@@ -23,9 +23,10 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_projects` | `?query&limit&offset` |
 | POST | `/api/agent/studio_create_project` | `{name, brief?}` |
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
-| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, strength?, template?, checkpoint?, use_character_reference, wait_s}` |
+| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, strength?, template?, checkpoint?, use_character_reference, consistent, wait_s}` |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, wait_s}` |
 | POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
+| POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
 | POST | `/api/agent/studio_voice?project=` | `{text, character_id?, voice?, speed?}` |
 | POST | `/api/agent/studio_import?project=` | `{path, kind?}` |
 | POST | `/api/agent/studio_analyze_audio?asset_id=` | - |
@@ -76,10 +77,11 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/projects/{id}/generate` | same body as the agent route; returns the full job |
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
 | POST | `/api/assets/{id}/animate` | `{asset_id, frames, fps, motion}` |
-| GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` |
-| POST | `/api/workflows/import` | `{name, workflow}` (API format) -> proposed spec with `map` |
+| GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` (built-ins now include `flux_schnell_txt2img`, `flux_kontext_edit`, `wan22_ti2v`, `ace15_song` alongside SDXL/SD1.5/SVD) |
+| POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first) -> proposed spec with `map` |
 | POST | `/api/workflows/import-file` | multipart `file` (.json, at most 2 MB) |
 | PATCH | `/api/workflows/{wf_id}` | `{name?, map?, vram_class?, kind?, output_node?, reference_node?}` (validated against the graph) |
+| POST | `/api/projects/{id}/compose` | same body as the agent route; returns the full job |
 | POST | `/api/projects/{id}/voice` | `{text, character_id?, voice?, speed?}` -> audio asset |
 | GET | `/api/voices` | curated voices with `downloaded`, `piper_installed` |
 | POST | `/api/voices/{voice_id}/download` | job `download_voice` |
@@ -94,7 +96,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/projects/{id}/photocard-set` | `{group_id}` |
 | GET | `/api/projects/{id}/timelines` | full timelines |
 | POST | `/api/projects/{id}/timelines/auto` | auto-cut body (as `studio_timeline` auto) |
-| GET / PATCH | `/api/timelines/{id}` | PATCH body = `patch` of `studio_timeline` |
+| GET / PATCH | `/api/timelines/{id}` | PATCH body = `patch` of `studio_timeline` (also accepts `finishing`, see below) |
 | POST | `/api/timelines/{id}/render` | `{timeline_id, quality}` -> job |
 | GET | `/api/jobs?state&project&limit&offset` | full jobs (`state=active` for queued+waiting+running) |
 | GET | `/api/jobs/{id}` | one job |
@@ -108,6 +110,27 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | PATCH / DELETE | `/api/boards/{id}` | rename / delete a board (assets are not touched) |
 | PUT | `/api/boards/{id}/items` | `{items: [{asset_id, note}]}` (same project only) |
 
+## Timeline finishing
+
+`PATCH /api/timelines/{id}` (and `studio_timeline` action `update`) accepts
+a `finishing` object, applied once over the whole joined cut at render
+time, before the lyric captions are burned on top. Every key is optional;
+`{}` (the default for a new timeline) renders exactly as before this
+feature existed:
+
+```json
+{"color_grade": "teal_orange", "grain": 0.3, "vignette": true,
+ "letterbox": true, "glitch_on_downbeats": true, "lyric_style": "horror"}
+```
+
+`color_grade` is one of `teal_orange`, `sodium_night`, `bleach_bypass`
+(single-pass `eq`/`colorbalance`/`curves` approximations, not a 3D LUT).
+`grain` is 0-1 (ffmpeg `noise`). `glitch_on_downbeats` times an RGB-split
+flash (`rgbashift`) to the clips the auto-cut already marks as strong
+downbeats. `lyric_style: "horror"` swaps the caption font for a condensed
+uppercase face with a small per-line rotation/shear jitter, seeded from
+each line's own text so a re-render is byte-identical.
+
 ## Configuration file
 
 `data/backend.json` (written by Settings; can be edited by hand):
@@ -117,7 +140,8 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
   "comfy": {"url": "http://127.0.0.1:8188"},
   "faustus": {"url": "http://127.0.0.1:8000", "token": "..."},
   "capabilities": {"music": {"url": "http://127.0.0.1:9000"}},
-  "vram_estimates_mb": {"sdxl": 7000, "sd15": 3500, "svd": 10000},
+  "vram_estimates_mb": {"sdxl": 7000, "sd15": 3500, "svd": 10000,
+                        "flux": 13000, "kontext": 13000, "wan": 12000, "ace": 8000},
   "import_roots": ["D:\\Music", "E:\\Photos"]
 }
 ```
@@ -125,9 +149,16 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 Environment: `PROSPERO_DATA_DIR`, and Hoard Link's `HOARD_*_URL` overrides
 (for example `HOARD_COMFY_URL`, `HOARD_MUSIC_URL`).
 
-## Music backend contract (HttpMusic)
+## Music generation
+
+Two adapters implement `MusicBackend`: `ComfyMusic` resolves automatically
+once ComfyUI's `/object_info` has `TextEncodeAceStepAudio1.5` and a
+checkpoint named `ace_step*` (the `ace15_song` template), and `HttpMusic`
+below is the fallback for anything else.
+
+### Music backend contract (HttpMusic)
 
 Any local server implementing `POST {url}/generate` with
 `{"prompt", "lyrics", "duration_s", "seed"}` and answering audio bytes (wav or
-mp3) can be configured as `capabilities.music.url`. Nothing implements it on
-a stock install today; Backends and `studio_status` say so.
+mp3) can be configured as `capabilities.music.url`. `studio_status`'s
+`music_generation` list says which adapter (if any) is available.

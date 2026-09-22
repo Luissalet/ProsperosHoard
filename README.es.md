@@ -36,15 +36,15 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Área | Disponible ahora | Límite |
 | --- | --- | --- |
 | Proyectos y reparto | Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), grupos ordenados, menciones `@Nombre` que reconocen nombres de varias palabras y avisan de los desconocidos, 6 estilos predefinidos | Un único usuario local; los nombres no se pueden repetir en un proyecto (son la mención) |
-| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix») de imágenes generadas aquí, SD 1.5 txt2img, SVD imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; importación de tus propios flujos en formato API, con los nodos de prompt localizados siguiendo las conexiones del sampler y un mapa de parámetros editable | Prospero no aloja ningún modelo; las exportaciones en formato de interfaz se rechazan con instrucciones, no se convierten |
+| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix»), SD 1.5 txt2img, SVD imagen a vídeo, FLUX.1 schnell txt2img, FLUX.1 Kontext (edición guiada por referencia), Wan 2.2 TI2V imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; conversor/importador de flujos en formato de interfaz **o** API (subgrafos, `PrimitiveNode`/`Reroute`, bypass/mute) con mapa de parámetros editable; `consistent=true` mantiene el diseño exacto de un `@Personaje` vía Kontext y su referencia canónica | Prospero no aloja ningún modelo; Kontext admite una sola referencia, Wan solo imagen a vídeo |
 | Uso compartido de la GPU | VRAM estimada por familia de flujo (editable), comparada con nvidia-smi o con `system_stats` de ComfyUI; si falta memoria, el trabajo espera en `waiting_gpu` con el motivo, reintentando cada 15 s hasta 30 min; se puede cancelar en cualquier momento | Nunca se descarga nada salvo que pulses «Liberar memoria de ComfyUI» |
 | Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
 | Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (3 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura; degradados, lámina holográfica, modos de fusión, espaciado de letras, sombras y texto que se encoge para caber; sets de photocards de un grupo entero con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 5 familias tipográficas OFL incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
 | Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla | Las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
 | Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Solo voces sintéticas genéricas: no se clona la voz de nadie |
-| Generación de música | Una interfaz `MusicBackend` con dos adaptadores (nodos de audio de ComfyUI y un contrato HTTP mínimo documentado) | No viene instalada por defecto: ambos lo dicen y explican cómo añadir uno; las canciones importadas funcionan del todo |
-| Vídeo | Montaje automático al ritmo (densidad según la energía, destellos al inicio de cada frase musical, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD se convierten a mp4 | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin |
-| Control por agentes | 20 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes del trabajo terminado, errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
+| Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o un contrato HTTP mínimo documentado para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Ninguno de los dos viene instalado por defecto; las canciones importadas funcionan del todo igualmente |
+| Vídeo | Montaje automático al ritmo (densidad según la energía, destellos al inicio de cada frase musical, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
+| Control por agentes | 21 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
 | Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
@@ -67,6 +67,7 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_generate_image` | Encolar txt2img/img2img con @menciones y estilos | no |
 | `studio_edit_image` | img2img, inpaint, ampliar, repetir receta, variar semilla | no |
 | `studio_animate` | Imagen a vídeo corto (SVD) | no |
+| `studio_compose` | Componer una canción con voz (ACE-Step) | no |
 | `studio_voice` | Frase hablada con la voz de un personaje | no |
 | `studio_import` | Importar un archivo local de una carpeta permitida | no |
 | `studio_analyze_audio` | Tempo, pulsos y secciones | sí |
@@ -117,6 +118,37 @@ encuentra) o pon su URL en Ajustes.
 ![Pantalla de audio: la canción de demostración a 120 BPM con sus pulsos y secciones A/B/A, la herramienta para sincronizar la letra y las frases habladas](docs/media/04-audio.png)
 *Aplicación real, datos de demostración: la canción sintética analizada con el detector de pulsos integrado, con la estimación de secciones y la letra LRC sincronizada.*
 
+## Ejemplo de producción
+
+[`scripts/productions/no_mires_atras.py`](scripts/productions/no_mires_atras.py)
+dirige un sencillo completo de principio a fin **solo a través del
+adaptador MCP** (lanza `mcp_server.py` por stdio, el mismo camino que usa
+Faustus): un proyecto, un personaje original consistente, una canción
+compuesta, doce fotogramas, varios clips de imagen a vídeo con Wan, un set
+de photocards estilo idol, las artes del álbum y un montaje sincronizado
+al ritmo, con gradación de color, renderizado a mp4 - terminando con un
+`REPORT.md` que lista cada id de recurso y qué revisar.
+
+```powershell
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend fake --quality draft
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lrc-path C:\letra.lrc
+```
+
+Con honestidad sobre qué se ejecutó y dónde: la ejecución sin GPU de
+este propio repositorio usó `--backend fake` (el mismo sustituto
+procedural que usa la opción `--demo`), por lo que sus imágenes llevan la
+etiqueta de marcador de posición en vez de una salida real de
+Flux/Kontext/Wan/ACE-Step. Aun así demuestra toda la tubería: cada paso
+termina, se produce cada tipo de recurso, el montaje se renderiza con su
+gradación de color, grano, viñeta y destellos de glitch, y la letra se
+graba a tiempo. La ejecución real - con el ComfyUI del dueño y los
+checkpoints de Flux, Kontext, Wan y ACE-Step que ya tiene en disco - está
+pendiente de sus GPUs; `--backend real` dirige el mismo script contra
+ella en cuanto ComfyUI esté arriba, sin cambiar nada de código. El script
+es idempotente (`--only <paso>` repite un paso; borra su `state.json` para
+empezar de cero) y nunca nombra otro producto o franquicia, ni en sus
+prompts ni en su salida.
+
 ## Arquitectura
 
 FastAPI y SQLite (WAL, una conexión por hilo) con un hilo de trabajo para la
@@ -135,14 +167,22 @@ con la aplicación. Detalles, modelo de datos y decisiones:
 cd frontend; npm ci; npm run build
 ```
 
-La última ejecución completa: **107 pruebas superadas** en unos 35 s,
+La última ejecución completa: **139 pruebas superadas** en unos 90 s,
 sin red, con el backend de demostración en lugar de ComfyUI. Cubren: el
 protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
 aplicación en marcha: palabras clave y anotaciones de cada herramienta,
 generación con imagen, linaje, diseño, errores legibles y el mensaje de
-aplicación apagada); la reproducción byte a byte con «repetir receta»; casos
-límite de las @menciones; la validación de checkpoints, samplers y nodos que
-faltan; importaciones hostiles de flujos; rutas con `..`, enlaces
+aplicación apagada); el conversor de flujos de formato de interfaz a API
+contra las cinco plantillas oficiales de ComfyUI (subgrafos, bypass/mute,
+`PrimitiveNode`/`Reroute`); las cuatro plantillas nuevas (Flux schnell,
+edición Kontext, Wan 2.2 TI2V, canción ACE-Step) generando contra el
+`/object_info` real del backend falso; el enrutado de consistencia de
+personaje y su error `consistent_needs_reference`; los grafos de filtro del
+acabado (gradación de color, grano, viñeta, barras, glitch) probados por
+comparación exacta más un renderizado real con ffmpeg; la reproducción byte
+a byte con «repetir receta»; casos límite de las @menciones; la validación
+de checkpoints, samplers y nodos que faltan; importaciones hostiles de
+flujos; rutas con `..`, enlaces
 simbólicos, archivos renombrados y carpetas permitidas al importar; rutas
 maliciosas contra la SPA y los recursos; la protección contra ataques desde
 el navegador; la recuperación de trabajos tras un reinicio, la espera de

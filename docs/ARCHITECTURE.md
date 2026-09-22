@@ -12,7 +12,9 @@ prosperos_hoard/
   jobs.py          JobQueue: one GPU worker + one CPU worker thread, cancel, VRAM waits
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
                    /object_info pre-flight, checkpoint resolution, template hash
-  workflows/       API-format *.json + *.params.json per built-in template
+  workflows/       API-format *.json + *.params.json per built-in template, plus
+    convert.py     UI-format (nodes/links, subgraphs, PrimitiveNode/Reroute, bypass/mute)
+                   -> API-format, against a live or cached /object_info
   backend.py       wrapper around the vendored Hoard Link: ComfyUI client on Hoard
                    Link's loop, free VRAM, "free ComfyUI memory", import folders,
                    overrides in data/backend.json, MusicBackend adapters
@@ -52,7 +54,9 @@ One SQLite file, `<data>/prosperos.sqlite3`, WAL mode:
   reference, voice), `groups` (ordered member ids, logo, colours)
 - `style_presets` (6 built-in, refreshed on start-up; project presets possible)
 - `boards` (ordered `{asset_id, note}` items), `timelines` (aspect, fps, size,
-  song, `tracks_json`)
+  song, `tracks_json`, `finishing_json` - colour grade/grain/vignette/
+  letterbox/glitch/lyric style, added in schema v3 with an in-place `ALTER
+  TABLE` on older databases)
 - `jobs` (type, lane gpu|cpu, params, state, progress, message, outputs, log
   excerpt, cancel flag, timestamps), `agent_calls` (tool, arguments summary,
   duration, ok, error)
@@ -101,12 +105,19 @@ Files under `<data>/`: `assets/`, `thumbs/` (WebP 512), `voices/` (Piper),
    next transition's length and chained with `xfade` whose offsets are the
    nominal starts, so cuts stay on the beat and the video keeps the song's
    length.
-3. Lyrics become an ASS file (escaped: braces, backslash codes and newlines
-   cannot inject tags or events; karaoke `\k` per word). ffmpeg runs the final
-   pass with the work folder as its cwd and `ass=lyrics.ass:fontsdir=fonts`,
-   because the filter-graph parser treats the drive colon and the apostrophe
-   of `C:\...\Prospero's Hoard\` specially.
-4. The song is muxed with `-shortest`; progress comes from `-progress pipe:1`;
+3. If the timeline has a `finishing` config, its filters (colour grade
+   `eq`/`colorbalance`/`curves`, `noise` grain, `vignette`, letterbox
+   `drawbox` bars, downbeat `rgbashift` glitches timed to the clips the
+   auto-cut already marked as strong downbeats) are built into one `-vf`
+   chain that runs on the whole joined cut, before the captions.
+4. Lyrics become an ASS file (escaped: braces, backslash codes and newlines
+   cannot inject tags or events; karaoke `\k` per word; the `horror` lyric
+   style swaps in a condensed uppercase face with a per-line rotation/shear
+   jitter seeded from the line text). ffmpeg runs the final pass with the
+   work folder as its cwd and `ass=lyrics.ass:fontsdir=fonts`, because the
+   filter-graph parser treats the drive colon and the apostrophe of
+   `C:\...\Prospero's Hoard\` specially.
+5. The song is muxed with `-shortest`; progress comes from `-progress pipe:1`;
    stderr goes to a temporary file so it can never block the pipe.
 
 ## Audio analysis
@@ -142,3 +153,21 @@ apart), segments that sound alike share a letter, energy relative to the song.
 - **Import folders**: agents may pass paths, so imports are limited to the home
   folder, `data/inbox` and folders added in Settings, with symlinks and `..`
   resolved first and content checked against the extension.
+- **`flux_kontext_edit` is single-reference only**: the official template's
+  multi-reference image-stitching path is not exposed; `wan22_ti2v` is
+  image-to-video only (a still becomes the start frame) - its pure
+  text-to-video path (bypassing `LoadImage`) is not exposed either. Both are
+  scope cuts, not converter limitations (the converter itself expands
+  either path correctly).
+- **Checkpoint cross-validation** (against `/object_info`) only runs for
+  `CheckpointLoaderSimple`-based templates (SDXL, SD1.5, `flux_schnell_txt2img`,
+  `ace15_song`); `UNETLoader`/`DualCLIPLoader`/`CLIPLoader`/`VAELoader`-based
+  ones (`flux_kontext_edit`, `wan22_ti2v`) do not get the same file-name
+  cross-check yet.
+- **Finishing colour grades** are single-pass `eq`/`colorbalance`/`curves`
+  approximations named for their look (teal-orange, sodium-night, bleach
+  bypass), not a calibrated 3D LUT.
+- **`include_image` defaults to false** on every MCP tool that can attach a
+  picture: a text-only local model (e.g. behind llama.cpp) handed an
+  `ImageContent` block mid-turn breaks; call `studio_show` explicitly, or
+  pass `include_image=true`, once a picture is actually wanted.
