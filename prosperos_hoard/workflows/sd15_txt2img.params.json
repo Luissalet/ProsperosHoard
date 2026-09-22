@@ -1,0 +1,20 @@
+{
+  "template": "sd15_txt2img",
+  "kind": "image",
+  "vram_class": "sd15",
+  "map": {
+    "checkpoint": "4.ckpt_name",
+    "positive_prompt": "6.text",
+    "negative_prompt": "7.text",
+    "width": "5.width",
+    "height": "5.height",
+    "batch_size": "5.batch_size",
+    "seed": "3.seed",
+    "steps": "3.steps",
+    "cfg": "3.cfg",
+    "sampler": "3.sampler_name",
+    "scheduler": "3.scheduler"
+  },
+  "output_node": "9",
+  "checkpoint_node": "CheckpointLoaderSimple"
+}

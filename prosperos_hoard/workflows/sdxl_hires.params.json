@@ -1,0 +1,24 @@
+{
+  "template": "sdxl_hires",
+  "kind": "image",
+  "vram_class": "sdxl",
+  "map": {
+    "checkpoint": "4.ckpt_name",
+    "positive_prompt": "6.text",
+    "negative_prompt": "7.text",
+    "width": "5.width",
+    "height": "5.height",
+    "seed": "3.seed",
+    "steps": "3.steps",
+    "cfg": "3.cfg",
+    "sampler": "3.sampler_name",
+    "scheduler": "3.scheduler",
+    "hires_width": "12.width",
+    "hires_height": "12.height",
+    "hires_steps": "13.steps",
+    "hires_denoise": "13.denoise"
+  },
+  "output_node": "9",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "linked_seeds": ["3.seed", "13.seed"]
+}
