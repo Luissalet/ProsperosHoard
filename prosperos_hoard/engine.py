@@ -244,6 +244,69 @@ def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optiona
     }
 
 
+CROP_PRESETS = {"full": (0.0, 0.0, 1.0, 1.0), "left_third": (0.0, 0.0, 1 / 3, 1.0),
+                "middle_third": (1 / 3, 0.0, 1 / 3, 1.0), "right_third": (2 / 3, 0.0, 1 / 3, 1.0)}
+
+
+def apply_canonical_crop(store: Store, project_id: str, fields: dict[str, Any],
+                         current_canonical: Optional[str] = None) -> dict[str, Any]:
+    """"Cast -> Reference sheet -> mark the canonical crop": a turnaround
+    sheet shows the character three times (front / three-quarter / back),
+    and handing all three to Kontext as *the* reference invites a triptych
+    back. `fields["canonical_crop"]` - a preset name (full, left_third,
+    middle_third, right_third) or `[x, y, w, h]` as fractions of the image -
+    crops `canonical_asset_id` (or the current canonical) into a new image
+    asset (lineage: operation "crop", derived_from the sheet, the box) that
+    becomes the canonical reference; the sheet is kept in
+    reference_asset_ids. Returns the fields to store (no canonical_crop)."""
+    fields = dict(fields)
+    crop = fields.pop("canonical_crop", None)
+    if crop is None or crop == "full":
+        return fields
+    if isinstance(crop, str):
+        if crop not in CROP_PRESETS:
+            raise EngineError("bad_crop", f"canonical_crop must be one of {', '.join(CROP_PRESETS)} or [x, y, w, h] fractions")
+        box = CROP_PRESETS[crop]
+    else:
+        try:
+            box = tuple(float(v) for v in crop)
+        except (TypeError, ValueError):
+            box = ()
+        if len(box) != 4 or not (0 <= box[0] < 1 and 0 <= box[1] < 1 and 0 < box[2] <= 1 and 0 < box[3] <= 1
+                                 and box[0] + box[2] <= 1.0001 and box[1] + box[3] <= 1.0001):
+            raise EngineError("bad_crop", "canonical_crop [x, y, w, h] must be fractions of the image (0-1) inside it")
+    source_id = fields.get("canonical_asset_id") or current_canonical
+    if not source_id:
+        raise EngineError("bad_crop", "canonical_crop needs a canonical_asset_id (the reference sheet) to crop")
+    src = store.get_asset(source_id)
+    if src["kind"] != "image" or src["project_id"] != project_id:
+        raise EngineError("bad_crop", f"asset {source_id} is not an image of this project")
+    with Image.open(store.data_dir / src["file_path"]) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        w, h = img.size
+        left, top = int(round(box[0] * w)), int(round(box[1] * h))
+        right, bottom = min(w, int(round((box[0] + box[2]) * w))), min(h, int(round((box[1] + box[3]) * h)))
+        if right - left < 64 or bottom - top < 64:
+            raise EngineError("bad_crop", "the crop is smaller than 64 px; pick a bigger area")
+        cropped = img.crop((left, top, right, bottom))
+    asset_id = new_id("a")
+    dest = store.path_for_asset_file(asset_id, ".png")
+    cropped.save(dest)
+    make_thumbnail(dest, store.path_for_thumb(asset_id))
+    recipe = {"operation": "crop", "backend": "local", "derived_from": src["id"], "input_asset_ids": [src["id"]],
+              "box": [round(v, 4) for v in box], "created_at": now_iso()}
+    asset = store.create_asset(project_id=project_id, kind="image", file_path=_rel(store, dest), mime="image/png",
+                               width=cropped.width, height=cropped.height, thumb_path=_rel(store, store.path_for_thumb(asset_id)),
+                               source="generated", recipe=recipe, asset_id=asset_id,
+                               name=_clip(f"canonical crop of {src.get('name') or src['id']}", 80))
+    refs = list(fields.get("reference_asset_ids") or [])
+    if src["id"] not in refs:
+        refs.append(src["id"])
+    fields["reference_asset_ids"] = refs
+    fields["canonical_asset_id"] = asset["id"]
+    return fields
+
+
 def build_kontext_instruction(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
     """For `consistent=true` generation ("Cast -> Reference sheet"): turn
     "@Name doing X" into a Kontext edit instruction ("the same character
@@ -910,7 +973,8 @@ def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Op
     return asset
 
 
-def create_lyrics(store: Store, project_id: str, text: str, name: Optional[str] = None) -> dict[str, Any]:
+def create_lyrics(store: Store, project_id: str, text: str, name: Optional[str] = None,
+                  recipe: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     store.get_project(project_id)
     if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_LYRICS_BYTES:
         raise EngineError("bad_lyrics", "lyrics must be text of at most 512 KB")
@@ -919,7 +983,7 @@ def create_lyrics(store: Store, project_id: str, text: str, name: Optional[str] 
     dest.write_text(text.replace("\r\n", "\n"), encoding="utf-8")
     return store.create_asset(project_id=project_id, kind="lyrics", file_path=_rel(store, dest),
                               mime="text/plain; charset=utf-8", source="derived", asset_id=asset_id,
-                              name=(name or "Lyrics")[:120])
+                              name=(name or "Lyrics")[:120], recipe=recipe)
 
 
 def save_lyrics(store: Store, asset_id: str, text: str) -> dict[str, Any]:
@@ -937,7 +1001,36 @@ def read_lyrics(store: Store, asset_id: str) -> dict[str, Any]:
     if asset["kind"] != "lyrics":
         raise EngineError("not_lyrics", f"asset {asset_id} is {asset['kind']}, not lyrics")
     text = (store.data_dir / asset["file_path"]).read_text(encoding="utf-8")
-    return {"asset_id": asset_id, "text": text, "lines": audio_mod.parse_lrc(text)}
+    sung, sections = audio_mod.lrc_sections(audio_mod.parse_lrc(text), float("inf"))
+    for sec in sections:
+        if sec["end_s"] == float("inf"):
+            sec["end_s"] = None  # "until the end of the song" - resolved against the song's duration
+    return {"asset_id": asset_id, "text": text, "lines": sung, "sections": sections}
+
+
+def time_lyrics(store: Store, project_id: str, song_asset_id: str, lyrics: str, name: Optional[str] = None) -> dict[str, Any]:
+    """`studio_time_lyrics`: a first-pass LRC for `lyrics` (with `[Section]`
+    tags) timed to the song's bars (see `audio.time_lyrics`), saved as a
+    lyrics asset whose section markers the auto-cut follows."""
+    store.get_project(project_id)
+    song = store.get_asset(song_asset_id)
+    if song["kind"] != "audio":
+        raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
+    if not isinstance(lyrics, str) or not lyrics.strip():
+        raise EngineError("empty_lyrics", "lyrics are empty; paste them with [Verse]/[Chorus] section tags")
+    analysis = analyze_audio(store, song_asset_id)
+    bpm = ((song.get("recipe") or {}).get("params") or {}).get("bpm")
+    try:
+        timed = audio_mod.time_lyrics(lyrics, analysis, bpm=bpm)
+    except ValueError as exc:
+        raise EngineError("bad_lyrics", str(exc)) from None
+    asset = create_lyrics(store, project_id, timed["lrc"], name or f"{song.get('name') or 'Song'} - timed lyrics",
+                          recipe={"operation": "time_lyrics", "backend": "local", "input_asset_ids": [song_asset_id],
+                                  "derived_from": song_asset_id, "method": "section tags + bar grid",
+                                  "created_at": now_iso()})
+    return {"id": asset["id"], "lines": len(timed["lines"]), "sections": timed["sections"],
+            "note": "estimated from the lyrics' [Section] tags and the song's bars, not from the vocals: "
+                    "re-time by ear in Audio > Lyrics before a final render"}
 
 
 # --------------------------------------------------------------- design --
@@ -1265,14 +1358,36 @@ def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], a
     analysis = analyze_audio(store, song_asset_id)
     pool = _pool(store, project_id, asset_ids, board_id)
     lyrics_lines = None
+    sections = analysis["sections"]
+    options = dict(options or {})
     if lyrics_asset_id:
-        lyrics_lines = read_lyrics(store, lyrics_asset_id)["lines"]
+        lyrics = read_lyrics(store, lyrics_asset_id)
+        lyrics_lines = lyrics["lines"]
         if not lyrics_lines:
             raise EngineError("lyrics_untimed", "the lyrics have no [mm:ss.xx] timestamps; time them in Audio > Lyrics first")
+        # timed [Section] markers are the song's real structure (verse,
+        # chorus...), which beats energy-based segmentation for cut density
+        if lyrics["sections"] and options.get("sections", "auto") != "analysis":
+            sections = [dict(sec, end_s=sec["end_s"] if sec["end_s"] is not None else analysis["duration_s"])
+                        for sec in lyrics["sections"]]
+            if sections[0]["start_s"] > 0:
+                sections.insert(0, {"label": "Intro", "kind": "intro", "energy": "low", "start_s": 0.0,
+                                    "end_s": sections[0]["start_s"]})
+    options.pop("sections", None)
+    if options.get("section_pools") is not None:
+        raw_pools = options["section_pools"]
+        if not isinstance(raw_pools, dict) or len(raw_pools) > 40:
+            raise EngineError("bad_options", "section_pools must be {section label or kind: [asset ids]}")
+        resolved: dict[str, list[dict[str, Any]]] = {}
+        for key, ids in raw_pools.items():
+            if not isinstance(ids, list) or len(ids) > 200:
+                raise EngineError("bad_options", f"section_pools['{key}'] must be a list of asset ids")
+            resolved[str(key)] = [a for a in _pool(store, project_id, [str(i) for i in ids], None)] if ids else []
+        options["section_pools"] = resolved
     try:
         built = timeline_mod.build_auto_cut(
-            analysis["duration_s"], analysis["beat_times"], analysis["sections"], pool,
-            options=options or {}, lyrics_lines=lyrics_lines, downbeats=analysis.get("downbeats"),
+            analysis["duration_s"], analysis["beat_times"], sections, pool,
+            options=options, lyrics_lines=lyrics_lines, downbeats=analysis.get("downbeats"),
         )
     except timeline_mod.TimelineError as exc:
         raise EngineError("bad_options", str(exc)) from None

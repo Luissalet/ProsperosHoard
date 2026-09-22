@@ -414,3 +414,204 @@ def to_lrc(lines: list[dict[str, Any]]) -> str:
         seconds = t - minutes * 60
         out.append(f"[{minutes:02d}:{seconds:05.2f}]{line['text']}")
     return "\n".join(out)
+
+
+# ----------------------------------------------------------------------
+# Lyric timing from the song structure
+# ----------------------------------------------------------------------
+#
+# ACE-Step (and most songwriting) lyrics carry their own structure as
+# `[Section]` tags. Before anyone taps the lines in by ear, that structure
+# plus the song's bar grid already gives a musically plausible first pass:
+# every line starts on a bar, rap verses move a line per bar, hooks and
+# spoken intros/bridges breathe over two, and each section gets the share
+# of the song its lines need. A section marker is written into the LRC as a
+# timed tag line (`[01:01.71][Chorus]`) - the same thing tapping a
+# `[Chorus]` line in Audio > Lyrics produces - so one file carries both the
+# captions and the structure the auto-cut uses.
+
+_SECTION_TAG = re.compile(r"^\[([^\]\d:][^\]]*)\]$")
+_SECTION_KINDS = (
+    ("pre", ("pre-chorus", "pre chorus", "prechorus", "pre-hook", "pre hook")),
+    ("chorus", ("chorus", "hook", "estribillo", "coro")),
+    ("intro", ("intro",)),
+    ("outro", ("outro", "coda", "final")),
+    ("bridge", ("bridge", "puente", "breakdown", "interlude", "break")),
+    ("verse", ("verse", "verso", "estrofa", "rap")),
+)
+# bars one sung line takes, by section kind (a 4/4 bar at the song's tempo)
+_BARS_PER_LINE = {"verse": 1, "pre": 2, "chorus": 2, "intro": 2, "bridge": 2, "outro": 2, "other": 2}
+_ENERGY = {"chorus": "high", "verse": "mid", "pre": "mid", "intro": "low", "bridge": "low", "outro": "low", "other": "mid"}
+# bars of music before the first line of an intro / after the last line of an outro
+_LEAD_IN_BARS, _TAIL_BARS = 2, 2
+
+
+def section_kind(label: str) -> str:
+    low = label.strip().lower()
+    for kind, words in _SECTION_KINDS:
+        if any(low.startswith(w) for w in words):
+            return kind
+    return "other"
+
+
+def section_energy(label: str) -> str:
+    return _ENERGY[section_kind(label)]
+
+
+def parse_structured_lyrics(text: str) -> list[dict[str, Any]]:
+    """`[Section]` tags + lines -> [{"label", "lines": [...]}]. Lines before
+    any tag form an untitled "Verse"; empty sections are dropped; existing
+    `[mm:ss.xx]` stamps are stripped."""
+    sections: list[dict[str, Any]] = []
+    current: Optional[dict[str, Any]] = None
+    for raw in (text or "").splitlines():
+        line = re.sub(r"^(\[\d+:\d+(?:\.\d+)?\])+", "", raw.strip()).strip()
+        if not line:
+            continue
+        m = _SECTION_TAG.match(line)
+        if m:
+            current = {"label": m.group(1).strip(), "lines": []}
+            sections.append(current)
+            continue
+        if current is None:
+            current = {"label": "Verse", "lines": []}
+            sections.append(current)
+        current["lines"].append(line)
+    return [s for s in sections if s["lines"]]
+
+
+def _bar_grid(analysis: dict[str, Any], duration_s: float, bpm: Optional[float]) -> list[float]:
+    downs = [float(d) for d in (analysis.get("downbeats") or []) if 0 <= float(d) < duration_s]
+    if len(downs) >= 8:
+        return downs
+    tempo = float(bpm or analysis.get("tempo_bpm") or 120.0)
+    bar = 4 * 60.0 / max(40.0, min(240.0, tempo))
+    start = float((analysis.get("beat_times") or [0.0])[0])
+    out, t = [], start
+    while t < duration_s - 0.25:
+        out.append(round(t, 3))
+        t += bar
+    return out or [0.0]
+
+
+def _allocate(weights: list[float], total: int, minimums: list[int]) -> list[int]:
+    """Integer shares of `total` proportional to `weights` (largest
+    remainder), each at least its minimum while the total allows it."""
+    if total <= 0:
+        return [0] * len(weights)
+    wsum = sum(weights) or 1.0
+    raw = [total * w / wsum for w in weights]
+    out = [max(m, int(r)) for r, m in zip(raw, minimums)]
+    while sum(out) > total and any(o > 1 for o in out):
+        i = max(range(len(out)), key=lambda k: out[k] - raw[k])
+        out[i] -= 1
+    order = sorted(range(len(out)), key=lambda k: raw[k] - out[k], reverse=True)
+    k = 0
+    while sum(out) < total and order:
+        out[order[k % len(order)]] += 1
+        k += 1
+    return out
+
+
+def _time_at_bar(bars: list[float], pos: float, bar_len: float) -> float:
+    i = int(pos)
+    if i >= len(bars) - 1:
+        return bars[-1] + (pos - (len(bars) - 1)) * bar_len
+    return bars[i] + (pos - i) * (bars[i + 1] - bars[i])
+
+
+def time_lyrics(lyrics: str, analysis: dict[str, Any], bpm: Optional[float] = None) -> dict[str, Any]:
+    """First-pass karaoke timing from the lyrics' own `[Section]` structure
+    and the song's bar grid (downbeats from the analysis, else the tempo).
+
+    Each section gets bars in proportion to what its lines need (one bar
+    per rap-verse line, two per hook/pre-chorus/intro/bridge/outro line,
+    plus a short instrumental lead-in and tail), scaled to the bars the song
+    actually has; when the analysis found real section boundaries, each
+    lyric section start snaps to the nearest one within two bars. Every
+    line then starts on a bar. It is an estimate of where a line is sung,
+    not vocal detection: re-time by ear in Audio > Lyrics.
+
+    Returns {"lrc", "lines": [{time_s, text, section}], "sections":
+    [{label, kind, energy, start_s, end_s}]}."""
+    duration = float(analysis.get("duration_s") or 0.0)
+    if duration <= 0:
+        raise ValueError("the song analysis has no duration")
+    parsed = parse_structured_lyrics(lyrics)
+    if not parsed:
+        raise ValueError("no lyric lines to time")
+    bars = _bar_grid(analysis, duration, bpm)
+    n_bars = len(bars)
+    kinds = [section_kind(s["label"]) for s in parsed]
+    need = [len(s["lines"]) * _BARS_PER_LINE[k] for s, k in zip(parsed, kinds)]
+    if kinds[0] == "intro":
+        need[0] += _LEAD_IN_BARS
+    if kinds[-1] == "outro":
+        need[-1] += _TAIL_BARS
+    shares = _allocate([float(x) for x in need], n_bars, [1] * len(parsed))
+    starts, acc = [], 0
+    for share in shares:
+        starts.append(acc)
+        acc += share
+
+    # snap lyric section starts to the analysis' own boundaries (if any)
+    found = [float(s["start_s"]) for s in (analysis.get("sections") or [])[1:]]
+    bar_len = (bars[-1] - bars[0]) / max(1, n_bars - 1) if n_bars > 1 else 2.0
+    for i in range(1, len(starts)):
+        t = bars[min(starts[i], n_bars - 1)]
+        near = [b for b in found if abs(b - t) <= 2 * bar_len + 0.05]
+        if near:
+            target = min(near, key=lambda b: abs(b - t))
+            idx = min(range(n_bars), key=lambda j: abs(bars[j] - target))
+            if starts[i - 1] < idx < (starts[i + 1] if i + 1 < len(starts) else n_bars):
+                starts[i] = idx
+    ends = starts[1:] + [n_bars]
+    beats = [float(b) for b in (analysis.get("beat_times") or []) if 0 <= float(b) < duration]
+
+    lines: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
+    lrc: list[str] = []
+    for sec, kind, b0, b1 in zip(parsed, kinds, starts, ends):
+        start_s = bars[min(b0, n_bars - 1)] if b0 > 0 else 0.0
+        end_s = bars[b1] if b1 < n_bars else duration
+        sections.append({"label": sec["label"], "kind": kind, "energy": _ENERGY[kind],
+                         "start_s": round(start_s, 3), "end_s": round(end_s, 3)})
+        lrc.append(to_lrc([{"time_s": start_s, "text": f"[{sec['label']}]"}]))
+        first = b0 + (_LEAD_IN_BARS if kind == "intro" and b1 - b0 > len(sec["lines"]) + _LEAD_IN_BARS else 0)
+        span = max(1, (b1 - (_TAIL_BARS if kind == "outro" and b1 - first > len(sec["lines"]) + _TAIL_BARS else 0)) - first)
+        # more music than words: lines keep their natural pace from the
+        # section start and the rest of the section is instrumental
+        span = min(span, len(sec["lines"]) * _BARS_PER_LINE[kind])
+        for j, text in enumerate(sec["lines"]):
+            # a fractional bar position when the section has fewer bars than
+            # lines (a crowded verse), snapped to the nearest beat so every
+            # line still lands on the grid and no two share a start
+            pos = first + j * span / len(sec["lines"])
+            t = _time_at_bar(bars, pos, bar_len)
+            if beats:
+                t = min(beats, key=lambda b: abs(b - t))
+            t = round(max(start_s, t, (lines[-1]["time_s"] + 0.25) if lines else 0.0), 3)
+            lines.append({"time_s": t, "text": text, "section": sec["label"]})
+            lrc.append(to_lrc([{"time_s": t, "text": text}]))
+    return {"lrc": "\n".join(lrc) + "\n", "lines": lines, "sections": sections}
+
+
+def lrc_sections(lines: list[dict[str, Any]], duration_s: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split parsed LRC lines into (sung lines, sections): a line whose whole
+    text is a `[Section]` tag marks where that section starts. Sections end
+    where the next begins (the last one at `duration_s`)."""
+    sung, marks = [], []
+    for line in lines:
+        m = _SECTION_TAG.match(line["text"].strip())
+        if m:
+            marks.append({"label": m.group(1).strip(), "start_s": float(line["time_s"])})
+        else:
+            sung.append(line)
+    sections = []
+    for i, mark in enumerate(marks):
+        end = marks[i + 1]["start_s"] if i + 1 < len(marks) else duration_s
+        if end > mark["start_s"]:
+            sections.append({"label": mark["label"], "kind": section_kind(mark["label"]),
+                             "energy": section_energy(mark["label"]), "start_s": round(mark["start_s"], 3),
+                             "end_s": round(end, 3)})
+    return sung, sections

@@ -151,6 +151,12 @@ class GenerateImageBody(BaseModel):
     wait_s: float = 0
 
 
+class TimeLyricsBody(BaseModel):
+    song_asset_id: str
+    lyrics: str
+    name: Optional[str] = None
+
+
 class ComposeBody(BaseModel):
     tags: str
     lyrics: str
@@ -493,7 +499,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 raise engine.EngineError("name_required", f"creating a {body.kind} needs a name")
             if body.kind == "group":
                 return store.create_group(project, body.name, **body.fields)
-            return store.create_character(project, body.name, **body.fields)
+            return store.create_character(project, body.name, **engine.apply_canonical_crop(store, project, body.fields))
         if body.action == "update":
             if not body.id:
                 raise engine.EngineError("id_required", f"updating a {body.kind} needs its id")
@@ -505,6 +511,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 raise engine.EngineError("wrong_project", f"{body.kind} {body.id} belongs to another project")
             if body.kind == "group":
                 return store.update_group(body.id, **fields)
+            if "canonical_crop" in fields:
+                existing_refs = target.get("reference_asset_ids") or []
+                fields.setdefault("reference_asset_ids", existing_refs)
+                fields = engine.apply_canonical_crop(store, project, fields, target.get("canonical_asset_id"))
             return store.update_character(body.id, **fields)
         raise engine.EngineError("bad_action", f"unknown cast action '{body.action}'; use list, create or update")
 
@@ -594,10 +604,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.patch("/api/characters/{character_id}")
     def update_character(character_id: str, body: CharacterBody):
-        fields = dict(body.fields)
-        if body.name:
-            fields["name"] = body.name
-        return store.update_character(character_id, **fields)
+        character = store.get_character(character_id)
+        return op_cast(character["project_id"], CastBody(action="update", kind="character", id=character_id,
+                                                         name=body.name, fields=body.fields))
 
     @app.get("/api/projects/{project_id}/groups")
     def list_groups(project_id: str):
@@ -736,6 +745,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             tmp_path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------ audio
+    @app.post("/api/agent/studio_time_lyrics")
+    def agent_time_lyrics(project: str, body: TimeLyricsBody):
+        return agent("studio_time_lyrics", body.song_asset_id,
+                     lambda: engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name))
+
     @app.post("/api/agent/studio_analyze_audio")
     def agent_analyze_audio(asset_id: str):
         return agent("studio_analyze_audio", asset_id,
@@ -747,7 +761,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/assets/{asset_id}/lyrics")
     def get_lyrics(asset_id: str):
-        return engine.read_lyrics(store, asset_id)
+        lyrics = engine.read_lyrics(store, asset_id)
+        # the editor also shows the timed [Section] markers, so saving keeps them
+        return {**lyrics, "all_lines": audio_mod.parse_lrc(lyrics["text"])}
 
     @app.put("/api/assets/{asset_id}/lyrics")
     def save_lyrics(asset_id: str, body: LyricsBody):

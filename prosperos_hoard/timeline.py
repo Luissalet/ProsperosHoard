@@ -80,6 +80,13 @@ def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[
             t += step
         return points or [{"start_s": 0.0, "flash": False}]
 
+    # a new section always starts on a new shot (the first beat at or after
+    # its start), so the edit breathes with the song's structure
+    section_starts = set()
+    for s in (sections or [])[1:]:
+        first = next((b for b in beats if b >= s["start_s"] - 0.05), None)
+        if first is not None:
+            section_starts.add(round(first, 3))
     points = [{"start_s": 0.0, "flash": False}]
     since = 0
     for i, b in enumerate(beats):
@@ -87,7 +94,8 @@ def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[
             continue
         since += 1
         step = density[_energy_at(b, sections)]
-        if since >= step and b - points[-1]["start_s"] >= MIN_CLIP_S and duration_s - b >= MIN_CLIP_S:
+        forced = round(b, 3) in section_starts
+        if (since >= step or forced) and b - points[-1]["start_s"] >= MIN_CLIP_S and duration_s - b >= MIN_CLIP_S:
             energy = _energy_at(b, sections)
             points.append({"start_s": round(b, 3), "flash": flash_on and energy == "high" and round(b, 3) in down})
             since = 0
@@ -112,6 +120,57 @@ def _assign_assets(pool: list[dict[str, Any]], count: int, seed: int = 0) -> lis
     return out
 
 
+def _section_at(t: float, sections: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    for s in sections or []:
+        if s["start_s"] <= t < s["end_s"]:
+            return s
+    return (sections or [None])[-1]
+
+
+def _section_key_candidates(section: Optional[dict[str, Any]]) -> list[str]:
+    if not section:
+        return []
+    label = str(section.get("label", "")).strip().lower()
+    out = [label]
+    base = label.rstrip("0123456789 ").strip()
+    if base and base != label:
+        out.append(base)
+    if section.get("kind"):
+        out.append(str(section["kind"]).lower())
+    return out
+
+
+def _assign_by_section(cuts: list[dict[str, Any]], sections: list[dict[str, Any]], pools: dict[str, list[dict[str, Any]]],
+                       fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Storyboard assignment: each cut takes the next asset, in the order
+    given, from the pool of the section it falls in (matched by exact label
+    such as "Verse 2", then without its number, then by kind such as
+    "chorus"); a pool keeps its place across repeats (the second chorus
+    continues where the first stopped). Sections without a pool draw from
+    the shuffled general pool. No asset repeats back to back."""
+    pools = {k.strip().lower(): v for k, v in pools.items() if v}
+    cursors: dict[str, int] = {}
+    general = _assign_assets(fallback, len(cuts))
+    out: list[dict[str, Any]] = []
+    for i, cut in enumerate(cuts):
+        section = _section_at(cut["start_s"], sections)
+        key = next((k for k in _section_key_candidates(section) if k in pools), None)
+        if key is None:
+            pick = general[i]
+        else:
+            pool = pools[key]
+            pos = cursors.get(key, 0)
+            pick = pool[pos % len(pool)]
+            if out and len(pool) > 1 and pick["id"] == out[-1]["id"]:
+                pos += 1
+                pick = pool[pos % len(pool)]
+            cursors[key] = pos + 1
+        if out and pick["id"] == out[-1]["id"] and len(fallback) > 1:
+            pick = next(a for a in fallback if a["id"] != out[-1]["id"])
+        out.append(pick)
+    return out
+
+
 def build_auto_cut(
     song_duration_s: float,
     beat_times: list[float],
@@ -131,7 +190,11 @@ def build_auto_cut(
 
     cuts = _cut_points(beat_times, downbeats, sections or [], song_duration_s, options)
     starts = [c["start_s"] for c in cuts] + [song_duration_s]
-    assets = _assign_assets(asset_pool, len(cuts), seed=seed)
+    section_pools = options.get("section_pools")
+    if section_pools:
+        assets = _assign_by_section(cuts, sections or [], section_pools, asset_pool)
+    else:
+        assets = _assign_assets(asset_pool, len(cuts), seed=seed)
 
     rng = random.Random(seed)
     visual_clips = []

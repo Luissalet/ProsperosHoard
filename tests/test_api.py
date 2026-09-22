@@ -315,3 +315,28 @@ def test_cancel_queued_job_via_api(client):
     app.state.store.update_job(job["id"], state="waiting_gpu")
     r = c.post(f"/api/agent/studio_cancel_job?job_id={job['id']}")
     assert r.status_code == 200 and r.json()["state"] == "cancelled"
+
+
+def test_canonical_crop_keeps_one_pose_of_a_reference_sheet(client):
+    c, app, _ = client
+    pid = _project(c, "Crop Test")
+    job = c.post(f"/api/agent/studio_generate_image?project={pid}",
+                 json={"prompt": "turnaround sheet", "template": "flux_schnell_txt2img", "width": 1344, "height": 768,
+                       "seed": 1, "wait_s": 20}).json()["job"]
+    sheet = job["asset_ids"][0]
+    made = c.post(f"/api/agent/studio_cast?project={pid}",
+                  json={"action": "create", "name": "FAROL", "fields": {"prompt": "lantern head"}}).json()
+    char_id = made.get("id") or made["character"]["id"]
+    c.post(f"/api/agent/studio_cast?project={pid}",
+           json={"action": "update", "id": char_id, "fields": {"canonical_asset_id": sheet, "canonical_crop": "left_third"}})
+    char = app.state.store.get_character(char_id)
+    crop = app.state.store.get_asset(char["canonical_asset_id"])
+    assert crop["id"] != sheet and (crop["width"], crop["height"]) == (448, 768)
+    assert crop["recipe"]["operation"] == "crop" and crop["recipe"]["derived_from"] == sheet
+    assert sheet in char["reference_asset_ids"]
+    # the UI route goes through the same path
+    r = c.patch(f"/api/characters/{char_id}", json={"fields": {"canonical_asset_id": sheet, "canonical_crop": [0.5, 0, 0.5, 1]}})
+    assert r.status_code == 200, r.text
+    assert app.state.store.get_asset(r.json()["canonical_asset_id"])["width"] == 672
+    bad = c.patch(f"/api/characters/{char_id}", json={"fields": {"canonical_crop": [0.9, 0, 0.5, 1]}})
+    assert bad.status_code == 400 and bad.json()["error"] == "bad_crop"

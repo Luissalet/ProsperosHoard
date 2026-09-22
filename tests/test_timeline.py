@@ -118,3 +118,35 @@ def test_auto_cut_on_real_demo_analysis_covers_song_on_beats(tmp_path):
     compact = tl.compact_view({"id": "t", "project_id": "p", "name": "n", "aspect": "9:16", "fps": 30, "width": 1080,
                                "height": 1920, "tracks": built["tracks"]}, clip_limit=5)
     assert len(compact["clips"]) == 5 and compact["has_more"] and compact["clips_total"] == len(clips)
+
+
+def test_every_section_starts_on_a_new_shot():
+    beats = _synthetic_beats(140.0, 30.0)
+    # a section boundary that is not a multiple of the 8-beat low-energy cut step
+    sections = [{"label": "Intro", "start_s": 0, "end_s": 9.0, "energy": "low"},
+                {"label": "Verse 1", "start_s": 9.0, "end_s": 30.0, "energy": "mid"}]
+    pool = [{"id": f"a{i}", "kind": "image"} for i in range(4)]
+    result = tl.build_auto_cut(30.0, beats, sections, pool, options={"beats_low": 8}, seed=2)
+    starts = [c["start_s"] for c in result["tracks"][0]["clips"]]
+    first_verse_beat = next(b for b in beats if b >= 9.0 - 0.05)
+    assert first_verse_beat in starts
+
+
+def test_section_pools_tell_the_story_in_order():
+    beats = _synthetic_beats(140.0, 40.0)
+    sections = [{"label": "Verse 1", "kind": "verse", "start_s": 0, "end_s": 20.0, "energy": "mid"},
+                {"label": "Chorus", "kind": "chorus", "start_s": 20.0, "end_s": 30.0, "energy": "high"},
+                {"label": "Chorus", "kind": "chorus", "start_s": 30.0, "end_s": 40.0, "energy": "high"}]
+    verse = [{"id": f"v{i}", "kind": "image"} for i in range(4)]
+    chorus = [{"id": f"c{i}", "kind": "image"} for i in range(3)]
+    pool = verse + chorus
+    result = tl.build_auto_cut(40.0, beats, sections, pool,
+                               options={"section_pools": {"Verse": verse, "chorus": chorus}}, seed=1)
+    clips = result["tracks"][0]["clips"]
+    verse_ids = [c["asset_id"] for c in clips if c["start_s"] < 20.0]
+    assert verse_ids[:4] == ["v0", "v1", "v2", "v3"]  # "Verse 1" found the "Verse" pool, in order
+    chorus_ids = [c["asset_id"] for c in clips if c["start_s"] >= 20.0]
+    assert set(chorus_ids) <= {"c0", "c1", "c2"}
+    assert chorus_ids[:3] == ["c0", "c1", "c2"]
+    assert all(a != b for a, b in zip([c["asset_id"] for c in clips], [c["asset_id"] for c in clips][1:]))
+    assert tl.validate_auto_cut_invariants(result["tracks"], beats, 40.0) == []

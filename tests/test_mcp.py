@@ -77,7 +77,7 @@ async def test_mcp_protocol_end_to_end(running_app):
             by_name = {t.name: t for t in tools.tools}
             expected = {"studio_status", "studio_projects", "studio_create_project", "studio_cast", "studio_generate_image",
                         "studio_edit_image", "studio_animate", "studio_voice", "studio_compose", "studio_import",
-                        "studio_analyze_audio", "studio_design", "studio_photocard_set", "studio_timeline", "studio_render",
+                        "studio_analyze_audio", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_timeline", "studio_render",
                         "studio_jobs", "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage"}
             assert expected <= set(by_name)
             for t in tools.tools:
@@ -148,6 +148,14 @@ async def test_mcp_protocol_end_to_end(running_app):
             song_asset_id = song["job"]["asset_ids"][0]
             result = await session.call_tool("studio_lineage", {"asset_id": song_asset_id})
             assert json.loads(result.content[0].text)["recipe"]["template"] == "ace15_song"
+
+            result = await session.call_tool("studio_time_lyrics", {
+                "project": project_id, "song_asset_id": song_asset_id,
+                "lyrics": "[Verse]\nCuenta las farolas, una, dos.\n[Chorus]\nNo mires atras.\n",
+            })
+            timed = json.loads(result.content[0].text)
+            assert timed["lines"] == 2 and [s["label"] for s in timed["sections"]] == ["Verse", "Chorus"]
+            assert timed["sections"][1]["energy"] == "high" and "by ear" in timed["note"]
 
             result = await session.call_tool("studio_job", {"job_id": "job_does_not_exist"})
             assert result.isError is True
