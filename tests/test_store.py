@@ -108,3 +108,10 @@ def test_asset_search_escapes_like_wildcards(store, project):
     assert [a["name"] for a in store.list_assets(project["id"], query="100%")["items"]] == ["100% idol"]
     assert store.list_assets(project["id"], query="%")["items"][0]["name"] == "100% idol"
     assert len(store.list_assets(project["id"], query="_")["items"]) == 0
+
+
+def test_ids_sort_in_creation_order_within_a_millisecond():
+    from prosperos_hoard.ids import new_id
+
+    ids = [new_id("job") for _ in range(5000)]
+    assert ids == sorted(ids) and len(set(ids)) == len(ids)
