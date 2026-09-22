@@ -1,3 +1,5 @@
+<img src="app-icon.png" width="28" height="28" alt="" align="left" />
+
 # Prospero's Hoard
 ### Such stuff as dreams are made on: can an agent direct a whole production?
 **A local media studio that drives your ComfyUI, ffmpeg and a local TTS to make consistent characters, photocards, album art and music videos cut on the beat, by hand or entirely over MCP, and remembers exactly how every asset was made.**
