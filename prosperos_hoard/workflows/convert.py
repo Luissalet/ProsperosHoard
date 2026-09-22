@@ -43,7 +43,20 @@ Handled, in order of how often real templates use them:
   feeds the instance node in the *outer* graph, and its declared outputs
   (``target_id == -20``) become the values downstream nodes see on the
   instance's own output slots. Nesting (a subgraph instance inside another
-  subgraph) is supported by recursion.
+  subgraph) is supported by recursion. A subgraph input is matched to
+  the instance's socket **by name** (the instance lists only the inputs
+  that have sockets, so slot numbers differ); an unlinked promoted widget
+  takes its value from the instance's own ``widgets_values``, which hold
+  one entry per widget-typed subgraph input in declaration order.
+- **Dynamic combos** (``COMFY_DYNAMICCOMBO_V3``, e.g. ``SaveVideo.format``):
+  the chosen option's own inputs follow the combo's value in
+  ``widgets_values`` and are emitted flattened as ``"<combo>.<child>"``
+  (``"format.codec"``), recursively -- exactly what the server validates.
+- **Autogrow sockets** (``COMFY_AUTOGROW_V3``, a variable list of e.g.
+  reference images): every linked ``"<name>.<slot>"`` socket on the node
+  is emitted under that same flattened name.
+- **Socketless widgets** (an image comparer's view) are frontend-only and
+  never emitted.
 """
 
 from __future__ import annotations
@@ -56,6 +69,9 @@ MUTE_MODE = 2
 DECORATIVE_TYPES = {"MarkdownNote", "Note"}
 PASSTHROUGH_TYPES = {"PrimitiveNode", "Reroute"}
 _WIDGET_SCALARS = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "COMFY_DYNAMICCOMBO_V3"}
+DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
+AUTOGROW = "COMFY_AUTOGROW_V3"
+SEED_NAMES = ("seed", "noise_seed")
 SUBGRAPH_INPUT_ORIGIN = -10
 SUBGRAPH_OUTPUT_TARGET = -20
 
@@ -93,25 +109,6 @@ def _links_from_array(raw_links: list) -> dict[Any, dict[str, Any]]:
 def _links_from_subgraph(raw_links: list) -> dict[Any, dict[str, Any]]:
     """Subgraph `links`: already a list of `{id, origin_id, origin_slot, target_id, target_slot, type}`."""
     return {entry["id"]: entry for entry in raw_links or []}
-
-
-def _type_tuple(object_info: dict, class_type: str, name: str) -> tuple[Any, dict]:
-    spec = (object_info.get(class_type) or {}).get("input") or {}
-    entry = (spec.get("required") or {}).get(name)
-    if entry is None:
-        entry = (spec.get("optional") or {}).get(name)
-    if entry is None:
-        return None, {}
-    type_ = entry[0]
-    cfg = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
-    return type_, cfg
-
-
-def _schema_names(object_info: dict, class_type: str) -> list[str]:
-    spec = (object_info.get(class_type) or {}).get("input") or {}
-    names = list((spec.get("required") or {}).keys())
-    names += list((spec.get("optional") or {}).keys())
-    return names
 
 
 def _is_widget_type(type_: Any) -> bool:
@@ -166,14 +163,24 @@ def _make_inner_scope(scope: _Scope, instance_node: dict, subgraph_id: str) -> _
     inner_links = _links_from_subgraph(sg.get("links", []))
     instance_prefix = f"{_prefixed(scope.prefix, instance_node['id'])}:"
 
+    sg_inputs = sg.get("inputs") or []
+    instance_inputs = {i.get("name"): i for i in (instance_node.get("inputs") or [])}
+    widget_names = [i.get("name") for i in sg_inputs if _is_widget_type(i.get("type"))]
+    widget_values = list(instance_node.get("widgets_values") or [])
+    promoted = dict(zip(widget_names, widget_values)) if len(widget_values) == len(widget_names) else {}
+
     def external_resolver(input_slot: int) -> Optional[Resolved]:
-        ins = instance_node.get("inputs") or []
-        if input_slot >= len(ins) or ins[input_slot].get("link") is None:
+        if input_slot >= len(sg_inputs):
             return None
-        link = scope.links.get(ins[input_slot]["link"])
-        if link is None:
-            return None
-        return _resolve(scope, link["origin_id"], link["origin_slot"])
+        name = sg_inputs[input_slot].get("name")
+        ui_in = instance_inputs.get(name)
+        if ui_in is not None and ui_in.get("link") is not None:
+            link = scope.links.get(ui_in["link"])
+            if link is not None:
+                return _resolve(scope, link["origin_id"], link["origin_slot"])
+        if name in promoted:
+            return ("value", promoted[name])
+        return None  # the inner node keeps its own widget value
 
     return _Scope(nodes=inner_nodes, links=inner_links, subgraphs=scope.subgraphs,
                   prefix=instance_prefix, external_resolver=external_resolver)
@@ -194,11 +201,22 @@ def _assign(inputs: dict, name: str, resolved: Resolved) -> None:
         inputs[name] = resolved[1]
 
 
+def _entry(raw: Any) -> tuple[Any, dict]:
+    """`[type, config]` schema entry -> (type, config dict)."""
+    type_ = raw[0] if isinstance(raw, (list, tuple)) and raw else None
+    cfg = raw[1] if isinstance(raw, (list, tuple)) and len(raw) > 1 and isinstance(raw[1], dict) else {}
+    return type_, cfg
+
+
+def _ordered_entries(spec: dict) -> list[tuple[str, Any]]:
+    return list((spec.get("required") or {}).items()) + list((spec.get("optional") or {}).items())
+
+
 def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict) -> dict[str, Any]:
-    schema = _schema_names(object_info, class_type)
+    spec = (object_info.get(class_type) or {}).get("input") or {}
     ui_inputs_by_name = {i["name"]: i for i in (node.get("inputs") or [])}
     widget_values = list(node.get("widgets_values") or [])
-    wv_i = 0
+    cursor = {"i": 0}
     out: dict[str, Any] = {}
 
     def resolve_link(link_id: Any) -> Optional[Resolved]:
@@ -207,40 +225,60 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
             return None
         return _resolve(scope, link["origin_id"], link["origin_slot"])
 
-    for name in schema:
-        type_, cfg = _type_tuple(object_info, class_type, name)
-        ui_in = ui_inputs_by_name.get(name)
-        linked = ui_in is not None and ui_in.get("link") is not None
-        if not _is_widget_type(type_):
+    def take() -> tuple[bool, Any]:
+        if cursor["i"] < len(widget_values):
+            value = widget_values[cursor["i"]]
+            cursor["i"] += 1
+            return True, value
+        return False, None
+
+    def walk(entries: list[tuple[str, Any]], prefix: str) -> None:
+        for short, raw in entries:
+            name = f"{prefix}{short}"
+            type_, cfg = _entry(raw)
+            ui_in = ui_inputs_by_name.get(name)
+            linked = ui_in is not None and ui_in.get("link") is not None
+            if type_ == AUTOGROW:
+                grow_prefix = f"{name}."
+                for ui_name, candidate in ui_inputs_by_name.items():
+                    if ui_name.startswith(grow_prefix) and candidate.get("link") is not None:
+                        resolved = resolve_link(candidate["link"])
+                        if resolved is not None:
+                            _assign(out, ui_name, resolved)
+                continue
+            if cfg.get("socketless"):
+                continue
+            if not _is_widget_type(type_):
+                if linked:
+                    resolved = resolve_link(ui_in["link"])
+                    if resolved is not None:
+                        _assign(out, name, resolved)
+                continue
+            consumed, value = take()
+            if consumed and (short in SEED_NAMES or cfg.get("control_after_generate")) \
+                    and cursor["i"] < len(widget_values) and isinstance(widget_values[cursor["i"]], str):
+                cursor["i"] += 1  # the UI-only control_after_generate widget ("fixed"/"randomize"...)
             if linked:
                 resolved = resolve_link(ui_in["link"])
                 if resolved is not None:
                     _assign(out, name, resolved)
-            continue
-        value_from_widgets = None
-        consumed = False
-        if wv_i < len(widget_values):
-            value_from_widgets = widget_values[wv_i]
-            wv_i += 1
-            consumed = True
-            if name in ("seed", "noise_seed") and wv_i < len(widget_values):
-                wv_i += 1  # control_after_generate
-        if linked:
-            resolved = resolve_link(ui_in["link"])
-            if resolved is not None:
-                _assign(out, name, resolved)
+                elif consumed:
+                    # a promoted (subgraph or converted-to-input) socket with
+                    # nothing actually feeding it falls back to the stale
+                    # widget value ComfyUI kept for it, same as the live app.
+                    out[name] = value
+                elif "default" in cfg:
+                    out[name] = cfg["default"]
             elif consumed:
-                # a promoted (subgraph or converted-to-input) socket with
-                # nothing actually feeding it falls back to the stale
-                # widget value ComfyUI kept for it, same as the live app.
-                out[name] = value_from_widgets
+                out[name] = value
             elif "default" in cfg:
                 out[name] = cfg["default"]
-            continue
-        if consumed:
-            out[name] = value_from_widgets
-        elif "default" in cfg:
-            out[name] = cfg["default"]
+            if type_ == DYNAMIC_COMBO and name in out and not isinstance(out[name], list):
+                chosen = next((o for o in cfg.get("options") or [] if o.get("key") == out[name]), None)
+                if chosen is not None:
+                    walk(_ordered_entries(chosen.get("inputs") or {}), f"{name}.")
+
+    walk(_ordered_entries(spec), "")
     return out
 
 
@@ -276,9 +314,27 @@ def ui_to_api(ui_workflow: dict[str, Any], object_info: dict[str, Any]) -> dict[
     return api
 
 
+def _required_names(spec: dict, values: dict, prefix: str = "") -> list[tuple[str, Any]]:
+    """Required inputs the server will check, including the chosen option's
+    children of every dynamic combo (flattened as ``"<combo>.<child>"``)."""
+    out: list[tuple[str, Any]] = []
+    for section in ("required", "optional"):
+        for short, raw in (spec.get(section) or {}).items():
+            name = f"{prefix}{short}"
+            type_, cfg = _entry(raw)
+            if section == "required":
+                out.append((name, raw))
+            if type_ == DYNAMIC_COMBO:
+                chosen = next((o for o in cfg.get("options") or [] if o.get("key") == values.get(name)), None)
+                if chosen is not None:
+                    out += _required_names(chosen.get("inputs") or {}, values, f"{name}.")
+    return out
+
+
 def validate_converted(api_workflow: dict[str, Any], object_info: dict[str, Any]) -> list[str]:
     """Structural checks on a converted prompt: every class exists,
-    every required input present, every link points to an existing output.
+    every required input present (dynamic-combo children included), every
+    link points to an existing node and one of its output slots.
     Returns a list of problems (empty when the workflow is sound)."""
     problems: list[str] = []
     for node_id, node in api_workflow.items():
@@ -286,9 +342,17 @@ def validate_converted(api_workflow: dict[str, Any], object_info: dict[str, Any]
         if class_type not in object_info:
             problems.append(f"node {node_id}: class '{class_type}' not in object_info")
             continue
-        required = list(((object_info[class_type].get("input") or {}).get("required") or {}).keys())
         inputs = node.get("inputs", {})
-        for name in required:
+        for name, raw in _required_names(object_info[class_type].get("input") or {}, inputs):
+            type_, cfg = _entry(raw)
+            if cfg.get("socketless"):
+                continue
+            if type_ == AUTOGROW:
+                have = sum(1 for key in inputs if key.startswith(f"{name}."))
+                minimum = int((cfg.get("template") or {}).get("min") or 0)
+                if have < minimum:
+                    problems.append(f"node {node_id} ({class_type}): '{name}' needs at least {minimum} inputs, has {have}")
+                continue
             if name not in inputs:
                 problems.append(f"node {node_id} ({class_type}): missing required input '{name}'")
         for name, value in inputs.items():
@@ -296,4 +360,8 @@ def validate_converted(api_workflow: dict[str, Any], object_info: dict[str, Any]
                 src_id, src_slot = value
                 if src_id not in api_workflow:
                     problems.append(f"node {node_id} input '{name}': link points to missing node '{src_id}'")
+                    continue
+                outputs = (object_info.get(api_workflow[src_id].get("class_type")) or {}).get("output") or []
+                if not isinstance(src_slot, int) or src_slot >= len(outputs):
+                    problems.append(f"node {node_id} input '{name}': slot {src_slot} does not exist on node '{src_id}'")
     return problems
