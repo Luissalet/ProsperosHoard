@@ -68,3 +68,51 @@ def test_propose_param_map_detects_known_nodes():
 def test_estimate_vram_mb_uses_table():
     _, spec = comfy_driver.load_template("svd_img2vid")
     assert comfy_driver.estimate_vram_mb(spec, {"svd": 10000, "sdxl": 7000, "sd15": 3500}) == 10000
+
+
+def test_template_names_cannot_escape_the_workflow_folders(tmp_path):
+    for name in ("../api", "..\\x", "/etc/passwd", "sdxl_txt2img.json", "wf_../../x", "", "A" * 60):
+        with pytest.raises(comfy_driver.WorkflowError):
+            comfy_driver.load_template(name, tmp_path)
+
+
+def test_checkpoint_resolution_by_stem_and_family():
+    avail = ["sd_xl_base_1.0.safetensors", "v1-5-pruned-emaonly-fp16.safetensors"]
+    assert comfy_driver.resolve_checkpoint("sd_xl_base_1.0", avail, None, "sdxl") == "sd_xl_base_1.0.safetensors"
+    assert comfy_driver.resolve_checkpoint("SD_XL_BASE_1.0.SAFETENSORS", avail, None, "sdxl") == "sd_xl_base_1.0.safetensors"
+    assert comfy_driver.resolve_checkpoint(None, avail, "missing.safetensors", "sd15") == "v1-5-pruned-emaonly-fp16.safetensors"
+    assert comfy_driver.resolve_checkpoint("dreamy.safetensors", avail, None, "sdxl") is None
+
+
+def test_validation_names_missing_nodes_and_bad_sampler():
+    workflow, spec = comfy_driver.load_template("sdxl_txt2img")
+    info = {k: {"input": {"required": {}}} for k in ("KSampler", "CLIPTextEncode", "EmptyLatentImage", "VAEDecode", "SaveImage")}
+    info["CheckpointLoaderSimple"] = {"input": {"required": {"ckpt_name": [["sd_xl_base_1.0.safetensors"]]}}}
+    info["KSampler"] = {"input": {"required": {"sampler_name": [["euler", "euler_ancestral"]], "scheduler": [["normal"]]}}}
+    out = comfy_driver.validate_against_object_info(spec, {"sampler": "euler"}, info, workflow)
+    assert out["checkpoint"] == "sd_xl_base_1.0.safetensors"
+    with pytest.raises(comfy_driver.ValidationError) as exc:
+        comfy_driver.validate_against_object_info(spec, {"sampler": "euler_a"}, info, workflow)
+    assert "euler_ancestral" in str(exc.value)
+    del info["VAEDecode"]
+    with pytest.raises(comfy_driver.ValidationError) as exc:
+        comfy_driver.validate_against_object_info(spec, {}, info, workflow)
+    assert "VAEDecode" in str(exc.value)
+
+
+def test_propose_map_classifies_positive_and_negative_prompts():
+    workflow, _ = comfy_driver.load_template("sdxl_txt2img")
+    spec = comfy_driver.propose_param_map(workflow)
+    assert spec["map"]["positive_prompt"] == "6.text"
+    assert spec["map"]["negative_prompt"] == "7.text"
+    assert spec["map"]["width"] == "5.width"
+    svd, _ = comfy_driver.load_template("svd_img2vid")
+    s2 = comfy_driver.propose_param_map(svd)
+    assert s2["kind"] == "video" and s2["vram_class"] == "svd" and s2["reference_node"] == "1.image"
+
+
+def test_template_hash_changes_with_the_graph():
+    workflow, spec = comfy_driver.load_template("sdxl_txt2img")
+    h1 = comfy_driver.template_hash(workflow, spec)
+    workflow["3"]["inputs"]["steps"] = 99
+    assert comfy_driver.template_hash(workflow, spec) != h1
