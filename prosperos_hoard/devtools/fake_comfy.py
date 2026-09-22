@@ -546,7 +546,12 @@ class FakeComfyServer:
             port = sock.getsockname()[1]
             sock.close()
 
-        config = uvicorn.Config(self.app, host=host, port=port, log_level="warning")
+        # loop="asyncio": uvicorn's default "auto" installs uvloop process-wide
+        # (asyncio.set_event_loop_policy) the moment this thread starts, which
+        # breaks subprocess spawning (e.g. an MCP stdio client) anywhere else
+        # in the process afterwards - uvloop's policy has no legacy child
+        # watcher, which is exactly what `loop.subprocess_exec` needs.
+        config = uvicorn.Config(self.app, host=host, port=port, log_level="warning", loop="asyncio")
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
         self._thread.start()
