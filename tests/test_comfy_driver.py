@@ -47,6 +47,25 @@ def test_ui_format_workflow_rejected_on_propose():
         comfy_driver.propose_param_map(ui_workflow)
 
 
+def test_ui_format_import_is_converted_and_mapped(tmp_path):
+    import json
+    from pathlib import Path
+
+    from prosperos_hoard.devtools.fake_comfy import real_object_info
+
+    ui = (Path(__file__).parent / "fixtures" / "comfy" / "flux_schnell.json").read_text(encoding="utf-8")
+    spec = comfy_driver.import_custom_workflow(tmp_path, "Flux from the UI", ui, object_info=real_object_info)
+    assert spec["converted_from"] == "ui"
+    assert spec["map"]["positive_prompt"] == "6.text" and spec["map"]["seed"] == "31.seed"
+    saved = json.loads((tmp_path / "workflows" / f"{spec['template']}.json").read_text(encoding="utf-8"))
+    assert saved["31"]["class_type"] == "KSampler" and "nodes" not in saved
+    # ComfyUI off and nothing cached: an actionable message, not a stack trace
+    def unreachable():
+        raise RuntimeError("connection refused")
+    with pytest.raises(comfy_driver.WorkflowError, match="Export \\(API\\)"):
+        comfy_driver.import_custom_workflow(tmp_path, "x", ui, object_info=unreachable)
+
+
 def test_propose_param_map_detects_known_nodes():
     custom = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "x.safetensors"}},

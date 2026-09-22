@@ -236,7 +236,8 @@ def test_hostile_workflow_imports_are_rejected(client):
     c, _, _ = client
     ui = {"nodes": [{"id": 1}], "links": []}
     r = c.post("/api/workflows/import", json={"name": "ui", "workflow": ui})
-    assert r.status_code == 400 and "API Format" in r.json()["message"]
+    # a UI export is converted now; a broken one fails with a readable reason
+    assert r.status_code == 400 and "no node type" in r.json()["message"]
     deep: dict = {"1": {"class_type": "SaveImage", "inputs": {"x": []}}}
     cur = deep["1"]["inputs"]["x"]
     for _ in range(30):
@@ -366,3 +367,24 @@ def test_solo_photocard_set_numbers_every_look(client):
     assert "contact_sheet" in sheet["tags"] and sheet["recipe"]["character_id"] == char_id
     bad = c.post(f"/api/agent/studio_photocard_set?project={pid}", json={"character_id": char_id})
     assert bad.status_code == 400
+
+
+def test_import_ui_format_workflow_converts_and_caches_object_info(client, data_dir):
+    c, app, _ = client
+    ui = (Path(__file__).parent / "fixtures" / "comfy" / "video_wan2_2_5B_ti2v.json").read_bytes()
+    r = c.post("/api/workflows/import-file", files={"file": ("wan.json", ui, "application/json")})
+    assert r.status_code == 200, r.text
+    spec = r.json()
+    assert spec["converted_from"] == "ui" and spec["template"].startswith("wf_")
+    cache = data_dir / "comfy" / "object_info.json"
+    assert cache.is_file() and "SaveVideo" in json.loads(cache.read_text(encoding="utf-8"))
+    # ComfyUI gone: the cached node list still converts the next UI export
+    (data_dir / "backend.json").write_text(json.dumps({"comfy": {"url": "http://127.0.0.1:9"}}), encoding="utf-8")
+    app.state.backend.__init__(data_dir)
+    from prosperos_hoard import engine as engine_mod
+
+    with pytest.raises(Exception):
+        engine_mod._object_info(app.state.backend)  # really unreachable now
+    r2 = c.post("/api/workflows/import-file", files={"file": ("wan2.json", ui, "application/json")})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["converted_from"] == "ui"

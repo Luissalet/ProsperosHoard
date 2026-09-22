@@ -281,3 +281,38 @@ def test_fake_comfy_rejects_what_the_real_server_rejects(fake_comfy):
     resp = httpx.post(f"http://127.0.0.1:{port}/prompt", json={"prompt": broken, "client_id": "t"})
     assert resp.status_code == 400
     assert "format.codec" in resp.text
+
+
+def test_missing_unet_file_is_reported_before_queueing(store, backend_with_comfy, fake_comfy, project):
+    """UNETLoader/VAELoader-based templates get the same model check as
+    checkpoints: the whole prompt is validated like ComfyUI's /prompt."""
+    still_id = _still(store, backend_with_comfy, project, 1344, 768)
+    server, _ = fake_comfy
+    seen = len(server.prompts_seen)
+    done = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "x", "positive_prompt": "x", "negative_prompt": "", "seed": 1, "count": 1,
+                     "template": "wan22_ti2v", "reference_asset_id": still_id}, project["id"])
+    assert done["state"] == "done"
+    from prosperos_hoard import engine as engine_mod
+
+    original = engine_mod._object_info
+
+    def without_wan(backend):
+        info = original(backend)
+        patched = dict(info)
+        unet = dict(patched["UNETLoader"])
+        unet["input"] = {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"], {}],
+                                      "weight_dtype": info["UNETLoader"]["input"]["required"]["weight_dtype"]}}
+        patched["UNETLoader"] = unet
+        return patched
+
+    engine_mod._object_info = without_wan
+    try:
+        failed = _run_job(store, backend_with_comfy, "generate_image",
+                          {"prompt": "x", "positive_prompt": "x", "negative_prompt": "", "seed": 2, "count": 1,
+                           "template": "wan22_ti2v", "reference_asset_id": still_id}, project["id"])
+    finally:
+        engine_mod._object_info = original
+    assert failed["state"] == "failed"
+    assert "wan2.2_ti2v_5B_fp16.safetensors" in failed["message"] and "not available" in failed["message"]
+    assert len(server.prompts_seen) == seen + 1  # the failing one never reached ComfyUI

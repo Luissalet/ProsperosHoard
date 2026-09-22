@@ -680,12 +680,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/workflows/import")
     def import_workflow(body: WorkflowImportBody):
-        return comfy_driver.import_custom_workflow(store.data_dir, body.name, body.workflow)
+        return comfy_driver.import_custom_workflow(store.data_dir, body.name, body.workflow,
+                                                   object_info=lambda: engine.object_info_live_or_cached(backend))
 
     @app.post("/api/workflows/import-file")
     async def import_workflow_file(file: UploadFile, name: Optional[str] = None):
         raw = await file.read(comfy_driver.MAX_WORKFLOW_BYTES + 1)
-        return comfy_driver.import_custom_workflow(store.data_dir, name or Path(file.filename or "workflow").stem, raw)
+        return comfy_driver.import_custom_workflow(store.data_dir, name or Path(file.filename or "workflow").stem, raw,
+                                                   object_info=lambda: engine.object_info_live_or_cached(backend))
 
     @app.patch("/api/workflows/{wf_id}")
     def update_workflow(wf_id: str, body: WorkflowUpdateBody):
