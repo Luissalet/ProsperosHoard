@@ -147,7 +147,7 @@ const en = {
   noResults: "Queued images appear here as soon as ComfyUI finishes them.",
   comfyDown: "ComfyUI is not reachable: {reason}",
   customWorkflows: "Custom workflows",
-  importWorkflow: "Import API-format workflow",
+  importWorkflow: "Import ComfyUI workflow (UI or API export)",
   paramMap: "Parameter map",
   // library
   libraryTitle: "Library",
@@ -456,7 +456,7 @@ const es: Record<MessageKey, string> = {
   noResults: "Las imágenes encoladas aparecen aquí en cuanto ComfyUI las termina.",
   comfyDown: "ComfyUI no responde: {reason}",
   customWorkflows: "Flujos propios",
-  importWorkflow: "Importar flujo en formato API",
+  importWorkflow: "Importar flujo de ComfyUI (exportación UI o API)",
   paramMap: "Mapa de parámetros",
   libraryTitle: "Biblioteca",
   search: "Buscar nombres, prompts, etiquetas...",

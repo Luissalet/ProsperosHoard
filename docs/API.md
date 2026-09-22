@@ -30,8 +30,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_voice?project=` | `{text, character_id?, voice?, speed?}` |
 | POST | `/api/agent/studio_import?project=` | `{path, kind?}` |
 | POST | `/api/agent/studio_analyze_audio?asset_id=` | - |
+| POST | `/api/agent/studio_time_lyrics?project=` | `{song_asset_id, lyrics, name?}` -> `{id, lines, sections, note}`: a lyrics asset timed from the `[Section]` tags and the song's bars |
 | POST | `/api/agent/studio_design?project=` | `{template, fields, image_asset_id?, variant?, options}` |
-| POST | `/api/agent/studio_photocard_set?project=` | `{group_id, template_front, template_back, image_asset_ids?}` |
+| POST | `/api/agent/studio_photocard_set?project=` | group `{group_id, template_front, template_back, image_asset_ids?}` or solo `{character_id, cards:[{image_asset_id, role?, message?, accent?}], set_name?}` |
 | POST | `/api/agent/studio_timeline?project=` | `{action, song_asset_id?, asset_ids?, board_id?, aspect, lyrics_asset_id?, options, timeline_id?, patch}` |
 | POST | `/api/agent/studio_render` | `{timeline_id, quality, wait_s}` |
 | GET | `/api/agent/studio_jobs` | `?state&limit&offset` |
@@ -78,7 +79,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
 | POST | `/api/assets/{id}/animate` | `{asset_id, frames, fps, motion}` |
 | GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` (built-ins now include `flux_schnell_txt2img`, `flux_kontext_edit`, `wan22_ti2v`, `ace15_song` alongside SDXL/SD1.5/SVD) |
-| POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first) -> proposed spec with `map` |
+| POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first, against the live `/object_info` or, with ComfyUI off, the copy cached in `data/comfy/object_info.json`) -> proposed spec with `map` (and `converted_from: "ui"`) |
 | POST | `/api/workflows/import-file` | multipart `file` (.json, at most 2 MB) |
 | PATCH | `/api/workflows/{wf_id}` | `{name?, map?, vram_class?, kind?, output_node?, reference_node?}` (validated against the graph) |
 | POST | `/api/projects/{id}/compose` | same body as the agent route; returns the full job |
@@ -88,7 +89,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/projects/{id}/import-upload` | multipart `file` (images 50 MB, audio/video 2 GB), `?kind=` |
 | POST | `/api/projects/{id}/import-path` | `{path, kind?}` (same rules as `studio_import`) |
 | POST | `/api/assets/{id}/analyze?force=` | full analysis (all beats) |
-| GET / PUT | `/api/assets/{id}/lyrics` | read `{text, lines}` / write `{text}` or `{lines:[{time_s, text}]}`; lyrics assets only |
+| GET / PUT | `/api/assets/{id}/lyrics` | read `{text, lines, sections, all_lines}` (`lines` = sung lines; `sections` from timed `[Section]` marker lines; `all_lines` includes the markers, for the editor) / write `{text}` or `{lines:[{time_s, text}]}`; lyrics assets only |
 | POST | `/api/projects/{id}/lyrics` | create a lyrics asset `{text, name?}` |
 | GET | `/api/design/templates` | templates with dimensions, variants and fields |
 | POST | `/api/design/preview` | `{template, fields, variant?}` -> `image/jpeg` (max side 720, nothing stored) |

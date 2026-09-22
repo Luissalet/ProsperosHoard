@@ -289,6 +289,8 @@ def _emit_graph(scope: _Scope, api: dict[str, Any], object_info: dict) -> None:
             inner_scope = _make_inner_scope(scope, node, ctype)
             _emit_graph(inner_scope, api, object_info)
             continue
+        if not isinstance(ctype, str) or not ctype:
+            raise ConversionError(f"node {node_id!r} has no node type; is this a complete ComfyUI export?")
         if ctype in DECORATIVE_TYPES or ctype in PASSTHROUGH_TYPES:
             continue
         if node.get("mode", 0) in (MUTE_MODE, BYPASS_MODE):

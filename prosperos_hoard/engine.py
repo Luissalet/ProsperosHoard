@@ -5,6 +5,7 @@ it is directly unit-testable without spinning up FastAPI.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -33,6 +34,7 @@ from .ids import new_id
 from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
 from .util import now_iso
+from .workflows import convert as convert_mod
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
@@ -430,9 +432,45 @@ def _download_output(backend: Backend, output) -> bytes:
     return backend.run_async(comfy.download(output))
 
 
+_object_info_cache_hash: dict[str, str] = {}
+
+
+def object_info_cache_path(data_dir: Path) -> Path:
+    return Path(data_dir) / "comfy" / "object_info.json"
+
+
 def _object_info(backend: Backend) -> dict[str, Any]:
+    """The live `/object_info`, also saved to `data/comfy/object_info.json`
+    whenever it changes, so UI-format workflows can still be converted while
+    ComfyUI is off (see `cached_object_info`)."""
     comfy = _comfy(backend)
-    return backend.run_async(comfy.object_info())
+    info = backend.run_async(comfy.object_info())
+    try:
+        if info:
+            blob = json.dumps(info, sort_keys=True)
+            digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+            path = object_info_cache_path(backend.data_dir)
+            if _object_info_cache_hash.get(str(path)) != digest:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(blob, encoding="utf-8")
+                tmp.replace(path)
+                _object_info_cache_hash[str(path)] = digest
+    except OSError:
+        pass  # the cache is a convenience; never fail a job over it
+    return info
+
+
+def object_info_live_or_cached(backend: Backend) -> dict[str, Any]:
+    """For converting a UI-format workflow: live when ComfyUI answers, else the
+    last copy saved by `_object_info`."""
+    try:
+        return _object_info(backend)
+    except Exception as live_exc:  # noqa: BLE001
+        path = object_info_cache_path(backend.data_dir)
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+        raise RuntimeError(str(live_exc) or "ComfyUI is not reachable") from live_exc
 
 
 def _svd_size(width: int, height: int) -> tuple[int, int]:
@@ -458,8 +496,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     progress(0.02, "checking free VRAM")
     check_vram_or_wait(backend, spec)
     progress(0.05, "validating against ComfyUI")
+    object_info = _object_info(backend)
     try:
-        values = comfy_driver.validate_against_object_info(spec, values, _object_info(backend), workflow)
+        values = comfy_driver.validate_against_object_info(spec, values, object_info, workflow)
     except comfy_driver.ValidationError as exc:
         raise EngineError("comfy_validation", str(exc)) from exc
 
@@ -499,6 +538,13 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if spec.get("requires_mask"):
             node, _, inp = spec["mask_node"].partition(".")
             wf[node]["inputs"][inp] = uploads[-1][1]
+        if i == 0 and object_info:
+            # the whole prompt, the way ComfyUI's /prompt will check it: every
+            # model file (UNet, text encoders, VAE - not only checkpoints),
+            # every combo choice and number range, dynamic-combo children
+            problems = convert_mod.validate_values(wf, object_info)
+            if problems:
+                raise EngineError("comfy_validation", "ComfyUI would reject this workflow: " + "; ".join(problems[:4]))
         progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
         t0 = time.monotonic()
         outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,

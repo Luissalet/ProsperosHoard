@@ -15,7 +15,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .ids import new_id
 from .util import now_iso
@@ -288,7 +288,11 @@ def validate_param_map(workflow: dict[str, Any], spec: dict[str, Any]) -> None:
             raise WorkflowError("reference_node must be 'node_id.input' of a LoadImage node")
 
 
-def import_custom_workflow(data_dir: Path, name: str, raw: bytes | str | dict) -> dict[str, Any]:
+def import_custom_workflow(data_dir: Path, name: str, raw: bytes | str | dict,
+                           object_info: Optional[Callable[[], dict[str, Any]]] = None) -> dict[str, Any]:
+    """Import an API-format workflow, or a UI-format one (what ComfyUI's
+    plain "Save"/"Export" writes) converted with `workflows.convert` against
+    `object_info()` - the live `/object_info`, or the cached copy."""
     if isinstance(raw, (bytes, str)):
         if len(raw) > MAX_WORKFLOW_BYTES:
             raise WorkflowError(f"workflow file is larger than {MAX_WORKFLOW_BYTES // (1024 * 1024)} MB")
@@ -301,7 +305,32 @@ def import_custom_workflow(data_dir: Path, name: str, raw: bytes | str | dict) -
         if len(json.dumps(workflow)) > MAX_WORKFLOW_BYTES:
             raise WorkflowError(f"workflow is larger than {MAX_WORKFLOW_BYTES // (1024 * 1024)} MB")
     name = (name or "").strip()[:80] or "Imported workflow"
+    converted_from_ui = False
+    if _looks_like_ui_format(workflow):
+        from .workflows import convert
+
+        if object_info is None:
+            raise WorkflowError("this is a ComfyUI UI export; converting it needs ComfyUI's /object_info")
+        try:
+            info = object_info()
+        except WorkflowError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - any failure to reach ComfyUI reads the same to the user
+            raise WorkflowError(
+                f"this is a ComfyUI UI export and converting it needs ComfyUI's node list, but ComfyUI is not "
+                f"reachable and none is cached yet ({exc}). Start ComfyUI once, or import the 'Export (API)' file."
+            ) from exc
+        try:
+            workflow = convert.ui_to_api(workflow, info)
+        except convert.ConversionError as exc:
+            raise WorkflowError(f"could not convert the UI export: {exc}") from exc
+        problems = convert.validate_converted(workflow, info)
+        if problems:
+            raise WorkflowError("the converted workflow would not run: " + "; ".join(problems[:3]))
+        converted_from_ui = True
     spec = propose_param_map(workflow)
+    if converted_from_ui:
+        spec["converted_from"] = "ui"
     wf_id = new_id("wf")
     spec.update({"template": wf_id, "name": name, "created_at": now_iso()})
     d = _custom_dir(data_dir)
