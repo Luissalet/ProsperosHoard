@@ -234,7 +234,7 @@ def studio_edit_image(
     """Change or re-run an existing image asset. operation:
     "img2img" - restyle it with `prompt` (strength 0-1 = how much changes, default 0.55);
     "inpaint" - repaint the white area of mask_asset_id;
-    "hires" - two-pass upscale to about 1.5x;
+    "hires" - 1.5x "hires fix" (re-runs the asset's SDXL txt2img recipe with a second pass);
     "reuse" - re-run the exact recipe (same seed: reproduces the asset);
     "vary" - same recipe with a new seed (or `seed`), `count` variations.
     Returns the job (poll studio_job); a finished job within wait_s also returns a picture.

@@ -172,3 +172,22 @@ def test_animated_webp_is_converted_to_mp4(tmp_path):
     dest = tmp_path / "anim.mp4"
     n = video.animated_webp_to_mp4(src, dest, 8, tmp_path / "work")
     assert n == 6 and dest.is_file() and dest.stat().st_size > 0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_short_video_clip_is_padded_to_its_slot(tmp_path):
+    import subprocess
+
+    src = tmp_path / "anim.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=8:duration=1",
+                    "-pix_fmt", "yuv420p", str(src)], check=True)
+    timeline = {"width": 360, "height": 640, "fps": 20, "audio_asset_id": None, "tracks": [
+        {"type": "visual", "clips": [{"asset_id": "v", "kind": "video", "duration_s": 2.5, "trim_start_s": 0.0,
+                                      "transition_in": {"type": "cut"}}]}]}
+    out = tmp_path / "o.mp4"
+    video.render_timeline(timeline, lambda _i: src, tmp_path / "w", out, quality="preview")
+    probe = subprocess.run(["ffmpeg", "-i", str(out)], capture_output=True, text=True)
+    import re
+
+    m = re.search(r"Duration: 00:00:(\d+\.\d+)", probe.stderr)
+    assert m and abs(float(m.group(1)) - 2.5) < 0.15

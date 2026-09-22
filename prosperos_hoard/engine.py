@@ -523,17 +523,26 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
         "denoise": _first(params.get("strength"), 1.0 if operation == "inpaint" else 0.55),
     }
     if operation == "hires":
-        w, h = src.get("width") or 1024, src.get("height") or 1024
+        # a "hires fix": the source's own txt2img recipe is re-run at its base
+        # size and upscaled in latent space with a second sampling pass, so
+        # it only applies to images generated here with SDXL txt2img
+        recipe = src.get("recipe") or {}
+        if recipe.get("backend") != "comfyui" or recipe.get("template") != "sdxl_txt2img":
+            raise EngineError("hires_needs_recipe", "upscale re-runs an SDXL txt2img recipe at a higher resolution; "
+                                                    f"asset {src['id']} was not made that way (try img2img instead)")
+        w, h = int(src_params.get("width") or src.get("width") or 1024), int(src_params.get("height") or src.get("height") or 1024)
         scale = 1.5
         values.update({
-            "width": _first(params.get("base_width"), src_params.get("width"), w),
-            "height": _first(params.get("base_height"), src_params.get("height"), h),
+            "negative_prompt": src_params.get("negative_prompt", ""), "width": w, "height": h,
+            "seed": src_params.get("seed") if params.get("seed") is None else params.get("seed"),
             "hires_width": _first(params.get("width"), int(round(w * scale / 64) * 64)),
             "hires_height": _first(params.get("height"), int(round(h * scale / 64) * 64)),
             "hires_steps": params.get("hires_steps") or 16, "hires_denoise": _first(params.get("strength"), 0.45),
         })
-        if values["seed"] is None:
-            values["seed"] = src_params.get("seed")
+        values.pop("denoise", None)
+        return run_template(store, backend, job, progress, template_name=template, values=values,
+                            operation="edit_image:hires", extra_recipe={"derived_from": src["id"]},
+                            name=f"upscaled: {src.get('name') or src['id']}")
     return run_template(store, backend, job, progress, template_name=template, values=values,
                         operation=f"edit_image:{operation}", count=params.get("count", 1),
                         reference_asset_id=src["id"], mask_asset_id=params.get("mask_asset_id"),
