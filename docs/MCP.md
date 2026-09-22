@@ -64,7 +64,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
 | `studio_create_project` | no | `name, brief=None` | `{id, name, brief}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` | list: `characters[], groups[]`; create/update: the object |
-| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, strength, template, wait_s=0, use_character_reference=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, seed}` (+ picture when done) |
+| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, strength, template, checkpoint, wait_s=0, use_character_reference=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, seed}` (+ picture when done) |
 | `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0` | `{job}` (+ picture when done) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0` | `{job}`; the output is an mp4 video asset |
 | `studio_voice` | no | `project, text, character_id, voice, speed` | audio asset summary + `provider` (`piper`, `faustus`, `piper_fallback`) |

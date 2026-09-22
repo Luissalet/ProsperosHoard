@@ -34,7 +34,7 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Área | Disponible ahora | Límite |
 | --- | --- | --- |
 | Proyectos y reparto | Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), grupos ordenados, menciones `@Nombre` que reconocen nombres de varias palabras y avisan de los desconocidos, 6 estilos predefinidos | Un único usuario local; los nombres no se pueden repetir en un proyecto (son la mención) |
-| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas, SD 1.5 txt2img, SVD imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; importación de tus propios flujos en formato API, con los nodos de prompt localizados siguiendo las conexiones del sampler y un mapa de parámetros editable | Prospero no aloja ningún modelo; las exportaciones en formato de interfaz se rechazan con instrucciones, no se convierten |
+| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix») de imágenes generadas aquí, SD 1.5 txt2img, SVD imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; importación de tus propios flujos en formato API, con los nodos de prompt localizados siguiendo las conexiones del sampler y un mapa de parámetros editable | Prospero no aloja ningún modelo; las exportaciones en formato de interfaz se rechazan con instrucciones, no se convierten |
 | Uso compartido de la GPU | VRAM estimada por familia de flujo (editable), comparada con nvidia-smi o con `system_stats` de ComfyUI; si falta memoria, el trabajo espera en `waiting_gpu` con el motivo, reintentando cada 15 s hasta 30 min; se puede cancelar en cualquier momento | Nunca se descarga nada salvo que pulses «Liberar memoria de ComfyUI» |
 | Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
 | Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (3 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura; degradados, lámina holográfica, modos de fusión, espaciado de letras, sombras y texto que se encoge para caber; sets de photocards de un grupo entero con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 5 familias tipográficas OFL incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
@@ -133,7 +133,7 @@ con la aplicación. Detalles, modelo de datos y decisiones:
 cd frontend; npm ci; npm run build
 ```
 
-La última ejecución completa: **TEST_COUNT pruebas superadas** en unos 40 s,
+La última ejecución completa: **107 pruebas superadas** en unos 35 s,
 sin red, con el backend de demostración en lugar de ComfyUI. Cubren: el
 protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
 aplicación en marcha: palabras clave y anotaciones de cada herramienta,
