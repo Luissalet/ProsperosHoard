@@ -1,3 +1,5 @@
+<img src="app-icon.png" width="28" height="28" alt="" align="left" />
+
 # Prospero's Hoard
 ### Estamos hechos de la misma materia que los sueños: ¿puede un agente dirigir una producción entera?
 **Un estudio multimedia local que maneja tu ComfyUI, ffmpeg y una voz sintética local para crear personajes coherentes, photocards, portadas y videoclips montados al ritmo, a mano o por completo desde MCP, y que recuerda exactamente cómo se hizo cada recurso.**

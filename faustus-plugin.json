@@ -3,7 +3,7 @@
   "id": "prospero",
   "name": "Prospero's Hoard",
   "purpose": "Directs a media studio (ComfyUI, ffmpeg, TTS) to produce consistent characters, photocards, album art and beat-cut music videos.",
-  "capabilities": ["image generation", "video editing", "graphic design", "audio analysis", "text-to-speech"],
+  "capabilities": ["image generation", "video editing", "graphic design", "audio analysis", "text-to-speech", "music composition"],
   "placeholders": ["PROSPERO_DIR", "APP_URL"],
   "defaults": {"APP_URL": "http://127.0.0.1:8815"},
   "app": {

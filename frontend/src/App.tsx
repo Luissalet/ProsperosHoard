@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Moon,
-  Palette, Server, Settings as SettingsIcon, Sparkles, Sun, Users, Wand2,
+  Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/jetbrains-mono";
@@ -175,7 +175,7 @@ export default function App() {
         <div className="app">
           <aside className="sidebar">
             <div className="brand">
-              <div className="brand-mark"><Sparkles size={20} /></div>
+              <div className="brand-mark"><img src="/favicon-192.png" alt="" width={28} height={28} /></div>
               <div>
                 <div className="brand-name">{t("appName")}</div>
                 <div className="brand-sub">{t("tagline")}</div>

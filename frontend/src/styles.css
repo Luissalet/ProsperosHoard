@@ -81,11 +81,11 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 6px; }
 .brand-mark {
-  width: 38px; height: 38px; border-radius: 11px;
-  display: grid; place-items: center;
-  background: radial-gradient(circle at 30% 25%, var(--gold), var(--accent) 55%, #7a1f64);
-  color: #fff; box-shadow: 0 6px 18px rgba(255, 77, 141, 0.35);
+  width: 28px; height: 28px; border-radius: 8px;
+  display: grid; place-items: center; overflow: hidden;
+  box-shadow: 0 6px 18px rgba(255, 77, 141, 0.35);
 }
+.brand-mark img { width: 28px; height: 28px; display: block; border-radius: 8px; }
 .brand-name { font-weight: 650; font-size: 15.5px; letter-spacing: -0.01em; }
 .brand-sub { color: var(--muted); font-size: 11.5px; }
 .project-switch { padding: 0 4px; }
