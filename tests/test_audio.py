@@ -69,3 +69,65 @@ def test_waveform_peaks_length():
     peaks = audio.waveform_peaks(sig, buckets=200)
     assert len(peaks) == 200
     assert all(0.0 <= p <= 1.0 for p in peaks)
+
+
+def _drum_pattern(bpm: float, duration_s: float = 24.0, sr: int = 44100, hats: bool = False) -> np.ndarray:
+    """Kick on every beat, noise snare on beats 2 and 4 (the pattern that
+    made a per-bin flux envelope lock onto the snare at half tempo)."""
+    n = int(duration_s * sr)
+    sig = np.zeros(n)
+    rng = np.random.default_rng(0)
+    kick_env = np.exp(-np.arange(int(sr * 0.15)) / (sr * 0.03))
+    kick = np.sin(2 * np.pi * 55 * np.arange(len(kick_env)) / sr) * kick_env
+    snare = rng.standard_normal(int(sr * 0.1)) * np.exp(-np.arange(int(sr * 0.1)) / (sr * 0.02))
+    hat = rng.standard_normal(int(sr * 0.03)) * np.exp(-np.arange(int(sr * 0.03)) / (sr * 0.005))
+    period = 60.0 / bpm
+    k, t = 0, 0.0
+    while t < duration_s:
+        i = int(t * sr)
+        sig[i:i + len(kick)] += kick[: max(0, min(len(kick), n - i))] * 0.9
+        if k % 4 in (1, 3):
+            sig[i:i + len(snare)] += snare[: max(0, min(len(snare), n - i))] * 0.5
+        if hats:
+            for sub in (0.0, period / 2):
+                j = int((t + sub) * sr)
+                if j < n:
+                    sig[j:j + len(hat)] += hat[: max(0, min(len(hat), n - j))] * 0.15
+        k += 1
+        t += period
+    return (sig / np.abs(sig).max() * 0.8).astype(np.float32)
+
+
+@pytest.mark.parametrize("bpm,hats", [(90.0, False), (120.0, False), (140.0, False), (100.0, True)])
+def test_backbeat_drums_are_not_tracked_at_half_or_double_tempo(bpm, hats):
+    result = audio.analyze_samples(_drum_pattern(bpm, hats=hats))
+    assert abs(result["tempo_bpm"] - bpm) <= 1.0
+    period = 60.0 / bpm
+    beats = np.array(result["beat_times"])
+    assert len(beats) >= int(24.0 / period) - 1  # every beat, not every other one
+    err = np.abs((beats / period) - np.round(beats / period)) * period
+    assert err.max() <= 0.05
+    assert beats[0] <= 0.05  # the first beat at t=0 is found
+
+
+def test_demo_song_is_120_bpm_with_a_b_a_sections(tmp_path):
+    from prosperos_hoard.devtools.demo_seed import _make_synthetic_song
+
+    path = tmp_path / "song.wav"
+    _make_synthetic_song(path)
+    result = audio.analyze_samples(audio.decode_to_mono(path))
+    assert abs(result["tempo_bpm"] - 120.0) <= 1.0
+    labels = [s["label"] for s in result["sections"]]
+    energies = [s["energy"] for s in result["sections"]]
+    assert labels == ["section A", "section B", "section A"]
+    assert energies == ["low", "high", "low"]
+    assert abs(result["sections"][1]["start_s"] - 8.0) <= 0.1
+    assert abs(result["sections"][1]["end_s"] - 24.0) <= 0.1
+    assert result["sections"][0]["start_s"] == 0.0 and result["sections"][-1]["end_s"] == pytest.approx(30.0)
+
+
+def test_steady_loop_is_one_section_and_silence_has_no_beats():
+    steady = audio.analyze_samples(_click_track(120.0))
+    assert len(steady["sections"]) == 1
+    silent = audio.analyze_samples(np.zeros(44100 * 3, dtype=np.float32))
+    assert silent["beat_times"] == [] and silent["tempo_bpm"] is None
