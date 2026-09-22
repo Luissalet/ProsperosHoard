@@ -24,7 +24,8 @@ def test_build_video_clip_cmd_snapshot():
     assert "-ss" in cmd
     assert cmd[cmd.index("-ss") + 1] == "1.500"
     assert "-t" in cmd
-    assert cmd[cmd.index("-t") + 1] == "3.000"
+    assert cmd[cmd.index("-t") + 1] == "3.021"  # half a frame of slack...
+    assert cmd[cmd.index("-frames:v") + 1] == "72"  # ...and an exact frame count (3 s at 24 fps)
 
 
 def test_build_concat_cmd_snapshot(tmp_path):
@@ -334,3 +335,30 @@ def test_horror_karaoke_lights_words_by_syllable_within_two_bars():
     assert style.endswith(f",2,60,60,{int(1920 * 0.2)},1")  # above the short-video apps' own UI
     landscape = next(ln for ln in video.build_ass(1920, 1080, clips, style="horror").splitlines() if ln.startswith("Style:"))
     assert landscape.split(",")[2] == str(1080 // 13) and landscape.endswith(f",{int(1080 * 0.09)},1")
+
+
+def test_render_with_transitions_keeps_the_full_length(tmp_path):
+    """Many short clips joined with xfade (flashes on the downbeats): the
+    chain used to end after a few clips once float offsets drifted past the
+    frame-quantised clip lengths. Clip lengths that are not frame multiples
+    at 24 fps are the worst case."""
+    from PIL import Image as PILImage
+
+    img = tmp_path / "a.png"
+    PILImage.new("RGB", (64, 64), (200, 40, 40)).save(img)
+    img2 = tmp_path / "b.png"
+    PILImage.new("RGB", (64, 64), (40, 40, 200)).save(img2)
+    # beat-aligned lengths from a real 140 bpm cut: several round *down* to
+    # whole frames at 24 fps, and the shortfall adds up
+    durations = [3.413, 3.437, 3.425, 3.425, 1.718, 1.289, 1.706, 1.715, 0.857, 0.861]
+    clips = []
+    for i, d in enumerate(durations):
+        clips.append({"asset_id": "a" if i % 2 == 0 else "b", "kind": "image", "duration_s": d, "trim_start_s": 0.0,
+                      "ken_burns": {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"},
+                      "transition_in": {"type": "flash_white", "duration_s": 0.15} if i == 9 else {"type": "cut"}})
+    timeline = {"width": 160, "height": 284, "fps": 24, "tracks": [{"type": "visual", "clips": clips}]}
+    out = tmp_path / "out.mp4"
+    video.render_timeline(timeline, lambda aid: img if aid == "a" else img2, tmp_path / "work", out, quality="final")
+    from prosperos_hoard import audio as audio_mod
+
+    assert abs(audio_mod.probe_duration_s(out) - sum(durations)) < 0.1
