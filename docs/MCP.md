@@ -94,6 +94,9 @@ whole is annotated as writing because create/update do.
   Neon night city, Album art minimal (name or id). They set prefix/suffix,
   negatives and default steps/cfg/sampler/scheduler/size.
 - **Aspects:** 1:1, 4:5, 2:3, 9:16, 3:2, 16:9 (SDXL-friendly sizes).
+- **Edits:** `hires` re-runs an SDXL txt2img recipe with a second, larger
+  sampling pass (so only for images generated here with that template);
+  `reuse`/`vary` need a ComfyUI recipe; `img2img` and `inpaint` work on any image.
 - **Templates:** `sdxl_txt2img` (default), `sdxl_img2img` (default when a
   reference is given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`,
   `svd_img2vid`, or an imported `wf_...` workflow.

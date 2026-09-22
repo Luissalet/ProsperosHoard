@@ -386,6 +386,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise engine.EngineError("bad_operation", f"operation must be one of {', '.join(ops)}")
         if body.operation == "inpaint" and not body.mask_asset_id:
             raise engine.EngineError("mask_required", "inpaint needs mask_asset_id (white = repaint)")
+        if body.operation == "hires" and (asset.get("recipe") or {}).get("template") != "sdxl_txt2img":
+            raise engine.EngineError("hires_needs_recipe", "upscale re-runs an SDXL txt2img recipe at a higher resolution; "
+                                                           f"asset {asset['id']} was not made that way (use img2img instead)")
         if body.operation in ("vary", "reuse") and (asset.get("recipe") or {}).get("backend") != "comfyui":
             raise engine.EngineError("not_reproducible", f"asset {asset['id']} was not generated on ComfyUI, so it has no recipe to re-run; use img2img")
         if not 1 <= body.count <= 8:

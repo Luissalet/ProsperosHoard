@@ -165,7 +165,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
             <div className="action-grid">
               <button className="btn sm" disabled={!fromComfy || busy} onClick={() => run(t("reuse"), () => api.edit(asset.id, { operation: "reuse" }))}><Repeat size={14} /> {t("reuse")}</button>
               <button className="btn sm" disabled={!fromComfy || busy} onClick={() => run(t("varySeed"), () => api.edit(asset.id, { operation: "vary", count: 2 }))}><Dices size={14} /> {t("varySeed")}</button>
-              <button className="btn sm" disabled={busy} onClick={() => run(t("hires"), () => api.edit(asset.id, { operation: "hires" }))}><Sparkles size={14} /> {t("hires")}</button>
+              <button className="btn sm" disabled={busy || recipe?.template !== "sdxl_txt2img"} onClick={() => run(t("hires"), () => api.edit(asset.id, { operation: "hires" }))}><Sparkles size={14} /> {t("hires")}</button>
               <button className="btn sm" disabled={busy} onClick={() => run(t("animate"), () => api.animate(asset.id, { frames: 14, fps: 7, motion: 127 }))}><Film size={14} /> {t("animate")}</button>
             </div>
             <label className="field">{t("editPrompt")}

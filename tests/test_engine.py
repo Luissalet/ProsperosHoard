@@ -224,3 +224,7 @@ def test_inpaint_and_hires_run_on_the_backend(store, backend_with_comfy, project
     assert up["state"] == "done", up
     big = store.get_asset(up["outputs"]["asset_ids"][0])
     assert (big["width"], big["height"]) == (768, 768)
+    assert big["recipe"]["derived_from"] == src and big["recipe"]["params"]["seed"] == 2
+    design_asset = engine.render_design(store, project["id"], "thumbnail", {"title": "x"})
+    refused = _run_job(store, backend_with_comfy, "edit_image", {"asset_id": design_asset["id"], "operation": "hires"}, project["id"])
+    assert refused["state"] == "failed" and "img2img" in refused["message"]
