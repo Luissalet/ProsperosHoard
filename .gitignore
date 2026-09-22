@@ -6,6 +6,7 @@ data/
 data-demo/
 node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 *.log
 .env
 test-results/
