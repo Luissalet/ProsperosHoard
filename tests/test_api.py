@@ -388,3 +388,17 @@ def test_import_ui_format_workflow_converts_and_caches_object_info(client, data_
     r2 = c.post("/api/workflows/import-file", files={"file": ("wan2.json", ui, "application/json")})
     assert r2.status_code == 200, r2.text
     assert r2.json()["converted_from"] == "ui"
+
+
+def test_prompt_preview_and_song_compose_have_their_own_bodies(client):
+    """Two request models once shared the name ComposeBody, so the later
+    (song) one silently replaced the prompt preview's: the Generate screen's
+    live final-prompt preview answered "tags: Field required"."""
+    c, _, _ = client
+    pid = _project(c, "Bodies")
+    c.post(f"/api/agent/studio_cast?project={pid}", json={"action": "create", "name": "Iris Volt", "fields": {"prompt": "platinum bob"}})
+    r = c.post(f"/api/projects/{pid}/compose-prompt", json={"prompt": "@Iris Volt backstage"})
+    assert r.status_code == 200, r.text
+    assert "platinum bob" in r.json()["positive_prompt"]
+    song = c.post(f"/api/projects/{pid}/compose", json={"tags": "dark trap", "lyrics": "[Verse]\nuna", "duration": 5})
+    assert song.status_code == 200, song.text
