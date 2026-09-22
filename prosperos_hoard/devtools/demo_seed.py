@@ -122,7 +122,8 @@ def _stable_seed(text: str) -> int:
 def _run_generation(store: Store, backend: Backend, project_id: str, prompt: str, negative: str, seed: int,
                     width: int = 1024, height: int = 1024, style: str | None = None) -> str:
     composed = engine.compose_prompt(store, project_id, prompt, negative, style)
-    job = store.create_job("generate_image", "gpu", {}, project_id=project_id)
+    # created as "running" so the live job workers never pick the seed jobs up
+    job = store.create_job("generate_image", "gpu", {}, project_id=project_id, state="running")
     params = {
         "prompt": prompt, "positive_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
         "width": width, "height": height, "seed": seed, "steps": 28, "cfg": 6.5, "sampler": "dpmpp_2m",
@@ -130,6 +131,8 @@ def _run_generation(store: Store, backend: Backend, project_id: str, prompt: str
         "style": composed["style"], "style_defaults": composed["style_defaults"],
         "matched_characters": composed["matched_characters"],
     }
+    store.conn.execute("UPDATE jobs SET params_json=? WHERE id=?", (__import__("json").dumps(params), job["id"]))
+    store.conn.commit()
     job = {**job, "params": params}
     result = engine.generate_image(store, backend, job, _no_progress)
     store.update_job(job["id"], state="done", progress=1.0, outputs=result, message="demo seed",
@@ -208,7 +211,8 @@ def seed_demo_data(store: Store, backend: Backend) -> dict[str, Any]:
     from ..backend import ffmpeg_path
 
     if ffmpeg_path():
-        job = store.create_job("render_timeline", "cpu", {"timeline_id": timeline["id"], "quality": "preview"}, project_id=project_id)
+        job = store.create_job("render_timeline", "cpu", {"timeline_id": timeline["id"], "quality": "preview"},
+                               project_id=project_id, state="running")
         result = engine.render_timeline_job(store, backend, job, _no_progress)
         store.update_job(job["id"], state="done", progress=1.0, outputs=result, message="demo seed",
                          started_at=job["created_at"], finished_at=job["created_at"])

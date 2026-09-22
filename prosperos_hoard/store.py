@@ -662,14 +662,14 @@ class Store:
 
     # ---------------------------------------------------------------- jobs
     def create_job(self, type_: str, lane: str, params: dict[str, Any], inputs: dict[str, Any] | None = None,
-                    project_id: str | None = None) -> dict[str, Any]:
+                    project_id: str | None = None, state: str = "queued") -> dict[str, Any]:
         jid = new_id("job")
         ts = now_iso()
         self.conn.execute(
             """INSERT INTO jobs (id, project_id, type, lane, params_json, inputs_json,
                 state, progress, message, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,'queued',0.0,NULL,?,?)""",
-            (jid, project_id, type_, lane, dumps(params), dumps(inputs or {}), ts, ts),
+               VALUES (?,?,?,?,?,?,?,0.0,NULL,?,?)""",
+            (jid, project_id, type_, lane, dumps(params), dumps(inputs or {}), state, ts, ts),
         )
         self.conn.commit()
         return self.get_job(jid)

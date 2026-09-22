@@ -60,7 +60,16 @@ def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[
         if not 1 <= v <= 32:
             raise TimelineError(f"beats_{k} must be between 1 and 32")
     flash_on = bool(options.get("flash_on_strong_downbeats", True))
-    down = {round(d, 3) for d in downbeats}
+    # "strong" downbeats: the first beat of every 4-bar phrase, and the
+    # first downbeat of each high-energy section (a flash every bar is
+    # tiring to watch)
+    strong = {round(d, 3) for d in downbeats[::4]}
+    for s in sections or []:
+        if s.get("energy") == "high":
+            first = next((d for d in downbeats if d >= s["start_s"] - 0.05), None)
+            if first is not None:
+                strong.add(round(first, 3))
+    down = strong
     beats = [b for b in beat_times if 0.0 <= b < duration_s]
     if not beats:
         # no beat grid (silence, speech): even cuts of `fallback_clip_s`
