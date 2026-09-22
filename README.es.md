@@ -1,105 +1,167 @@
 # Prospero's Hoard
-### Un solo estudio, cada paso recordado - ¿podría un agente dirigir toda una producción?
-**Un estudio de medios local que dirige ComfyUI, ffmpeg y TTS para construir personajes consistentes, photocards, portadas de álbum y videos musicales cortados al ritmo - a mano o enteramente por MCP.**
+### Estamos hechos de la misma materia que los sueños: ¿puede un agente dirigir una producción entera?
+**Un estudio multimedia local que maneja tu ComfyUI, ffmpeg y una voz sintética local para crear personajes coherentes, photocards, portadas y videoclips montados al ritmo, a mano o por completo desde MCP, y que recuerda exactamente cómo se hizo cada recurso.**
 
 [English](README.md) · [Ejecutar en local](#ejecutar-en-local-en-windows) · [Conectar una IA](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
 
-![Placeholder de frontend mostrando datos reales de salud de la API del proyecto de demo](docs/media/01-frontend-placeholder.png)
-*Aplicación real, datos de demo, backend de generación falso (la interfaz completa del estudio no se construye en esta entrega - ver "Límites" más abajo). El panel es JSON real de una instancia en ejecución con un proyecto de demo ya generado.*
-
-![Una portada de álbum renderizada por el motor de diseño sobre una imagen generada por el backend falso](docs/media/04-album-cover.png)
-*Salida real de `studio_design` (plantilla `album_cover`, variante `bottom_band`) - la pequeña leyenda grabada en la imagen indica la seed y el prompt, viene del backend de demo/pruebas, no de un generador real.*
-
-![Un set completo de photocards: frente y reverso de los cinco miembros de demo](docs/media/05-photocard-set.png)
-*Salida de `studio_photocard_set`: un frente y un reverso con número de serie por cada miembro, cada uno con su propio color de acento.*
+![Pantalla Generar: dos miembros del reparto mencionados con @, el prompt final con su aspecto insertado, el panel de parámetros y resultados anteriores](docs/media/01-generate.png)
+*Aplicación real, datos de demostración. Todas las imágenes salen del backend de demostración incluido, un sustituto procedural de ComfyUI que dibuja escenas de relleno rotuladas; con tu ComfyUI conectado, las mismas pantallas muestran resultados reales de SDXL/SD1.5.*
 
 ## Por qué
 
-Hacer una producción al estilo fan-made (photocards de un grupo idol,
-portada de álbum, voces de personaje, un video musical cortado a una
-canción) hoy implica alternar entre un editor de nodos, un editor de
-imagen, una DAW y un editor de video a mano, y ninguno recuerda cómo se
-hizo cada recurso: recrear un personaje consistente significa volver a
-adivinar el prompt y la seed cada vez. Un modelo de lenguaje al que se le
-pide ayuda solo puede describir lo que haría; no puede ejecutar ComfyUI de
-verdad, cortar un video al ritmo, ni decir la receta exacta que produjo
-una imagen. Prospero convierte cada paso en una operación única, tipada y
-encolable con su linaje registrado, para que un agente (o una persona)
-pueda dirigir toda la producción y reproducir cualquier recurso con
-exactitud.
+Un modelo de lenguaje al que se le pide ayuda con una producción de fans
+(un grupo idol inventado, sus photocards, una portada, un vídeo para el
+single) solo puede describir lo que haría. No puede ejecutar un grafo de
+nodos, no puede mantener la cara de un personaje en cuarenta imágenes, no
+encuentra el pulso de una canción y nadie sabrá después qué semilla y qué
+checkpoint hicieron esa tarjeta. Hacerlo a mano obliga a saltar entre un
+editor de nodos, un editor de imagen, una herramienta de audio y un editor
+de vídeo que no comparten memoria.
 
-## Qué está implementado
+Prospero convierte cada paso en una operación tipada, encolable y con su
+receta guardada: los personajes se mencionan como `@Nombre` y su
+descripción se inserta cada vez, cada recurso conserva los parámetros
+exactos que lo produjeron (y se puede repetir byte a byte en el mismo
+backend), las canciones se analizan para sacar tempo y secciones, y un
+montaje se corta al ritmo y se renderiza con ffmpeg. El modelo local dirige;
+el estudio hace el trabajo y responde con identificadores e imágenes.
+
+![Montaje: 23 planos cortados al ritmo de la canción de demostración, los subtítulos de la letra, la forma de onda, el render de vista previa y el editor de planos](docs/media/02-timeline.png)
+*Aplicación real, datos de demostración: el montaje automático de la canción de 30 s (120 BPM, suave-fuerte-suave), dos pulsos por plano en la parte fuerte, cuatro en las suaves, y la vista previa que renderizó con ffmpeg.*
+
+## Qué hay implementado
 
 | Área | Disponible ahora | Límite |
 | --- | --- | --- |
-| Modelo de datos | Proyectos, recursos con linaje completo (receta -> reproducible), personajes/@menciones, grupos, 6 estilos predefinidos, tableros, líneas de tiempo, cola de trabajos persistente (SQLite, sobrevive un reinicio) | Sin multiusuario/autenticación - un solo usuario local, por diseño |
-| Generación con ComfyUI | Plantillas txt2img/img2img/inpaint/hires/SD1.5/imagen-a-video, validación previa contra `/object_info`, estimación de VRAM + espera (nunca descarga modelos), importación de workflows personalizados en formato API con mapeo de parámetros autodetectado | Un workflow en formato UI se rechaza con un mensaje claro, no se convierte automáticamente |
-| Backend de demo | Un ComfyUI falso procedimental (renders deterministas con Pillow) para que todo el pipeline funcione y se pueda probar sin GPU | Obviamente no es una generación real - cada render lleva la seed/prompt como marca de agua |
-| Motor de diseño | 7 plantillas (photocard frente/reverso, portada de álbum en 3 variantes, póster teaser, tarjeta de letra, contraportada de tracklist, miniatura), 5 familias tipográficas OFL incluidas, efectos holográficos y grano, autoajuste de texto, modo imprenta/sangrado | La capa de QR se reconoce pero dibuja un recuadro de relleno - no se incluye ninguna librería de QR |
-| Audio | Importación/decodificación con ffmpeg, picos de forma de onda, un detector de ritmo hecho desde cero (flujo espectral + autocorrelación + programación dinámica), letras LRC, TTS con Piper y descarga de voces bajo demanda, TTS de Hoard Link (Faustus) como alternativa | Las etiquetas de sección ("sección A/B", nivel de energía) son estimaciones, no una detección verificada de verso/estribillo; no se clona la voz de ninguna persona real, en ningún caso |
-| Generación musical | Una interfaz `MusicBackend` tipada con dos adaptadores (nodos de audio de ComfyUI, un contrato HTTP mínimo documentado) | Ninguno está instalado en la máquina de referencia - ambos lo indican con claridad y explican cómo añadir uno |
-| Video | Imagen a video (SVD), un renderizador de línea de tiempo real con ffmpeg (Ken Burns vía `zoompan`, transiciones corte/crossfade/negro/blanco vía `xfade`, subtítulos ASS grabados con karaoke), un algoritmo de auto-corte que coloca los cortes en el ritmo | Ken Burns usa una parametrización documentada `{zoom, pan}`, no rectángulos de recorte arbitrarios por fotograma (ver `docs/ARCHITECTURE.md`) |
-| HTTP + MCP | Cada capacidad tiene un endpoint `/api/agent/*` y una tool MCP equivalente con la misma forma; middleware de protección contra ataques de navegador; un registro auditado `agent_calls` | Sin SSE/websocket - los trabajos y el registro de actividad están pensados para consultarse por sondeo (lecturas SQLite baratas) |
-| Frontend | Una página placeholder mínima que demuestra que la API y el pipeline de build funcionan de punta a punta | La interfaz real del estudio (barra lateral, vistas Generar/Biblioteca/Diseñador/Audio/Línea de tiempo) es una entrega posterior separada - `docs/API.md` documenta cada ruta que necesita |
+| Proyectos y reparto | Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), grupos ordenados, menciones `@Nombre` que reconocen nombres de varias palabras y avisan de los desconocidos, 6 estilos predefinidos | Un único usuario local; los nombres no se pueden repetir en un proyecto (son la mención) |
+| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas, SD 1.5 txt2img, SVD imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; importación de tus propios flujos en formato API, con los nodos de prompt localizados siguiendo las conexiones del sampler y un mapa de parámetros editable | Prospero no aloja ningún modelo; las exportaciones en formato de interfaz se rechazan con instrucciones, no se convierten |
+| Uso compartido de la GPU | VRAM estimada por familia de flujo (editable), comparada con nvidia-smi o con `system_stats` de ComfyUI; si falta memoria, el trabajo espera en `waiting_gpu` con el motivo, reintentando cada 15 s hasta 30 min; se puede cancelar en cualquier momento | Nunca se descarga nada salvo que pulses «Liberar memoria de ComfyUI» |
+| Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
+| Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (3 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura; degradados, lámina holográfica, modos de fusión, espaciado de letras, sombras y texto que se encoge para caber; sets de photocards de un grupo entero con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 5 familias tipográficas OFL incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
+| Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla | Las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
+| Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Solo voces sintéticas genéricas: no se clona la voz de nadie |
+| Generación de música | Una interfaz `MusicBackend` con dos adaptadores (nodos de audio de ComfyUI y un contrato HTTP mínimo documentado) | No viene instalada por defecto: ambos lo dicen y explican cómo añadir uno; las canciones importadas funcionan del todo |
+| Vídeo | Montaje automático al ritmo (densidad según la energía, destellos al inicio de cada frase musical, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD se convierten a mp4 | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin |
+| Control por agentes | 20 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes del trabajo terminado, errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
+| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+
+![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
+*Aplicación real, datos de demostración: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
 
 ## Conectarlo a Faustus
 
-La app se declara con `faustus-plugin.json`. Inícala y en Faustus:
-**Conectores -> Apps cercanas -> Añadir**. También funciona con cualquier
-cliente MCP por stdio - ver `docs/MCP.md` para el fragmento de
-configuración y la tabla completa de tools.
+La aplicación se declara con [`faustus-plugin.json`](faustus-plugin.json).
+Arráncala y, en Faustus, abre **Connectors -> Nearby apps -> Add**:
+Faustus la encuentra en el puerto 8815, lee el manifiesto y lanza el
+adaptador MCP (`prosperos_hoard/mcp_server.py`, stdio). El backend de
+modelos es compartido: el estudio pregunta a Hoard Link qué ComfyUI y qué
+TTS están ya en marcha en vez de cargar nada propio.
+
+| Herramienta | Qué hace | Solo lectura |
+| --- | --- | --- |
+| `studio_status` | Backends, checkpoints, VRAM libre, cola | sí |
+| `studio_projects` / `studio_create_project` | Listar o crear producciones | sí / no |
+| `studio_cast` | Listar, crear y editar personajes y grupos | no (listar sí lo es) |
+| `studio_generate_image` | Encolar txt2img/img2img con @menciones y estilos | no |
+| `studio_edit_image` | img2img, inpaint, ampliar, repetir receta, variar semilla | no |
+| `studio_animate` | Imagen a vídeo corto (SVD) | no |
+| `studio_voice` | Frase hablada con la voz de un personaje | no |
+| `studio_import` | Importar un archivo local de una carpeta permitida | no |
+| `studio_analyze_audio` | Tempo, pulsos y secciones | sí |
+| `studio_design` / `studio_photocard_set` | Renderizar un diseño / un set de photocards | no |
+| `studio_timeline` / `studio_render` | Montaje automático, lectura y edición / renderizado | no |
+| `studio_jobs` / `studio_job` / `studio_cancel_job` | Cola, un trabajo (con espera), cancelar | sí / sí / no |
+| `studio_assets` / `studio_show` / `studio_lineage` | Buscar recursos, verlos y su receta | sí |
+
+También funciona con cualquier cliente MCP por stdio:
+
+```json
+{"mcpServers": {"prosperos-hoard": {
+  "command": "C:/.../Prospero's Hoard/.venv/Scripts/python.exe",
+  "args": ["C:/.../Prospero's Hoard/prosperos_hoard/mcp_server.py"],
+  "env": {"PROSPERO_URL": "http://127.0.0.1:8815"}}}}
+```
+
+Argumentos, formato de las respuestas y límites de cada herramienta:
+[docs/MCP.md](docs/MCP.md). La receta completa que sigue el agente:
+[skills/idol-production/SKILL.md](skills/idol-production/SKILL.md).
 
 ## Ejecutar en local en Windows
 
-Doble clic en **`Iniciar Prospero's Hoard.cmd`**, o desde PowerShell:
-```powershell
-scripts\start.ps1 --demo
-```
+Haz doble clic en **`Iniciar Prospero's Hoard.cmd`** (o ejecuta
+`scripts\start.ps1`). La primera vez crea `.venv` con Python 3.13, instala
+`requirements-lock.txt`, compila la interfaz con npm y abre
+http://127.0.0.1:8815. `Detener Prospero's Hoard.cmd` la para (solo después
+de comprobar que el puerto es de verdad de Prospero).
+
 Pasos manuales:
+
 ```powershell
-python -m venv .venv
-.venv\Scripts\pip install -r requirements-lock.txt
-.venv\Scripts\pip install -e .
+C:\Python313\python.exe -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
 cd frontend; npm ci; npm run build; cd ..
-.venv\Scripts\python -m prosperos_hoard --demo
+.venv\Scripts\python.exe -m prosperos_hoard            # datos reales en .\data
+.venv\Scripts\python.exe -m prosperos_hoard --demo     # datos de demostración en .\data-demo
 ```
-`--demo` genera un grupo idol original (inventado), sus photocards y
-portada con el backend falso, sintetiza una canción de demo real a 120
-BPM y renderiza un video de vista previa cortado al ritmo, para poder
-probar y capturar todo el pipeline sin tener ComfyUI instalado. Con
-hardware real: apunta `data/backend.json` a tu ComfyUI (`comfy.url`) -
-ver la sección `/api/backend` de `docs/API.md`.
+
+Opciones: `--port`, `--data-dir` (o `PROSPERO_DATA_DIR`), `--demo` y
+`--no-browser`. `--demo` arranca el backend procedural de demostración y
+crea un grupo original de cinco miembros con retratos, fotos en el
+escenario, una portada, un set de photocards, una canción sintética de 30 s
+con la letra sincronizada y un montaje automático, y renderiza su vista
+previa. Para usar tu ComfyUI, déjalo en 127.0.0.1:8188 (Hoard Link lo
+encuentra) o pon su URL en Ajustes.
+
+![Pantalla de audio: la canción de demostración a 120 BPM con sus pulsos y secciones A/B/A, la herramienta para sincronizar la letra y las frases habladas](docs/media/04-audio.png)
+*Aplicación real, datos de demostración: la canción sintética analizada con el detector de pulsos integrado, con la estimación de secciones y la letra LRC sincronizada.*
 
 ## Arquitectura
 
-Módulos, modelo de datos, hilos y cada desviación documentada respecto a
-la especificación original: `docs/ARCHITECTURE.md`. Cada endpoint con
-ejemplos de petición/respuesta: `docs/API.md`.
+FastAPI y SQLite (WAL, una conexión por hilo) con un hilo de trabajo para la
+GPU y otro para la CPU sobre una tabla de trabajos persistente; la lógica
+vive en módulos sin dependencias web (`engine`, `comfy_driver`, `design`,
+`audio`, `timeline`, `video`, `voices`); Hoard Link va incluido para resolver
+los backends; el adaptador MCP es un script stdio aparte que solo habla HTTP
+con la aplicación. Detalles, modelo de datos y decisiones:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Todos los endpoints:
+[docs/API.md](docs/API.md).
 
-## Tests
+## Pruebas
 
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+cd frontend; npm ci; npm run build
 ```
-pytest -q
-```
-60 tests, ~35s, completamente offline (el ComfyUI falso y una pista de
-clics sintética sustituyen al hardware real). Cubre: mapeo de parámetros
-de workflows y validación contra `/object_info`, rechazo de workflows en
-formato UI, persistencia de la cola de trabajos tras un reinicio simulado
-y la espera/reintento por VRAM, hashes deterministas del renderizador de
-diseño y autoajuste de texto, el detector de ritmo contra pistas de clics
-sintéticas a 90/120/140 BPM (±1 BPM, tiempos de golpe dentro de 50 ms) y
-detección de secciones, invariantes del auto-corte (cortes en el ritmo,
-duración mínima de clip, sin repeticiones inmediatas, cubre toda la
-canción), snapshots de construcción de comandos ffmpeg más un render
-real, temporización de karaoke en ASS, rechazo de path traversal en el
-endpoint de archivos, y una ronda real por el protocolo MCP (el adaptador
-lanzado por stdio contra la app en ejecución).
+
+La última ejecución completa: **TEST_COUNT pruebas superadas** en unos 40 s,
+sin red, con el backend de demostración en lugar de ComfyUI. Cubren: el
+protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
+aplicación en marcha: palabras clave y anotaciones de cada herramienta,
+generación con imagen, linaje, diseño, errores legibles y el mensaje de
+aplicación apagada); la reproducción byte a byte con «repetir receta»; casos
+límite de las @menciones; la validación de checkpoints, samplers y nodos que
+faltan; importaciones hostiles de flujos; rutas con `..`, enlaces
+simbólicos, archivos renombrados y carpetas permitidas al importar; rutas
+maliciosas contra la SPA y los recursos; la protección contra ataques desde
+el navegador; la recuperación de trabajos tras un reinicio, la espera de
+VRAM y la cancelación; el detector de pulsos con metrónomos, patrones de
+batería y la canción de demostración; las invariantes del montaje
+automático; el escapado ASS de letras hostiles; renders reales con ffmpeg
+en una carpeta llamada como la instalación de Windows (apóstrofo, espacios y
+tildes); hashes de referencia del diseño, sangrado y ajuste de texto; el uso
+del almacén desde varios hilos y la comprobación del manifiesto de Faustus.
 
 ## Privacidad y límites
 
-Solo local: escucha en `127.0.0.1`, sin telemetría, sin acceso a red
-salvo lo que una función activada necesite obviamente (una descarga de
-voz Piper desde Hugging Face, mostrada en la interfaz). Sin clonación de
-voz de personas reales. Los datos de `--demo` usan solo personajes
-inventados. Los datos viven en `data/` (ignorado por git) salvo que se
-indique `--data-dir`/`PROSPERO_DATA_DIR`.
+Todo en local: la aplicación escucha en 127.0.0.1, no envía telemetría y
+solo sale a internet cuando pides una voz de Piper que aún no está
+descargada (del repositorio rhasspy/piper-voices en Hugging Face). Se
+rechazan las escrituras que llegan desde otras webs (comprobación de Host,
+Origin y Sec-Fetch-Site). Los agentes solo pueden importar archivos de tu
+carpeta personal, de `data/inbox` y de las carpetas que añadas en Ajustes, y
+solo si el contenido coincide con su tipo. No hay clonación de voz y la
+demostración usa únicamente personas inventadas. Los datos se quedan en
+`data/` (o en tu `--data-dir`); el token de Faustus se guarda en
+`data/backend.json` y la API nunca lo devuelve.
+
+Licencia MIT. Tipografías con licencia SIL Open Font License (ver `prosperos_hoard/fonts/*/OFL.txt`).

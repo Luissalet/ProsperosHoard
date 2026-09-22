@@ -1,37 +1,38 @@
 ---
 name: idol-production
-description: End-to-end recipe for producing an idol group's visuals and a beat-cut music video with Prospero's Hoard - cast, reference sheets, photocards, cover art, song analysis, auto-cut editing, and rendering.
+description: Use Prospero's Hoard to produce an invented group's visuals and a music video - cast with @mentions, reference portraits, photocards, cover, song analysis, beat-synced auto-cut and render - through the studio_* MCP tools.
 ---
 
-# Idol production, start to finish
+# Idol production with Prospero's Hoard
 
-1. **Check the studio first.** Call `studio_status`. If ComfyUI is
-   unreachable or VRAM is tight, say so before promising images - jobs will
-   sit in `waiting_gpu`, which is normal, not broken.
-2. **Create the project and cast** with `studio_create_project`, then
-   `studio_cast` (action="create") for each member and the group. Write a
-   real `prompt` fragment per character (hair, build, styling) and a
-   shared `negative` - this is what makes @mentions work later.
-3. **Lock a reference image per member first.** `studio_generate_image`
-   with `seed` set and `count=1`, then `studio_cast` (action="update") to
-   set `canonical_asset_id`. Everything after this reuses that seed/recipe
-   via `studio_lineage` so the member's look stays consistent - do not
-   re-roll the seed once a reference is picked.
-4. **Photocards and cover** come from `studio_photocard_set` (needs
-   canonical references) and `studio_design` (template="album_cover").
-   Look at results with `studio_show` before telling the user they are
-   done - a fake/demo backend still returns a valid file, but it will not
-   look like a real photo.
-5. **Song first, visuals second, for a music video.** Import the song
-   (`studio_import`), then `studio_analyze_audio` to get BPM/beats/
-   sections. Only then call `studio_timeline` (action="auto") with the
-   image/video pool - it needs the analysis to place cuts on beats.
-6. **Inspect the timeline before rendering.** `studio_timeline`
-   (action="get") returns real clips with Ken Burns/transition fields -
-   review or `patch` it, then `studio_render` with `quality="preview"`
-   first (fast, 540p) and only "final" once the cut is approved.
-7. **Traps**: VRAM waits can take minutes on a shared GPU - poll
-   `studio_job`, do not assume failure. `studio_edit_image`/`studio_animate`
-   need an existing asset id, not a prompt. Aspect choice (9:16 vs 16:9)
-   must be decided before `studio_timeline`, since it fixes the render
-   resolution.
+Order matters. Each step returns ids; pass them to the next call.
+
+1. `studio_status()` first. If `comfyui.reachable` is false, say so and do only
+   GPU-free steps. `demo_backend: true` means pictures are placeholders.
+2. `studio_create_project(name, brief)`, then one `studio_cast(project, "create",
+   name=..., fields={"role", "prompt", "negative", "palette"})` per member. The
+   `prompt` is the look (hair, face, outfit), inlined wherever `@Name` appears.
+   Then the group: `kind="group", fields={"member_ids": [...in order...]}`.
+3. Reference portraits: `studio_generate_image(project, "@Name studio portrait",
+   style="Studio portrait", seed=<fixed>, count=2, wait_s=90)`, `studio_show`
+   them, then set the chosen one with `studio_cast(..., "update", id=...,
+   fields={"canonical_asset_id": ...})`. Later shots keep `@Name`; for a closer
+   likeness add `use_character_reference=true` (strength 0.4-0.6).
+4. Same shot again: `studio_edit_image(asset_id, "vary", count=3)`; exact
+   reproduction: `"reuse"`.
+5. `studio_photocard_set(project, group_id)` for fronts, backs and a sheet;
+   `studio_design(project, "album_cover", {"title": ...}, image_asset_id=...,
+   variant="bottom_band")` for the cover.
+6. Song: `studio_import(project, "<absolute path>")`, `studio_analyze_audio(id)`.
+7. `studio_timeline(project, "auto", song_asset_id=..., aspect="9:16")`, adjust
+   with `action="update", patch={"clip_updates": [...]}`, then
+   `studio_render(timeline_id, "preview")` + `studio_job(job_id, wait_s=120)`.
+   Render "final" only after the user approves the preview.
+
+Traps:
+- `waiting_gpu` is normal on a shared GPU: keep polling, it has not failed.
+- Never describe an image you have not looked at with `studio_show`.
+- `unknown_mentions` means a name matched no character: fix it, do not ignore it.
+- Choose the aspect before `studio_timeline`: it fixes the render size.
+- Voices are generic Piper voices (first use downloads ~60 MB); never imitate a
+  real person. No music model is installed: ask the user for an audio file.
