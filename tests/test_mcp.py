@@ -74,34 +74,81 @@ async def test_mcp_protocol_end_to_end(running_app):
             await session.initialize()
 
             tools = await session.list_tools()
-            names = {t.name for t in tools.tools}
-            assert "studio_status" in names
-            assert "studio_generate_image" in names
-            assert "studio_show" in names
-            assert len(names) >= 15
+            by_name = {t.name: t for t in tools.tools}
+            expected = {"studio_status", "studio_projects", "studio_create_project", "studio_cast", "studio_generate_image",
+                        "studio_edit_image", "studio_animate", "studio_voice", "studio_import", "studio_analyze_audio",
+                        "studio_design", "studio_photocard_set", "studio_timeline", "studio_render", "studio_jobs",
+                        "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage"}
+            assert expected <= set(by_name)
+            for t in tools.tools:
+                assert "Keywords:" in (t.description or ""), t.name
+                assert t.annotations is not None and t.annotations.destructiveHint is False
+            assert by_name["studio_show"].annotations.readOnlyHint is True
+            assert by_name["studio_generate_image"].annotations.readOnlyHint is False
+            assert by_name["studio_voice"].annotations.openWorldHint is True  # first use downloads a voice
+
+            result = await session.call_tool("studio_status", {})
+            status = json.loads(result.content[0].text)
+            assert status["comfyui"]["reachable"] is True
+            assert status["music_generation"][0]["available"] is False
 
             result = await session.call_tool("studio_create_project", {"name": "MCP Test"})
-            project = json.loads(result.content[0].text)
-            project_id = project["id"]
+            project_id = json.loads(result.content[0].text)["id"]
+            await session.call_tool("studio_cast", {"project": project_id, "action": "create", "kind": "character",
+                                                    "name": "Iris Volt", "fields": {"prompt": "platinum hair idol"}})
 
             result = await session.call_tool(
                 "studio_generate_image",
-                {"project": project_id, "prompt": "a synthwave skyline", "count": 1, "wait_s": 20},
+                {"project": project_id, "prompt": "@Iris Volt on a rooftop", "count": 1, "wait_s": 20, "seed": 11},
             )
             gen = json.loads(result.content[0].text)
             assert gen["job"]["state"] == "done"
-            asset_id = gen["job"]["outputs"]["asset_ids"][0]
+            assert "platinum hair idol" in gen["final_prompt"]
+            assert any(type(c).__name__ == "ImageContent" for c in result.content)  # finished within wait_s
+            asset_id = gen["job"]["asset_ids"][0]
+            assert len(result.content[0].text) < 4000  # compact
 
             result = await session.call_tool("studio_show", {"asset_ids": [asset_id]})
-            kinds = [type(c).__name__ for c in result.content]
-            assert "ImageContent" in kinds
+            images = [c for c in result.content if type(c).__name__ == "ImageContent"]
+            assert images and len(images[0].data) * 3 / 4 < 210_000
 
             result = await session.call_tool("studio_lineage", {"asset_id": asset_id})
             lineage = json.loads(result.content[0].text)
             assert lineage["recipe"]["operation"] == "generate_image"
+            assert lineage["recipe"]["params"]["seed"] == 11
+
+            result = await session.call_tool("studio_design", {"project": project_id, "template": "thumbnail",
+                                                               "fields": {"title": "Afterglow"}, "image_asset_id": asset_id})
+            assert json.loads(result.content[0].text)["kind"] == "image"
+            assert any(type(c).__name__ == "ImageContent" for c in result.content)
 
             result = await session.call_tool("studio_job", {"job_id": "job_does_not_exist"})
             assert result.isError is True
+            assert "not_found" in result.content[0].text
+
+            result = await session.call_tool("studio_design", {"project": project_id, "template": "thumbnail", "fields": {"titel": "x"}})
+            assert result.isError is True and "unknown_field" in result.content[0].text and "title" in result.content[0].text
+
+    calls = app.state.store.list_agent_calls(50)
+    assert {c["tool"] for c in calls} >= {"studio_status", "studio_generate_image", "studio_show", "studio_design"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_reports_app_not_running(tmp_path):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    params = StdioServerParameters(
+        command=sys.executable, args=[str(REPO_ROOT / "prosperos_hoard" / "mcp_server.py")],
+        env={**os.environ, "PROSPERO_URL": f"http://127.0.0.1:{_free_port()}"},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("studio_projects", {})
+            assert result.isError is True
+            assert "prosperos-hoard_unavailable: Prospero's Hoard is not running" in result.content[0].text
+            assert "Iniciar Prospero's Hoard.cmd" in result.content[0].text
 
 
 def test_mcp_server_refuses_non_loopback_url(monkeypatch):
