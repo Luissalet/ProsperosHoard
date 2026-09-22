@@ -1,0 +1,14 @@
+Vendored from: HoardLink (https://github.com/Luissalet/HoardLink)
+Vendored at: 2026-09-22T18:52:18Z
+Source commit: none yet - the source repository had not made its first git
+commit when this snapshot was taken (built concurrently by a sibling agent).
+This is a byte-for-byte copy of hoard_link/*.py at that point in time.
+
+Do not modify these files directly. Prospero's Hoard talks to Hoard Link
+only through prosperos_hoard/backend.py, which wraps this package (adds
+Prospero-specific VRAM estimates and a tiny "not installed" MusicBackend
+layer) without editing any vendored file. When re-vendoring a
+later hoard-link commit, drop in the new files here and re-run
+`pytest tests/test_backend.py` to confirm the wrapper still lines up with
+the public API (Link, LinkConfig, ComfyClient, Resolution, Unavailable,
+BackendError, gpu_free_mb).

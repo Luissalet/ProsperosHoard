@@ -1,0 +1,22 @@
+{
+  "template": "sdxl_inpaint",
+  "kind": "image",
+  "vram_class": "sdxl",
+  "requires_reference": true,
+  "requires_mask": true,
+  "reference_node": "1.image",
+  "mask_node": "2.image",
+  "map": {
+    "checkpoint": "4.ckpt_name",
+    "positive_prompt": "6.text",
+    "negative_prompt": "7.text",
+    "seed": "3.seed",
+    "steps": "3.steps",
+    "cfg": "3.cfg",
+    "sampler": "3.sampler_name",
+    "scheduler": "3.scheduler",
+    "denoise": "3.denoise"
+  },
+  "output_node": "9",
+  "checkpoint_node": "CheckpointLoaderSimple"
+}

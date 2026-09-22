@@ -1,0 +1,21 @@
+{
+  "template": "svd_img2vid",
+  "kind": "video",
+  "vram_class": "svd",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "checkpoint": "2.ckpt_name",
+    "width": "3.width",
+    "height": "3.height",
+    "frames": "3.video_frames",
+    "fps": "3.fps",
+    "motion": "3.motion_bucket_id",
+    "augmentation": "3.augmentation_level",
+    "seed": "4.seed",
+    "steps": "4.steps",
+    "cfg": "4.cfg"
+  },
+  "output_node": "6",
+  "checkpoint_node": "ImageOnlyCheckpointLoader"
+}
