@@ -1273,11 +1273,13 @@ def photocard_set_looks(store: Store, project_id: str, character_id: str, cards:
                         "group_name": label, "accent": accent}
         back_fields = {"member_name": char["name"], "group_name": label, "accent": accent,
                        "message": str(card.get("message") or char.get("bio") or "")[:160],
-                       "serial": card.get("serial") or f"No. {idx:03d}/{total:03d}"}
+                       "serial": card.get("serial") or f"No. {idx:03d}/{total:03d}",
+                       "monogram": char["name"][:1].upper()}
         fronts.append(render_design(store, project_id, template_front,
                                     {k: v for k, v in front_fields.items() if k in design_templates.TEMPLATE_FIELDS.get(template_front, {})}))
         backs.append(render_design(store, project_id, template_back,
-                                   {k: v for k, v in back_fields.items() if k in design_templates.TEMPLATE_FIELDS.get(template_back, {})}))
+                                   {k: v for k, v in back_fields.items()
+                                    if k in design_templates.TEMPLATE_FIELDS.get(template_back, {}) or k == "monogram"}))
     ordered = [a for pair in zip(fronts, backs) for a in pair]
     sheet = contact_sheet([store.data_dir / a["file_path"] for a in ordered], cols=min(4, len(ordered)), cell=360,
                           labels=[f"{i // 2 + 1:02d} {'front' if i % 2 == 0 else 'back'}" for i in range(len(ordered))])

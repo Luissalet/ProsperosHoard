@@ -150,3 +150,28 @@ def test_section_pools_tell_the_story_in_order():
     assert chorus_ids[:3] == ["c0", "c1", "c2"]
     assert all(a != b for a, b in zip([c["asset_id"] for c in clips], [c["asset_id"] for c in clips][1:]))
     assert tl.validate_auto_cut_invariants(result["tracks"], beats, 40.0) == []
+
+
+def test_cut_on_lyrics_starts_a_shot_with_each_line():
+    beats = _synthetic_beats(140.0, 30.0)
+    sections = [{"label": "Verse", "start_s": 0, "end_s": 30.0, "energy": "low"}]
+    lines = [{"time_s": 3.1, "text": "a"}, {"time_s": 7.75, "text": "b"}, {"time_s": 12.0, "text": "c"}]
+    pool = [{"id": f"a{i}", "kind": "image"} for i in range(4)]
+    result = tl.build_auto_cut(30.0, beats, sections, pool, options={"beats_low": 16, "cut_on_lyrics": True},
+                               lyrics_lines=lines, seed=1)
+    starts = [c["start_s"] for c in result["tracks"][0]["clips"]]
+    for ln in lines:
+        assert min(beats, key=lambda b: abs(b - ln["time_s"])) in starts
+    assert tl.validate_auto_cut_invariants(result["tracks"], beats, 30.0) == []
+
+
+def test_a_beat_a_hair_before_a_rounded_section_start_opens_that_section():
+    beats = _synthetic_beats(140.0, 20.0)
+    beat = beats[23]  # e.g. 9.857 s; an LRC marker for it reads 9.86
+    sections = [{"label": "Verse", "start_s": 0, "end_s": round(beat, 2), "energy": "mid"},
+                {"label": "Chorus", "start_s": round(beat, 2), "end_s": 20.0, "energy": "high"}]
+    pool = [{"id": "v", "kind": "image"}, {"id": "c", "kind": "image"}, {"id": "x", "kind": "image"}]
+    result = tl.build_auto_cut(20.0, beats, sections, pool,
+                               options={"section_pools": {"Verse": [pool[0], pool[2]], "Chorus": [pool[1], pool[2]]}})
+    clip = next(c for c in result["tracks"][0]["clips"] if c["start_s"] == beat)
+    assert clip["asset_id"] == "c"
