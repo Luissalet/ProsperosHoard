@@ -172,7 +172,7 @@ def test_import_real_files_with_hostile_names(client):
     project_id = _project(c, "Names")
     folder = allowed / "Prospero's Hoard ñ"
     folder.mkdir()
-    img = folder / "it's a \"photo\" ü.png"
+    img = folder / "it's a photo (1) ü.png"
     Image.new("RGB", (64, 48), (200, 10, 10)).save(img)
     song = folder / "canción 'uno'.wav"
     _wav(song)

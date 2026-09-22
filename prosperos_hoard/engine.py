@@ -82,13 +82,16 @@ def random_seed() -> int:
 def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
     recipe = asset.get("recipe") or {}
     params = recipe.get("params") or {}
+    name = _clip(asset.get("name"), 60)
+    prompt = params.get("positive_prompt") or recipe.get("text")
+    if prompt and name and prompt.startswith(name.rstrip("…")):
+        prompt = None  # the name already is the start of the prompt
     summary = {k: v for k, v in {
         "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
-        "prompt": _clip(params.get("positive_prompt") or recipe.get("text"), 160),
-        "inputs": recipe.get("input_asset_ids") or None,
+        "prompt": _clip(prompt, 120), "inputs": (recipe.get("input_asset_ids") or [])[:4] or None,
     }.items() if v is not None}
     view = {
-        "id": asset["id"], "kind": asset["kind"], "name": asset.get("name"), "source": asset["source"],
+        "id": asset["id"], "kind": asset["kind"], "name": name, "source": asset["source"],
         "width": asset.get("width"), "height": asset.get("height"),
         "duration_s": round(asset["duration_s"], 2) if asset.get("duration_s") else None,
         "tags": asset.get("tags") or [], "rating": asset.get("rating", 0), "favourite": asset.get("favourite", False),
@@ -328,7 +331,7 @@ def _svd_size(width: int, height: int) -> tuple[int, int]:
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, mask_asset_id: Optional[str] = None,
-                 extra_recipe: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
     project_id = job["project_id"]
@@ -396,13 +399,13 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
                 **(extra_recipe or {}),
             }
-            assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values))
+            assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
 
 
 def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, recipe: dict[str, Any],
-                         values: dict[str, Any]) -> dict[str, Any]:
+                         values: dict[str, Any], name: Optional[str] = None) -> dict[str, Any]:
     asset_id = new_id("a")
     if kind == "video":
         is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
@@ -423,7 +426,7 @@ def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, 
         return store.create_asset(
             project_id=project_id, kind="video", file_path=_rel(store, dest), mime="video/mp4",
             width=with_size[0], height=with_size[1], duration_s=duration, thumb_path=thumb,
-            source="generated", recipe=recipe, asset_id=asset_id, name=f"{recipe['operation']} {asset_id[-6:]}",
+            source="generated", recipe=recipe, asset_id=asset_id, name=_clip(name, 80) or f"{recipe['operation']} {asset_id[-6:]}",
         )
     dest = store.path_for_asset_file(asset_id, ".png")
     dest.write_bytes(data)
@@ -433,7 +436,7 @@ def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, 
     return store.create_asset(
         project_id=project_id, kind="image", file_path=_rel(store, dest), mime="image/png", width=width, height=height,
         thumb_path=_rel(store, store.path_for_thumb(asset_id)), source="generated", recipe=recipe, asset_id=asset_id,
-        name=_clip(values.get("positive_prompt") or recipe["operation"], 60),
+        name=_clip(name or values.get("positive_prompt") or recipe["operation"], 80),
     )
 
 
@@ -492,6 +495,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or []},
+        name=params.get("prompt") or params["positive_prompt"],
     )
 
 
@@ -516,7 +520,7 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
         "cfg": _first(params.get("cfg"), src_params.get("cfg"), 6.5),
         "sampler": _first(params.get("sampler"), src_params.get("sampler"), "dpmpp_2m"),
         "scheduler": _first(params.get("scheduler"), src_params.get("scheduler"), "karras"),
-        "denoise": _first(params.get("strength"), 0.55 if operation != "inpaint" else 0.9),
+        "denoise": _first(params.get("strength"), 1.0 if operation == "inpaint" else 0.55),
     }
     if operation == "hires":
         w, h = src.get("width") or 1024, src.get("height") or 1024
@@ -532,7 +536,8 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
             values["seed"] = src_params.get("seed")
     return run_template(store, backend, job, progress, template_name=template, values=values,
                         operation=f"edit_image:{operation}", count=params.get("count", 1),
-                        reference_asset_id=src["id"], mask_asset_id=params.get("mask_asset_id"))
+                        reference_asset_id=src["id"], mask_asset_id=params.get("mask_asset_id"),
+                        name=f"{operation}: {src.get('name') or src['id']}")
 
 
 def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, src: dict[str, Any], vary: bool,
@@ -561,6 +566,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         reference_asset_id=ref, mask_asset_id=mask,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
+        name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",
     )
     if current and recipe.get("template_hash") and current != recipe["template_hash"]:
         result["note"] = "the workflow template changed since this asset was made; the result may differ"
@@ -584,7 +590,7 @@ def animate_image(store: Store, backend: Backend, job: dict[str, Any], progress)
         "seed": params.get("seed"), "steps": 20, "cfg": 2.5,
     }
     return run_template(store, backend, job, progress, template_name="svd_img2vid", values=values,
-                        operation="animate", reference_asset_id=src["id"])
+                        operation="animate", reference_asset_id=src["id"], name=f"animated: {src.get('name') or src['id']}")
 
 
 # ------------------------------------------------------------------ i/o --
