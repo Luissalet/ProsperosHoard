@@ -221,7 +221,8 @@ def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optiona
         defaults = style.get("defaults") or {}
     positive = " ".join(p for p in (prefix.strip(), expansion["expanded_prompt"].strip()) if p)
     if suffix.strip():
-        positive = positive + (suffix if suffix.startswith(",") else " " + suffix)
+        positive = positive.rstrip(" ,") + (suffix if suffix.startswith(",") else " " + suffix)
+    positive = re.sub(r"\s*,(\s*,)+", ",", positive)
     negative_parts: list[str] = []
     for part in (negative, expansion["negative_extra"], style_negative):
         for piece in (part or "").split(","):
