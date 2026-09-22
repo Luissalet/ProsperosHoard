@@ -392,10 +392,13 @@ def studio_timeline(
     action="update": patch timeline_id with {"clip_updates": [{"index": 3, "duration_s": 2.0,
     "transition_in": {"type": "crossfade", "duration_s": 0.3}}, {"index": 5, "asset_id": "a_..."},
     {"index": 7, "delete": true}, {"index": 2, "move_to": 0}], "name", "aspect", "fps",
-    "lyrics_asset_id", "karaoke"}. Transitions: cut, crossfade, dip_black, flash_white.
-    Returns a compact view: duration, clips_total and one page of clips with their index.
+    "lyrics_asset_id", "karaoke", "finishing"}. Transitions: cut, crossfade, dip_black, flash_white.
+    finishing (applied once at render, all optional): {"color_grade": "teal_orange"|"sodium_night"|
+    "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
+    "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)}.
+    Returns a compact view: duration, clips_total, finishing and one page of clips with their index.
 
-    Keywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, linea de tiempo, montaje al ritmo, video musical, editar clips
+    Keywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, colour grade, color grade, vignette, film grain, letterbox, glitch flash, horror captions, linea de tiempo, montaje al ritmo, video musical, editar clips, gradacion de color
     """
     body = {
         "action": action, "song_asset_id": song_asset_id, "asset_ids": asset_ids, "board_id": board_id,

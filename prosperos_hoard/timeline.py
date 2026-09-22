@@ -340,7 +340,7 @@ def compact_view(timeline: dict[str, Any], clip_offset: int = 0, clip_limit: int
         "id": timeline["id"], "project_id": timeline["project_id"], "name": timeline["name"], "aspect": timeline["aspect"],
         "fps": timeline["fps"], "width": timeline["width"], "height": timeline["height"],
         "audio_asset_id": timeline.get("audio_asset_id"), "duration_s": round(total, 3),
-        "clips_total": len(clips), "lyrics_lines": len(lyrics["clips"]),
+        "clips_total": len(clips), "lyrics_lines": len(lyrics["clips"]), "finishing": timeline.get("finishing") or {},
         "clips": page, "has_more": has_more, "next_clip_offset": clip_offset + clip_limit if has_more else None,
         "updated_at": timeline.get("updated_at"),
     }

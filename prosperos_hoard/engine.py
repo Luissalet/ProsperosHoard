@@ -1247,8 +1247,8 @@ def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], a
 def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     tl = store.get_timeline(timeline_id)
     if not isinstance(patch, dict) or not patch:
-        raise EngineError("empty_patch", "patch needs at least one of: name, aspect, fps, audio_asset_id, clip_updates, tracks")
-    allowed = {"name", "aspect", "fps", "audio_asset_id", "clip_updates", "tracks", "lyrics_asset_id", "karaoke"}
+        raise EngineError("empty_patch", "patch needs at least one of: name, aspect, fps, audio_asset_id, clip_updates, tracks, finishing")
+    allowed = {"name", "aspect", "fps", "audio_asset_id", "clip_updates", "tracks", "lyrics_asset_id", "karaoke", "finishing"}
     unknown = set(patch) - allowed
     if unknown:
         raise EngineError("unknown_patch_field", f"unknown patch field(s): {', '.join(sorted(unknown))}; allowed: {', '.join(sorted(allowed))}")
@@ -1299,6 +1299,11 @@ def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> di
             if a["kind"] != "audio":
                 raise EngineError("not_audio", "audio_asset_id must be an audio asset")
         fields["audio_asset_id"] = patch["audio_asset_id"] or ""
+    if "finishing" in patch:
+        try:
+            fields["finishing"] = video_mod.validate_finishing(patch["finishing"])
+        except video_mod.RenderError as exc:
+            raise EngineError("bad_finishing", str(exc)) from None
     return store.update_timeline(timeline_id, **fields)
 
 
