@@ -4,8 +4,9 @@ import { api, type Project } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, Empty, JobState, Progress, timeAgo, useApp } from "../components/ui";
 
-const LABEL: Record<string, string> = {
-  generate_image: "Generate", edit_image: "Edit", animate: "Animate", render_timeline: "Render", download_voice: "Voice download",
+const LABEL: Record<string, Record<string, string>> = {
+  en: { generate_image: "Generate", edit_image: "Edit", animate: "Animate", render_timeline: "Render", download_voice: "Voice download" },
+  es: { generate_image: "Generar", edit_image: "Editar", animate: "Animar", render_timeline: "Renderizar", download_voice: "Descarga de voz" },
 };
 
 export function JobsView({ projects }: { projects: Project[] }) {
@@ -47,7 +48,7 @@ export function JobsView({ projects }: { projects: Project[] }) {
                 return (
                   <tr key={j.id}>
                     <td>
-                      <strong>{LABEL[j.type] || j.type}</strong> <span className="pill">{j.lane}</span>
+                      <strong>{LABEL[lang]?.[j.type] || j.type}</strong> <span className="pill">{j.lane}</span>
                       <div className="mono muted small">{j.id}</div>
                       {prompt && <div className="small muted ellipsis" style={{ maxWidth: 320 }}>{prompt}</div>}
                     </td>
