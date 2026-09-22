@@ -31,8 +31,9 @@ MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
 MAX_WORKFLOW_NODES = 400
 MAX_JSON_DEPTH = 12
 
-OUTPUT_CLASSES = {"SaveImage": "image", "SaveAnimatedWEBP": "video", "VHS_VideoCombine": "video", "SaveVideo": "video"}
-VRAM_CLASSES = ("sdxl", "sd15", "svd")
+OUTPUT_CLASSES = {"SaveImage": "image", "SaveAnimatedWEBP": "video", "VHS_VideoCombine": "video", "SaveVideo": "video",
+                  "SaveAudioMP3": "audio", "SaveAudio": "audio"}
+VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace")
 
 # Inputs we know how to recognise when importing a custom workflow, and the
 # friendly parameter each maps to. CLIPTextEncode prompts are resolved to

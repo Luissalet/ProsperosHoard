@@ -1,0 +1,20 @@
+{
+  "template": "flux_schnell_txt2img",
+  "kind": "image",
+  "vram_class": "flux",
+  "map": {
+    "checkpoint": "30.ckpt_name",
+    "positive_prompt": "6.text",
+    "width": "27.width",
+    "height": "27.height",
+    "batch_size": "27.batch_size",
+    "seed": "31.seed",
+    "steps": "31.steps",
+    "cfg": "31.cfg",
+    "sampler": "31.sampler_name",
+    "scheduler": "31.scheduler"
+  },
+  "output_node": "9",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "notes": "FLUX.1 schnell, all-in-one checkpoint (flux1-schnell-fp8.safetensors). No real negative prompt (node 33 stays empty) - schnell is a distilled model, keep cfg at 1 and steps at 4 for the intended quality/speed. Converted from the official flux_schnell.json template, hand-checked against object_info."
+}

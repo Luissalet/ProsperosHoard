@@ -147,6 +147,21 @@ class GenerateImageBody(BaseModel):
     template: Optional[str] = None
     checkpoint: Optional[str] = None
     use_character_reference: bool = False
+    consistent: bool = False
+    wait_s: float = 0
+
+
+class ComposeBody(BaseModel):
+    tags: str
+    lyrics: str
+    bpm: int = 120
+    duration: float = 120.0
+    key: str = "C major"
+    language: str = "en"
+    time_signature: int = 4
+    seed: Optional[int] = None
+    checkpoint: Optional[str] = None
+    count: int = 1
     wait_s: float = 0
 
 
@@ -276,6 +291,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
     queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))
+    queue.register("compose_song", lambda job, p: engine.compose_song(store, backend, job, p))
     queue.register("render_timeline", lambda job, p: engine.render_timeline_job(store, backend, job, p))
     queue.register("download_voice", lambda job, p: _download_voice_job(store, job, p))
     queue.start()
@@ -336,11 +352,28 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # shared by the agent endpoints (compact) and the UI endpoints (full)
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
-        composed = engine.compose_prompt(store, project, body.prompt, body.negative, body.style)
-        reference = body.reference_asset_id
-        if not reference and body.use_character_reference:
-            reference = composed["reference_asset_id"]
-        template = body.template or ("sdxl_img2img" if reference else "sdxl_txt2img")
+        if body.consistent:
+            # "Cast -> Reference sheet": route through the Kontext edit
+            # template with the canonical reference as input and the scene
+            # as the instruction, instead of a fresh txt2img.
+            kontext = engine.build_kontext_instruction(store, project, body.prompt)
+            reference = body.reference_asset_id or kontext["reference_asset_id"]
+            if not reference:
+                raise engine.EngineError(
+                    "consistent_needs_reference",
+                    "consistent=true needs a canonical reference: mention a cast member with a canonical "
+                    "reference image (studio_cast update canonical_asset_id), or pass reference_asset_id",
+                )
+            composed = {"positive_prompt": kontext["instruction"], "negative_prompt": "", "style": None,
+                       "style_defaults": {}, "matched_characters": kontext["matched_characters"],
+                       "unknown_mentions": kontext["unknown_mentions"], "reference_asset_id": reference}
+            template = body.template or "flux_kontext_edit"
+        else:
+            composed = engine.compose_prompt(store, project, body.prompt, body.negative, body.style)
+            reference = body.reference_asset_id
+            if not reference and body.use_character_reference:
+                reference = composed["reference_asset_id"]
+            template = body.template or ("sdxl_img2img" if reference else "sdxl_txt2img")
         width, height = body.width, body.height
         if body.aspect and not (width and height):
             if body.aspect not in engine.ASPECT_SIZES:
@@ -394,6 +427,21 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if not 1 <= body.count <= 8:
             raise engine.EngineError("bad_parameter", "count must be between 1 and 8")
         job = queue.enqueue("edit_image", "gpu", body.model_dump(exclude={"wait_s"}), project_id=asset["project_id"])
+        return {"job": wait(job, body.wait_s)}
+
+    def op_compose(project: str, body: ComposeBody) -> dict[str, Any]:
+        store.get_project(project)
+        if not body.tags.strip():
+            raise engine.EngineError("empty_tags", "tags describe the sound (genre, mood, instruments, vocal style)")
+        if not body.lyrics.strip():
+            raise engine.EngineError("empty_lyrics", "lyrics are required (use [Section] tags in English)")
+        if not 40 <= body.bpm <= 220:
+            raise engine.EngineError("bad_parameter", "bpm must be between 40 and 220")
+        if not 4 <= body.duration <= 240:
+            raise engine.EngineError("bad_parameter", "duration must be between 4 and 240 seconds")
+        if not 1 <= body.count <= 4:
+            raise engine.EngineError("bad_parameter", "count must be between 1 and 4")
+        job = queue.enqueue("compose_song", "gpu", body.model_dump(exclude={"wait_s"}), project_id=project)
         return {"job": wait(job, body.wait_s)}
 
     def op_animate(body: AnimateBody) -> dict[str, Any]:
@@ -600,6 +648,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_animate")
     def agent_animate(body: AnimateBody):
         return agent("studio_animate", body.asset_id, lambda: {"job": job_result(op_animate(body)["job"])})
+
+    @app.post("/api/agent/studio_compose")
+    def agent_compose(project: str, body: ComposeBody):
+        return agent("studio_compose", body.tags[:80], lambda: {"job": job_result(op_compose(project, body)["job"])})
+
+    @app.post("/api/projects/{project_id}/compose")
+    def ui_compose(project_id: str, body: ComposeBody):
+        return op_compose(project_id, body)
 
     @app.post("/api/assets/{asset_id}/animate")
     def ui_animate(asset_id: str, body: AnimateBody):

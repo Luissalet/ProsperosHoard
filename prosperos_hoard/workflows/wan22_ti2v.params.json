@@ -1,0 +1,26 @@
+{
+  "template": "wan22_ti2v",
+  "kind": "video",
+  "vram_class": "wan",
+  "requires_reference": true,
+  "reference_node": "56.image",
+  "map": {
+    "positive_prompt": "6.text",
+    "negative_prompt": "7.text",
+    "width": "55.width",
+    "height": "55.height",
+    "length": "55.length",
+    "fps": "57.fps",
+    "unet_name": "37.unet_name",
+    "clip_name": "38.clip_name",
+    "vae_name": "39.vae_name",
+    "shift": "48.shift",
+    "seed": "3.seed",
+    "steps": "3.steps",
+    "cfg": "3.cfg",
+    "sampler": "3.sampler_name",
+    "scheduler": "3.scheduler"
+  },
+  "output_node": "58",
+  "notes": "Wan 2.2 TI2V 5B, image-to-video only (a still becomes the start frame, matching how the production uses it - 'the best still of shot N'). The official template also supports pure text-to-video with its LoadImage bypassed; that path is not exposed here. 1280x704 @ 121 frames/24 fps = 5.04 s by default (lower to 960x544 for less VRAM, per the VRAM estimate table). Converted from the official video_wan2_2_5B_ti2v.json template, hand-checked; steps 20, cfg 5, shift 8 match the model's recommendation."
+}

@@ -243,6 +243,54 @@ def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optiona
     }
 
 
+def build_kontext_instruction(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
+    """For `consistent=true` generation ("Cast -> Reference sheet"): turn
+    "@Name doing X" into a Kontext edit instruction ("the same character
+    from the reference, now doing X") instead of inlining the character's
+    full look description the way `compose_prompt` does for a fresh
+    txt2img - the reference image already carries the look, so the
+    instruction should describe only the change. Mentions are still
+    resolved the same way (longest name, word boundaries, unknowns kept)
+    so the caller gets the same `matched_characters`/`unknown_mentions`
+    bookkeeping and the first mentioned character's canonical image."""
+    characters = store.list_characters(project_id)
+    aliases = _mention_aliases(characters)
+    reference_asset_id: Optional[str] = None
+    matched: list[str] = []
+    unknown: list[str] = []
+    out: list[str] = []
+    i, n = 0, len(prompt)
+    while i < n:
+        ch = prompt[i]
+        if ch == "@" and (i == 0 or not _WORD.match(prompt[i - 1])):
+            rest = prompt[i + 1:]
+            low = rest.lower()
+            hit = None
+            for alias, char in aliases:
+                if low.startswith(alias) and (len(rest) == len(alias) or not _WORD.match(rest[len(alias)])):
+                    hit = (alias, char)
+                    break
+            if hit:
+                alias, char = hit
+                if char["name"] not in matched:
+                    matched.append(char["name"])
+                if reference_asset_id is None and char.get("canonical_asset_id"):
+                    reference_asset_id = char["canonical_asset_id"]
+                i += 1 + len(alias)
+                continue
+            m = re.match(r"[\w-]+", rest, re.UNICODE)
+            if m:
+                unknown.append(m.group(0))
+        out.append(ch)
+        i += 1
+    scene = re.sub(r"\s+", " ", "".join(out)).strip(" ,")
+    instruction = f"the same character from the reference, now {scene}" if scene else "the same character from the reference"
+    return {
+        "instruction": instruction, "reference_asset_id": reference_asset_id,
+        "matched_characters": matched, "unknown_mentions": sorted(set(unknown)),
+    }
+
+
 def _find_style(store: Store, project_id: str, style: str) -> dict[str, Any]:
     """A style preset by id or by (case-insensitive) name."""
     try:
@@ -428,6 +476,25 @@ def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, 
             width=with_size[0], height=with_size[1], duration_s=duration, thumb_path=thumb,
             source="generated", recipe=recipe, asset_id=asset_id, name=_clip(name, 80) or f"{recipe['operation']} {asset_id[-6:]}",
         )
+    if kind == "audio":
+        # ComfyUI's real ACE-Step returns mp3; the fake backend returns a
+        # real WAV (see devtools/fake_comfy.render_fake_song) - sniff the
+        # RIFF/WAVE header rather than assuming, same spirit as the webp/mp4
+        # sniff above.
+        is_wav = data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+        dest = store.path_for_asset_file(asset_id, ".wav" if is_wav else ".mp3")
+        dest.write_bytes(data)
+        duration = audio_mod.probe_duration_s(dest)
+        asset = store.create_asset(
+            project_id=project_id, kind="audio", file_path=_rel(store, dest), mime="audio/wav" if is_wav else "audio/mpeg",
+            duration_s=duration, source="generated", recipe=recipe, asset_id=asset_id,
+            name=_clip(name or values.get("tags") or recipe["operation"], 80),
+        )
+        try:
+            store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(audio_mod.decode_to_mono(dest)))
+        except audio_mod.DecodeError:
+            pass
+        return asset
     dest = store.path_for_asset_file(asset_id, ".png")
     dest.write_bytes(data)
     with Image.open(dest) as img:
@@ -600,6 +667,35 @@ def animate_image(store: Store, backend: Backend, job: dict[str, Any], progress)
     }
     return run_template(store, backend, job, progress, template_name="svd_img2vid", values=values,
                         operation="animate", reference_asset_id=src["id"], name=f"animated: {src.get('name') or src['id']}")
+
+
+def compose_song(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
+    """`studio_compose`: a song with vocals and lyrics via the ACE-Step 1.5
+    template, the same job-queue/lineage/VRAM-wait machinery as an image or
+    video generation."""
+    params = job["params"]
+    if not str(params.get("tags") or "").strip():
+        raise EngineError("empty_tags", "tags describe the sound (genre, mood, instruments, vocal style)")
+    if not str(params.get("lyrics") or "").strip():
+        raise EngineError("empty_lyrics", "lyrics are required (use [Section] tags in English, e.g. [Verse], [Chorus])")
+    duration = float(_first(params.get("duration"), 120))
+    if not 4 <= duration <= 240:
+        raise EngineError("bad_parameter", "duration must be between 4 and 240 seconds")
+    bpm = int(_first(params.get("bpm"), 120))
+    if not 40 <= bpm <= 220:
+        raise EngineError("bad_parameter", "bpm must be between 40 and 220")
+    values = {
+        "checkpoint": params.get("checkpoint"), "tags": params["tags"], "lyrics": params["lyrics"],
+        "bpm": bpm, "duration": duration, "timesignature": str(_first(params.get("time_signature"), 4)),
+        "language": _first(params.get("language"), "en"), "key": _first(params.get("key"), "C major"),
+        "seed": params.get("seed"), "steps": 8, "cfg": 1,
+    }
+    return run_template(
+        store, backend, job, progress, template_name="ace15_song", values=values, operation="compose_song",
+        count=params.get("count", 1),
+        extra_recipe={"tags": params["tags"], "bpm": bpm, "key": values["key"], "language": values["language"]},
+        name=params.get("name") or params["tags"][:60],
+    )
 
 
 # ------------------------------------------------------------------ i/o --

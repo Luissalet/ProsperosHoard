@@ -103,10 +103,14 @@ def _images(asset_ids: list[str], size: int = 512) -> list[Any]:
     return out
 
 
-def _with_preview(result: dict[str, Any]) -> Any:
-    """A job result, plus a look at the images when the job already finished."""
+def _with_preview(result: dict[str, Any], include_image: bool = False) -> Any:
+    """A job result, plus a look at the images when the job already finished
+    and the caller asked for one. Defaults to text-only: a text-only local
+    model handed an ImageContent block mid-turn breaks (llama.cpp and
+    similar backends expect the turn's content to match what the model can
+    read), so a picture is only attached when `include_image=True`."""
     job = result.get("job", result)
-    if job.get("state") == "done" and job.get("asset_ids"):
+    if include_image and job.get("state") == "done" and job.get("asset_ids"):
         return [result, *_images(job["asset_ids"])]
     return result
 
@@ -200,18 +204,21 @@ def studio_generate_image(
     scheduler: Optional[str] = None, seed: Optional[int] = None, count: int = 1,
     reference_asset_id: Optional[str] = None, strength: Optional[float] = None,
     template: Optional[str] = None, wait_s: float = 0, use_character_reference: bool = False,
-    checkpoint: Optional[str] = None,
+    checkpoint: Optional[str] = None, include_image: bool = False,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; img2img when reference_asset_id is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
     inlined, and use_character_reference=true also uses the first mentioned character's canonical image
     as the img2img reference. style: a preset name ("Studio portrait", "Film still 35mm", "Anime cel",
     "Pastel dream", "Neon night city", "Album art minimal"). aspect: 1:1, 9:16, 16:9, 2:3, 3:2, 4:5.
-    template: sdxl_txt2img (default), sdxl_img2img, sd15_txt2img (low VRAM), sdxl_hires, or an imported wf_ id.
+    template: sdxl_txt2img (default), sdxl_img2img, sd15_txt2img (low VRAM), sdxl_hires, flux_schnell_txt2img,
+    flux_kontext_edit (needs reference_asset_id), wan22_ti2v, or an imported wf_ id.
     seed: fix it to reproduce or keep a look consistent (random when omitted, always returned).
     checkpoint: a file name from studio_status (default: the template's; a wrong name fails listing the installed ones).
     count 1-8 (seeds seed..seed+count-1). Returns the job (poll studio_job), the exact final prompt and
-    unknown_mentions; with wait_s > 0 and a finished job, also the asset ids and a picture of them.
+    unknown_mentions; with wait_s > 0 and a finished job, also the asset ids and, only when
+    include_image=true, a picture of them (default false: a text-only model does not want an image
+    block on its turn - use studio_show once you need to look).
     A job in "waiting_gpu" is waiting for free VRAM - normal, not an error.
 
     Keywords: generate image, txt2img, make a photo, draw, render a portrait, generar imagen, crear foto, dibujar, hacer una foto
@@ -223,13 +230,15 @@ def studio_generate_image(
         "template": template, "wait_s": wait_s, "use_character_reference": use_character_reference,
         "checkpoint": checkpoint,
     }
-    return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body))
+    return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
+                         include_image)
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_edit_image(
     asset_id: str, operation: str, prompt: Optional[str] = None, strength: Optional[float] = None,
     mask_asset_id: Optional[str] = None, count: int = 1, seed: Optional[int] = None, wait_s: float = 0,
+    include_image: bool = False,
 ) -> Any:
     """Change or re-run an existing image asset. operation:
     "img2img" - restyle it with `prompt` (strength 0-1 = how much changes, default 0.55);
@@ -237,26 +246,49 @@ def studio_edit_image(
     "hires" - 1.5x "hires fix" (re-runs the asset's SDXL txt2img recipe with a second pass);
     "reuse" - re-run the exact recipe (same seed: reproduces the asset);
     "vary" - same recipe with a new seed (or `seed`), `count` variations.
-    Returns the job (poll studio_job); a finished job within wait_s also returns a picture.
+    Returns the job (poll studio_job); a finished job within wait_s also returns a picture, but only
+    when include_image=true (default false).
 
     Keywords: edit image, inpaint, upscale, variation, reproduce, same seed, editar imagen, subir resolucion, variacion, repetir receta
     """
     body = {"asset_id": asset_id, "operation": operation, "prompt": prompt, "strength": strength,
             "mask_asset_id": mask_asset_id, "count": count, "seed": seed, "wait_s": wait_s}
-    return _with_preview(_call("POST", "/api/agent/studio_edit_image", json=body))
+    return _with_preview(_call("POST", "/api/agent/studio_edit_image", json=body), include_image)
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_animate(asset_id: str, frames: int = 14, fps: int = 7, motion: int = 127,
-                    seed: Optional[int] = None, wait_s: float = 0) -> Any:
+                    seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False) -> Any:
     """Turn a still image into a short video clip (SVD image-to-video on ComfyUI, about 10 GB VRAM).
     frames 4-50 (14 = 2 s at 7 fps), motion 1-255 (higher moves more but can distort). The output is
     an mp4 video asset usable in timelines. Returns the job; poll studio_job (animation is slow).
+    include_image=true also returns a picture of a finished job (default false).
 
     Keywords: animate image, image to video, make it move, svd, animar imagen, imagen a video, dar movimiento
     """
     body = {"asset_id": asset_id, "frames": frames, "fps": fps, "motion": motion, "seed": seed, "wait_s": wait_s}
-    return _with_preview(_call("POST", "/api/agent/studio_animate", json=body))
+    return _with_preview(_call("POST", "/api/agent/studio_animate", json=body), include_image)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_compose(
+    project: str, tags: str, lyrics: str, bpm: int = 120, duration: float = 120.0, key: str = "C major",
+    language: str = "en", time_signature: int = 4, seed: Optional[int] = None, count: int = 1,
+    wait_s: float = 0,
+) -> Any:
+    """Compose a song with vocals on ComfyUI (ACE-Step 1.5; needs ace_step_1.5_turbo_aio.safetensors -
+    see studio_status's music_generation). tags describe the sound: genre, mood, instruments, vocal style
+    ("dark trap, horror rap, eerie music box melody, heavy 808, half-time 140 bpm, male rap vocals,
+    spanish, minor key"). lyrics use [Section] tags in English (Intro/Verse/Chorus/Bridge/Outro) even when
+    the words are in another language. key: a note plus major/minor, e.g. "F# minor". duration 4-240 s,
+    bpm 40-220. The output is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage,
+    ready for studio_analyze_audio and a timeline. Returns the job (poll studio_job).
+
+    Keywords: compose song, make music, write a song, generate audio, ace-step, componer cancion, hacer musica
+    """
+    body = {"tags": tags, "lyrics": lyrics, "bpm": bpm, "duration": duration, "key": key, "language": language,
+            "time_signature": time_signature, "seed": seed, "count": count, "wait_s": wait_s}
+    return _call("POST", "/api/agent/studio_compose", params={"project": project}, json=body)
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
@@ -302,9 +334,10 @@ def studio_analyze_audio(asset_id: str) -> dict[str, Any]:
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_design(
     project: str, template: str, fields: dict[str, Any], image_asset_id: Optional[str] = None,
-    variant: Optional[str] = None, options: Optional[dict[str, Any]] = None,
+    variant: Optional[str] = None, options: Optional[dict[str, Any]] = None, include_image: bool = False,
 ) -> dict[str, Any]:
-    """Render a design (Pillow, fast, no GPU) and return the new image asset plus a picture of it.
+    """Render a design (Pillow, fast, no GPU) and return the new image asset, plus a picture of it
+    when include_image=true (default false).
     Templates and fields (image fields take an image asset id; image_asset_id fills the main one):
     photocard_front: image, member_name*, role, group_name, accent;
     photocard_back: member_name*, group_name, group_logo, message, serial, accent;
@@ -319,18 +352,19 @@ def studio_design(
         "POST", "/api/agent/studio_design", params={"project": project},
         json={"template": template, "fields": fields, "image_asset_id": image_asset_id, "variant": variant, "options": options or {}},
     )
-    return [asset, *_images([asset["id"]])]
+    return [asset, *_images([asset["id"]])] if include_image else asset
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_photocard_set(
     project: str, group_id: str, template_front: str = "photocard_front", template_back: str = "photocard_back",
-    image_asset_ids: Optional[dict[str, str]] = None,
+    image_asset_ids: Optional[dict[str, str]] = None, include_image: bool = False,
 ) -> dict[str, Any]:
     """Render a front and a back photocard for every member of a group, plus one contact sheet.
     Each front uses image_asset_ids[character_id] if given, else the member's canonical image, else their
     best-rated generated image that mentions them. Returns front_ids, back_ids, contact_sheet_id (and
-    skipped_members if someone has no image) with a picture of the sheet.
+    skipped_members if someone has no image), with a picture of the sheet when include_image=true
+    (default false).
 
     Keywords: photocard set, all members cards, trading cards, set de photocards, tarjetas de todos los miembros
     """
@@ -338,7 +372,7 @@ def studio_photocard_set(
         "POST", "/api/agent/studio_photocard_set", params={"project": project},
         json={"group_id": group_id, "template_front": template_front, "template_back": template_back, "image_asset_ids": image_asset_ids},
     )
-    return [result, *_images([result["contact_sheet_id"]], size=768)]
+    return [result, *_images([result["contact_sheet_id"]], size=768)] if include_image else result
 
 
 # --------------------------------------------------------------- timeline
@@ -395,15 +429,16 @@ def studio_jobs(state: Optional[str] = None, limit: int = 10) -> dict[str, Any]:
 
 
 @tool(_ro(readOnlyHint=True))
-def studio_job(job_id: str, wait_s: float = 0) -> Any:
-    """One job's state, progress and message; when done, its asset ids and a picture of the results.
+def studio_job(job_id: str, wait_s: float = 0, include_image: bool = False) -> Any:
+    """One job's state, progress and message; when done, its asset ids, and a picture of the results
+    only when include_image=true (default false: use studio_show once you actually need to look).
     wait_s (up to 300) waits server-side until the job finishes - use 30-120 instead of polling in a
     tight loop. waiting_gpu means it is waiting for free VRAM (normal); failed carries the reason.
 
     Keywords: job status, poll job, check progress, is it done, estado del trabajo, revisar progreso, ya esta
     """
     job = _call("GET", "/api/agent/studio_job", params={"job_id": job_id, "wait_s": wait_s})
-    if job.get("state") == "done" and job.get("asset_ids") and job.get("type") != "render_timeline":
+    if include_image and job.get("state") == "done" and job.get("asset_ids") and job.get("type") != "render_timeline":
         return [job, *_images(job["asset_ids"])]
     return job
 

@@ -295,7 +295,10 @@ def test_backend_endpoint_reports_comfy_and_hides_token(client):
     assert body["comfy"]["reachable"] is True
     assert "sd_xl_base_1.0.safetensors" in body["comfy"]["checkpoints"]
     assert body["ffmpeg"]["found"] in (True, False)
-    assert body["music"][0]["available"] is False
+    # the fake backend serves a real /object_info (patched with the models the
+    # production example uses), so ComfyMusic (ACE-Step) now resolves.
+    assert body["music"][0]["name"] == "comfy_music"
+    assert body["music"][0]["available"] is True
     r = c.post("/api/backend", json={"faustus_token": "secret123"})
     assert r.status_code == 200
     assert r.json()["token_set"] is True
