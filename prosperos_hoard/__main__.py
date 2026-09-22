@@ -42,26 +42,31 @@ def main() -> None:
     else:
         import os
 
-        data_dir = Path(os.environ.get("PROSPERO_DATA_DIR", repo_root / "data"))
+        data_dir = Path(os.environ.get("PROSPERO_DATA_DIR") or repo_root / "data")
+    data_dir = data_dir.expanduser().resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     _setup_logging(data_dir)
 
     if args.demo:
+        import json
+
         from .devtools.fake_comfy import FakeComfyServer
 
         fake = FakeComfyServer(data_dir / "fake_comfy")
         fake_port = fake.run_in_thread()
         backend_json = data_dir / "backend.json"
-        backend_json.write_text(
-            '{"comfy": {"url": "http://127.0.0.1:%d"}}' % fake_port, encoding="utf-8"
-        )
-        print(f"[prosperos-hoard] demo mode: fake ComfyUI on 127.0.0.1:{fake_port}")
+        raw = {}
+        if backend_json.is_file():
+            try:
+                raw = json.loads(backend_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raw = {}
+        raw["comfy"] = {"url": f"http://127.0.0.1:{fake_port}"}
+        backend_json.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        print(f"[prosperos-hoard] demo mode: fake ComfyUI (procedural placeholder images) on 127.0.0.1:{fake_port}")
 
     static_dir = repo_root / "frontend" / "dist"
-
-    from .api import create_app as _create_app
-
-    app = _create_app(data_dir, static_dir if static_dir.is_dir() else None, port=args.port)
+    app = create_app(data_dir, static_dir if static_dir.is_dir() else None, port=args.port, demo=args.demo)
 
     if args.demo:
         from .devtools.demo_seed import seed_demo_data
@@ -80,7 +85,10 @@ def main() -> None:
         except Exception:
             pass
 
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    finally:
+        app.state.queue.stop()
 
 
 if __name__ == "__main__":

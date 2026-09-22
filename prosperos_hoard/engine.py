@@ -6,35 +6,49 @@ it is directly unit-testable without spinning up FastAPI.
 from __future__ import annotations
 
 import io
+import json
+import mimetypes
+import random
 import re
 import shutil
-import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
 from . import comfy_driver
 from . import design
+from . import procutil
 from . import templates as design_templates
 from . import timeline as timeline_mod
 from . import video as video_mod
 from . import voices as voices_mod
 from .backend import Backend, ffmpeg_path
-from .hoard_link.errors import BackendError, Unavailable
+from .hoard_link.errors import Unavailable
 from .ids import new_id
-from .jobs import WaitingForResources
+from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
 from .util import now_iso
 
-MENTION_RE = re.compile(r"@([A-Za-z0-9_\-]+)")
-
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
-VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".webp"}
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv"}
+LYRICS_EXTS = {".lrc", ".txt"}
+FONT_EXTS = {".ttf", ".otf"}
+KIND_EXTS = {"image": IMAGE_EXTS, "audio": AUDIO_EXTS, "video": VIDEO_EXTS, "lyrics": LYRICS_EXTS, "font": FONT_EXTS}
+
+MAX_IMAGE_BYTES = 50 * 1024 * 1024
+MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024
+MAX_LYRICS_BYTES = 512 * 1024
+MAX_FONT_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PIXELS = 80_000_000
+
+ASPECT_SIZES = {"1:1": (1024, 1024), "9:16": (768, 1344), "16:9": (1344, 768), "2:3": (832, 1216), "3:2": (1216, 832),
+                "4:5": (896, 1120)}
+SHOW_MAX_BYTES = 200 * 1024
 
 
 class EngineError(ValueError):
@@ -44,522 +58,1136 @@ class EngineError(ValueError):
         self.message = message
 
 
+def _first(*values: Any) -> Any:
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
+def _clip(text: Optional[str], n: int) -> Optional[str]:
+    if text is None:
+        return None
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def random_seed() -> int:
+    return random.SystemRandom().randrange(0, 2**31 - 1)
+
+
+# ------------------------------------------------------------- compact views
+# What the agent endpoints return: small, id-first, no file paths or bulky
+# arrays (waveforms, analysis). The UI endpoints return the full rows.
+
+def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
+    recipe = asset.get("recipe") or {}
+    params = recipe.get("params") or {}
+    summary = {k: v for k, v in {
+        "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
+        "prompt": _clip(params.get("positive_prompt") or recipe.get("text"), 160),
+        "inputs": recipe.get("input_asset_ids") or None,
+    }.items() if v is not None}
+    view = {
+        "id": asset["id"], "kind": asset["kind"], "name": asset.get("name"), "source": asset["source"],
+        "width": asset.get("width"), "height": asset.get("height"),
+        "duration_s": round(asset["duration_s"], 2) if asset.get("duration_s") else None,
+        "tags": asset.get("tags") or [], "rating": asset.get("rating", 0), "favourite": asset.get("favourite", False),
+        "notes": _clip(asset.get("notes"), 200), "created_at": asset.get("created_at"),
+    }
+    if summary:
+        view["recipe"] = summary
+    return {k: v for k, v in view.items() if v not in (None, [], "")} | {"id": asset["id"]}
+
+
+def job_view(job: dict[str, Any]) -> dict[str, Any]:
+    outputs = job.get("outputs") or {}
+    asset_ids = outputs.get("asset_ids") or ([outputs["asset_id"]] if outputs.get("asset_id") else [])
+    view = {
+        "id": job["id"], "type": job["type"], "state": job["state"], "progress": round(float(job.get("progress") or 0), 3),
+        "message": job.get("message"), "project_id": job.get("project_id"), "asset_ids": asset_ids,
+        "created_at": job.get("created_at"), "finished_at": job.get("finished_at"),
+    }
+    if job["state"] in ("queued", "waiting_gpu", "running"):
+        view["hint"] = "poll with studio_job(job_id, wait_s=30)"
+    if job["state"] == "failed":
+        view["error"] = job.get("message")
+    return {k: v for k, v in view.items() if v is not None}
+
+
 # ---------------------------------------------------------------- prompts
+
+_WORD = re.compile(r"[\w'-]", re.UNICODE)
+
+
+def _mention_aliases(characters: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+    """(alias, character) longest first. Every character answers to its
+    full name ("Iris Volt"), the name without spaces or with _ / - ("IrisVolt",
+    "Iris_Volt"), and its first word when no other character shares it."""
+    aliases: dict[str, list[dict[str, Any]]] = {}
+
+    def add(alias: str, char: dict[str, Any]) -> None:
+        alias = alias.lower().strip()
+        if alias and char not in aliases.setdefault(alias, []):
+            aliases[alias].append(char)
+
+    for c in characters:
+        name = re.sub(r"\s+", " ", c["name"].strip())
+        add(name, c)
+        add(name.replace(" ", ""), c)
+        add(name.replace(" ", "_"), c)
+        add(name.replace(" ", "-"), c)
+    firsts: dict[str, list[dict[str, Any]]] = {}
+    for c in characters:
+        first = c["name"].strip().split()[0].lower() if c["name"].strip() else ""
+        if first:
+            firsts.setdefault(first, []).append(c)
+    for first, chars in firsts.items():
+        if len(chars) == 1:
+            add(first, chars[0])
+    unique = [(a, cs[0]) for a, cs in aliases.items() if len(cs) == 1]
+    return sorted(unique, key=lambda ac: -len(ac[0]))
+
 
 def expand_mentions(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
     """Replace @Name with the character's prompt fragment. Returns
-    {"expanded_prompt", "negative_extra", "reference_asset_id", "matched"}."""
-    characters = {c["name"].lower(): c for c in store.list_characters(project_id)}
+    {"expanded_prompt", "negative_extra", "reference_asset_id",
+    "matched_characters", "unknown_mentions"}.
+
+    An `@` only starts a mention at the start of the text or after a
+    non-word character, so e-mail addresses are left alone; the longest
+    matching name wins ("@Iris Volt" over "@Iris"), and the match must end
+    at a word boundary ("@Irisa" is not "@Iris")."""
+    characters = store.list_characters(project_id)
+    aliases = _mention_aliases(characters)
     negatives: list[str] = []
     reference_asset_id: Optional[str] = None
     matched: list[str] = []
-
-    def _sub(m: re.Match) -> str:
-        nonlocal reference_asset_id
-        name = m.group(1)
-        char = characters.get(name.lower())
-        if not char:
-            return m.group(0)
-        matched.append(char["name"])
-        if char.get("negative"):
-            negatives.append(char["negative"])
-        if reference_asset_id is None and char.get("canonical_asset_id"):
-            reference_asset_id = char["canonical_asset_id"]
-        return char.get("prompt") or f"{char['name']}"
-
-    expanded = MENTION_RE.sub(_sub, prompt)
+    unknown: list[str] = []
+    out: list[str] = []
+    i = 0
+    n = len(prompt)
+    while i < n:
+        ch = prompt[i]
+        if ch == "@" and (i == 0 or not _WORD.match(prompt[i - 1])):
+            rest = prompt[i + 1:]
+            low = rest.lower()
+            hit = None
+            for alias, char in aliases:
+                if low.startswith(alias) and (len(rest) == len(alias) or not _WORD.match(rest[len(alias)])):
+                    hit = (alias, char)
+                    break
+            if hit:
+                alias, char = hit
+                if char["name"] not in matched:
+                    matched.append(char["name"])
+                    if char.get("negative"):
+                        negatives.append(char["negative"])
+                if reference_asset_id is None and char.get("canonical_asset_id"):
+                    reference_asset_id = char["canonical_asset_id"]
+                out.append((char.get("prompt") or char["name"]).strip())
+                i += 1 + len(alias)
+                continue
+            m = re.match(r"[\w-]+", rest, re.UNICODE)
+            if m:
+                unknown.append(m.group(0))
+        out.append(ch)
+        i += 1
     return {
-        "expanded_prompt": expanded,
+        "expanded_prompt": "".join(out),
         "negative_extra": ", ".join(negatives),
         "reference_asset_id": reference_asset_id,
         "matched_characters": matched,
+        "unknown_mentions": sorted(set(unknown)),
     }
 
 
 def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optional[str], style_id: Optional[str]) -> dict[str, Any]:
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise EngineError("empty_prompt", "the prompt is empty; describe the image (mention characters as @Name)")
+    if len(prompt) > 4000:
+        raise EngineError("prompt_too_long", "the prompt is longer than 4000 characters")
+    store.get_project(project_id)
     expansion = expand_mentions(store, project_id, prompt)
     prefix = suffix = ""
     style_negative = ""
     defaults: dict[str, Any] = {}
+    style_name = None
     if style_id:
-        style = store.get_style_preset(style_id)
+        style = _find_style(store, project_id, style_id)
+        style_name = style["name"]
         prefix = style.get("prompt_prefix") or ""
         suffix = style.get("prompt_suffix") or ""
         style_negative = style.get("negative") or ""
         defaults = style.get("defaults") or {}
-    positive = f"{prefix} {expansion['expanded_prompt']} {suffix}".strip()
-    negative_parts = [p for p in (negative, expansion["negative_extra"], style_negative) if p]
-    final_negative = ", ".join(negative_parts)
+    positive = " ".join(p for p in (prefix.strip(), expansion["expanded_prompt"].strip()) if p)
+    if suffix.strip():
+        positive = positive + (suffix if suffix.startswith(",") else " " + suffix)
+    negative_parts: list[str] = []
+    for part in (negative, expansion["negative_extra"], style_negative):
+        for piece in (part or "").split(","):
+            piece = piece.strip()
+            if piece and piece.lower() not in {p.lower() for p in negative_parts}:
+                negative_parts.append(piece)
     return {
-        "positive_prompt": positive,
-        "negative_prompt": final_negative,
+        "positive_prompt": re.sub(r"\s+", " ", positive).strip(),
+        "negative_prompt": ", ".join(negative_parts),
         "reference_asset_id": expansion["reference_asset_id"],
         "matched_characters": expansion["matched_characters"],
+        "unknown_mentions": expansion["unknown_mentions"],
+        "style": style_name,
         "style_defaults": defaults,
     }
 
 
+def _find_style(store: Store, project_id: str, style: str) -> dict[str, Any]:
+    """A style preset by id or by (case-insensitive) name."""
+    try:
+        return store.get_style_preset(style)
+    except NotFound:
+        pass
+    presets = store.list_style_presets(project_id)
+    for p in presets:
+        if p["name"].lower() == style.strip().lower():
+            return p
+    raise EngineError("unknown_style", f"unknown style '{style}'; available: {', '.join(p['name'] for p in presets)}")
+
+
 # -------------------------------------------------------------- ComfyUI --
-
-def _resolve_comfy_url(backend: Backend) -> str:
-    res = backend.link.sync.resolve("image")
-    if not res.resolved or res.provider != "comfyui":
-        raise Unavailable("image", res.details.get("reasons", [res.reason]))
-    return res.url
-
-
-def vram_free_mb(backend: Backend) -> Optional[int]:
-    from .hoard_link.gpu import gpu_free_mb
-
-    gpus = gpu_free_mb()
-    return gpus[0].free_mb if gpus else None
-
 
 def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
     needed = comfy_driver.estimate_vram_mb(spec, backend.vram_estimates_mb())
-    free = vram_free_mb(backend)
+    free = backend.vram_free_mb()
     if free is not None and free < needed:
-        raise WaitingForResources(f"waiting for {needed} MB VRAM ({free} MB free) for a {spec.get('vram_class')} job")
+        raise WaitingForResources(
+            f"waiting for {needed} MB of free VRAM for a {spec.get('vram_class', 'sdxl')} job ({free} MB free now); "
+            "retrying every 15 s for up to 30 min. Nothing is unloaded automatically - use Backends > Free ComfyUI "
+            "memory if you want to make room."
+        )
 
 
-def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], reference_bytes: Optional[bytes] = None,
-                         reference_name: Optional[str] = None, mask_bytes: Optional[bytes] = None,
-                         mask_name: Optional[str] = None, timeout_s: float = 300.0,
-                         on_progress=None) -> tuple[dict[str, Any], list]:
-    comfy = backend.run_async(backend.link.comfy())
+def _comfy(backend: Backend):
+    try:
+        comfy = backend.comfy()
+    except Exception as exc:  # noqa: BLE001 - resolver failures become one readable reason
+        raise Unavailable("image", [f"ComfyUI could not be resolved: {exc}"]) from exc
     if comfy is None:
-        raise Unavailable("image", ["ComfyUI not reachable"])
-    if reference_bytes is not None:
-        backend.run_async(comfy.upload_image(reference_bytes, reference_name or "reference.png"))
-    if mask_bytes is not None:
-        backend.run_async(comfy.upload_image(mask_bytes, mask_name or "mask.png"))
+        res = backend.link.sync.resolve("image")
+        raise Unavailable("image", (res.details or {}).get("reasons") or [res.reason or "ComfyUI is not reachable"])
+    return comfy
+
+
+def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
+                         progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
+    comfy = _comfy(backend)
+    for data, name in uploads:
+        backend.run_async(comfy.upload_image(data, name))
     client_id = str(uuid.uuid4())
     prompt_id = backend.run_async(comfy.queue(workflow, client_id))
-    backend.run_async(comfy.wait(prompt_id, timeout_s=timeout_s, on_progress=on_progress))
+    deadline = time.monotonic() + timeout_s
+    cancelled = getattr(progress, "cancelled", lambda: False)
+    while True:
+        if cancelled():
+            try:
+                backend.run_async(comfy.interrupt())
+            except Exception:  # pragma: no cover - best effort
+                pass
+            raise JobCancelled("cancelled")
+        try:
+            backend.run_async(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
+            break
+        except TimeoutError:
+            if time.monotonic() > deadline:
+                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s") from None
     outputs = backend.run_async(comfy.outputs(prompt_id))
-    return {"prompt_id": prompt_id}, outputs
+    saved = [o for o in outputs if o.type == "output"]
+    if output_node:
+        preferred = [o for o in saved if o.node_id == output_node]
+        saved = preferred or saved
+    return saved
 
 
 def _download_output(backend: Backend, output) -> bytes:
-    comfy = backend.run_async(backend.link.comfy())
+    comfy = _comfy(backend)
     return backend.run_async(comfy.download(output))
 
 
 def _object_info(backend: Backend) -> dict[str, Any]:
-    comfy = backend.run_async(backend.link.comfy())
-    if comfy is None:
-        return {}
+    comfy = _comfy(backend)
     return backend.run_async(comfy.object_info())
 
 
-def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, recipe: dict[str, Any]) -> dict[str, Any]:
+def _svd_size(width: int, height: int) -> tuple[int, int]:
+    if width > height * 1.2:
+        return 1024, 576
+    if height > width * 1.2:
+        return 576, 1024
+    return 768, 768
+
+
+def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
+                 template_name: str, values: dict[str, Any], operation: str, count: int = 1,
+                 reference_asset_id: Optional[str] = None, mask_asset_id: Optional[str] = None,
+                 extra_recipe: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Run one workflow template `count` times (seed, seed+1, ...) and import
+    each output as an asset whose recipe can re-run it exactly."""
+    project_id = job["project_id"]
+    try:
+        workflow, spec = comfy_driver.load_template(template_name, store.data_dir)
+    except comfy_driver.WorkflowError as exc:
+        raise EngineError("unknown_template", str(exc)) from exc
+    started = time.monotonic()
+    progress(0.02, "checking free VRAM")
+    check_vram_or_wait(backend, spec)
+    progress(0.05, "validating against ComfyUI")
+    try:
+        values = comfy_driver.validate_against_object_info(spec, values, _object_info(backend), workflow)
+    except comfy_driver.ValidationError as exc:
+        raise EngineError("comfy_validation", str(exc)) from exc
+
+    uploads: list[tuple[bytes, str]] = []
+    input_ids: list[str] = []
+    if spec.get("requires_reference"):
+        if not reference_asset_id:
+            raise EngineError("reference_required", f"template '{template_name}' needs a reference image (reference_asset_id)")
+        ref = store.get_asset(reference_asset_id)
+        if ref["kind"] != "image":
+            raise EngineError("reference_not_image", f"reference {ref['id']} is {ref['kind']}, not an image")
+        ref_path = store.data_dir / ref["file_path"]
+        ref_name = f"prospero_{ref['id']}{ref_path.suffix}"
+        uploads.append((ref_path.read_bytes(), ref_name))
+        input_ids.append(ref["id"])
+    if spec.get("requires_mask"):
+        if not mask_asset_id:
+            raise EngineError("mask_required", "inpainting needs mask_asset_id (a black/white image, white = repaint)")
+        mask = store.get_asset(mask_asset_id)
+        mask_path = store.data_dir / mask["file_path"]
+        mask_name = f"prospero_{mask['id']}_mask{mask_path.suffix}"
+        uploads.append((mask_path.read_bytes(), mask_name))
+        input_ids.append(mask["id"])
+
+    count = max(1, min(int(count or 1), 8))
+    base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
+    thash = comfy_driver.template_hash(workflow, spec)
+    assets = []
+    for i in range(count):
+        progress.check_cancel() if hasattr(progress, "check_cancel") else None
+        seed = base_seed + i
+        run_values = {**values, "seed": seed}
+        wf = comfy_driver.apply_params(workflow, spec, run_values)
+        if spec.get("requires_reference"):
+            node, _, inp = spec["reference_node"].partition(".")
+            wf[node]["inputs"][inp] = uploads[0][1]
+        if spec.get("requires_mask"):
+            node, _, inp = spec["mask_node"].partition(".")
+            wf[node]["inputs"][inp] = uploads[-1][1]
+        progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
+        t0 = time.monotonic()
+        outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,
+                                      timeout_s=900.0 if spec.get("kind") == "video" else 600.0,
+                                      output_node=spec.get("output_node"))
+        if not outputs:
+            raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
+        for out in outputs:
+            data = _download_output(backend, out)
+            recipe = {
+                "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
+                "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
+                "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
+                **(extra_recipe or {}),
+            }
+            assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values))
+    progress(0.97, "imported outputs")
+    return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
+
+
+def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, recipe: dict[str, Any],
+                         values: dict[str, Any]) -> dict[str, Any]:
     asset_id = new_id("a")
-    ext = ".webp" if kind == "video" and data[:4] == b"RIFF" else (".png" if kind == "image" else ".bin")
-    dest = store.path_for_asset_file(asset_id, ext)
+    if kind == "video":
+        is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+        src = store.path_for_asset_file(asset_id, ".webp" if is_webp else ".mp4")
+        src.write_bytes(data)
+        dest = store.path_for_asset_file(asset_id, ".mp4")
+        fps = float(values.get("fps") or 8)
+        if is_webp:
+            work = store.data_dir / "tmp" / asset_id
+            try:
+                video_mod.animated_webp_to_mp4(src, dest, fps, work)
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+            src.unlink(missing_ok=True)
+        duration = audio_mod.probe_duration_s(dest)
+        thumb = _video_thumbnail(dest, store.path_for_thumb(asset_id))
+        with_size = _probe_video_size(dest)
+        return store.create_asset(
+            project_id=project_id, kind="video", file_path=_rel(store, dest), mime="video/mp4",
+            width=with_size[0], height=with_size[1], duration_s=duration, thumb_path=thumb,
+            source="generated", recipe=recipe, asset_id=asset_id, name=f"{recipe['operation']} {asset_id[-6:]}",
+        )
+    dest = store.path_for_asset_file(asset_id, ".png")
     dest.write_bytes(data)
-    width = height = None
-    duration_s = None
-    if kind == "image":
-        with Image.open(dest) as img:
-            width, height = img.size
-        make_thumbnail(dest, store.path_for_thumb(asset_id))
+    with Image.open(dest) as img:
+        width, height = img.size
+    make_thumbnail(dest, store.path_for_thumb(asset_id))
     return store.create_asset(
-        project_id=project_id, kind=kind, file_path=str(dest.relative_to(store.data_dir)),
-        mime="image/png" if kind == "image" else "image/webp", width=width, height=height,
-        duration_s=duration_s, thumb_path=str(store.path_for_thumb(asset_id).relative_to(store.data_dir)) if kind == "image" else None,
-        source="generated", recipe=recipe, asset_id=asset_id,
+        project_id=project_id, kind="image", file_path=_rel(store, dest), mime="image/png", width=width, height=height,
+        thumb_path=_rel(store, store.path_for_thumb(asset_id)), source="generated", recipe=recipe, asset_id=asset_id,
+        name=_clip(values.get("positive_prompt") or recipe["operation"], 60),
     )
+
+
+def _rel(store: Store, path: Path) -> str:
+    return path.relative_to(store.data_dir).as_posix()
+
+
+def _probe_video_size(path: Path) -> tuple[Optional[int], Optional[int]]:
+    exe = ffmpeg_path()
+    if not exe:
+        return None, None
+    out = procutil.run([exe, "-nostdin", "-hide_banner", "-i", str(path)], text=True, timeout=30)
+    m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", out.stderr or "")
+    return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+
+
+def _video_thumbnail(path: Path, dest: Path) -> Optional[str]:
+    exe = ffmpeg_path()
+    if not exe:
+        return None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".jpg")
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-ss", "0.3", "-i", str(path), "-frames:v", "1", str(tmp)], timeout=60)
+    if not tmp.is_file():
+        procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(path), "-frames:v", "1", str(tmp)], timeout=60)
+    if not tmp.is_file():
+        return None
+    make_thumbnail(tmp, dest)
+    tmp.unlink(missing_ok=True)
+    return dest.relative_to(dest.parent.parent).as_posix()
+
+
+def _generation_values(params: dict[str, Any]) -> dict[str, Any]:
+    d = params.get("style_defaults") or {}
+    return {
+        "checkpoint": _first(params.get("checkpoint"), d.get("checkpoint")),
+        "positive_prompt": params["positive_prompt"],
+        "negative_prompt": params.get("negative_prompt") or "",
+        "width": _first(params.get("width"), d.get("width"), 1024),
+        "height": _first(params.get("height"), d.get("height"), 1024),
+        "batch_size": 1,
+        "seed": params.get("seed"),
+        "steps": _first(params.get("steps"), d.get("steps"), 30),
+        "cfg": _first(params.get("cfg"), d.get("cfg"), 6.5),
+        "sampler": _first(params.get("sampler"), d.get("sampler"), "dpmpp_2m"),
+        "scheduler": _first(params.get("scheduler"), d.get("scheduler"), "karras"),
+        "denoise": _first(params.get("strength"), 1.0 if not params.get("reference_asset_id") else 0.6),
+    }
 
 
 def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
-    project_id = job["project_id"]
-    template_name = params.get("template", "sdxl_txt2img")
-    workflow, spec = comfy_driver.load_template(template_name)
-    style_defaults = params.get("style_defaults", {})
-    checkpoint = params.get("checkpoint") or style_defaults.get("checkpoint")
-    values = {
-        "checkpoint": checkpoint,
-        "positive_prompt": params["positive_prompt"],
-        "negative_prompt": params.get("negative_prompt", ""),
-        "width": params.get("width") or style_defaults.get("width", 1024),
-        "height": params.get("height") or style_defaults.get("height", 1024),
-        "batch_size": 1,
-        "seed": params.get("seed", 0),
-        "steps": params.get("steps") or style_defaults.get("steps", 30),
-        "cfg": params.get("cfg") or style_defaults.get("cfg", 6.5),
-        "sampler": params.get("sampler") or style_defaults.get("sampler", "dpmpp_2m"),
-        "scheduler": params.get("scheduler") or style_defaults.get("scheduler", "karras"),
-        "denoise": params.get("strength", 1.0),
-    }
-    check_vram_or_wait(backend, spec)
-    object_info = _object_info(backend)
-    try:
-        comfy_driver.validate_against_object_info(spec, values, object_info)
-    except comfy_driver.ValidationError as exc:
-        raise EngineError("invalid_checkpoint", str(exc)) from exc
+    template = params.get("template") or ("sdxl_img2img" if params.get("reference_asset_id") else "sdxl_txt2img")
+    return run_template(
+        store, backend, job, progress, template_name=template, values=_generation_values(params),
+        operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
+        extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
+                      "matched_characters": params.get("matched_characters") or []},
+    )
 
-    reference_bytes = None
-    reference_name = None
-    if spec.get("requires_reference"):
-        ref_asset = store.get_asset(params["reference_asset_id"])
-        ref_path = store.data_dir / ref_asset["file_path"]
-        reference_bytes = ref_path.read_bytes()
-        reference_name = f"{ref_asset['id']}{ref_path.suffix}"
-        values["_ref_name"] = reference_name
 
-    count = params.get("count", 1)
-    assets = []
-    for i in range(count):
-        seed = values["seed"] + i
-        run_values = {**values, "seed": seed}
-        wf = comfy_driver.apply_params(workflow, spec, run_values)
-        if spec.get("requires_reference"):
-            ref_node, _, ref_input = spec["reference_node"].partition(".")
-            wf[ref_node]["inputs"][ref_input] = reference_name
-        progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count}")
-        _, outputs = _run_comfy_workflow(backend, wf, reference_bytes=reference_bytes, reference_name=reference_name)
-        for out in outputs:
-            data = _download_output(backend, out)
-            recipe = {
-                "operation": "generate_image", "backend": "comfyui", "template": template_name,
-                "checkpoint": checkpoint, "params": run_values, "created_at": now_iso(),
-            }
-            assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe))
-        reference_bytes = None  # already uploaded once
-    progress(0.95, "importing outputs")
-    return {"asset_ids": [a["id"] for a in assets], "assets": assets}
+_EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires"}
 
 
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
-    project_id = job["project_id"]
     operation = params["operation"]
-    src_asset = store.get_asset(params["asset_id"])
-    template_name = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires", "vary": "sdxl_img2img"}[operation]
-    workflow, spec = comfy_driver.load_template(template_name)
-    check_vram_or_wait(backend, spec)
-
-    ref_path = store.data_dir / src_asset["file_path"]
-    reference_bytes = ref_path.read_bytes()
-    reference_name = f"{src_asset['id']}{ref_path.suffix}"
-
+    src = store.get_asset(params["asset_id"])
+    if operation in ("reuse", "vary"):
+        return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
+                            count=params.get("count", 1))
+    template = _EDIT_TEMPLATES[operation]
+    src_params = (src.get("recipe") or {}).get("params") or {}
     values = {
-        "checkpoint": (src_asset.get("recipe") or {}).get("checkpoint", "sd_xl_base_1.0.safetensors"),
-        "positive_prompt": params.get("prompt", (src_asset.get("recipe") or {}).get("params", {}).get("positive_prompt", "")),
-        "negative_prompt": params.get("negative_prompt", ""),
-        "seed": params.get("seed", int(time.time()) % 100000),
-        "steps": params.get("steps", 30), "cfg": params.get("cfg", 6.5),
-        "sampler": params.get("sampler", "dpmpp_2m"), "scheduler": params.get("scheduler", "karras"),
-        "denoise": params.get("strength", 0.55),
-        "hires_width": params.get("width", 1536), "hires_height": params.get("height", 1536),
-        "hires_steps": params.get("hires_steps", 16), "hires_denoise": params.get("hires_denoise", 0.45),
+        "checkpoint": src_params.get("checkpoint"),
+        "positive_prompt": _first(params.get("prompt"), src_params.get("positive_prompt"), ""),
+        "negative_prompt": _first(params.get("negative_prompt"), src_params.get("negative_prompt"), ""),
+        "seed": params.get("seed"),
+        "steps": _first(params.get("steps"), src_params.get("steps"), 30),
+        "cfg": _first(params.get("cfg"), src_params.get("cfg"), 6.5),
+        "sampler": _first(params.get("sampler"), src_params.get("sampler"), "dpmpp_2m"),
+        "scheduler": _first(params.get("scheduler"), src_params.get("scheduler"), "karras"),
+        "denoise": _first(params.get("strength"), 0.55 if operation != "inpaint" else 0.9),
     }
+    if operation == "hires":
+        w, h = src.get("width") or 1024, src.get("height") or 1024
+        scale = 1.5
+        values.update({
+            "width": _first(params.get("base_width"), src_params.get("width"), w),
+            "height": _first(params.get("base_height"), src_params.get("height"), h),
+            "hires_width": _first(params.get("width"), int(round(w * scale / 64) * 64)),
+            "hires_height": _first(params.get("height"), int(round(h * scale / 64) * 64)),
+            "hires_steps": params.get("hires_steps") or 16, "hires_denoise": _first(params.get("strength"), 0.45),
+        })
+        if values["seed"] is None:
+            values["seed"] = src_params.get("seed")
+    return run_template(store, backend, job, progress, template_name=template, values=values,
+                        operation=f"edit_image:{operation}", count=params.get("count", 1),
+                        reference_asset_id=src["id"], mask_asset_id=params.get("mask_asset_id"))
 
-    mask_bytes = mask_name = None
-    if operation == "inpaint":
-        mask_asset = store.get_asset(params["mask_asset_id"])
-        mask_path = store.data_dir / mask_asset["file_path"]
-        mask_bytes = mask_path.read_bytes()
-        mask_name = f"{mask_asset['id']}{mask_path.suffix}"
 
-    count = params.get("count", 1)
-    assets = []
-    for i in range(count):
-        seed = values["seed"] + i
-        wf = comfy_driver.apply_params(workflow, spec, {**values, "seed": seed})
-        ref_node, _, ref_input = spec["reference_node"].partition(".")
-        wf[ref_node]["inputs"][ref_input] = reference_name
-        if operation == "inpaint":
-            mask_node, _, mask_input = spec["mask_node"].partition(".")
-            wf[mask_node]["inputs"][mask_input] = mask_name
-        progress(0.1 + 0.8 * i / count, f"editing {i + 1}/{count}")
-        _, outputs = _run_comfy_workflow(
-            backend, wf, reference_bytes=reference_bytes if i == 0 else None, reference_name=reference_name,
-            mask_bytes=mask_bytes if i == 0 else None, mask_name=mask_name,
-        )
-        for out in outputs:
-            data = _download_output(backend, out)
-            recipe = {
-                "operation": f"edit_image:{operation}", "backend": "comfyui", "template": template_name,
-                "input_asset_ids": [src_asset["id"]], "params": {**values, "seed": seed}, "created_at": now_iso(),
-            }
-            assets.append(_import_comfy_output(store, project_id, data, "image", recipe))
-    return {"asset_ids": [a["id"] for a in assets], "assets": assets}
+def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, src: dict[str, Any], vary: bool,
+                 seed: Optional[int] = None, count: int = 1) -> dict[str, Any]:
+    """"Reuse recipe" (same seed: reproduces the asset on the same backend)
+    or "vary seed" (same recipe, new seed)."""
+    recipe = src.get("recipe") or {}
+    if recipe.get("backend") != "comfyui" or not recipe.get("template"):
+        raise EngineError("not_reproducible", f"asset {src['id']} was not generated on ComfyUI ({recipe.get('operation') or src['source']}); "
+                                              "only generated images and animations can be re-run")
+    values = dict(recipe.get("params") or {})
+    if vary:
+        values["seed"] = seed if seed is not None else random_seed()
+    inputs = recipe.get("input_asset_ids") or []
+    ref = inputs[0] if inputs else None
+    mask = inputs[1] if len(inputs) > 1 else None
+    current = None
+    try:
+        workflow, spec = comfy_driver.load_template(recipe["template"], store.data_dir)
+        current = comfy_driver.template_hash(workflow, spec)
+    except comfy_driver.WorkflowError:
+        pass
+    result = run_template(
+        store, backend, job, progress, template_name=recipe["template"], values=values,
+        operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
+        reference_asset_id=ref, mask_asset_id=mask,
+        extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
+                      **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
+    )
+    if current and recipe.get("template_hash") and current != recipe["template_hash"]:
+        result["note"] = "the workflow template changed since this asset was made; the result may differ"
+    return result
 
 
 def animate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
-    project_id = job["project_id"]
-    src_asset = store.get_asset(params["asset_id"])
-    workflow, spec = comfy_driver.load_template("svd_img2vid")
-    check_vram_or_wait(backend, spec)
-    ref_path = store.data_dir / src_asset["file_path"]
-    reference_bytes = ref_path.read_bytes()
-    reference_name = f"{src_asset['id']}{ref_path.suffix}"
-    with Image.open(ref_path) as im:
-        width, height = im.size
+    src = store.get_asset(params["asset_id"])
+    if src["kind"] != "image":
+        raise EngineError("not_an_image", f"asset {src['id']} is {src['kind']}; animate needs an image")
+    width, height = _svd_size(src.get("width") or 1024, src.get("height") or 576)
+    frames = int(_first(params.get("frames"), 14))
+    fps = int(_first(params.get("fps"), 7))
+    motion = int(_first(params.get("motion"), 127))
+    if not 4 <= frames <= 50 or not 1 <= fps <= 30 or not 1 <= motion <= 255:
+        raise EngineError("bad_animation_params", "frames must be 4-50, fps 1-30 and motion 1-255")
     values = {
-        "checkpoint": "svd_xt.safetensors",
-        "width": min(width, 1024), "height": min(height, 576),
-        "frames": params.get("frames", 14), "fps": params.get("fps", 7),
-        "motion": params.get("motion", 127), "augmentation": 0.0,
-        "seed": params.get("seed", 0), "steps": 20, "cfg": 2.5,
+        "checkpoint": params.get("checkpoint") or "svd_xt.safetensors", "width": width, "height": height,
+        "frames": frames, "fps": fps, "motion": motion, "augmentation": 0.0,
+        "seed": params.get("seed"), "steps": 20, "cfg": 2.5,
     }
-    wf = comfy_driver.apply_params(workflow, spec, values)
-    ref_node, _, ref_input = spec["reference_node"].partition(".")
-    wf[ref_node]["inputs"][ref_input] = reference_name
-    progress(0.2, "animating")
-    _, outputs = _run_comfy_workflow(backend, wf, reference_bytes=reference_bytes, reference_name=reference_name, timeout_s=600.0)
-    assets = []
-    for out in outputs:
-        data = _download_output(backend, out)
-        webp_path = store.path_for_asset_file(new_id("a"), ".webp")
-        webp_path.write_bytes(data)
-        mp4_path = webp_path.with_suffix(".mp4")
-        _normalise_to_mp4(webp_path, mp4_path)
-        asset_id = mp4_path.stem
-        with Image.open(webp_path) as im:
-            n_frames = getattr(im, "n_frames", 1)
-        duration_s = n_frames / max(1, values["fps"])
-        recipe = {"operation": "animate", "backend": "comfyui", "template": "svd_img2vid",
-                  "input_asset_ids": [src_asset["id"]], "params": values, "created_at": now_iso()}
-        assets.append(store.create_asset(
-            project_id=project_id, kind="video", file_path=str(mp4_path.relative_to(store.data_dir)),
-            mime="video/mp4", width=values["width"], height=values["height"], duration_s=duration_s,
-            source="generated", recipe=recipe, asset_id=asset_id,
-        ))
-    return {"asset_ids": [a["id"] for a in assets], "assets": assets}
-
-
-def _normalise_to_mp4(src: Path, dest: Path) -> None:
-    ffmpeg = ffmpeg_path()
-    if not ffmpeg:
-        shutil.copyfile(src, dest.with_suffix(src.suffix))
-        return
-    subprocess.run([ffmpeg, "-y", "-i", str(src), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dest)],
-                   capture_output=True, check=True)
+    return run_template(store, backend, job, progress, template_name="svd_img2vid", values=values,
+                        operation="animate", reference_asset_id=src["id"])
 
 
 # ------------------------------------------------------------------ i/o --
 
 def make_thumbnail(src: Path, dest: Path, size: int = 512) -> None:
     with Image.open(src) as img:
-        img = img.convert("RGB")
+        img = ImageOps.exif_transpose(img)
+        if img.mode in ("RGBA", "LA", "P"):
+            rgba = img.convert("RGBA")
+            bg = Image.new("RGB", rgba.size, (18, 14, 22))
+            bg.paste(rgba, mask=rgba.split()[3])
+            img = bg
+        else:
+            img = img.convert("RGB")
         img.thumbnail((size, size))
         dest.parent.mkdir(parents=True, exist_ok=True)
         img.save(dest, format="WEBP", quality=85)
 
 
-def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
-                  original_name: Optional[str] = None) -> dict[str, Any]:
-    ext = Path(original_name or source_path).suffix.lower()
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_import_path(backend: Backend, store: Store, raw_path: str) -> Path:
+    """The only way a client-supplied path reaches the filesystem. The path
+    is made absolute (relative paths are taken from `data/inbox/`),
+    symlinks and `..` are resolved, and the result must be a regular file
+    inside one of the allowed import folders and outside the app's own
+    database/asset folders."""
+    if not isinstance(raw_path, str) or not raw_path.strip() or "\x00" in raw_path:
+        raise EngineError("bad_path", "give the absolute path of a local file")
+    candidate = Path(raw_path.strip().strip('"')).expanduser()
+    inbox = (store.data_dir / "inbox")
+    if not candidate.is_absolute():
+        inbox.mkdir(parents=True, exist_ok=True)
+        candidate = inbox / candidate
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise EngineError("file_not_found", f"no such file: {raw_path[:200]}") from None
+    if not resolved.is_file():
+        raise EngineError("not_a_file", f"{raw_path[:200]} is not a regular file")
+    roots = backend.import_roots()
+    if not any(_inside(resolved, r) for r in roots):
+        raise EngineError(
+            "outside_import_folders",
+            f"{resolved} is outside the folders Prospero may import from ({', '.join(str(r) for r in roots)}). "
+            "Move the file into one of them or add its folder in Settings > Import folders.",
+        )
+    data_root = store.data_dir.resolve()
+    if _inside(resolved, data_root) and not _inside(resolved, (data_root / "inbox")):
+        raise EngineError("inside_app_data", "files inside the app's own data folder cannot be imported (only data/inbox/)")
+    return resolved
+
+
+def _detect_kind(ext: str, kind_hint: Optional[str]) -> str:
+    inferred = next((k for k, exts in KIND_EXTS.items() if ext in exts), None)
     if kind_hint:
-        kind = kind_hint
-    elif ext in IMAGE_EXTS:
-        kind = "image"
-    elif ext in AUDIO_EXTS:
-        kind = "audio"
-    elif ext in VIDEO_EXTS:
-        kind = "video"
-    elif ext in (".lrc", ".txt"):
-        kind = "lyrics"
-    else:
-        raise EngineError("unsupported_kind", f"cannot infer asset kind from extension '{ext}'")
+        if kind_hint not in KIND_EXTS:
+            raise EngineError("unsupported_kind", f"kind must be one of {', '.join(KIND_EXTS)}")
+        if ext not in KIND_EXTS[kind_hint]:
+            raise EngineError("kind_mismatch", f"a '{ext or 'no extension'}' file cannot be imported as {kind_hint}; "
+                                               f"{kind_hint} files are {', '.join(sorted(KIND_EXTS[kind_hint]))}")
+        return kind_hint
+    if inferred is None:
+        allowed = sorted(set().union(*KIND_EXTS.values()))
+        raise EngineError("unsupported_kind", f"cannot import '{ext or 'no extension'}' files; supported: {', '.join(allowed)}")
+    return inferred
+
+
+def _validate_content(path: Path, kind: str) -> dict[str, Any]:
+    """Proves the bytes are what the extension claims (so an arbitrary file
+    renamed to .png or .lrc cannot be pulled into the library and served)."""
+    size = path.stat().st_size
+    info: dict[str, Any] = {}
+    if kind == "image":
+        if size > MAX_IMAGE_BYTES:
+            raise EngineError("too_large", f"images are limited to {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+        try:
+            with Image.open(path) as img:
+                if img.width * img.height > MAX_IMAGE_PIXELS:
+                    raise EngineError("too_large", f"image is {img.width}x{img.height}; the limit is {MAX_IMAGE_PIXELS // 1_000_000} megapixels")
+                img.verify()
+            with Image.open(path) as img:
+                info["format"] = (img.format or "").lower()
+                img = ImageOps.exif_transpose(img)
+                info["width"], info["height"] = img.size
+        except EngineError:
+            raise
+        except Exception:
+            raise EngineError("invalid_image", f"{path.name} is not a readable image") from None
+    elif kind in ("audio", "video"):
+        if size > MAX_MEDIA_BYTES:
+            raise EngineError("too_large", "audio and video files are limited to 2 GB")
+        duration = audio_mod.probe_duration_s(path)
+        if not duration:
+            raise EngineError(f"invalid_{kind}", f"{path.name} is not a readable {kind} file (ffmpeg could not read a duration)")
+        info["duration_s"] = duration
+    elif kind == "lyrics":
+        if size > MAX_LYRICS_BYTES:
+            raise EngineError("too_large", "lyrics files are limited to 512 KB")
+        try:
+            text = path.read_bytes().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise EngineError("invalid_lyrics", f"{path.name} is not UTF-8 text") from None
+        if "\x00" in text:
+            raise EngineError("invalid_lyrics", f"{path.name} is not a text file")
+        info["text"] = text
+    elif kind == "font":
+        if size > MAX_FONT_BYTES:
+            raise EngineError("too_large", "fonts are limited to 20 MB")
+        try:
+            from PIL import ImageFont
+
+            ImageFont.truetype(str(path), 20)
+        except Exception:
+            raise EngineError("invalid_font", f"{path.name} is not a TrueType/OpenType font") from None
+    return info
+
+
+_MIME = {"image": None, "audio": None, "video": None, "lyrics": "text/plain; charset=utf-8", "font": None}
+
+
+def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
+                 original_name: Optional[str] = None) -> dict[str, Any]:
+    """Copy an already-authorised local file (see resolve_import_path) or a
+    finished upload into the library."""
+    store.get_project(project_id)
+    name = Path(original_name or source_path.name).name
+    ext = Path(name).suffix.lower()
+    kind = _detect_kind(ext, kind_hint)
+    info = _validate_content(source_path, kind)
 
     asset_id = new_id("a")
-    dest = store.path_for_asset_file(asset_id, ext)
+    stored_ext = ".lrc" if kind == "lyrics" else ext
+    dest = store.path_for_asset_file(asset_id, stored_ext)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source_path, dest)
+    if kind == "lyrics":
+        dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
+    else:
+        shutil.copyfile(source_path, dest)
 
-    width = height = duration_s = None
     thumb_path = None
-    mime = {
-        "image": "image/png", "audio": "audio/mpeg", "video": "video/mp4", "lyrics": "text/plain",
-    }.get(kind)
-
+    mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
     if kind == "image":
-        with Image.open(dest) as img:
-            width, height = img.size
         thumb = store.path_for_thumb(asset_id)
         make_thumbnail(dest, thumb)
-        thumb_path = str(thumb.relative_to(store.data_dir))
-    elif kind == "audio":
-        duration_s = audio_mod.probe_duration_s(dest)
+        thumb_path = _rel(store, thumb)
+        mime = Image.MIME.get((info.get("format") or "").upper(), mime)
     elif kind == "video":
-        duration_s = audio_mod.probe_duration_s(dest)
+        thumb_path = _video_thumbnail(dest, store.path_for_thumb(asset_id))
+        info["width"], info["height"] = _probe_video_size(dest)
+    elif kind == "audio":
+        mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
 
-    return store.create_asset(
-        project_id=project_id, kind=kind, file_path=str(dest.relative_to(store.data_dir)), mime=mime,
-        width=width, height=height, duration_s=duration_s, thumb_path=thumb_path, source="import",
-        asset_id=asset_id,
+    asset = store.create_asset(
+        project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
+        width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
+        source="import", asset_id=asset_id, name=name,
     )
+    if kind == "audio":
+        try:
+            samples = audio_mod.decode_to_mono(dest)
+            store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples))
+            asset = store.get_asset(asset_id)
+        except audio_mod.DecodeError:
+            pass
+    return asset
+
+
+def create_lyrics(store: Store, project_id: str, text: str, name: Optional[str] = None) -> dict[str, Any]:
+    store.get_project(project_id)
+    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_LYRICS_BYTES:
+        raise EngineError("bad_lyrics", "lyrics must be text of at most 512 KB")
+    asset_id = new_id("a")
+    dest = store.path_for_asset_file(asset_id, ".lrc")
+    dest.write_text(text.replace("\r\n", "\n"), encoding="utf-8")
+    return store.create_asset(project_id=project_id, kind="lyrics", file_path=_rel(store, dest),
+                              mime="text/plain; charset=utf-8", source="derived", asset_id=asset_id,
+                              name=(name or "Lyrics")[:120])
+
+
+def save_lyrics(store: Store, asset_id: str, text: str) -> dict[str, Any]:
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "lyrics":
+        raise EngineError("not_lyrics", f"asset {asset_id} is {asset['kind']}; only lyrics assets can be edited as text")
+    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_LYRICS_BYTES:
+        raise EngineError("bad_lyrics", "lyrics must be text of at most 512 KB")
+    (store.data_dir / asset["file_path"]).write_text(text.replace("\r\n", "\n"), encoding="utf-8")
+    return {"asset_id": asset_id, "lines": audio_mod.parse_lrc(text), "lrc": text}
+
+
+def read_lyrics(store: Store, asset_id: str) -> dict[str, Any]:
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "lyrics":
+        raise EngineError("not_lyrics", f"asset {asset_id} is {asset['kind']}, not lyrics")
+    text = (store.data_dir / asset["file_path"]).read_text(encoding="utf-8")
+    return {"asset_id": asset_id, "text": text, "lines": audio_mod.parse_lrc(text)}
 
 
 # --------------------------------------------------------------- design --
 
 def _asset_resolver(store: Store):
     def resolve(asset_id: Optional[str]) -> Optional[Path]:
-        if not asset_id:
+        if not asset_id or not isinstance(asset_id, str):
             return None
         try:
             asset = store.get_asset(asset_id)
         except NotFound:
             return None
+        if asset["kind"] != "image":
+            return None
         return store.data_dir / asset["file_path"]
     return resolve
 
 
+def _check_design_fields(store: Store, template: str, fields: dict[str, Any]) -> dict[str, Any]:
+    spec = design_templates.TEMPLATE_FIELDS.get(template)
+    if spec is None:
+        raise EngineError("unknown_template",
+                          f"unknown design template '{template}'; use one of {', '.join(design_templates.TEMPLATE_FIELDS)}")
+    if not isinstance(fields, dict):
+        raise EngineError("bad_fields", "fields must be an object")
+    clean = {}
+    internal = {"holo_seed", "monogram"}
+    for key, value in fields.items():
+        if key not in spec and key not in internal:
+            raise EngineError("unknown_field", f"template '{template}' has no field '{key}'. Fields: {design_templates.fields_hint(template)}")
+        if value is None or value == "":
+            continue
+        ftype = spec.get(key, ("text",))[0]
+        if ftype == "image":
+            try:
+                asset = store.get_asset(str(value))
+            except NotFound:
+                raise EngineError("unknown_asset", f"field '{key}': asset '{value}' does not exist") from None
+            if asset["kind"] != "image":
+                raise EngineError("not_an_image", f"field '{key}': asset {value} is {asset['kind']}, not an image")
+        elif ftype == "colour":
+            try:
+                design._hex(value)
+            except design.DesignError as exc:
+                raise EngineError("bad_colour", f"field '{key}': {exc}") from None
+        else:
+            value = str(value)[:2000]
+        clean[key] = value
+    missing = [f for f, (_, required, _) in spec.items() if required and f not in clean and f not in ("image", "cover_image")]
+    if missing:
+        raise EngineError("missing_fields", f"template '{template}' needs: {', '.join(missing)}. Fields: {design_templates.fields_hint(template)}")
+    return clean
+
+
 def render_design(store: Store, project_id: str, template: str, fields: dict[str, Any], variant: Optional[str] = None,
-                   print_mode: bool = False) -> dict[str, Any]:
-    layout = design_templates.get_layout(template, variant)
+                  print_mode: bool = False) -> dict[str, Any]:
+    store.get_project(project_id)
+    fields = _check_design_fields(store, template, fields)
+    try:
+        layout = design_templates.get_layout(template, variant)
+    except ValueError as exc:
+        raise EngineError("bad_variant", str(exc)) from None
+    started = time.monotonic()
     img = design.render_layout(layout, fields, _asset_resolver(store))
     data = design.image_bytes(img, print_mode=print_mode)
     asset_id = new_id("a")
     dest = store.path_for_asset_file(asset_id, ".png")
     dest.write_bytes(data)
     make_thumbnail(dest, store.path_for_thumb(asset_id))
-    recipe = {"operation": "design", "template": template, "variant": variant, "fields": fields, "created_at": now_iso()}
+    with Image.open(dest) as out:
+        width, height = out.size
+    input_ids = [v for k, v in fields.items() if design_templates.TEMPLATE_FIELDS[template].get(k, ("text",))[0] == "image"]
+    recipe = {"operation": "design", "template": template, "variant": variant, "fields": fields, "print": print_mode,
+              "input_asset_ids": input_ids, "elapsed_s": round(time.monotonic() - started, 2), "created_at": now_iso()}
+    title = fields.get("member_name") or fields.get("title") or fields.get("quote") or fields.get("group_name") or template
     return store.create_asset(
-        project_id=project_id, kind="image", file_path=str(dest.relative_to(store.data_dir)), mime="image/png",
-        width=img.width, height=img.height, thumb_path=str(store.path_for_thumb(asset_id).relative_to(store.data_dir)),
-        source="rendered", recipe=recipe, asset_id=asset_id,
+        project_id=project_id, kind="image", file_path=_rel(store, dest), mime="image/png", width=width, height=height,
+        thumb_path=_rel(store, store.path_for_thumb(asset_id)), source="rendered", recipe=recipe, asset_id=asset_id,
+        name=_clip(f"{template.replace('_', ' ')} - {title}", 80), tags=[template],
     )
 
 
-def contact_sheet(store: Store, image_paths: list[Path], cols: int = 3, cell: int = 320) -> bytes:
-    rows = (len(image_paths) + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * cell, rows * cell), (18, 16, 22))
-    for i, path in enumerate(image_paths):
-        with Image.open(path) as img:
-            img = img.convert("RGB")
-            img.thumbnail((cell - 16, cell - 16))
-            x = (i % cols) * cell + (cell - img.width) // 2
-            y = (i // cols) * cell + (cell - img.height) // 2
-            sheet.paste(img, (x, y))
+def preview_design(store: Store, template: str, fields: dict[str, Any], variant: Optional[str] = None, max_side: int = 720) -> bytes:
+    """Reduced-size JPEG of a layout for the Designer's live preview. Nothing
+    is stored."""
+    fields = _check_design_fields(store, template, {k: v for k, v in (fields or {}).items() if v not in (None, "")} or {})
+    layout = design_templates.get_layout(template, variant)
+    scale = min(1.0, max_side / max(layout["width"], layout["height"]))
+    img = design.render_layout(_scale_layout(layout, scale), fields, _asset_resolver(store))
+    bg = Image.new("RGB", img.size, (18, 14, 22))
+    bg.paste(img, mask=img.split()[3])
     buf = io.BytesIO()
-    sheet.save(buf, format="PNG")
+    bg.save(buf, format="JPEG", quality=86)
     return buf.getvalue()
 
 
+def _scale_layout(layout: dict[str, Any], s: float) -> dict[str, Any]:
+    if s >= 0.999:
+        return layout
+    out = json.loads(json.dumps(layout))
+    out["width"] = max(1, int(layout["width"] * s))
+    out["height"] = max(1, int(layout["height"] * s))
+    if out.get("radius"):
+        out["radius"] = max(1, int(out["radius"] * s))
+    for layer in out["layers"]:
+        for key in ("x", "y", "w", "h", "size", "radius", "width", "inset"):
+            if isinstance(layer.get(key), (int, float)) and not isinstance(layer.get(key), bool):
+                layer[key] = max(1, int(layer[key] * s)) if layer[key] else 0
+        if isinstance(layer.get("shadow"), dict):
+            layer["shadow"] = {**layer["shadow"], "dx": int(layer["shadow"].get("dx", 0) * s), "dy": int(layer["shadow"].get("dy", 4) * s)}
+    return out
+
+
+def contact_sheet(image_paths: list[Path], cols: int = 3, cell: int = 320, labels: Optional[list[str]] = None) -> Image.Image:
+    cols = max(1, min(cols, len(image_paths) or 1))
+    rows = (len(image_paths) + cols - 1) // cols
+    label_h = 26 if labels else 0
+    sheet = Image.new("RGB", (cols * cell, rows * (cell + label_h)), (18, 14, 22))
+    draw = ImageDraw.Draw(sheet)
+    for i, path in enumerate(image_paths):
+        with Image.open(path) as img:
+            img = img.convert("RGBA")
+            img.thumbnail((cell - 16, cell - 16))
+            x = (i % cols) * cell + (cell - img.width) // 2
+            y = (i // cols) * (cell + label_h) + (cell - img.height) // 2
+            flat = Image.new("RGB", img.size, (18, 14, 22))
+            flat.paste(img, mask=img.split()[3])
+            sheet.paste(flat, (x, y))
+        if labels:
+            lx = (i % cols) * cell + 8
+            ly = (i // cols) * (cell + label_h) + cell - 2
+            draw.text((lx, ly), labels[i][:40], fill=(235, 225, 240), font=design.get_font("space-grotesk", 16))
+    return sheet
+
+
+def _save_sheet(store: Store, project_id: str, sheet: Image.Image, recipe: dict[str, Any], name: str) -> dict[str, Any]:
+    sheet_id = new_id("a")
+    path = store.path_for_asset_file(sheet_id, ".png")
+    sheet.save(path, format="PNG")
+    make_thumbnail(path, store.path_for_thumb(sheet_id))
+    return store.create_asset(
+        project_id=project_id, kind="image", file_path=_rel(store, path), mime="image/png", width=sheet.width,
+        height=sheet.height, thumb_path=_rel(store, store.path_for_thumb(sheet_id)), source="rendered", recipe=recipe,
+        asset_id=sheet_id, name=name, tags=["contact_sheet"],
+    )
+
+
+def _best_image_for(store: Store, project_id: str, char: dict[str, Any]) -> Optional[str]:
+    """The member's canonical reference, else their best-rated generated
+    image that mentions them, else None."""
+    if char.get("canonical_asset_id"):
+        return char["canonical_asset_id"]
+    for ref in char.get("reference_asset_ids") or []:
+        return ref
+    candidates = store.list_assets(project_id=project_id, kind="image", query=char["name"], limit=30,
+                                   exclude_sources=("rendered",))["items"]
+    if candidates:
+        return sorted(candidates, key=lambda a: (-(a.get("rating") or 0), a["created_at"]))[0]["id"]
+    return None
+
+
 def photocard_set(store: Store, project_id: str, group_id: str, template_front: str = "photocard_front",
-                   template_back: str = "photocard_back", image_asset_ids: Optional[dict[str, str]] = None) -> dict[str, Any]:
+                  template_back: str = "photocard_back", image_asset_ids: Optional[dict[str, str]] = None) -> dict[str, Any]:
     group = store.get_group(group_id)
+    if group["project_id"] != project_id:
+        raise EngineError("wrong_project", f"group {group_id} belongs to another project")
+    if not group["member_ids"]:
+        raise EngineError("empty_group", f"group '{group['name']}' has no members; add member_ids with studio_cast")
     image_asset_ids = image_asset_ids or {}
-    assets = []
-    for member_id in group["member_ids"]:
+    monogram = "".join(w[0] for w in group["name"].split()[:3]).upper()
+    fronts, backs, skipped = [], [], []
+    total = len(group["member_ids"])
+    for idx, member_id in enumerate(group["member_ids"], start=1):
         char = store.get_character(member_id)
-        image_id = image_asset_ids.get(member_id) or char.get("canonical_asset_id")
+        image_id = image_asset_ids.get(member_id) or _best_image_for(store, project_id, char)
         if not image_id:
-            candidates = store.list_assets(project_id=project_id, kind="image", limit=1)["items"]
-            image_id = candidates[0]["id"] if candidates else None
-        if not image_id:
+            skipped.append(char["name"])
             continue
-        front = render_design(store, project_id, template_front, {
-            "image": image_id, "member_name": char["name"], "role": char.get("role") or "",
-            "accent": (char.get("palette") or ["#ff4d8d"])[0],
-        })
-        back = render_design(store, project_id, template_back, {
-            "group_logo": group.get("logo_asset_id"), "member_name": char["name"],
-            "serial": f"No. {len(assets) // 2 + 1:03d}/250", "message": char.get("bio") or "",
-            "accent": (char.get("palette") or ["#ff4d8d"])[0],
-        })
-        assets.append(front)
-        assets.append(back)
-    if not assets:
+        accent = (char.get("palette") or group.get("colours") or ["#ff4d8d"])[0]
+        front_fields = {"image": image_id, "member_name": char["name"], "role": char.get("role") or "",
+                        "group_name": group["name"], "accent": accent}
+        back_fields = {"member_name": char["name"], "group_name": group["name"],
+                       "message": (char.get("bio") or f"Thank you for loving {group['name']}.")[:160],
+                       "serial": f"No. {idx:03d}/{max(total, 1):03d}", "accent": accent}
+        if group.get("logo_asset_id"):
+            back_fields["group_logo"] = group["logo_asset_id"]
+        else:
+            back_fields["monogram"] = monogram
+        fronts.append(render_design(store, project_id, template_front,
+                                    {k: v for k, v in front_fields.items() if k in design_templates.TEMPLATE_FIELDS.get(template_front, {})}))
+        backs.append(render_design(store, project_id, template_back,
+                                   {k: v for k, v in back_fields.items()
+                                    if k in design_templates.TEMPLATE_FIELDS.get(template_back, {}) or k == "monogram"}))
+    if not fronts:
         raise EngineError(
             "no_reference_images",
-            "no group member has a canonical reference image or an available project image; "
-            "generate or import at least one image, or pass image_asset_ids explicitly",
+            "no group member has a canonical reference image or a generated image mentioning them; "
+            "generate one per member (e.g. studio_generate_image with '@Name portrait'), set canonical_asset_id, "
+            "or pass image_asset_ids {character_id: asset_id}",
         )
-    sheet_paths = [store.data_dir / a["file_path"] for a in assets]
-    sheet_bytes = contact_sheet(store, sheet_paths, cols=4)
-    sheet_id = new_id("a")
-    sheet_path = store.path_for_asset_file(sheet_id, ".png")
-    sheet_path.write_bytes(sheet_bytes)
-    sheet_asset = store.create_asset(
-        project_id=project_id, kind="image", file_path=str(sheet_path.relative_to(store.data_dir)), mime="image/png",
-        source="rendered", recipe={"operation": "photocard_set", "group_id": group_id, "created_at": now_iso()},
-        asset_id=sheet_id,
-    )
-    return {"asset_ids": [a["id"] for a in assets], "assets": assets, "contact_sheet": sheet_asset}
+    ordered = [a for pair in zip(fronts, backs) for a in pair]
+    sheet = contact_sheet([store.data_dir / a["file_path"] for a in ordered], cols=min(4, len(ordered)), cell=360,
+                          labels=[a["name"] or "" for a in ordered])
+    sheet_asset = _save_sheet(store, project_id, sheet,
+                              {"operation": "photocard_set", "group_id": group_id, "input_asset_ids": [a["id"] for a in ordered],
+                               "created_at": now_iso()}, f"{group['name']} photocard set")
+    result = {"asset_ids": [a["id"] for a in ordered], "front_ids": [a["id"] for a in fronts],
+              "back_ids": [a["id"] for a in backs], "contact_sheet_id": sheet_asset["id"]}
+    if skipped:
+        result["skipped_members"] = skipped
+        result["note"] = f"no image for {', '.join(skipped)}; generate one and run again"
+    return result
 
 
 # ---------------------------------------------------------------- audio --
 
-def analyze_audio(store: Store, asset_id: str) -> dict[str, Any]:
+def analyze_audio(store: Store, asset_id: str, force: bool = False) -> dict[str, Any]:
     asset = store.get_asset(asset_id)
+    if asset["kind"] not in ("audio", "video"):
+        raise EngineError("not_audio", f"asset {asset_id} is {asset['kind']}; analysis needs an audio (or video) asset")
+    if asset.get("analysis") and not force and asset["analysis"].get("version") == ANALYSIS_VERSION:
+        return asset["analysis"]
     path = store.data_dir / asset["file_path"]
-    samples = audio_mod.decode_to_mono(path)
+    try:
+        samples = audio_mod.decode_to_mono(path)
+    except audio_mod.DecodeError as exc:
+        raise EngineError("decode_failed", f"could not decode {asset.get('name') or asset_id}: {exc}") from None
     result = audio_mod.analyze_samples(samples)
-    peaks = audio_mod.waveform_peaks(samples)
-    store.update_asset(asset_id, notes=asset.get("notes"))
-    store.conn.execute(
-        "UPDATE assets SET waveform_json=?, duration_s=? WHERE id=?",
-        (__import__("json").dumps(peaks), result["duration_s"], asset_id),
-    )
-    store.conn.commit()
+    result["version"] = ANALYSIS_VERSION
+    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=result["duration_s"])
     return result
+
+
+ANALYSIS_VERSION = 2
+
+
+def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) -> dict[str, Any]:
+    beats = analysis.get("beat_times") or []
+    downs = analysis.get("downbeats") or []
+    return {
+        "asset_id": asset_id, "duration_s": analysis.get("duration_s"), "tempo_bpm": analysis.get("tempo_bpm"),
+        "beat_count": len(beats), "beat_times": beats[:max_beats], "beats_truncated": len(beats) > max_beats,
+        "downbeats": downs[: max_beats // 4], "sections": analysis.get("sections") or [], "notes": analysis.get("notes"),
+    }
 
 
 def voice_line(store: Store, backend: Backend, project_id: str, text: str, character_id: Optional[str] = None,
                voice_override: Optional[str] = None, speed: Optional[float] = None) -> dict[str, Any]:
+    store.get_project(project_id)
+    if not isinstance(text, str) or not text.strip():
+        raise EngineError("empty_text", "give the line to speak")
+    if len(text) > 1500:
+        raise EngineError("text_too_long", "a voice line is limited to 1500 characters; split longer text")
     voice_cfg: dict[str, Any] = {}
+    char_name = None
     if character_id:
         char = store.get_character(character_id)
+        char_name = char["name"]
         voice_cfg = dict(char.get("voice") or {})
     if voice_override:
         voice_cfg["voice_id"] = voice_override
+        voice_cfg.setdefault("backend", "piper")
     if speed:
-        voice_cfg["speed"] = speed
+        if not 0.5 <= float(speed) <= 2.0:
+            raise EngineError("bad_speed", "speed must be between 0.5 and 2.0")
+        voice_cfg["speed"] = float(speed)
     voices_dir = store.data_dir / "voices"
-    wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text, voice_cfg)
+    try:
+        wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text.strip(), voice_cfg)
+    except voices_mod.VoiceError as exc:
+        raise EngineError(exc.code, str(exc)) from None
     asset_id = new_id("a")
     dest = store.path_for_asset_file(asset_id, ".wav")
     dest.write_bytes(wav_bytes)
     duration_s = audio_mod.probe_duration_s(dest)
-    recipe = {"operation": "voice", "provider": provider, "text": text, "voice": voice_cfg, "created_at": now_iso()}
-    return store.create_asset(
-        project_id=project_id, kind="audio", file_path=str(dest.relative_to(store.data_dir)), mime="audio/wav",
+    recipe = {"operation": "voice", "provider": provider, "text": text, "voice": voice_cfg, "character_id": character_id,
+              "created_at": now_iso()}
+    asset = store.create_asset(
+        project_id=project_id, kind="audio", file_path=_rel(store, dest), mime="audio/wav",
         duration_s=duration_s, source="generated", recipe=recipe, asset_id=asset_id,
+        name=_clip(f"{char_name + ': ' if char_name else ''}{text.strip()}", 80), tags=["voice"],
     )
+    try:
+        store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(audio_mod.decode_to_mono(dest)))
+    except audio_mod.DecodeError:
+        pass
+    return store.get_asset(asset_id)
 
 
 # ------------------------------------------------------------- timeline --
 
-def timeline_auto(store: Store, project_id: str, song_asset_id: str, asset_ids: Optional[list[str]],
-                   board_id: Optional[str], aspect: str, lyrics_asset_id: Optional[str],
-                   options: Optional[dict[str, Any]]) -> dict[str, Any]:
-    song = store.get_asset(song_asset_id)
-    if not song.get("waveform") or song.get("duration_s") is None:
-        analyze_audio(store, song_asset_id)
-        song = store.get_asset(song_asset_id)
-    analysis = analyze_audio(store, song_asset_id)  # cheap enough to redo for fresh beat/section data
-
+def _pool(store: Store, project_id: str, asset_ids: Optional[list[str]], board_id: Optional[str]) -> list[dict[str, Any]]:
     if asset_ids:
-        pool = [store.get_asset(a) for a in asset_ids]
+        pool = []
+        for a in asset_ids:
+            asset = store.get_asset(a)
+            if asset["project_id"] != project_id:
+                raise EngineError("wrong_project", f"asset {a} belongs to another project")
+            pool.append(asset)
     elif board_id:
         board = store.get_board(board_id)
-        pool = [store.get_asset(item["asset_id"]) for item in board["items"] if "asset_id" in item]
+        pool = [store.get_asset(item["asset_id"]) for item in board["items"]]
     else:
-        pool = store.list_assets(project_id=project_id, kind="image", limit=60)["items"]
+        # generated/imported pictures and clips; rendered designs (cards,
+        # covers, contact sheets) only when asked for explicitly
+        pool = [a for a in store.list_assets(project_id=project_id, limit=60, exclude_sources=("rendered",))["items"]
+                if a["kind"] in ("image", "video")]
     pool = [a for a in pool if a["kind"] in ("image", "video")]
     if not pool:
-        raise EngineError("empty_pool", "no image/video assets available to build a timeline from")
+        raise EngineError("empty_pool", "no image or video assets to cut; generate or import some, or pass asset_ids / board_id")
+    return pool
 
+
+def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], asset_ids: Optional[list[str]],
+                  board_id: Optional[str], aspect: str, lyrics_asset_id: Optional[str],
+                  options: Optional[dict[str, Any]]) -> dict[str, Any]:
+    store.get_project(project_id)
+    if not song_asset_id:
+        raise EngineError("song_required", "action 'auto' needs song_asset_id (an audio asset)")
+    if aspect not in timeline_mod.ASPECTS:
+        raise EngineError("bad_aspect", f"aspect must be one of {', '.join(timeline_mod.ASPECTS)}")
+    song = store.get_asset(song_asset_id)
+    if song["kind"] != "audio":
+        raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
+    analysis = analyze_audio(store, song_asset_id)
+    pool = _pool(store, project_id, asset_ids, board_id)
     lyrics_lines = None
     if lyrics_asset_id:
-        lyrics_asset = store.get_asset(lyrics_asset_id)
-        text = (store.data_dir / lyrics_asset["file_path"]).read_text(encoding="utf-8")
-        lyrics_lines = audio_mod.parse_lrc(text)
+        lyrics_lines = read_lyrics(store, lyrics_asset_id)["lines"]
+        if not lyrics_lines:
+            raise EngineError("lyrics_untimed", "the lyrics have no [mm:ss.xx] timestamps; time them in Audio > Lyrics first")
+    try:
+        built = timeline_mod.build_auto_cut(
+            analysis["duration_s"], analysis["beat_times"], analysis["sections"], pool,
+            options=options or {}, lyrics_lines=lyrics_lines, downbeats=analysis.get("downbeats"),
+        )
+    except timeline_mod.TimelineError as exc:
+        raise EngineError("bad_options", str(exc)) from None
+    fps = int((options or {}).get("fps", 30))
+    if fps not in (24, 25, 30):
+        raise EngineError("bad_fps", "fps must be 24, 25 or 30")
+    width, height = timeline_mod.ASPECTS[aspect]
+    return store.create_timeline(project_id, name=f"Auto-cut - {song.get('name') or song['id']}"[:100], aspect=aspect,
+                                 fps=fps, width=width, height=height, audio_asset_id=song_asset_id, tracks=built["tracks"])
 
-    built = timeline_mod.build_auto_cut(
-        analysis["duration_s"], analysis["beat_times"], analysis["sections"], pool,
-        options=options or {}, lyrics_lines=lyrics_lines,
-    )
-    tl = store.create_timeline(project_id, name=f"Auto-cut {song['id']}", aspect=aspect,
-                                audio_asset_id=song_asset_id, tracks=built["tracks"])
-    return tl
+
+def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    tl = store.get_timeline(timeline_id)
+    if not isinstance(patch, dict) or not patch:
+        raise EngineError("empty_patch", "patch needs at least one of: name, aspect, fps, audio_asset_id, clip_updates, tracks")
+    allowed = {"name", "aspect", "fps", "audio_asset_id", "clip_updates", "tracks", "lyrics_asset_id", "karaoke"}
+    unknown = set(patch) - allowed
+    if unknown:
+        raise EngineError("unknown_patch_field", f"unknown patch field(s): {', '.join(sorted(unknown))}; allowed: {', '.join(sorted(allowed))}")
+    fields: dict[str, Any] = {}
+    tracks = tl["tracks"]
+    try:
+        if "tracks" in patch:
+            tracks = patch["tracks"]
+        if "clip_updates" in patch:
+            tracks = timeline_mod.apply_clip_updates(tracks, patch["clip_updates"])
+        if "lyrics_asset_id" in patch:
+            others = [t for t in tracks if t["type"] != "lyrics"]
+            if patch["lyrics_asset_id"]:
+                lines = read_lyrics(store, patch["lyrics_asset_id"])["lines"]
+                duration = sum(c["duration_s"] for c in next(t for t in tracks if t["type"] == "visual")["clips"])
+                others.append({"type": "lyrics", "clips": timeline_mod.lyrics_clips_from_lines(lines, duration, bool(patch.get("karaoke")))})
+            tracks = others
+        elif "karaoke" in patch:
+            tracks = [dict(t, clips=[dict(c, karaoke=bool(patch["karaoke"])) for c in t["clips"]]) if t["type"] == "lyrics" else t
+                      for t in tracks]
+
+        def lookup(aid: str) -> Optional[dict[str, Any]]:
+            try:
+                a = store.get_asset(aid)
+            except NotFound:
+                return None
+            return a if a["project_id"] == tl["project_id"] else None
+
+        fields["tracks"] = timeline_mod.normalise_tracks(tracks, lookup)
+    except timeline_mod.TimelineError as exc:
+        raise EngineError("bad_timeline", str(exc)) from None
+    if "name" in patch:
+        if not str(patch["name"]).strip():
+            raise EngineError("bad_name", "name cannot be empty")
+        fields["name"] = str(patch["name"]).strip()[:100]
+    if "aspect" in patch:
+        if patch["aspect"] not in timeline_mod.ASPECTS:
+            raise EngineError("bad_aspect", f"aspect must be one of {', '.join(timeline_mod.ASPECTS)}")
+        fields["aspect"] = patch["aspect"]
+        fields["width"], fields["height"] = timeline_mod.ASPECTS[patch["aspect"]]
+    if "fps" in patch:
+        if patch["fps"] not in (24, 25, 30):
+            raise EngineError("bad_fps", "fps must be 24, 25 or 30")
+        fields["fps"] = patch["fps"]
+    if "audio_asset_id" in patch:
+        if patch["audio_asset_id"]:
+            a = store.get_asset(patch["audio_asset_id"])
+            if a["kind"] != "audio":
+                raise EngineError("not_audio", "audio_asset_id must be an audio asset")
+        fields["audio_asset_id"] = patch["audio_asset_id"] or ""
+    return store.update_timeline(timeline_id, **fields)
 
 
 def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
@@ -569,102 +1197,205 @@ def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], pro
     tl = store.get_timeline(timeline_id)
 
     def asset_path_for(asset_id: str) -> Path:
-        return store.data_dir / store.get_asset(asset_id)["file_path"]
+        asset = store.get_asset(asset_id)
+        return store.data_dir / asset["file_path"]
 
     work_dir = store.data_dir / "tmp" / job["id"]
     out_id = new_id("a")
     out_path = store.path_for_asset_file(out_id, ".mp4")
-
-    def on_progress(frac: float, msg: Optional[str]) -> None:
-        progress(frac, msg)
-
-    result = video_mod.render_timeline(tl, asset_path_for, work_dir, out_path, quality=quality, progress=on_progress)
-    shutil.rmtree(work_dir, ignore_errors=True)
-    recipe = {"operation": "render", "timeline_id": timeline_id, "quality": quality, "created_at": now_iso()}
+    started = time.monotonic()
+    try:
+        result = video_mod.render_timeline(tl, asset_path_for, work_dir, out_path, quality=quality, progress=progress,
+                                           should_cancel=getattr(progress, "cancelled", None))
+    except video_mod.RenderCancelled:
+        out_path.unlink(missing_ok=True)
+        raise JobCancelled("cancelled") from None
+    except video_mod.RenderError as exc:
+        out_path.unlink(missing_ok=True)
+        raise EngineError("render_failed", str(exc)) from None
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    thumb = _video_thumbnail(out_path, store.path_for_thumb(out_id))
+    recipe = {"operation": "render", "timeline_id": timeline_id, "quality": quality, "timeline_updated_at": tl["updated_at"],
+              "elapsed_s": round(time.monotonic() - started, 2), "created_at": now_iso()}
     asset = store.create_asset(
-        project_id=tl["project_id"], kind="video", file_path=str(out_path.relative_to(store.data_dir)),
+        project_id=tl["project_id"], kind="video", file_path=_rel(store, out_path),
         mime="video/mp4", width=result["width"], height=result["height"], duration_s=result["duration_s"],
-        source="rendered", recipe=recipe, asset_id=out_id,
+        thumb_path=thumb, source="rendered", recipe=recipe, asset_id=out_id,
+        name=_clip(f"{tl['name']} ({quality})", 100), tags=["render", quality],
     )
-    return {"asset_id": asset["id"], "asset": asset}
+    return {"asset_id": asset["id"], "asset_ids": [asset["id"]], "duration_s": result["duration_s"]}
 
 
 # --------------------------------------------------------------- lineage
 
-def get_lineage(store: Store, asset_id: str) -> dict[str, Any]:
+def get_lineage(store: Store, asset_id: str, depth: int = 3) -> dict[str, Any]:
+    """The recipe of an asset plus (compactly) the recipes of its inputs, up
+    to `depth` levels, so "how was this card made" answers in one call."""
     asset = store.get_asset(asset_id)
-    return {"asset_id": asset_id, "recipe": asset.get("recipe"), "source": asset["source"]}
+    recipe = asset.get("recipe")
+    out: dict[str, Any] = {"asset_id": asset_id, "kind": asset["kind"], "source": asset["source"], "recipe": recipe}
+    if recipe and recipe.get("backend") == "comfyui":
+        out["reproduce"] = {"tool": "studio_edit_image", "args": {"asset_id": asset_id, "operation": "reuse"},
+                            "vary": {"asset_id": asset_id, "operation": "vary"}}
+    if depth > 0 and recipe:
+        inputs = []
+        for iid in (recipe.get("input_asset_ids") or [])[:6]:
+            try:
+                inp = get_lineage(store, iid, depth - 1)
+            except NotFound:
+                inputs.append({"asset_id": iid, "missing": True})
+                continue
+            r = inp.get("recipe") or {}
+            inputs.append({"asset_id": iid, "source": inp["source"], "operation": r.get("operation"),
+                           "template": r.get("template"), "seed": (r.get("params") or {}).get("seed")})
+        if inputs:
+            out["inputs"] = inputs
+    return out
 
 
 # ------------------------------------------------------------------ show
 
+def _jpeg_under(img: Image.Image, max_bytes: int = SHOW_MAX_BYTES) -> bytes:
+    img = img.convert("RGB")
+    for quality in (85, 75, 65, 55):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        if buf.tell() <= max_bytes:
+            return buf.getvalue()
+    while True:
+        img = img.resize((max(64, img.width * 3 // 4), max(64, img.height * 3 // 4)))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=60)
+        if buf.tell() <= max_bytes or img.width <= 64:
+            return buf.getvalue()
+
+
+def _flatten(path: Path) -> Image.Image:
+    with Image.open(path) as img:
+        img = ImageOps.exif_transpose(img).convert("RGBA")
+    bg = Image.new("RGB", img.size, (18, 14, 22))
+    bg.paste(img, mask=img.split()[3])
+    return bg
+
+
 def show_assets(store: Store, asset_ids: list[str], size: int = 768) -> list[dict[str, Any]]:
-    out = []
-    for asset_id in asset_ids:
-        asset = store.get_asset(asset_id)
+    """Images for the model: up to 4 separate images, or one labelled contact
+    sheet when more are asked for; a video becomes a 3-frame strip, audio a
+    waveform picture. Each JPEG stays under ~200 KB."""
+    size = max(128, min(int(size), 1024))
+    ids = [a.strip() for a in asset_ids if a and a.strip()]
+    if not ids:
+        raise EngineError("no_assets", "pass one or more asset ids")
+    if len(ids) > 24:
+        raise EngineError("too_many", "studio_show takes at most 24 asset ids (more would be unreadable in one sheet)")
+    assets = [store.get_asset(a) for a in ids]
+    pictures: list[tuple[dict[str, Any], Image.Image]] = []
+    for asset in assets:
         path = store.data_dir / asset["file_path"]
         if asset["kind"] == "image":
-            with Image.open(path) as img:
-                img = img.convert("RGB")
-                img.thumbnail((size, size))
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=85)
-                out.append({"asset_id": asset_id, "kind": "image", "mime": "image/jpeg", "bytes": buf.getvalue()})
+            img = _flatten(path)
         elif asset["kind"] == "video":
-            frames = _video_frames_sheet(path, asset.get("duration_s") or 1.0, size)
-            out.append({"asset_id": asset_id, "kind": "video", "mime": "image/jpeg", "bytes": frames})
+            img = _video_frames_sheet(path, asset.get("duration_s") or 1.0, size)
         elif asset["kind"] == "audio":
-            wf_img = _waveform_image(asset.get("waveform") or [], size)
-            buf = io.BytesIO()
-            wf_img.save(buf, format="JPEG", quality=85)
-            out.append({"asset_id": asset_id, "kind": "audio", "mime": "image/jpeg", "bytes": buf.getvalue()})
+            img = _waveform_image(asset.get("waveform") or [], size, asset.get("analysis"))
+        else:
+            img = _text_card(asset, store, size)
+        pictures.append((asset, img))
+    if len(pictures) > 4:
+        tmp_paths = []
+        tmp_dir = store.data_dir / "tmp" / f"show_{uuid.uuid4().hex[:8]}"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for i, (_, img) in enumerate(pictures):
+                p = tmp_dir / f"{i}.png"
+                img.thumbnail((400, 400))
+                img.save(p)
+                tmp_paths.append(p)
+            cols = 4 if len(pictures) > 9 else 3
+            cell = max(160, min(320, (size * 2) // cols))
+            sheet = contact_sheet(tmp_paths, cols=cols, cell=cell, labels=[f"{a['id'][-8:]} {a['kind']}" for a, _ in pictures])
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        sheet.thumbnail((max(size, 1024), max(size, 1024)))
+        return [{"asset_id": ",".join(a["id"] for a, _ in pictures), "kind": "contact_sheet", "mime": "image/jpeg",
+                 "bytes": _jpeg_under(sheet), "order": [a["id"] for a, _ in pictures]}]
+    out = []
+    for asset, img in pictures:
+        img.thumbnail((size, size))
+        out.append({"asset_id": asset["id"], "kind": asset["kind"], "mime": "image/jpeg", "bytes": _jpeg_under(img)})
     return out
 
 
-def _video_frames_sheet(path: Path, duration_s: float, size: int) -> bytes:
+def _text_card(asset: dict[str, Any], store: Store, size: int) -> Image.Image:
+    img = Image.new("RGB", (size, size // 2), (18, 14, 22))
+    draw = ImageDraw.Draw(img)
+    text = asset.get("name") or asset["id"]
+    if asset["kind"] == "lyrics":
+        try:
+            text = (store.data_dir / asset["file_path"]).read_text(encoding="utf-8")[:400]
+        except OSError:
+            pass
+    draw.multiline_text((16, 16), text, fill=(235, 225, 240), font=design.get_font("inter", 18))
+    return img
+
+
+def _video_frames_sheet(path: Path, duration_s: float, size: int) -> Image.Image:
     ffmpeg = ffmpeg_path()
-    frame_paths = []
-    timestamps = [0.0, duration_s * 0.33, duration_s * 0.66]
-    tmp_dir = path.parent / f".frames_{path.stem}"
-    tmp_dir.mkdir(exist_ok=True)
+    frames: list[Image.Image] = []
+    timestamps = [min(duration_s * f, max(0.0, duration_s - 0.05)) for f in (0.1, 0.5, 0.9)]
+    tmp_dir = path.parent.parent / "tmp" / f"frames_{path.stem}_{uuid.uuid4().hex[:6]}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     try:
         for i, ts in enumerate(timestamps):
             out = tmp_dir / f"f{i}.jpg"
-            subprocess.run([ffmpeg, "-y", "-ss", f"{ts:.2f}", "-i", str(path), "-vframes", "1", str(out)],
-                           capture_output=True)
+            if ffmpeg:
+                procutil.run([ffmpeg, "-nostdin", "-y", "-loglevel", "error", "-ss", f"{ts:.2f}", "-i", str(path),
+                              "-frames:v", "1", str(out)], timeout=60)
             if out.is_file():
-                frame_paths.append(out)
-        if not frame_paths:
-            img = Image.new("RGB", (size, size), (30, 28, 34))
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG")
-            return buf.getvalue()
-        cell = size // len(frame_paths)
-        sheet = Image.new("RGB", (cell * len(frame_paths), cell), (0, 0, 0))
-        for i, fp in enumerate(frame_paths):
-            with Image.open(fp) as im:
-                im = im.convert("RGB")
-                im.thumbnail((cell, cell))
-                sheet.paste(im, (i * cell, 0))
-        buf = io.BytesIO()
-        sheet.save(buf, format="JPEG", quality=85)
-        return buf.getvalue()
+                with Image.open(out) as im:
+                    frames.append(im.convert("RGB"))
+        if not frames:
+            return Image.new("RGB", (size, size // 2), (30, 28, 34))
+        cell_h = size // 2
+        scaled = []
+        for f in frames:
+            f = f.copy()
+            f.thumbnail((size, cell_h))
+            scaled.append(f)
+        width = sum(f.width for f in scaled) + 8 * (len(scaled) - 1)
+        sheet = Image.new("RGB", (width, max(f.height for f in scaled)), (0, 0, 0))
+        x = 0
+        for f in scaled:
+            sheet.paste(f, (x, 0))
+            x += f.width + 8
+        return sheet
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _waveform_image(peaks: list[float], width: int) -> Image.Image:
-    from PIL import ImageDraw
-
-    height = max(80, width // 4)
-    img = Image.new("RGB", (width, height), (18, 16, 22))
-    if not peaks:
-        return img
+def _waveform_image(peaks: list[float], width: int, analysis: Optional[dict[str, Any]] = None) -> Image.Image:
+    height = max(120, width // 4)
+    img = Image.new("RGB", (width, height), (18, 14, 22))
     draw = ImageDraw.Draw(img)
-    step = max(1, len(peaks) // width)
-    mid = height // 2
-    for x in range(min(width, len(peaks) // step)):
-        v = peaks[x * step]
-        h = int(v * (height // 2 - 4))
-        draw.line([(x, mid - h), (x, mid + h)], fill=(255, 77, 141))
+    duration = (analysis or {}).get("duration_s")
+    if analysis and duration:
+        shades = {"low": (32, 28, 44), "mid": (44, 30, 52), "high": (64, 30, 58)}
+        for s in analysis.get("sections") or []:
+            x0, x1 = int(s["start_s"] / duration * width), int(s["end_s"] / duration * width)
+            draw.rectangle([x0, 0, x1, height], fill=shades.get(s.get("energy"), (40, 30, 50)))
+            draw.text((x0 + 4, 4), f"{s['label']} ({s.get('energy')})", fill=(220, 210, 230), font=design.get_font("inter", 12))
+    if peaks:
+        mid = height // 2
+        n = len(peaks)
+        for x in range(width):
+            v = peaks[min(n - 1, int(x * n / width))]
+            h = int(v * (height // 2 - 8))
+            draw.line([(x, mid - h), (x, mid + h)], fill=(255, 77, 141))
+    if analysis and duration:
+        for b in analysis.get("downbeats") or []:
+            x = int(b / duration * width)
+            draw.line([(x, height - 10), (x, height)], fill=(245, 194, 107))
+        bpm = analysis.get("tempo_bpm")
+        draw.text((width - 110, height - 26), f"{bpm} BPM" if bpm else "no beat", fill=(245, 194, 107), font=design.get_font("inter", 14))
     return img
