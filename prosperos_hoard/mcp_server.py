@@ -331,7 +331,7 @@ def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Opti
     bridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a
     lyrics asset (LRC with timed [Section] markers) for studio_timeline action="auto"
     lyrics_asset_id=..., whose cut density then follows verse/chorus. An estimate from the structure,
-    not vocal detection: re-time by ear in Audio > Lyrics before a final render.
+    not vocal detection: re-time by ear in Audio > Lyrics timing before a final render.
     Returns {id, lines, sections: [{label, energy, start_s, end_s}], note}.
 
     Keywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra

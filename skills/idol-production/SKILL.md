@@ -18,13 +18,25 @@ Order matters. Each step returns ids; pass them to the next call.
    them, then set the chosen one with `studio_cast(..., "update", id=...,
    fields={"canonical_asset_id": ...})`. Later shots keep `@Name`; for a closer
    likeness add `use_character_reference=true` (strength 0.4-0.6).
+   With Flux/Kontext installed, the stronger path: a `flux_schnell_txt2img`
+   turnaround sheet (front / three-quarter / back on grey), set it with
+   `fields={"canonical_asset_id": sheet, "canonical_crop": "left_third"}` (one
+   pose), then `consistent=true` on every shot where the character is in
+   frame; shots without them use a plain template, or Kontext puts them in.
 4. Same shot again: `studio_edit_image(asset_id, "vary", count=3)`; exact
    reproduction: `"reuse"`.
-5. `studio_photocard_set(project, group_id)` for fronts, backs and a sheet;
-   `studio_design(project, "album_cover", {"title": ...}, image_asset_id=...,
-   variant="bottom_band")` for the cover.
-6. Song: `studio_import(project, "<absolute path>")`, `studio_analyze_audio(id)`.
-7. `studio_timeline(project, "auto", song_asset_id=..., aspect="9:16")`, adjust
+5. `studio_photocard_set(project, group_id)` for fronts, backs and a sheet (a
+   solo artist: `character_id=..., cards=[{image_asset_id, role, message,
+   accent}]`); `studio_design(project, "album_cover", {"title": ...},
+   image_asset_id=..., variant="bottom_band")` for the cover (`variant="night"`
+   on cover, poster, lyric card and tracklist for a horror/thriller look).
+6. Song: `studio_import(project, "<absolute path>")` or `studio_compose(...)`
+   (when `studio_status` lists ACE-Step), then `studio_analyze_audio(id)`.
+   Lyrics with [Section] tags: `studio_time_lyrics(project, song_id, lyrics)`
+   gives a first-pass LRC - tell the user it is an estimate to re-time by ear.
+7. `studio_timeline(project, "auto", song_asset_id=..., aspect="9:16",
+   lyrics_asset_id=..., options={"karaoke": true, "cut_on_lyrics": true,
+   "section_pools": {"Verse 1": [...], "Chorus": [...]}})`, adjust
    with `action="update", patch={"clip_updates": [...]}`, then
    `studio_render(timeline_id, "preview")` + `studio_job(job_id, wait_s=120)`.
    Render "final" only after the user approves the preview.
@@ -35,4 +47,5 @@ Traps:
 - `unknown_mentions` means a name matched no character: fix it, do not ignore it.
 - Choose the aspect before `studio_timeline`: it fixes the render size.
 - Voices are generic Piper voices (first use downloads ~60 MB); never imitate a
-  real person. No music model is installed: ask the user for an audio file.
+  real person. Without a music model (see `studio_status`), ask the user for
+  an audio file.

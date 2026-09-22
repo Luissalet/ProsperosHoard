@@ -427,7 +427,7 @@ def to_lrc(lines: list[dict[str, Any]]) -> str:
 # spoken intros/bridges breathe over two, and each section gets the share
 # of the song its lines need. A section marker is written into the LRC as a
 # timed tag line (`[01:01.71][Chorus]`) - the same thing tapping a
-# `[Chorus]` line in Audio > Lyrics produces - so one file carries both the
+# `[Chorus]` line in Audio > Lyrics timing produces - so one file carries both the
 # captions and the structure the auto-cut uses.
 
 _SECTION_TAG = re.compile(r"^\[([^\]\d:][^\]]*)\]$")
@@ -530,7 +530,7 @@ def time_lyrics(lyrics: str, analysis: dict[str, Any], bpm: Optional[float] = No
     actually has; when the analysis found real section boundaries, each
     lyric section start snaps to the nearest one within two bars. Every
     line then starts on a bar. It is an estimate of where a line is sung,
-    not vocal detection: re-time by ear in Audio > Lyrics.
+    not vocal detection: re-time by ear in Audio > Lyrics timing.
 
     Returns {"lrc", "lines": [{time_s, text, section}], "sections":
     [{label, kind, energy, start_s, end_s}]}."""
