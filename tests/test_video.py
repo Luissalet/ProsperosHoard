@@ -332,7 +332,8 @@ def test_horror_karaoke_lights_words_by_syllable_within_two_bars():
     assert ks[4] > ks[0]  # "SIGUE" (2 syllables) takes longer than "LA"
     assert r"\fad(90,120)" in ass
     style = next(ln for ln in ass.splitlines() if ln.startswith("Style: Lyrics"))
-    assert style.endswith(f",2,60,60,{int(1920 * 0.2)},1")  # above the short-video apps' own UI
+    # above the short-video apps' own UI, and off the phone's edges
+    assert style.endswith(f",2,{int(1080 * 0.08)},{int(1080 * 0.08)},{int(1920 * 0.2)},1")
     landscape = next(ln for ln in video.build_ass(1920, 1080, clips, style="horror").splitlines() if ln.startswith("Style:"))
     assert landscape.split(",")[2] == str(1080 // 13) and landscape.endswith(f",{int(1080 * 0.09)},1")
 

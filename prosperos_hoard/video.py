@@ -299,7 +299,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Spacing, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Lyrics,{fontname},{fontsize},{primary},{secondary},{outline},{back},{bold},0,1,{border},{shadow},{spacing},2,60,60,{margin_v},1
+Style: Lyrics,{fontname},{fontsize},{primary},{secondary},{outline},{back},{bold},0,1,{border},{shadow},{spacing},2,{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -374,10 +374,14 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
         # apps draw their own buttons and captions
         fontsize = max(28, min(width, height) // 13)
         margin_v = int(height * (0.2 if height > width else 0.09))
+        # 8% side margins: a long line wraps onto two instead of touching
+        # the edges of a phone screen
+        margin_h = int(width * 0.08)
     else:
         fontsize = max(28, height // 24)
-        margin_v = 80
-    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize, margin_v=margin_v, **style_vars)]
+        margin_v, margin_h = 80, 60
+    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize, margin_v=margin_v, margin_h=margin_h,
+                                **style_vars)]
     for clip in lyric_clips:
         start, end = float(clip["start_s"]), float(clip["end_s"])
         text = str(clip.get("text", ""))
