@@ -123,7 +123,7 @@ class CharacterBody(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
-class ComposeBody(BaseModel):
+class ComposePromptBody(BaseModel):
     prompt: str
     negative: Optional[str] = None
     style: Optional[str] = None
@@ -157,7 +157,7 @@ class TimeLyricsBody(BaseModel):
     name: Optional[str] = None
 
 
-class ComposeBody(BaseModel):
+class ComposeSongBody(BaseModel):
     tags: str
     lyrics: str
     bpm: int = 120
@@ -438,7 +438,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = queue.enqueue("edit_image", "gpu", body.model_dump(exclude={"wait_s"}), project_id=asset["project_id"])
         return {"job": wait(job, body.wait_s)}
 
-    def op_compose(project: str, body: ComposeBody) -> dict[str, Any]:
+    def op_compose(project: str, body: ComposeSongBody) -> dict[str, Any]:
         store.get_project(project)
         if not body.tags.strip():
             raise engine.EngineError("empty_tags", "tags describe the sound (genre, mood, instruments, vocal style)")
@@ -631,7 +631,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return {"items": store.list_style_presets(project)}
 
     @app.post("/api/projects/{project_id}/compose-prompt")
-    def compose(project_id: str, body: ComposeBody):
+    def compose(project_id: str, body: ComposePromptBody):
         return engine.compose_prompt(store, project_id, body.prompt, body.negative, body.style)
 
     # -------------------------------------------------------------- generate
@@ -662,11 +662,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_animate", body.asset_id, lambda: {"job": job_result(op_animate(body)["job"])})
 
     @app.post("/api/agent/studio_compose")
-    def agent_compose(project: str, body: ComposeBody):
+    def agent_compose(project: str, body: ComposeSongBody):
         return agent("studio_compose", body.tags[:80], lambda: {"job": job_result(op_compose(project, body)["job"])})
 
     @app.post("/api/projects/{project_id}/compose")
-    def ui_compose(project_id: str, body: ComposeBody):
+    def ui_compose(project_id: str, body: ComposeSongBody):
         return op_compose(project_id, body)
 
     @app.post("/api/assets/{asset_id}/animate")
