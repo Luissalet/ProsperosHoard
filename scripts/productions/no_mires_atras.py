@@ -11,40 +11,43 @@ Usage (from the repo root):
 
     # against a real, already-running Prospero + ComfyUI
     .venv/bin/python scripts/productions/no_mires_atras.py --backend real \\
-        --app-url http://127.0.0.1:8815 --quality final --lrc-path ~/no_mires_atras.lrc
+        --app-url http://127.0.0.1:8815 --quality final
 
     # re-run a single step once its inputs exist (e.g. after picking a
     # different canonical reference, or after reviewing the output)
     .venv/bin/python scripts/productions/no_mires_atras.py --backend fake --only stills
 
 Steps: 1 project, 2 character
-(FAROL reference sheet -> canonical), 3 song (studio_compose, 2 seeds),
-4 stills (12 shots, Kontext with the canonical reference), 5 clips (Wan
-2.2 TI2V from the best still of shots 1,2,3,5,7,10,12), 6 photocards (5
-idol looks + backs + a contact sheet), 7 album art (cover, tracklist
-back, teaser poster, lyric card), 8 timeline (auto-cut, sodium-night
-grade, grain, vignette, glitch on the downbeats; preview then final), 9
-REPORT.md.
+(FAROL reference sheet -> front-view crop as the canonical), 3 song
+(studio_compose, 2 seeds), 4 stills (12 shots: Kontext with the canonical
+reference when FAROL is in frame, Flux schnell in the same night look
+when not), 5 clips (Wan 2.2 TI2V from the best still of shots 1,2,3,5,7,
+10,12), 6 photocards (a solo set: 5 idol looks, fronts, backs, contact
+sheet), 7 album art (night variants: cover, tracklist back, teaser poster,
+lyric card), 8 timeline (lyrics timed to the song's bars, a storyboard per
+section, a shot per sung line, sodium-night grade, grain, vignette,
+flash + glitch on the chorus downbeats, horror karaoke; 9:16 and 16:9,
+preview then final), 9 REPORT.md.
 
---quality draft trims the scope (fewer seeds/variants/clips/looks/aspects)
+--quality draft trims the scope (fewer seeds/variants/clips/looks, preview renders only)
 so a full run finishes quickly; --quality final uses the full
 numbers. Both produce every asset kind, which is what "done" requires.
 
 Idempotency: step 1 finds the project by name through a real MCP call
 (studio_projects). For everything else, this script keeps its own
-checkpoint (`state.json` next to this file's other output) recording the
-ids each step produced - the MCP surface has no generic "what have I
-already made for this production" query, so this file is the script's own
-bookkeeping, not a side channel into Prospero. Delete state.json (or pass
---only <step>) to force a step to redo; every other already-done step is
-skipped on the next run.
+checkpoint (`state.json` next to REPORT.md) recording the ids each step
+produced - and, inside the long steps, each still / clip / card / render
+as it finishes, so an interrupted GPU run resumes where it stopped. The
+MCP surface has no generic "what have I already made for this
+production" query, so this file is the script's own bookkeeping, not a
+side channel into Prospero. `--only <step>` redoes one step from scratch;
+delete state.json to start over.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 import json
 import os
 import socket
@@ -60,7 +63,6 @@ sys.path.insert(0, str(REPO_ROOT))
 OUT_DIR = REPO_ROOT / "data" / "productions" / "no_mires_atras"
 STATE_PATH = OUT_DIR / "state.json"
 REPORT_PATH = OUT_DIR / "REPORT.md"
-MEDIA_DIR = OUT_DIR / "review"  # contact sheets etc. saved to look at directly
 
 PROJECT_NAME = "NO MIRES ATRÁS"
 CHARACTER_NAME = "FAROL"
@@ -92,45 +94,62 @@ REFERENCE_SHEET_PROMPT = (
     "design and proportions in every pose, even studio lighting, reference photography"
 )
 
+# The idol cards are the fun contrast: a glossy studio shoot. The canonical
+# reference already carries FAROL's look, so these describe only the shoot
+# (repeating the night-street description here would drag rain and fog
+# into a pastel studio). Roles parody an idol line-up; the accents are the
+# set's pastel versions; the backs are creepy-sweet notes in Spanish.
 IDOL_LOOKS = [
-    {"role": "Bouquet", "message": "gracias por venir",
-     "prompt": f"{FAROL_LOOK}, glossy idol photocard studio shoot, pastel pink backdrop, holding a "
-               "bouquet of wilted roses, soft beauty lighting, magazine grade"},
-    {"role": "Knit sweater", "message": "noche tranquila",
-     "prompt": f"{FAROL_LOOK}, glossy idol photocard studio shoot, sitting on a stool, cream knit "
-               "sweater, the candle flame glowing softly inside the lantern head, soft beauty lighting"},
-    {"role": "Photobooth", "prompt": f"{FAROL_LOOK}, glossy idol photocard, peace sign, photo-booth "
-                                     "strip style, soft flash lighting, magazine grade", "message": "click"},
-    {"role": "Rainy window", "message": "no mires atras",
-     "prompt": f"{FAROL_LOOK}, glossy idol photocard, rainy window backdrop, fairy lights, soft beauty lighting"},
-    {"role": "Sorry note", "message": "perdon",
-     "prompt": f"{FAROL_LOOK}, glossy idol photocard, holding a hand-written \"perdon\" note, soft "
-               "beauty lighting, magazine grade"},
+    {"role": "Visual", "message": "gracias por venir", "accent": "#F4A7C0",
+     "prompt": "posing for a glossy idol photocard, bright studio, pastel pink seamless backdrop, holding a bouquet "
+               "of wilted roses, soft beauty lighting, magazine retouching, the candle flame glowing warmly inside the lantern head"},
+    {"role": "Main Rapper", "message": "abrígate, fuera hace frío", "accent": "#EADBC8",
+     "prompt": "sitting on a wooden stool in a cream knit sweater for a glossy idol photocard, warm cream backdrop, "
+               "the candle flame glowing softly inside the lantern head, soft beauty lighting, magazine retouching"},
+    {"role": "Center", "message": "¡clic!", "accent": "#B8D8F0",
+     "prompt": "making a peace sign with one long paper finger, photo-booth strip style, four small frames, bright "
+               "flash, baby blue curtain backdrop, glossy idol photocard"},
+    {"role": "Lead Vocal", "message": "te veo desde aquí", "accent": "#F6D98B",
+     "prompt": "standing by a rainy window strung with warm fairy lights, glossy idol photocard, soft bokeh, soft "
+               "beauty lighting, gentle smile painted on the lantern"},
+    {"role": "Maknae", "message": "perdón por seguirte", "accent": "#C9B8E8",
+     "prompt": "holding a small hand-written note that says \"sorry\" with both paper hands, lilac backdrop, glossy "
+               "idol photocard, soft beauty lighting, magazine retouching"},
 ]
 
+# The night look every still shares (Kontext keeps the character, this keeps the world).
+NIGHT_LOOK = ("cinematic 35mm film still, night, sodium-vapour street lamps, wet asphalt, fog, light rain, shallow depth "
+              "of field, practical light only, deep shadows, subtle film grain, no text, no readable signs, no logos")
+
+# `farol`: whether the character is in frame. Shots without FAROL (the
+# phone, the doormat, the dark bedroom) are generated fresh with Flux
+# schnell in the same night look: handing Kontext FAROL's reference for a
+# shot it must not appear in would put the creature in every frame.
 SHOTS = [
-    {"n": 1, "prompt": "empty Spanish-style street at 2:15 a.m., fog, a far sodium lamp flickering, a "
-                       "tall figure standing under it, wet asphalt, no readable signs or brands"},
-    {"n": 2, "prompt": "over-the-shoulder point of view looking back down an empty wet street, the "
-                       "figure now under a closer sodium lamp"},
-    {"n": 3, "prompt": "extreme close-up of the lantern head, painted crooked smile, candle flame "
-                       "inside, raindrops on the paper"},
-    {"n": 4, "prompt": "a phone in a trembling hand, screen glow on a wet face, rainy night street "
-                       "behind, screen left blank"},
-    {"n": 5, "prompt": "bus shelter at night, in the glass reflection the figure stands beside the "
-                       "viewer; beside the viewer in reality, nothing"},
-    {"n": 6, "prompt": "stairwell seen from below, long paper fingers curling over the rail two floors "
-                       "up, dim stairwell light"},
-    {"n": 7, "prompt": "empty laundromat at 3 a.m., machines spinning, the figure seated among empty "
-                       "plastic chairs"},
-    {"n": 8, "prompt": "elevator mirror interior, amber lantern glow reflected behind a shoulder"},
-    {"n": 9, "prompt": "close-up of a wet doormat, footprints that are not human leading to a front door"},
-    {"n": 10, "prompt": "from inside a dark flat looking out through a window, the figure on the street "
-                        "below, lantern lit, looking up"},
-    {"n": 11, "prompt": "quick chorus insert: flickering sodium lamps, the crooked smile, long paper "
-                        "fingers, the candle flame, very short fragmented framing"},
-    {"n": 12, "prompt": "dark bedroom just after the light switch is turned off, the room slowly "
-                        "turning sodium orange"},
+    {"n": 1, "farol": True, "prompt": "standing perfectly still under a far flickering sodium lamp at the end of an empty "
+                                      "Spanish-style street at 2:15 a.m., seen small in the distance, fog"},
+    {"n": 2, "farol": True, "prompt": "seen over the shoulder of someone looking back down an empty wet street, standing "
+                                      "under a closer sodium lamp, still, a little closer than before"},
+    {"n": 3, "farol": True, "prompt": "extreme close-up of the paper lantern head: the crooked painted smile, the candle "
+                                      "flame inside, raindrops beading on the wet paper"},
+    {"n": 4, "farol": False, "prompt": "close-up of a phone held in a trembling hand at night, the screen's cold glow "
+                                       "on a wet frightened face, rainy street blurred behind, the screen itself blank"},
+    {"n": 5, "farol": True, "prompt": "reflected in the fogged glass of a night bus shelter, standing right beside the "
+                                      "viewer's reflection, while the real bench beside the viewer is empty"},
+    {"n": 6, "farol": True, "prompt": "only its long paper fingers curling over a stairwell rail two floors up, seen "
+                                      "from below, dim stairwell light"},
+    {"n": 7, "farol": True, "prompt": "seated perfectly still among empty plastic chairs in a laundromat at 3 a.m., "
+                                      "washing machines spinning, flickering fluorescent tubes"},
+    {"n": 8, "farol": True, "prompt": "an amber lantern glow in an elevator mirror, just behind the viewer's shoulder, "
+                                      "the lantern head barely visible"},
+    {"n": 9, "farol": False, "prompt": "close-up of a wet doormat outside a flat door at night, a trail of wet "
+                                       "footprints that are not human, long and thin like bent umbrella ribs, leading to the door"},
+    {"n": 10, "farol": True, "prompt": "seen from inside a dark flat through a rain-streaked window: standing on the "
+                                       "empty street below, lantern lit, looking up at the window"},
+    {"n": 11, "farol": True, "prompt": "a quick fragmented insert: flickering sodium lamps, the crooked painted smile, "
+                                       "long paper fingers and the candle flame, extreme close framing"},
+    {"n": 12, "farol": False, "prompt": "a dark bedroom a second after the light switch was turned off, a hand still on "
+                                        "the switch, the room slowly filling with a sodium-orange glow from the window"},
 ]
 CLIP_MOTION = {
     1: "light rain falling, the far lamp flickering",
@@ -213,8 +232,8 @@ Una… dos… tres…
 # --quality knobs: (spec numbers under "final"; a fast, cheap subset under "draft")
 QUALITY = {
     "draft": {"ref_seeds": 2, "song_seeds": 1, "still_variants": 1, "posts": False,
-              "clip_shots": [1, 3, 7], "idol_looks": IDOL_LOOKS[:2],
-              "timeline_aspects": ["9:16"], "render_qualities": ["preview"]},
+              "clip_shots": [1, 3, 12], "idol_looks": IDOL_LOOKS[:3],
+              "timeline_aspects": ["9:16", "16:9"], "render_qualities": ["preview"]},
     "final": {"ref_seeds": 4, "song_seeds": 2, "still_variants": 3, "posts": True,
               "clip_shots": [1, 2, 3, 5, 7, 10, 12], "idol_looks": IDOL_LOOKS,
               "timeline_aspects": ["9:16", "16:9"], "render_qualities": ["preview", "final"]},
@@ -226,6 +245,21 @@ class ProductionError(RuntimeError):
 
 
 # ------------------------------------------------------------------- state
+
+def set_out_dir(path: Path) -> None:
+    """`--out-dir`: keep separate runs (a draft and a final) side by side."""
+    global OUT_DIR, STATE_PATH, REPORT_PATH
+    OUT_DIR = path.resolve()
+    STATE_PATH = OUT_DIR / "state.json"
+    REPORT_PATH = OUT_DIR / "REPORT.md"
+
+
+def _shown(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
 
 def load_state() -> dict[str, Any]:
     if STATE_PATH.is_file():
@@ -243,11 +277,25 @@ def save_state(state: dict[str, Any]) -> None:
 
 def mark_done(state: dict[str, Any], step: int, data: dict[str, Any]) -> None:
     state["done"][str(step)] = data
+    state.get("partial", {}).pop(str(step), None)
     save_state(state)
 
 
 def is_done(state: dict[str, Any], step: int) -> bool:
     return str(step) in state["done"]
+
+
+def partial(state: dict[str, Any], step: int) -> dict[str, Any]:
+    """Per-item progress inside a long step (a still, a clip, a card, a
+    render), checkpointed as each item finishes: a real GPU run that stops
+    at shot 7 resumes at shot 7, not shot 1. Cleared when the step
+    completes, or when `--only` forces the step to redo."""
+    return state.setdefault("partial", {}).setdefault(str(step), {})
+
+
+def save_partial(state: dict[str, Any], step: int, key: str, value: Any) -> None:
+    partial(state, step)[key] = value
+    save_state(state)
 
 
 # --------------------------------------------------------------- MCP glue
@@ -260,6 +308,10 @@ async def call(session: Any, tool: str, args: dict[str, Any]) -> Any:
     if getattr(result, "isError", False):
         text = result.content[0].text if result.content else "unknown error"
         raise ProductionError(f"{tool} failed: {text}")
+    # the production never asks for pictures (include_image stays false), and
+    # a text-only local model must never receive one it did not ask for
+    if any(type(block).__name__ == "ImageContent" for block in result.content):
+        raise ProductionError(f"{tool} returned an image without include_image=true")
     for block in result.content:
         if type(block).__name__ == "TextContent":
             try:
@@ -267,28 +319,6 @@ async def call(session: Any, tool: str, args: dict[str, Any]) -> Any:
             except json.JSONDecodeError:
                 return block.text
     return None
-
-
-async def call_images(session: Any, tool: str, args: dict[str, Any]) -> tuple[Any, list[bytes]]:
-    """Like `call`, but also returns the raw bytes of any ImageContent
-    blocks in the result (used only for studio_show, to save a contact
-    sheet next to the report to look at directly)."""
-    args = {k: v for k, v in args.items() if v is not None}
-    result = await session.call_tool(tool, args)
-    if getattr(result, "isError", False):
-        text = result.content[0].text if result.content else "unknown error"
-        raise ProductionError(f"{tool} failed: {text}")
-    payload, images = None, []
-    for block in result.content:
-        if type(block).__name__ == "TextContent":
-            if payload is None:
-                try:
-                    payload = json.loads(block.text)
-                except json.JSONDecodeError:
-                    payload = block.text
-        elif type(block).__name__ == "ImageContent":
-            images.append(base64.b64decode(block.data))
-    return payload, images
 
 
 async def wait_job(session: Any, job: dict[str, Any], timeout_s: float = 600.0) -> dict[str, Any]:
@@ -303,23 +333,33 @@ async def wait_job(session: Any, job: dict[str, Any], timeout_s: float = 600.0) 
     return job
 
 
-def naive_lrc(lyrics: str, duration_s: float) -> str:
-    """A [mm:ss.xx]-timed lyric file, sung lines only (section tags like
-    [Chorus] are structure, not on-screen captions), evenly spaced across
-    the song. Good enough to prove the timeline's karaoke captions render;
-    for a real run, re-align this by ear against the
-    analysed sections instead of trusting this even spacing."""
-    lines = [ln.strip() for ln in lyrics.splitlines() if ln.strip() and not ln.strip().startswith("[")]
-    if not lines:
-        return ""
-    margin = min(2.0, duration_s * 0.05)
-    span = max(1.0, duration_s - 2 * margin)
-    step = span / len(lines)
-    out = []
-    for i, line in enumerate(lines):
-        t = margin + i * step
-        out.append(f"[{int(t // 60):02d}:{t % 60:05.2f}]{line}")
-    return "\n".join(out) + "\n"
+def shot_asset(stills: dict[str, Any], clips: dict[str, str], n: int, prefer_clip: bool = True) -> str:
+    """The asset that shows shot `n` in the edit: its Wan clip when one was
+    made (and wanted), else its best still."""
+    if prefer_clip and str(n) in clips:
+        return clips[str(n)]
+    return stills[str(n)]["best"]
+
+
+# The storyboard: which shots play under which part of the song, in the
+# order the lyrics tell the walk home. `c` = the clip when there is one.
+# With cut_on_lyrics the edit changes shot on every sung line, so each
+# verse list reads line by line (e.g. Verse 2: bus shelter, its reflection,
+# the phone, the message, the stairs, the fingers, the elevator...).
+STORYBOARD = {
+    "Intro": [(1, "c"), (2, ""), (1, "")],
+    "Verse 1": [(1, ""), (1, "c"), (4, ""), (2, ""), (1, ""), (2, "c"), (11, ""), (2, ""), (3, ""), (3, "c"), (1, ""), (3, "c")],
+    "Pre-Chorus": [(5, "c"), (2, "")],
+    "Chorus": [(11, ""), (3, "c"), (1, ""), (11, ""), (10, ""), (3, ""), (6, ""), (11, ""), (8, ""), (3, "c"), (7, ""), (11, "")],
+    "Verse 2": [(5, ""), (5, "c"), (4, ""), (4, ""), (6, ""), (6, ""), (8, ""), (3, ""), (9, ""), (9, ""), (10, ""), (10, "c")],
+    "Bridge": [(12, ""), (7, "c"), (12, ""), (3, ""), (12, "c")],
+    "Outro": [(1, ""), (3, "c")],
+}
+
+
+def storyboard_pools(stills: dict[str, Any], clips: dict[str, str]) -> dict[str, list[str]]:
+    return {section: [shot_asset(stills, clips, n, prefer_clip=(flag == "c")) for n, flag in shots]
+            for section, shots in STORYBOARD.items()}
 
 
 # ------------------------------------------------------------------ steps
@@ -362,17 +402,23 @@ async def step_character(session: Any, state: dict[str, Any], args: argparse.Nam
     ref_ids = job["asset_ids"]
     # Scoring hook: the fake backend has no real image to judge, so the first
     # seed is the canonical pick; for a real run this is a provisional pick -
-    # look with studio_show and, if a different seed
-    # reads better, call studio_cast(action="update", fields={"canonical_asset_id": ...})
-    # and re-run `--only stills` (and clips/photocards/album if already made).
-    canonical = ref_ids[0]
-    await call(session, "studio_cast", {
+    # look with studio_show and, if another seed or pose reads
+    # better, calls studio_cast(action="update", fields={"canonical_asset_id":
+    # <sheet>, "canonical_crop": "left_third"|"middle_third"|"right_third"})
+    # and re-runs `--only stills` (then clips/photocards/album/timeline).
+    sheet = ref_ids[0]
+    # The sheet shows front / three-quarter / back left to right; Kontext
+    # follows one pose far better than a triptych, so the canonical is the
+    # front view, cropped out of the sheet (a new asset with lineage).
+    updated = await call(session, "studio_cast", {
         "project": pid, "action": "update", "id": existing["id"],
-        "fields": {"canonical_asset_id": canonical},
+        "fields": {"canonical_asset_id": sheet, "canonical_crop": "left_third"},
     })
-    print(f"  reference sheet: {ref_ids} -> canonical {canonical}"
+    canonical = updated["canonical_asset_id"]
+    print(f"  reference sheet: {ref_ids} -> sheet {sheet}, canonical (front view crop) {canonical}"
           f"{' (PROVISIONAL - confirm by eye on a real run)' if args.backend == 'real' else ''}")
-    mark_done(state, 2, {"character_id": existing["id"], "reference_asset_ids": ref_ids, "canonical_asset_id": canonical})
+    mark_done(state, 2, {"character_id": existing["id"], "reference_asset_ids": ref_ids, "sheet_asset_id": sheet,
+                         "canonical_asset_id": canonical, "canonical_crop": "left_third"})
 
 
 async def step_song(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
@@ -384,32 +430,39 @@ async def step_song(session: Any, state: dict[str, Any], args: argparse.Namespac
     })
     job = await wait_job(session, res["job"], timeout_s=900)
     song_ids = job["asset_ids"]
+    durations = {a["id"]: a.get("duration_s") for a in job.get("assets") or []}
     print(f"  composed {len(song_ids)} song take(s): {song_ids}")
-    mark_done(state, 3, {"song_asset_ids": song_ids, "song_asset_id": song_ids[0]})
+    mark_done(state, 3, {"song_asset_ids": song_ids, "song_asset_id": song_ids[0],
+                         "duration_s": durations.get(song_ids[0]) or SONG_PARAMS["duration"]})
+
+
+async def _generate(session: Any, args: dict[str, Any], timeout_s: float = 600.0) -> list[str]:
+    gen = await call(session, "studio_generate_image", {**args, "wait_s": 240})
+    return (await wait_job(session, gen["job"], timeout_s=timeout_s))["asset_ids"]
 
 
 async def step_stills(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
     cfg = QUALITY[args.quality]
     variants, want_posts = cfg["still_variants"], cfg["posts"]
-    stills: dict[str, dict[str, Any]] = {}
+    stills: dict[str, dict[str, Any]] = dict(partial(state, 4))
     for shot in SHOTS:
         n = shot["n"]
-        prompt = f"@{CHARACTER_NAME} {shot['prompt']}"
-        gen = await call(session, "studio_generate_image", {
-            "project": pid, "prompt": prompt, "consistent": True, "width": 1344, "height": 768,
-            "count": variants, "seed": 3000 + n * 10, "wait_s": 240,
-        })
-        job = await wait_job(session, gen["job"])
-        entry = {"aspect_16_9": job["asset_ids"], "best": job["asset_ids"][0]}
+        if str(n) in stills:
+            print(f"  shot {n}: {stills[str(n)]['aspect_16_9']} (already made)")
+            continue
+        if shot["farol"]:
+            base = {"project": pid, "prompt": f"@{CHARACTER_NAME} {shot['prompt']}, {NIGHT_LOOK}", "consistent": True}
+        else:
+            base = {"project": pid, "prompt": f"{shot['prompt']}, {NIGHT_LOOK}", "negative": FAROL_NEGATIVE,
+                    "template": "flux_schnell_txt2img"}
+        wide = await _generate(session, {**base, "width": 1344, "height": 768, "count": variants, "seed": 3000 + n * 10})
+        entry: dict[str, Any] = {"aspect_16_9": wide, "best": wide[0],
+                                 "route": "kontext (FAROL reference)" if shot["farol"] else "flux schnell txt2img (no FAROL)"}
         if want_posts:
-            post = await call(session, "studio_generate_image", {
-                "project": pid, "prompt": prompt, "consistent": True, "aspect": "4:5",
-                "count": 1, "seed": 3000 + n * 10 + 1, "wait_s": 240,
-            })
-            post_job = await wait_job(session, post["job"])
-            entry["aspect_4_5"] = post_job["asset_ids"]
+            entry["aspect_4_5"] = await _generate(session, {**base, "aspect": "4:5", "count": 1, "seed": 3000 + n * 10 + 1})
         stills[str(n)] = entry
+        save_partial(state, 4, str(n), entry)
         print(f"  shot {n}: {entry['aspect_16_9']}" + (f" + {entry.get('aspect_4_5')}" if want_posts else ""))
     mark_done(state, 4, {"stills": stills})
 
@@ -417,77 +470,79 @@ async def step_stills(session: Any, state: dict[str, Any], args: argparse.Namesp
 async def step_clips(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
     stills = state["done"]["4"]["stills"]
-    clips: dict[str, str] = {}
+    clips: dict[str, str] = dict(partial(state, 5))
     for n in QUALITY[args.quality]["clip_shots"]:
+        if str(n) in clips:
+            print(f"  shot {n} clip: {clips[str(n)]} (already made)")
+            continue
         best = stills[str(n)]["best"]
-        gen = await call(session, "studio_generate_image", {
-            "project": pid, "template": "wan22_ti2v", "reference_asset_id": best,
-            "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "wait_s": 280,
-        })
-        job = await wait_job(session, gen["job"], timeout_s=1200)
-        clips[str(n)] = job["asset_ids"][0]
+        # template defaults: 1280x704 (follows the still's aspect), 121 frames
+        # at 24 fps = 5 s, 20 steps, cfg 5, shift 8, uni_pc
+        ids = await _generate(session, {"project": pid, "template": "wan22_ti2v", "reference_asset_id": best,
+                                        "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "seed": 5000 + n},
+                              timeout_s=1800)
+        clips[str(n)] = ids[0]
+        save_partial(state, 5, str(n), ids[0])
         print(f"  shot {n} clip: {clips[str(n)]}")
     mark_done(state, 5, {"clips": clips})
 
 
 async def step_photocards(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
+    char_id = state["done"]["2"]["character_id"]
     looks = QUALITY[args.quality]["idol_looks"]
-    fronts, backs = [], []
+    cards, photos = [], []
+    done_photos = partial(state, 6)
     for i, look in enumerate(looks, start=1):
-        gen = await call(session, "studio_generate_image", {
-            "project": pid, "prompt": f"@{CHARACTER_NAME} {look['prompt']}", "consistent": True,
-            "aspect": "2:3", "count": 1, "seed": 4000 + i, "wait_s": 240,
-        })
-        job = await wait_job(session, gen["job"])
-        photo_id = job["asset_ids"][0]
-        front = await call(session, "studio_design", {
-            "project": pid, "template": "photocard_front", "image_asset_id": photo_id,
-            "fields": {"member_name": CHARACTER_NAME, "role": look["role"], "group_name": PROJECT_NAME, "accent": ACCENT},
-        })
-        back = await call(session, "studio_design", {
-            "project": pid, "template": "photocard_back",
-            "fields": {"member_name": CHARACTER_NAME, "group_name": PROJECT_NAME, "message": look.get("message", ""),
-                       "serial": f"FAROL-{i:02d}", "accent": ACCENT},
-        })
-        fronts.append(front["id"])
-        backs.append(back["id"])
-        print(f"  photocard {i} ({look['role']}): front {front['id']}, back {back['id']}")
+        if str(i) in done_photos:
+            ids = [done_photos[str(i)]]
+        else:
+            ids = await _generate(session, {"project": pid, "prompt": f"@{CHARACTER_NAME} {look['prompt']}",
+                                            "consistent": True, "aspect": "2:3", "count": 1, "seed": 4000 + i})
+            save_partial(state, 6, str(i), ids[0])
+        photos.append(ids[0])
+        cards.append({"image_asset_id": ids[0], "role": look["role"], "message": look["message"], "accent": look["accent"]})
+        print(f"  look {i} ({look['role']}): photo {ids[0]}")
+    result = await call(session, "studio_photocard_set", {
+        "project": pid, "character_id": char_id, "cards": cards, "set_name": PROJECT_NAME,
+    })
+    print(f"  set: fronts {result['front_ids']}, backs {result['back_ids']}, contact sheet {result['contact_sheet_id']}")
+    mark_done(state, 6, {"photo_ids": photos, "front_ids": result["front_ids"], "back_ids": result["back_ids"],
+                         "contact_sheet_id": result["contact_sheet_id"]})
 
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    sheet_paths = []
-    _payload, images = await call_images(session, "studio_show", {"asset_ids": fronts, "size": 768})
-    for i, raw in enumerate(images):
-        path = MEDIA_DIR / f"photocards_contact_sheet_{i}.jpg"
-        path.write_bytes(raw)
-        sheet_paths.append(str(path.relative_to(REPO_ROOT)))
-    print(f"  contact sheet saved to {sheet_paths}")
-    mark_done(state, 6, {"front_ids": fronts, "back_ids": backs, "contact_sheet_paths": sheet_paths})
+
+def _mmss(seconds: float) -> str:
+    seconds = int(round(seconds or 0))
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 async def step_album(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
     stills = state["done"]["4"]["stills"]
+    duration = state["done"]["3"].get("duration_s") or SONG_PARAMS["duration"]
     cover_image = stills["3"]["best"]        # lantern close-up: the strongest single graphic
-    poster_image = stills["1"]["best"]       # the establishing shot
+    poster_image = stills["1"]["best"]       # the establishing shot: small, far, under the lamp
     lyric_image = stills["11"]["best"]       # chorus insert
 
     cover = await call(session, "studio_design", {
-        "project": pid, "template": "album_cover", "image_asset_id": cover_image, "variant": "center_title",
-        "fields": {"title": f"{CHARACTER_NAME} / {PROJECT_NAME}", "accent": ACCENT},
+        "project": pid, "template": "album_cover", "image_asset_id": cover_image, "variant": "night",
+        "fields": {"title": PROJECT_NAME, "artist": CHARACTER_NAME, "subtitle": "single", "accent": ACCENT},
     })
     tracklist = await call(session, "studio_design", {
-        "project": pid, "template": "tracklist_back", "image_asset_id": cover["id"],
-        "fields": {"group_name": CHARACTER_NAME, "tracks": [PROJECT_NAME], "accent": ACCENT},
+        "project": pid, "template": "tracklist_back", "image_asset_id": cover_image, "variant": "night",
+        "fields": {"group_name": CHARACTER_NAME, "title": PROJECT_NAME,
+                   "tracks": [f"01  {PROJECT_NAME}  {_mmss(duration)}"],
+                   "credits": "Letra y música: FAROL\nHecho de noche, bajo farolas de sodio, con Prospero's Hoard.",
+                   "accent": ACCENT},
     })
     poster = await call(session, "studio_design", {
-        "project": pid, "template": "teaser_poster", "image_asset_id": poster_image,
-        "fields": {"title": CHARACTER_NAME, "tagline": PROJECT_NAME, "accent": ACCENT},
+        "project": pid, "template": "teaser_poster", "image_asset_id": poster_image, "variant": "night",
+        "fields": {"title": CHARACTER_NAME, "tagline": "No mires atrás", "date": "Siempre un poco más cerca", "accent": ACCENT},
     })
     lyric_card = await call(session, "studio_design", {
-        "project": pid, "template": "lyric_card", "image_asset_id": lyric_image,
-        "fields": {"quote": "No mires atrás, no mires atrás,\nla luz que te sigue no es de la ciudad",
-                   "attribution": f"{CHARACTER_NAME} - {PROJECT_NAME}", "accent": ACCENT_RED},
+        "project": pid, "template": "lyric_card", "image_asset_id": lyric_image, "variant": "night",
+        "fields": {"quote": "No mires atrás,\nno mires atrás,\nla luz que te sigue\nno es de la ciudad",
+                   "attribution": f"{CHARACTER_NAME} — {PROJECT_NAME}", "accent": ACCENT},
     })
     print(f"  cover {cover['id']}, tracklist back {tracklist['id']}, poster {poster['id']}, lyric card {lyric_card['id']}")
     mark_done(state, 7, {"cover_id": cover["id"], "tracklist_back_id": tracklist["id"],
@@ -501,29 +556,34 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
     clips = state["done"]["5"]["clips"]
     asset_ids = [s["best"] for s in stills.values()] + list(clips.values())
 
-    lyrics_asset_id = None
-    lrc_text = naive_lrc(SONG_LYRICS, SONG_PARAMS["duration"])
-    if args.backend == "fake":
-        inbox = Path(state["_appdata"]) / "inbox"
-        inbox.mkdir(parents=True, exist_ok=True)
-        lrc_path = inbox / "no_mires_atras.lrc"
-        lrc_path.write_text(lrc_text, encoding="utf-8")
-        imported = await call(session, "studio_import", {"project": pid, "path": lrc_path.name, "kind": "lyrics"})
-        lyrics_asset_id = imported["id"]
-    elif args.lrc_path:
+    sections: list[dict[str, Any]] = []
+    if args.lrc_path:
+        # your own timing (re-timed by ear) wins over the estimate
         imported = await call(session, "studio_import", {"project": pid, "path": args.lrc_path, "kind": "lyrics"})
-        lyrics_asset_id = imported["id"]
+        lyrics_asset_id, lyrics_source = imported["id"], f"imported from {Path(args.lrc_path).name}"
     else:
-        print("  no --lrc-path given for a real run: timeline will have no karaoke captions "
-              "(time the lyrics in Audio > Lyrics in the app, or pass --lrc-path)")
+        timed = await call(session, "studio_time_lyrics", {"project": pid, "song_asset_id": song_id, "lyrics": SONG_LYRICS})
+        lyrics_asset_id, sections = timed["id"], timed["sections"]
+        lyrics_source = "studio_time_lyrics (section tags + the song's bars - an estimate, re-time by ear)"
+        print(f"  timed {timed['lines']} lines in {len(sections)} sections -> lyrics {lyrics_asset_id}")
 
-    timelines: dict[str, Any] = {}
+    options = {
+        "karaoke": True, "fps": 24, "cut_on_lyrics": True, "flash_on_strong_downbeats": True,
+        # quiet dread in the intro/bridge/outro (two-bar holds), a shot a bar
+        # in the verses (or a line, whichever comes first), half a bar in the chorus
+        "beats_low": 8, "beats_mid": 4, "beats_high": 2,
+        "section_pools": storyboard_pools(stills, clips),
+    }
+    timelines: dict[str, Any] = dict(partial(state, 8).get("timelines", {}))
     finishing = {"color_grade": "sodium_night", "grain": 0.3, "vignette": True, "glitch_on_downbeats": True,
-                "lyric_style": "horror"}
+                 "lyric_style": "horror"}
     for aspect in QUALITY[args.quality]["timeline_aspects"]:
+        if aspect in timelines:
+            print(f"  timeline {aspect}: {timelines[aspect]['renders']} (already rendered)")
+            continue
         built = await call(session, "studio_timeline", {
             "project": pid, "action": "auto", "song_asset_id": song_id, "asset_ids": asset_ids, "aspect": aspect,
-            "lyrics_asset_id": lyrics_asset_id, "options": {"karaoke": True, "fps": 24},
+            "lyrics_asset_id": lyrics_asset_id, "options": options,
         })
         tid = built["id"]
         await call(session, "studio_timeline", {
@@ -532,80 +592,107 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
         renders = {}
         for quality in QUALITY[args.quality]["render_qualities"]:
             rendered = await call(session, "studio_render", {"timeline_id": tid, "quality": quality, "wait_s": 280})
-            job = await wait_job(session, rendered["job"], timeout_s=900)
+            job = await wait_job(session, rendered["job"], timeout_s=1800)
             renders[quality] = job["asset_ids"][0]
             print(f"  timeline {aspect} render ({quality}): {renders[quality]}")
-        timelines[aspect] = {"timeline_id": tid, "renders": renders}
-    mark_done(state, 8, {"lyrics_asset_id": lyrics_asset_id, "timelines": timelines, "finishing": finishing})
+        timelines[aspect] = {"timeline_id": tid, "clips": built.get("clips_total"), "renders": renders}
+        save_partial(state, 8, "timelines", timelines)
+    mark_done(state, 8, {"lyrics_asset_id": lyrics_asset_id, "lyrics_source": lyrics_source, "sections": sections,
+                         "timelines": timelines, "finishing": finishing})
 
 
 async def step_report(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     done = state["done"]
+    timings = state.get("timings", {})
     lines = [f"# {PROJECT_NAME} - production report", "",
              f"Backend: **{args.backend}** - quality: **{args.quality}**",
-             "", "Every id below is a Prospero asset id; `studio_lineage(asset_id)` gives its full recipe.", ""]
+             "", "Every id below is a Prospero asset id; `studio_lineage(asset_id)` gives its full recipe "
+             "(template, every parameter, seed, inputs).", ""]
+    if args.backend == "fake":
+        lines += ["> Made against the bundled demo ComfyUI: pictures, clips and the song are procedural "
+                  "placeholders. Everything Prospero itself decides - design layouts, typography, grade, grain, "
+                  "glitch, cut rhythm, storyboard, karaoke timing - is real and is what a GPU run reuses unchanged.", ""]
 
+    if timings:
+        lines += ["## Timings", "", "| Step | seconds |", "| --- | --- |"]
+        for n in sorted(timings, key=int):
+            lines.append(f"| {n} {STEP_NAMES[int(n)]} | {timings[n]} |")
+        lines.append("")
+
+    d2 = done["2"]
     lines += ["## Project & character", "",
               f"- Project: `{done['1']['project_id']}`",
-              f"- Character: `{done['2']['character_id']}`",
-              f"- Reference sheet seeds: {done['2']['reference_asset_ids']}",
-              f"- Canonical reference: `{done['2']['canonical_asset_id']}`" +
-              (" **(provisional pick on the fake backend's first seed - review before the real run's cards go out)**"
-               if args.backend == "real" else ""), ""]
+              f"- Character FAROL: `{d2['character_id']}`",
+              f"- Reference sheet seeds: {d2['reference_asset_ids']} (sheet used: `{d2.get('sheet_asset_id', '-')}`)",
+              f"- Canonical reference: `{d2['canonical_asset_id']}` - the front view cropped out of the sheet "
+              f"({d2.get('canonical_crop', 'full')})" +
+              (" **(provisional: first seed - confirm before the cards go out)**" if args.backend == "real" else ""), ""]
 
     lines += ["## Song", "", f"- Takes: {done['3']['song_asset_ids']}",
-              f"- Used for the timeline: `{done['3']['song_asset_id']}`",
+              f"- Used for the timeline: `{done['3']['song_asset_id']}` ({_mmss(done['3'].get('duration_s') or 0)})",
               f"- Tags: `{SONG_TAGS}`",
               f"- bpm {SONG_PARAMS['bpm']}, key {SONG_PARAMS['key']}, language {SONG_PARAMS['language']}, "
               f"time signature {SONG_PARAMS['time_signature']}, duration {SONG_PARAMS['duration']}s", ""]
 
-    lines += ["## Stills (12 shots)", "", "| Shot | 16:9 variants | best | 4:5 post |", "| --- | --- | --- | --- |"]
+    lines += ["## Stills (12 shots)", "", "| Shot | route | 16:9 variants | best | 4:5 post |", "| --- | --- | --- | --- | --- |"]
     for n, entry in sorted(done["4"]["stills"].items(), key=lambda kv: int(kv[0])):
-        lines.append(f"| {n} | {entry['aspect_16_9']} | `{entry['best']}` | {entry.get('aspect_4_5', '-')} |")
-    lines.append("")
+        lines.append(f"| {n} | {entry.get('route', 'kontext')} | {entry['aspect_16_9']} | `{entry['best']}` | "
+                     f"{entry.get('aspect_4_5', '-')} |")
+    lines += ["", "Shots 4, 9 and 12 do not show FAROL, so they are generated fresh (Flux schnell, same night look) "
+              "instead of edited from FAROL's reference - a Kontext edit keeps the character in frame.", ""]
 
     if "5" in done:
-        lines += ["## Clips (Wan 2.2 TI2V)", "", "| Shot | clip asset |", "| --- | --- |"]
+        lines += ["## Clips (Wan 2.2 TI2V, 5 s from the best still)", "", "| Shot | clip asset | motion |", "| --- | --- | --- |"]
         for n, cid in sorted(done["5"]["clips"].items(), key=lambda kv: int(kv[0])):
-            lines.append(f"| {n} | `{cid}` |")
+            lines.append(f"| {n} | `{cid}` | {CLIP_MOTION.get(int(n), '')} |")
         lines.append("")
 
     if "6" in done:
-        lines += ["## Photocards", "", f"- Fronts: {done['6']['front_ids']}", f"- Backs: {done['6']['back_ids']}",
-                  "- Contact sheet: rendered with studio_show and saved as a plain image file next to "
-                  f"this report (not a Prospero library asset - studio_photocard_set expects a group "
-                  f"of distinct members, and FAROL is one character in several looks): "
-                  f"{done['6']['contact_sheet_paths']}", ""]
+        d6 = done["6"]
+        lines += ["## Photocards (solo set, one card per look)", "",
+                  f"- Photos (Kontext, 2:3): {d6.get('photo_ids', [])}",
+                  f"- Fronts: {d6['front_ids']}", f"- Backs: {d6['back_ids']}",
+                  f"- Contact sheet: `{d6.get('contact_sheet_id', '-')}`", ""]
 
     if "7" in done:
         a = done["7"]
-        lines += ["## Album art", "", f"- Cover: `{a['cover_id']}`", f"- Tracklist back: `{a['tracklist_back_id']}`",
-                  f"- Teaser poster: `{a['teaser_poster_id']}`", f"- Lyric card: `{a['lyric_card_id']}`", ""]
+        lines += ["## Album art (night variants)", "", f"- Cover 3000x3000: `{a['cover_id']}`",
+                  f"- Tracklist back: `{a['tracklist_back_id']}`", f"- Teaser poster: `{a['teaser_poster_id']}`",
+                  f"- Lyric card (hook): `{a['lyric_card_id']}`", ""]
 
     if "8" in done:
         t = done["8"]
         finishing_str = ", ".join(f"{k}={v}" for k, v in t["finishing"].items())
-        lines += ["## Timeline", "", f"- Lyrics asset: `{t['lyrics_asset_id']}`" if t["lyrics_asset_id"]
-                  else "- Lyrics: none (no LRC was available for this run - see the note above)",
-                  f"- Finishing: {finishing_str}", ""]
+        lines += ["## Timeline", "", f"- Lyrics: `{t['lyrics_asset_id']}` - {t.get('lyrics_source', '')}",
+                  f"- Finishing: {finishing_str}",
+                  "- Cut: a new shot on every sung line and every section start; two-bar holds in the intro, "
+                  "bridge and outro, half-bar cuts with a white flash + RGB glitch on the chorus's strong downbeats; "
+                  "shots follow the storyboard (`STORYBOARD` in this script) section by section", ""]
+        if t.get("sections"):
+            lines += ["| Section | energy | from | to |", "| --- | --- | --- | --- |"]
+            for sec in t["sections"]:
+                lines.append(f"| {sec['label']} | {sec['energy']} | {sec['start_s']:.2f} s | {sec['end_s']:.2f} s |")
+            lines.append("")
         for aspect, info in t["timelines"].items():
-            lines.append(f"- {aspect}: timeline `{info['timeline_id']}`, renders {info['renders']}")
+            lines.append(f"- {aspect}: timeline `{info['timeline_id']}` ({info.get('clips') or '?'} clips), renders {info['renders']}")
         lines.append("")
 
     lines += ["## What to review", "",
-              "- The canonical FAROL reference (first seed, auto-picked) - swap it with "
-              "`studio_cast` if another seed reads better, then re-run with `--only stills`.",
-              "- The naive, evenly-spaced LRC timing (`naive_lrc` in this script) - re-align it by "
-              "ear against the analysed sections (`studio_analyze_audio`) for real karaoke timing.",
-              "- On the real backend: VRAM per step (Flux/Kontext ~13 GB, Wan 5B ~12 GB at "
-              "1280x704, ACE-Step 1.5 turbo ~8 GB) on a card with 16 "
-              "GB - `--cuda-device` picks which GPU ComfyUI starts on; only one workflow class runs "
-              "at a time per the job queue's GPU lane.",
-              "- The `final` render quality (1080p, slower) versus the `preview` used for early looks.", ""]
+              "- The canonical FAROL reference: first sheet seed, front third. If another seed or pose reads "
+              "better: `studio_cast` update with `canonical_asset_id` + `canonical_crop`, then `--only stills` "
+              "and the steps after it.",
+              "- The best variant of each still (the first one is used): swap `best` in state.json, then "
+              "`--only clips`, `--only album`, `--only timeline`.",
+              "- Karaoke timing: estimated from the lyrics' [Section] tags and the song's bars, not from the "
+              "vocals. Re-time by ear in Audio > Lyrics timing (tap Space per line, [Section] lines included), export "
+              "the LRC and run `--only timeline --lrc-path <file>`.",
+              "- VRAM per step (Flux/Kontext ~13 GB, Wan 5B ~12 GB at 1280x704, ACE-Step 1.5 turbo ~8 GB): run "
+              "ComfyUI on a 16 GB card (`--cuda-device`), not the 12 GB one.",
+              "- The `final` render (1080p) after approving the `preview`.", ""]
 
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
-    print(f"  wrote {REPORT_PATH.relative_to(REPO_ROOT)}")
-    mark_done(state, 9, {"report_path": str(REPORT_PATH.relative_to(REPO_ROOT))})
+    print(f"  wrote {_shown(REPORT_PATH)}")
+    mark_done(state, 9, {"report_path": _shown(REPORT_PATH)})
 
 
 STEP_FUNCS = {
@@ -715,10 +802,15 @@ async def run(args: argparse.Namespace) -> int:
                         print(f"[{n}/9] {STEP_NAMES[n]}: already done, skipping (use --only to force)")
                         continue
                     print(f"[{n}/9] {STEP_NAMES[n]}...")
+                    if args.only:
+                        state.get("partial", {}).pop(str(n), None)  # --only redoes the step from scratch
                     for dep in range(1, n):
                         if dep in (1,) and not is_done(state, dep) and n != 1:
                             raise ProductionError(f"step {n} needs step {dep} ({STEP_NAMES[dep]}) to run first")
+                    started = time.monotonic()
                     await STEP_FUNCS[n](session, state, args)
+                    state.setdefault("timings", {})[str(n)] = round(time.monotonic() - started, 1)
+                    save_state(state)
         return 0
     finally:
         if fake_app:
@@ -730,9 +822,15 @@ def main() -> int:
     parser.add_argument("--backend", choices=["fake", "real"], default="fake")
     parser.add_argument("--quality", choices=["draft", "final"], default="draft")
     parser.add_argument("--app-url", default=None, help="real backend only; default PROSPERO_URL or 127.0.0.1:8815")
-    parser.add_argument("--lrc-path", default=None, help="real backend only; a timed .lrc file to import for karaoke")
+    parser.add_argument("--lrc-path", default=None,
+                        help="a timed .lrc (re-timed by ear in Audio > Lyrics timing) to use instead of the bar-grid estimate; "
+                             "a path the app may import (home folder or a folder allowed in Settings)")
     parser.add_argument("--only", default=None, help="run just one step (name or number 1-9)")
+    parser.add_argument("--out-dir", default=None,
+                        help="where state.json, REPORT.md (and the fake backend's data) go; default data/productions/no_mires_atras")
     args = parser.parse_args()
+    if args.out_dir:
+        set_out_dir(Path(args.out_dir))
     return asyncio.run(run(args))
 
 
