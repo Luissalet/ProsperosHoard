@@ -1,0 +1,401 @@
+// Thin typed client for the Prospero's Hoard HTTP API (see docs/API.md).
+
+export type Kind = "image" | "video" | "audio" | "lyrics" | "font" | "layout";
+
+export interface Recipe {
+  operation?: string;
+  backend?: string;
+  template?: string;
+  template_hash?: string;
+  checkpoint?: string;
+  params?: Record<string, unknown>;
+  input_asset_ids?: string[];
+  elapsed_s?: number;
+  prompt?: string;
+  style?: string;
+  fields?: Record<string, unknown>;
+  variant?: string;
+  derived_from?: string;
+  rerun?: string;
+  text?: string;
+  provider?: string;
+  timeline_id?: string;
+  quality?: string;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+export interface Section {
+  label: string;
+  start_s: number;
+  end_s: number;
+  energy: "low" | "mid" | "high";
+}
+
+export interface Analysis {
+  duration_s: number;
+  tempo_bpm: number | null;
+  beat_times: number[];
+  downbeats: number[];
+  sections: Section[];
+  notes?: string;
+}
+
+export interface Asset {
+  id: string;
+  project_id: string;
+  kind: Kind;
+  name: string | null;
+  file_path: string;
+  mime: string | null;
+  width: number | null;
+  height: number | null;
+  duration_s: number | null;
+  thumb_path: string | null;
+  tags: string[];
+  rating: number;
+  favourite: boolean;
+  notes: string | null;
+  source: "import" | "generated" | "derived" | "rendered";
+  recipe: Recipe | null;
+  created_at: string;
+  waveform?: number[] | null;
+  analysis?: Analysis | null;
+}
+
+export interface Paged<T> {
+  items: T[];
+  has_more: boolean;
+  next_offset: number | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  brief: string | null;
+  cover_asset_id: string | null;
+  created_at: string;
+  updated_at: string;
+  counts: Record<string, number>;
+}
+
+export interface Voice {
+  backend?: string;
+  voice_id?: string;
+  speed?: number;
+}
+
+export interface Character {
+  id: string;
+  project_id: string;
+  name: string;
+  role: string | null;
+  bio: string | null;
+  prompt: string | null;
+  negative: string | null;
+  palette: string[];
+  reference_asset_ids: string[];
+  canonical_asset_id: string | null;
+  voice: Voice | null;
+  notes: string | null;
+}
+
+export interface Group {
+  id: string;
+  project_id: string;
+  name: string;
+  concept: string | null;
+  member_ids: string[];
+  logo_asset_id: string | null;
+  colours: string[];
+}
+
+export interface StylePreset {
+  id: string;
+  name: string;
+  prompt_prefix: string;
+  prompt_suffix: string;
+  negative: string;
+  defaults: Record<string, string | number>;
+  is_builtin: number;
+}
+
+export type JobState = "queued" | "waiting_gpu" | "running" | "done" | "failed" | "cancelled";
+
+export interface Job {
+  id: string;
+  project_id: string | null;
+  type: string;
+  lane: "gpu" | "cpu";
+  state: JobState;
+  progress: number;
+  message: string | null;
+  params: Record<string, unknown>;
+  outputs: { asset_ids?: string[]; asset_id?: string; [k: string]: unknown } | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  log_excerpt: string | null;
+  cancel_requested: boolean;
+}
+
+export interface Clip {
+  asset_id: string;
+  kind: "image" | "video";
+  start_s: number;
+  duration_s: number;
+  trim_start_s?: number;
+  ken_burns?: { zoom_start: number; zoom_end: number; pan: string };
+  transition_in?: { type: string; duration_s: number };
+}
+
+export interface LyricClip {
+  text: string;
+  start_s: number;
+  end_s: number;
+  karaoke: boolean;
+}
+
+export interface Timeline {
+  id: string;
+  project_id: string;
+  name: string;
+  aspect: string;
+  fps: number;
+  width: number;
+  height: number;
+  audio_asset_id: string | null;
+  tracks: ({ type: "visual"; clips: Clip[] } | { type: "lyrics"; clips: LyricClip[] })[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Board {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  items: { asset_id: string; note: string }[];
+}
+
+export interface TemplateField {
+  name: string;
+  type: "text" | "image" | "colour";
+  required: boolean;
+  description: string;
+}
+
+export interface DesignTemplate {
+  template: string;
+  width: number;
+  height: number;
+  variants: string[];
+  fields: TemplateField[];
+}
+
+export interface Composed {
+  positive_prompt: string;
+  negative_prompt: string;
+  matched_characters: string[];
+  unknown_mentions: string[];
+  reference_asset_id: string | null;
+  style: string | null;
+  style_defaults: Record<string, string | number>;
+}
+
+export interface Resolution {
+  capability: string;
+  provider: string | null;
+  url: string | null;
+  model: string | null;
+  state: string;
+  reason: string;
+  details: Record<string, unknown>;
+}
+
+export interface BackendStatus {
+  demo: boolean;
+  hoard_link: Record<string, Resolution>;
+  comfy: {
+    reachable: boolean;
+    url?: string | null;
+    reason?: string | null;
+    checkpoints?: string[];
+    vram_free_mb?: number | null;
+    devices?: { name: string; vram_total_mb: number; vram_free_mb: number }[];
+    version?: string;
+  };
+  ffmpeg: { found: boolean; path: string | null; version: string | null };
+  piper: { installed: boolean };
+  fonts_bundled: string[];
+  vram_estimates_mb: Record<string, number>;
+  music: { name: string; available: boolean; reason: string }[];
+  overrides: { faustus_url?: string | null; comfy_url?: string | null; import_roots: string[] };
+  token_set: boolean;
+}
+
+export interface AgentCall {
+  id: string;
+  tool: string;
+  args_summary: string;
+  duration_ms: number;
+  ok: boolean;
+  error: string | null;
+  created_at: string;
+}
+
+export interface WorkflowSpec {
+  template: string;
+  name?: string;
+  kind: string;
+  vram_class: string;
+  map: Record<string, string>;
+  builtin: boolean;
+  requires_reference?: boolean;
+  auto_detected?: boolean;
+  output_node?: string;
+}
+
+export interface CuratedVoice {
+  id: string;
+  lang: string;
+  label: string;
+  size_mb: number;
+  downloaded: boolean;
+}
+
+export class ApiError extends Error {
+  code: string;
+  status: number;
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const init: RequestInit = { method, headers: {} };
+  if (body instanceof FormData) {
+    init.body = body;
+  } else if (body !== undefined) {
+    init.body = JSON.stringify(body);
+    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
+  }
+  const res = await fetch(path, init);
+  const type = res.headers.get("content-type") || "";
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    let message = res.statusText;
+    if (type.includes("json")) {
+      const data = await res.json();
+      code = data.error || code;
+      message = data.message || message;
+    }
+    throw new ApiError(code, message, res.status);
+  }
+  if (type.includes("json")) return (await res.json()) as T;
+  return (await res.blob()) as unknown as T;
+}
+
+const q = (params: Record<string, string | number | boolean | undefined | null>) => {
+  const s = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") s.set(k, String(v));
+  const text = s.toString();
+  return text ? `?${text}` : "";
+};
+
+export const fileUrl = (id: string) => `/api/assets/${id}/file`;
+export const thumbUrl = (a: Pick<Asset, "id" | "thumb_path" | "kind">) =>
+  a.thumb_path ? `/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
+
+export const api = {
+  health: () => request<{ service: string; version: string; demo: boolean; active_jobs: number }>("GET", "/api/health"),
+  projects: () => request<Paged<Project>>("GET", "/api/projects"),
+  createProject: (name: string, brief?: string) => request<Project>("POST", "/api/projects", { name, brief }),
+  project: (id: string) => request<Project>("GET", `/api/projects/${id}`),
+  updateProject: (id: string, patch: Partial<Pick<Project, "name" | "brief" | "cover_asset_id">>) =>
+    request<Project>("PATCH", `/api/projects/${id}`, patch),
+
+  characters: (pid: string) => request<{ items: Character[] }>("GET", `/api/projects/${pid}/characters`),
+  createCharacter: (pid: string, name: string, fields: Partial<Character>) =>
+    request<Character>("POST", `/api/projects/${pid}/characters`, { name, fields }),
+  updateCharacter: (id: string, fields: Partial<Character>) => request<Character>("PATCH", `/api/characters/${id}`, { fields }),
+  groups: (pid: string) => request<{ items: Group[] }>("GET", `/api/projects/${pid}/groups`),
+  createGroup: (pid: string, name: string, fields: Partial<Group>) =>
+    request<Group>("POST", `/api/projects/${pid}/groups`, { name, fields }),
+  updateGroup: (id: string, fields: Partial<Group>) => request<Group>("PATCH", `/api/groups/${id}`, { fields }),
+
+  styles: (pid?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project: pid })}`),
+  compose: (pid: string, prompt: string, negative: string, style: string | null) =>
+    request<Composed>("POST", `/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style }),
+  generate: (pid: string, body: Record<string, unknown>) =>
+    request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/api/projects/${pid}/generate`, body),
+  edit: (assetId: string, body: Record<string, unknown>) =>
+    request<{ job: Job }>("POST", `/api/assets/${assetId}/edit`, { asset_id: assetId, ...body }),
+  animate: (assetId: string, body: Record<string, unknown>) =>
+    request<{ job: Job }>("POST", `/api/assets/${assetId}/animate`, { asset_id: assetId, ...body }),
+  workflows: () => request<{ builtin: WorkflowSpec[]; custom: WorkflowSpec[] }>("GET", "/api/workflows"),
+  importWorkflow: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<WorkflowSpec>("POST", `/api/workflows/import-file`, fd);
+  },
+  updateWorkflow: (id: string, patch: Partial<WorkflowSpec>) => request<WorkflowSpec>("PATCH", `/api/workflows/${id}`, patch),
+
+  voice: (pid: string, text: string, character_id?: string, voice?: string) =>
+    request<Asset>("POST", `/api/projects/${pid}/voice`, { text, character_id, voice }),
+  voices: () => request<{ items: CuratedVoice[]; piper_installed: boolean }>("GET", "/api/voices"),
+  downloadVoice: (id: string) => request<Job>("POST", `/api/voices/${id}/download`),
+
+  upload: (pid: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<Asset>("POST", `/api/projects/${pid}/import-upload`, fd);
+  },
+  importPath: (pid: string, path: string) => request<Asset>("POST", `/api/projects/${pid}/import-path`, { path }),
+
+  analyze: (assetId: string, force = false) => request<Analysis>("POST", `/api/assets/${assetId}/analyze${q({ force })}`),
+  lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[] }>("GET", `/api/assets/${assetId}/lyrics`),
+  saveLyrics: (assetId: string, text: string) => request<{ lines: { time_s: number; text: string }[] }>("PUT", `/api/assets/${assetId}/lyrics`, { text }),
+  createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/api/projects/${pid}/lyrics`, { text, name }),
+
+  templates: () => request<{ items: DesignTemplate[] }>("GET", "/api/design/templates"),
+  preview: (template: string, fields: Record<string, string>, variant: string | null) =>
+    request<Blob>("POST", "/api/design/preview", { template, fields, variant }),
+  design: (pid: string, template: string, fields: Record<string, string>, variant: string | null, print: boolean) =>
+    request<Asset>("POST", `/api/projects/${pid}/design`, { template, fields, variant, options: { print } }),
+  photocardSet: (pid: string, group_id: string) =>
+    request<{ front_ids: string[]; back_ids: string[]; contact_sheet_id: string; skipped_members?: string[] }>(
+      "POST", `/api/projects/${pid}/photocard-set`, { group_id }),
+
+  timelines: (pid: string) => request<{ items: Timeline[] }>("GET", `/api/projects/${pid}/timelines`),
+  timeline: (id: string) => request<Timeline>("GET", `/api/timelines/${id}`),
+  autoCut: (pid: string, body: Record<string, unknown>) => request<Timeline>("POST", `/api/projects/${pid}/timelines/auto`, body),
+  patchTimeline: (id: string, patch: Record<string, unknown>) => request<Timeline>("PATCH", `/api/timelines/${id}`, patch),
+  render: (id: string, quality: "preview" | "final") =>
+    request<{ job: Job }>("POST", `/api/timelines/${id}/render`, { timeline_id: id, quality }),
+
+  jobs: (params: { state?: string; project?: string; limit?: number } = {}) => request<Paged<Job>>("GET", `/api/jobs${q(params)}`),
+  job: (id: string) => request<Job>("GET", `/api/jobs/${id}`),
+  cancelJob: (id: string) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+
+  assets: (pid: string, params: Record<string, string | number | boolean | undefined> = {}) =>
+    request<Paged<Asset>>("GET", `/api/projects/${pid}/assets${q(params)}`),
+  asset: (id: string) => request<Asset>("GET", `/api/assets/${id}`),
+  updateAsset: (id: string, patch: Partial<Pick<Asset, "tags" | "rating" | "favourite" | "notes" | "name">>) =>
+    request<Asset>("PATCH", `/api/assets/${id}`, patch),
+  lineage: (id: string) => request<{ recipe: Recipe | null; inputs?: { asset_id: string; operation?: string; seed?: number }[] }>(
+    "GET", `/api/assets/${id}/lineage`),
+
+  boards: (pid: string) => request<{ items: Board[] }>("GET", `/api/projects/${pid}/boards`),
+  createBoard: (pid: string, name: string, kind: string) => request<Board>("POST", `/api/projects/${pid}/boards`, { name, kind }),
+  updateBoard: (id: string, patch: { name?: string; kind?: string }) => request<Board>("PATCH", `/api/boards/${id}`, patch),
+  deleteBoard: (id: string) => request<{ ok: boolean }>("DELETE", `/api/boards/${id}`),
+  setBoardItems: (id: string, items: Board["items"]) => request<Board>("PUT", `/api/boards/${id}/items`, { items }),
+
+  backend: () => request<BackendStatus>("GET", "/api/backend"),
+  setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/api/backend", patch),
+  freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
+  agentCalls: (limit = 100) => request<{ items: AgentCall[] }>("GET", `/api/agent-calls${q({ limit })}`),
+};
