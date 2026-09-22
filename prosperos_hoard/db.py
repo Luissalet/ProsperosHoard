@@ -13,7 +13,15 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Columns added after v1: (table, column, declaration). Applied with ALTER
+# TABLE on databases created by an older version.
+_ADDED_COLUMNS = [
+    ("assets", "name", "TEXT"),
+    ("assets", "analysis_json", "TEXT"),
+    ("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0"),
+]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -163,8 +171,9 @@ _local = threading.local()
 def connect(data_dir: Path) -> sqlite3.Connection:
     """Open (and, on first use, create) the app's SQLite database.
 
-    One connection per thread (sqlite3 connections are not thread-safe);
-    callers get a cached connection for the calling thread.
+    One connection per thread (sqlite3 connections must not be shared
+    between threads); callers get a cached connection for the calling
+    thread, keyed by the database folder.
     """
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -174,15 +183,21 @@ def connect(data_dir: Path) -> sqlite3.Connection:
         return cache[key]
 
     db_path = data_dir / "prosperos.sqlite3"
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), timeout=15.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('version', ?)",
-        (str(SCHEMA_VERSION),),
-    )
+    for table, column, decl in _ADDED_COLUMNS:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in have:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+            except sqlite3.OperationalError as exc:  # another thread added it first
+                if "duplicate column" not in str(exc):
+                    raise
+    conn.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('version', ?)", (str(SCHEMA_VERSION),))
     conn.commit()
     cache[key] = conn
     _local.conns = cache

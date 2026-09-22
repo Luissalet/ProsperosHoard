@@ -58,3 +58,53 @@ def test_requeue_running_jobs_on_boot(store):
     n = store.requeue_running_jobs()
     assert n == 1
     assert store.get_job(job["id"])["state"] == "queued"
+
+
+def test_store_is_safe_across_threads(store, project):
+    import threading
+
+    errors = []
+
+    def worker(n):
+        try:
+            for i in range(25):
+                job = store.create_job("t", "cpu", {"n": n, "i": i}, project_id=project["id"])
+                store.update_job(job["id"], state="done", progress=1.0)
+                store.list_jobs(limit=5)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(store.list_jobs(state="done", limit=50)["items"]) == 50
+
+
+def test_schema_upgrade_adds_new_columns_to_old_database(tmp_path):
+    import sqlite3
+
+    from prosperos_hoard.store import Store
+
+    d = tmp_path / "old"
+    d.mkdir()
+    conn = sqlite3.connect(d / "prosperos.sqlite3")
+    conn.execute("CREATE TABLE assets (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL, file_path TEXT NOT NULL, "
+                 "mime TEXT, width INTEGER, height INTEGER, duration_s REAL, thumb_path TEXT, waveform_json TEXT, "
+                 "tags_json TEXT NOT NULL DEFAULT '[]', rating INTEGER NOT NULL DEFAULT 0, favourite INTEGER NOT NULL DEFAULT 0, "
+                 "notes TEXT, source TEXT NOT NULL, recipe_json TEXT, created_at TEXT NOT NULL)")
+    conn.commit()
+    conn.close()
+    s = Store(d)
+    cols = {r[1] for r in s.conn.execute("PRAGMA table_info(assets)")}
+    assert {"name", "analysis_json"} <= cols
+
+
+def test_asset_search_escapes_like_wildcards(store, project):
+    store.create_asset(project["id"], "image", "assets/a.png", name="100% idol", source="import")
+    store.create_asset(project["id"], "image", "assets/b.png", name="plain", source="import")
+    assert [a["name"] for a in store.list_assets(project["id"], query="100%")["items"]] == ["100% idol"]
+    assert store.list_assets(project["id"], query="%")["items"][0]["name"] == "100% idol"
+    assert len(store.list_assets(project["id"], query="_")["items"]) == 0
