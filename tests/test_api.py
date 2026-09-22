@@ -340,3 +340,29 @@ def test_canonical_crop_keeps_one_pose_of_a_reference_sheet(client):
     assert app.state.store.get_asset(r.json()["canonical_asset_id"])["width"] == 672
     bad = c.patch(f"/api/characters/{char_id}", json={"fields": {"canonical_crop": [0.9, 0, 0.5, 1]}})
     assert bad.status_code == 400 and bad.json()["error"] == "bad_crop"
+
+
+def test_solo_photocard_set_numbers_every_look(client):
+    c, app, _ = client
+    pid = _project(c, "Solo Set")
+    ids = []
+    for seed in (1, 2, 3):
+        job = c.post(f"/api/agent/studio_generate_image?project={pid}",
+                     json={"prompt": "idol shoot", "template": "flux_schnell_txt2img", "aspect": "2:3", "seed": seed,
+                           "wait_s": 20}).json()["job"]
+        ids.append(job["asset_ids"][0])
+    made = c.post(f"/api/agent/studio_cast?project={pid}", json={"action": "create", "name": "FAROL", "fields": {}}).json()
+    char_id = made.get("id") or made["character"]["id"]
+    r = c.post(f"/api/agent/studio_photocard_set?project={pid}", json={
+        "character_id": char_id, "set_name": "NO MIRES ATRÁS",
+        "cards": [{"image_asset_id": ids[0], "role": "Visual", "message": "gracias", "accent": "#F4A7C0"},
+                  {"image_asset_id": ids[1], "role": "Main Rapper"}, {"image_asset_id": ids[2]}]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["front_ids"]) == 3 and len(body["back_ids"]) == 3
+    back = app.state.store.get_asset(body["back_ids"][2])
+    assert back["recipe"]["fields"]["serial"] == "No. 003/003"
+    sheet = app.state.store.get_asset(body["contact_sheet_id"])
+    assert "contact_sheet" in sheet["tags"] and sheet["recipe"]["character_id"] == char_id
+    bad = c.post(f"/api/agent/studio_photocard_set?project={pid}", json={"character_id": char_id})
+    assert bad.status_code == 400

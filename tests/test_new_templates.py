@@ -86,7 +86,8 @@ def test_consistent_generation_routes_through_kontext(store, backend_with_comfy,
     kontext = engine.build_kontext_instruction(store, project["id"], "@FAROL under a flickering lamp, rain")
     assert kontext["reference_asset_id"] == canonical
     assert kontext["matched_characters"] == ["FAROL"]
-    assert kontext["instruction"] == "the same character from the reference, now under a flickering lamp, rain"
+    assert kontext["instruction"] == ("the same character from the reference image, with exactly the same design, "
+                                      "proportions and colours, now under a flickering lamp, rain")
 
 
 def test_kontext_needs_reference(store, backend_with_comfy, project):

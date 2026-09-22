@@ -364,10 +364,12 @@ def studio_design(
     Templates and fields (image fields take an image asset id; image_asset_id fills the main one):
     photocard_front: image, member_name*, role, group_name, accent;
     photocard_back: member_name*, group_name, group_logo, message, serial, accent;
-    album_cover: cover_image, title*, subtitle, accent - variant center_title|bottom_band|corner_minimal;
-    teaser_poster: image, title*, tagline, date, accent;  lyric_card: image, quote*, attribution, accent;
-    tracklist_back: cover_image, group_name*, tracks* (one per line), accent;  thumbnail: image, title*, accent.
-    accent is a hex colour. options {"print": true} adds 3 mm bleed at 300 dpi.
+    album_cover: cover_image, title*, subtitle, artist, accent - variant center_title|bottom_band|corner_minimal|night;
+    teaser_poster: image, title*, tagline, date, accent - variant classic|night;
+    lyric_card: image, quote*, attribution, accent - variant classic|night;
+    tracklist_back: cover_image, group_name*, title, tracks* (one per line, or a list), credits, accent - variant classic|night;
+    thumbnail: image, title*, accent. "night" is the horror/thriller look (condensed bone-white titles with a
+    red misregistration, sodium accents, typewriter small print, vignette, grain). accent is a hex colour. options {"print": true} adds 3 mm bleed at 300 dpi.
 
     Keywords: design, photocard, album cover, poster, lyric card, thumbnail, diseno, tarjeta, portada de album, cartel
     """
@@ -380,20 +382,25 @@ def studio_design(
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_photocard_set(
-    project: str, group_id: str, template_front: str = "photocard_front", template_back: str = "photocard_back",
-    image_asset_ids: Optional[dict[str, str]] = None, include_image: bool = False,
+    project: str, group_id: Optional[str] = None, template_front: str = "photocard_front",
+    template_back: str = "photocard_back", image_asset_ids: Optional[dict[str, str]] = None,
+    character_id: Optional[str] = None, cards: Optional[list[dict[str, Any]]] = None, set_name: Optional[str] = None,
+    include_image: bool = False,
 ) -> dict[str, Any]:
-    """Render a front and a back photocard for every member of a group, plus one contact sheet.
-    Each front uses image_asset_ids[character_id] if given, else the member's canonical image, else their
-    best-rated generated image that mentions them. Returns front_ids, back_ids, contact_sheet_id (and
-    skipped_members if someone has no image), with a picture of the sheet when include_image=true
-    (default false).
+    """Render a front and a back photocard per card, plus one contact sheet. Two shapes:
+    a group - group_id: one card per member, each front from image_asset_ids[character_id], else the
+    member's canonical image, else their best generated image mentioning them;
+    a solo set - character_id + cards [{image_asset_id, role, message, accent}]: one character in several
+    looks, numbered No. 001/00N (set_name replaces the small line above the name).
+    Returns front_ids, back_ids, contact_sheet_id (and skipped_members if someone has no image), with a
+    picture of the sheet when include_image=true (default false).
 
-    Keywords: photocard set, all members cards, trading cards, set de photocards, tarjetas de todos los miembros
+    Keywords: photocard set, all members cards, trading cards, solo set, versions, set de photocards, tarjetas de todos los miembros
     """
     result = _call(
         "POST", "/api/agent/studio_photocard_set", params={"project": project},
-        json={"group_id": group_id, "template_front": template_front, "template_back": template_back, "image_asset_ids": image_asset_ids},
+        json={"group_id": group_id, "template_front": template_front, "template_back": template_back,
+              "image_asset_ids": image_asset_ids, "character_id": character_id, "cards": cards, "set_name": set_name},
     )
     return [result, *_images([result["contact_sheet_id"]], size=768)] if include_image else result
 

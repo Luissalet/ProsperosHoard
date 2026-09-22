@@ -221,7 +221,10 @@ class DesignBody(BaseModel):
 
 
 class PhotocardSetBody(BaseModel):
-    group_id: str
+    group_id: Optional[str] = None
+    character_id: Optional[str] = None
+    cards: Optional[list[dict[str, Any]]] = None
+    set_name: Optional[str] = None
     template_front: str = "photocard_front"
     template_back: str = "photocard_back"
     image_asset_ids: Optional[dict[str, str]] = None
@@ -787,14 +790,23 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def design_preview(body: PreviewBody):
         return Response(engine.preview_design(store, body.template, body.fields, body.variant), media_type="image/jpeg")
 
+    def op_photocard_set(project: str, body: PhotocardSetBody) -> dict[str, Any]:
+        if body.character_id or body.cards:
+            if not (body.character_id and body.cards):
+                raise engine.EngineError("bad_cards", "a solo set needs character_id and cards [{image_asset_id, role, message, accent}]")
+            return engine.photocard_set_looks(store, project, body.character_id, body.cards, body.template_front,
+                                              body.template_back, body.set_name)
+        if not body.group_id:
+            raise engine.EngineError("group_required", "pass group_id (one card per member) or character_id + cards (one per look)")
+        return engine.photocard_set(store, project, body.group_id, body.template_front, body.template_back, body.image_asset_ids)
+
     @app.post("/api/agent/studio_photocard_set")
     def agent_photocard_set(project: str, body: PhotocardSetBody):
-        return agent("studio_photocard_set", body.group_id, lambda: engine.photocard_set(
-            store, project, body.group_id, body.template_front, body.template_back, body.image_asset_ids))
+        return agent("studio_photocard_set", body.group_id or body.character_id or "", lambda: op_photocard_set(project, body))
 
     @app.post("/api/projects/{project_id}/photocard-set")
     def ui_photocard_set(project_id: str, body: PhotocardSetBody):
-        return engine.photocard_set(store, project_id, body.group_id, body.template_front, body.template_back, body.image_asset_ids)
+        return op_photocard_set(project_id, body)
 
     @app.get("/api/design/templates")
     def design_templates_list():

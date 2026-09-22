@@ -348,7 +348,10 @@ def build_kontext_instruction(store: Store, project_id: str, prompt: str) -> dic
         out.append(ch)
         i += 1
     scene = re.sub(r"\s+", " ", "".join(out)).strip(" ,")
-    instruction = f"the same character from the reference, now {scene}" if scene else "the same character from the reference"
+    # Kontext follows explicit preservation best ("keep X, change Y"): name
+    # what must not drift, then the new scene
+    keep = "the same character from the reference image, with exactly the same design, proportions and colours"
+    instruction = f"{keep}, now {scene}" if scene else keep
     return {
         "instruction": instruction, "reference_asset_id": reference_asset_id,
         "matched_characters": matched, "unknown_mentions": sorted(set(unknown)),
@@ -1077,6 +1080,8 @@ def _check_design_fields(store: Store, template: str, fields: dict[str, Any]) ->
             except design.DesignError as exc:
                 raise EngineError("bad_colour", f"field '{key}': {exc}") from None
         else:
+            if isinstance(value, (list, tuple)):  # e.g. tracks as a list: one per line
+                value = "\n".join(str(v) for v in value)
             value = str(value)[:2000]
         clean[key] = value
     missing = [f for f, (_, required, _) in spec.items() if required and f not in clean and f not in ("image", "cover_image")]
@@ -1243,6 +1248,45 @@ def photocard_set(store: Store, project_id: str, group_id: str, template_front: 
         result["skipped_members"] = skipped
         result["note"] = f"no image for {', '.join(skipped)}; generate one and run again"
     return result
+
+
+def photocard_set_looks(store: Store, project_id: str, character_id: str, cards: list[dict[str, Any]],
+                        template_front: str = "photocard_front", template_back: str = "photocard_back",
+                        set_name: Optional[str] = None) -> dict[str, Any]:
+    """A solo artist's set: one character in several looks (each card its
+    own photo, role line, back message and accent), numbered "No. 001/005",
+    plus one contact sheet (front and back side by side per card) - the
+    shape `photocard_set` gives a group, for a single member."""
+    char = store.get_character(character_id)
+    if char["project_id"] != project_id:
+        raise EngineError("wrong_project", f"character {character_id} belongs to another project")
+    if not isinstance(cards, list) or not 1 <= len(cards) <= 12:
+        raise EngineError("bad_cards", "cards must be a list of 1-12 {image_asset_id, role, message, accent}")
+    total = len(cards)
+    label = set_name or char["name"]
+    fronts, backs = [], []
+    for idx, card in enumerate(cards, start=1):
+        if not isinstance(card, dict) or not card.get("image_asset_id"):
+            raise EngineError("bad_cards", f"card {idx} needs an image_asset_id")
+        accent = card.get("accent") or (char.get("palette") or ["#ff4d8d"])[0]
+        front_fields = {"image": card["image_asset_id"], "member_name": char["name"], "role": card.get("role") or char.get("role") or "",
+                        "group_name": label, "accent": accent}
+        back_fields = {"member_name": char["name"], "group_name": label, "accent": accent,
+                       "message": str(card.get("message") or char.get("bio") or "")[:160],
+                       "serial": card.get("serial") or f"No. {idx:03d}/{total:03d}"}
+        fronts.append(render_design(store, project_id, template_front,
+                                    {k: v for k, v in front_fields.items() if k in design_templates.TEMPLATE_FIELDS.get(template_front, {})}))
+        backs.append(render_design(store, project_id, template_back,
+                                   {k: v for k, v in back_fields.items() if k in design_templates.TEMPLATE_FIELDS.get(template_back, {})}))
+    ordered = [a for pair in zip(fronts, backs) for a in pair]
+    sheet = contact_sheet([store.data_dir / a["file_path"] for a in ordered], cols=min(4, len(ordered)), cell=360,
+                          labels=[f"{i // 2 + 1:02d} {'front' if i % 2 == 0 else 'back'}" for i in range(len(ordered))])
+    sheet_asset = _save_sheet(store, project_id, sheet,
+                              {"operation": "photocard_set", "character_id": character_id,
+                               "input_asset_ids": [a["id"] for a in ordered], "created_at": now_iso()},
+                              f"{label} photocard set")
+    return {"asset_ids": [a["id"] for a in ordered], "front_ids": [a["id"] for a in fronts],
+            "back_ids": [a["id"] for a in backs], "contact_sheet_id": sheet_asset["id"]}
 
 
 # ---------------------------------------------------------------- audio --

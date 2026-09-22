@@ -2,7 +2,7 @@
 
 A layout is a JSON spec: `{"width", "height", "layers": [...]}`. Layer
 types: `rect`, `image`, `text`, `holo` (procedural iridescent foil),
-`grain`, `frame`, `badge`. Every layer may reference a named `field` whose
+`grain`, `vignette` (radial edge darkening), `frame`, `badge`. Every layer may reference a named `field` whose
 value is filled in at render time from the caller's `fields` dict, so one
 layout can be reused for many photocards/covers.
 
@@ -33,6 +33,7 @@ _FONT_FILES = {
     "playfair-display": FONTS_DIR / "PlayfairDisplay" / "PlayfairDisplay.ttf",
     "space-grotesk": FONTS_DIR / "SpaceGrotesk" / "SpaceGrotesk.ttf",
     "caveat": FONTS_DIR / "Caveat" / "Caveat.ttf",
+    "special-elite": FONTS_DIR / "SpecialElite" / "SpecialElite-Regular.ttf",
 }
 
 _font_cache: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
@@ -212,6 +213,8 @@ def render_layout(layout: dict[str, Any], fields: dict[str, Any], asset_resolver
             _layer_holo(canvas, layer, fields)
         elif ltype == "grain":
             _layer_grain(canvas, layer)
+        elif ltype == "vignette":
+            _layer_vignette(canvas, layer)
         elif ltype == "frame":
             _layer_frame(canvas, layer, fields)
         elif ltype == "badge":
@@ -298,6 +301,9 @@ def _layer_image(canvas: Image.Image, layer: dict, fields: dict[str, Any], asset
         pad = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         pad.alpha_composite(src, ((w - src.width) // 2, (h - src.height) // 2))
         src = pad
+    blur = float(layer.get("blur", 0) or 0)
+    if blur > 0:
+        src = src.filter(ImageFilter.GaussianBlur(blur))
     radius = int(_resolve(layer.get("radius", 0), fields))
     if radius:
         src = _round_corners(src, radius)
@@ -323,6 +329,9 @@ def _layer_text(canvas: Image.Image, layer: dict, fields: dict[str, Any]) -> Non
     spacing_em = float(layer.get("letter_spacing", 0.0))
     overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+    if layer.get("columns"):
+        _draw_columns(canvas, overlay, draw, layer, text, font_name, colour, (x, y, w, h), max_size, line_height, spacing_em)
+        return
     if layer.get("auto_fit", True):
         font, lines = _fit_text(draw, text, font_name, (w, h), max_size, line_height=line_height, spacing_em=spacing_em)
     else:
@@ -365,6 +374,49 @@ def _layer_text(canvas: Image.Image, layer: dict, fields: dict[str, Any]) -> Non
     canvas.alpha_composite(overlay)
 
 
+def _draw_columns(canvas: Image.Image, overlay: Image.Image, draw: ImageDraw.ImageDraw, layer: dict, text: str,
+                  font_name: str, colour: tuple[int, int, int, int], box: tuple[int, int, int, int], max_size: int,
+                  line_height: float, spacing_em: float) -> None:
+    """A tracklist-style table: each line splits on a tab or 2+ spaces into
+    number / title / time; the first column sits at x, the middle one at
+    x + `columns.indent` (fraction of the width), the last is right-aligned.
+    One size for every row, the largest at which all rows fit the box."""
+    import re as _re
+
+    x, y, w, h = box
+    rows = [[c for c in _re.split(r"\t+|\s{2,}", ln.strip()) if c] for ln in text.split("\n") if ln.strip()]
+    if not rows:
+        return
+    indent = float((layer.get("columns") or {}).get("indent", 0.1)) * w if isinstance(layer.get("columns"), dict) else 0.1 * w
+    muted = _hex(layer.get("muted_colour", "#ffffff99"))
+    size = max_size
+    while size > 10:
+        font = get_font(font_name, size)
+        sp = spacing_em * size
+        widest = max(indent + sum(_text_width(draw, c, font, sp) for c in r[1:]) + size for r in rows)
+        if widest <= w and _line_px(font) * line_height * len(rows) <= h:
+            break
+        size -= 2
+    font = get_font(font_name, size)
+    sp = spacing_em * size
+    lh = _line_px(font) * line_height
+    cy = float(y)
+    for r in rows:
+        if len(r) == 1:
+            _draw_line(draw, (x, cy), r[0], font, colour, sp, {})
+        else:
+            _draw_line(draw, (x, cy), r[0], font, muted, sp, {})
+            if len(r) >= 3:
+                last = r[-1]
+                _draw_line(draw, (x + w - _text_width(draw, last, font, sp), cy), last, font, muted, sp, {})
+                middle = " ".join(r[1:-1])
+            else:
+                middle = r[1]
+            _draw_line(draw, (x + indent, cy), middle, font, colour, sp, {})
+        cy += lh
+    canvas.alpha_composite(overlay)
+
+
 def _draw_line(draw: ImageDraw.ImageDraw, xy: tuple[float, float], line: str, font: ImageFont.FreeTypeFont,
                fill: tuple[int, int, int, int], spacing: float, kwargs: dict[str, Any]) -> None:
     if not spacing:
@@ -397,6 +449,28 @@ def _layer_grain(canvas: Image.Image, layer: dict) -> None:
     alpha = Image.new("L", canvas.size, int(min(60, 4 + amount * 2)))
     grain = Image.merge("RGBA", (grey, grey, grey, alpha))
     _blend_onto(canvas, grain, (0, 0), "overlay")
+
+
+def _layer_vignette(canvas: Image.Image, layer: dict) -> None:
+    """Radial darkening towards the edges and corners (`strength` 0-1: the
+    corner opacity; `radius` 0-1: where the falloff starts, as a fraction of
+    the half-diagonal) - the lens/print look a horror cover wants."""
+    import numpy as np
+
+    strength = max(0.0, min(1.0, float(layer.get("strength", 0.55))))
+    start = max(0.0, min(0.95, float(layer.get("radius", 0.45))))
+    w, h = canvas.size
+    small_w, small_h = max(2, w // 8), max(2, h // 8)
+    yy, xx = np.mgrid[0:small_h, 0:small_w].astype(np.float32)
+    dx = (xx - (small_w - 1) / 2) / ((small_w - 1) / 2)
+    dy = (yy - (small_h - 1) / 2) / ((small_h - 1) / 2)
+    dist = np.sqrt(dx * dx + dy * dy) / math.sqrt(2)
+    t = np.clip((dist - start) / (1.0 - start), 0.0, 1.0)
+    alpha = (t * t * (3 - 2 * t) * strength * 255).astype("uint8")
+    mask = Image.fromarray(alpha, "L").resize((w, h), Image.BILINEAR)
+    shade = Image.new("RGBA", (w, h), _hex(layer.get("colour", "#000000ff")))
+    shade.putalpha(mask)
+    canvas.alpha_composite(shade)
 
 
 def _layer_frame(canvas: Image.Image, layer: dict, fields: dict[str, Any]) -> None:
