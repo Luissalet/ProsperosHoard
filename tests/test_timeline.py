@@ -63,3 +63,58 @@ def test_no_immediate_repeat_asset_with_small_pool():
     clips = result["tracks"][0]["clips"]
     for i in range(1, len(clips)):
         assert clips[i]["asset_id"] != clips[i - 1]["asset_id"]
+
+
+def _lookup(assets):
+    table = {a["id"]: a for a in assets}
+    return lambda aid: table.get(aid)
+
+
+def test_normalise_tracks_rejects_bad_edits_with_clip_index():
+    assets = [{"id": "a1", "kind": "image"}, {"id": "s1", "kind": "audio"}]
+    good = [{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2.0}, {"asset_id": "a1", "duration_s": 1.0,
+                                                                                "transition_in": {"type": "crossfade", "duration_s": 0.3}}]}]
+    clean = tl.normalise_tracks(good, _lookup(assets))
+    assert [c["start_s"] for c in clean[0]["clips"]] == [0.0, 2.0]
+    bad_cases = [
+        ([{"type": "visual", "clips": [{"asset_id": "s1", "duration_s": 2.0}]}], "audio"),
+        ([{"type": "visual", "clips": [{"asset_id": "zz", "duration_s": 2.0}]}], "does not exist"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 0.1}]}], "between"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "transition_in": {"type": "spin"}}]}], "transition"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "ken_burns": {"zoom_start": 9}}]}], "zoom"),
+        ([{"type": "lyrics", "clips": []}], "visual track"),
+    ]
+    for tracks, fragment in bad_cases:
+        with pytest.raises(tl.TimelineError) as exc:
+            tl.normalise_tracks(tracks, _lookup(assets))
+        assert fragment in str(exc.value)
+
+
+def test_clip_updates_edit_move_and_delete():
+    tracks = [{"type": "visual", "clips": [{"asset_id": f"a{i}", "kind": "image", "duration_s": 1.0} for i in range(4)]}]
+    out = tl.apply_clip_updates(tracks, [{"index": 0, "duration_s": 3.0}, {"index": 3, "move_to": 0}, {"index": 1, "delete": True}])
+    assert [c["asset_id"] for c in out[0]["clips"]] == ["a3", "a1", "a2"]
+    with pytest.raises(tl.TimelineError):
+        tl.apply_clip_updates(tracks, [{"index": 9, "duration_s": 1}])
+    with pytest.raises(tl.TimelineError):
+        tl.apply_clip_updates(tracks, [{"index": 0, "file_path": "/etc/passwd"}])
+
+
+def test_auto_cut_on_real_demo_analysis_covers_song_on_beats(tmp_path):
+    from prosperos_hoard import audio
+    from prosperos_hoard.devtools.demo_seed import _make_synthetic_song
+
+    path = tmp_path / "s.wav"
+    _make_synthetic_song(path)
+    a = audio.analyze_samples(audio.decode_to_mono(path))
+    pool = [{"id": f"a{i}", "kind": "image"} for i in range(5)]
+    built = tl.build_auto_cut(a["duration_s"], a["beat_times"], a["sections"], pool, downbeats=a["downbeats"])
+    assert tl.validate_auto_cut_invariants(built["tracks"], a["beat_times"], a["duration_s"]) == []
+    clips = built["tracks"][0]["clips"]
+    loud = [c for c in clips if 8.5 <= c["start_s"] < 23.5]
+    quiet = [c for c in clips if c["start_s"] < 7.5]
+    assert all(c["duration_s"] <= 1.05 for c in loud)  # 2 beats at 120 BPM in the loud section
+    assert all(c["duration_s"] >= 1.9 for c in quiet)  # 4 beats in the quiet intro
+    compact = tl.compact_view({"id": "t", "project_id": "p", "name": "n", "aspect": "9:16", "fps": 30, "width": 1080,
+                               "height": 1920, "tracks": built["tracks"]}, clip_limit=5)
+    assert len(compact["clips"]) == 5 and compact["has_more"] and compact["clips_total"] == len(clips)

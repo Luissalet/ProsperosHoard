@@ -1,6 +1,6 @@
 """Timeline domain logic: building an auto-cut edit from a song analysis
-and a pool of assets. Pure Python / no ffmpeg here (see `video.py` for the
-renderer) so the cut logic is fast to unit test.
+and a pool of assets, validating edits, and compact views. Pure Python, no
+ffmpeg here (see `video.py` for the renderer) so it is fast to unit test.
 
 Clip schema (stored inside `timelines.tracks_json`, one "visual" track and
 optionally one "lyrics" track):
@@ -15,66 +15,91 @@ optionally one "lyrics" track):
         {"text": "...", "start_s": 1.2, "end_s": 3.4, "karaoke": true}
     ]}
 
-`ken_burns` is Prospero's own simplified, ffmpeg-`zoompan`-shaped
-parameterisation of a "start/end rect" pan (see README
-boundaries): a zoom range plus a pan direction, which maps directly onto a
-single `zoompan` filter invocation instead of arbitrary per-frame crop
-rectangles.
+`start_s` of visual clips is derived (the running sum of durations) and
+rewritten by `normalise_tracks`, so an edit can never leave gaps.
+
+`ken_burns` is a zoom range plus a pan direction (a "start/end
+rect" simplified to what one ffmpeg `zoompan` filter expresses; see the
+README boundaries).
 """
 
 from __future__ import annotations
 
 import random
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 MIN_CLIP_S = 0.5
+MAX_CLIP_S = 60.0
 PAN_DIRECTIONS = ("left", "right", "up", "down", "none")
+TRANSITIONS = ("cut", "crossfade", "dip_black", "flash_white")
+ASPECTS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
 
 
-def _cut_points(beat_times: list[float], sections: list[dict[str, Any]], flash_on_downbeats: bool) -> list[dict[str, Any]]:
-    """Every element: {"start_s", "flash": bool}. Cuts land on beat times,
-    density depends on the section's energy, and no clip is shorter than
-    MIN_CLIP_S."""
-    if not beat_times:
-        return [{"start_s": 0.0, "flash": False}]
+class TimelineError(ValueError):
+    pass
 
-    points: list[dict[str, Any]] = []
-    for section in sections:
-        step = 2 if section.get("energy") == "high" else 4
-        in_section = [t for t in beat_times if section["start_s"] <= t < section["end_s"]]
-        for i in range(0, len(in_section), step):
-            t = in_section[i]
-            is_downbeat = beat_times.index(t) % 4 == 0 if t in beat_times else False
-            points.append({"start_s": t, "flash": flash_on_downbeats and is_downbeat and section.get("energy") == "high"})
-    if not points or points[0]["start_s"] > 0.0001:
-        points.insert(0, {"start_s": 0.0, "flash": False})
-    points.sort(key=lambda p: p["start_s"])
 
-    # enforce min clip length by dropping cuts that are too close together
-    filtered = [points[0]]
-    for p in points[1:]:
-        if p["start_s"] - filtered[-1]["start_s"] >= MIN_CLIP_S:
-            filtered.append(p)
-    return filtered
+# ------------------------------------------------------------- auto-cut
+
+def _energy_at(t: float, sections: list[dict[str, Any]]) -> str:
+    for s in sections:
+        if s["start_s"] <= t < s["end_s"]:
+            return s.get("energy", "mid")
+    return sections[-1].get("energy", "mid") if sections else "mid"
+
+
+def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[dict[str, Any]], duration_s: float,
+                options: dict[str, Any]) -> list[dict[str, Any]]:
+    """Cut times on beats: every `beats_low` beats (default 4) in low-energy
+    sections, `beats_mid` (4) in mid, `beats_high` (2) in high. Returns
+    [{"start_s", "flash"}] starting at 0.0; no clip shorter than MIN_CLIP_S,
+    the last clip ends at the song's end."""
+    density = {"low": int(options.get("beats_low", 4)), "mid": int(options.get("beats_mid", 4)),
+               "high": int(options.get("beats_high", 2))}
+    for k, v in density.items():
+        if not 1 <= v <= 32:
+            raise TimelineError(f"beats_{k} must be between 1 and 32")
+    flash_on = bool(options.get("flash_on_strong_downbeats", True))
+    down = {round(d, 3) for d in downbeats}
+    beats = [b for b in beat_times if 0.0 <= b < duration_s]
+    if not beats:
+        # no beat grid (silence, speech): even cuts of `fallback_clip_s`
+        step = float(options.get("fallback_clip_s", 2.0))
+        points, t = [], 0.0
+        while t < duration_s - MIN_CLIP_S:
+            points.append({"start_s": round(t, 3), "flash": False})
+            t += step
+        return points or [{"start_s": 0.0, "flash": False}]
+
+    points = [{"start_s": 0.0, "flash": False}]
+    since = 0
+    for i, b in enumerate(beats):
+        if b <= 1e-6:
+            continue
+        since += 1
+        step = density[_energy_at(b, sections)]
+        if since >= step and b - points[-1]["start_s"] >= MIN_CLIP_S and duration_s - b >= MIN_CLIP_S:
+            energy = _energy_at(b, sections)
+            points.append({"start_s": round(b, 3), "flash": flash_on and energy == "high" and round(b, 3) in down})
+            since = 0
+    return points
 
 
 def _assign_assets(pool: list[dict[str, Any]], count: int, seed: int = 0) -> list[dict[str, Any]]:
+    """Walk a shuffled pool round-robin (reshuffled per pass) with no
+    immediate repeats when the pool has more than one asset."""
     if not pool:
-        raise ValueError("cannot build an auto-cut timeline with an empty asset pool")
+        raise TimelineError("cannot build an auto-cut timeline with an empty asset pool")
     rng = random.Random(seed)
-    shuffled = pool[:]
-    rng.shuffle(shuffled)
     out: list[dict[str, Any]] = []
-    last: Optional[str] = None
-    i = 0
+    bag: list[dict[str, Any]] = []
     while len(out) < count:
-        candidate = shuffled[i % len(shuffled)]
-        if candidate["id"] == last and len(pool) > 1:
-            i += 1
-            candidate = shuffled[i % len(shuffled)]
-        out.append(candidate)
-        last = candidate["id"]
-        i += 1
+        if not bag:
+            bag = pool[:]
+            rng.shuffle(bag)
+            if out and len(bag) > 1 and bag[0]["id"] == out[-1]["id"]:
+                bag.append(bag.pop(0))
+        out.append(bag.pop(0))
     return out
 
 
@@ -86,56 +111,180 @@ def build_auto_cut(
     options: Optional[dict[str, Any]] = None,
     lyrics_lines: Optional[list[dict[str, Any]]] = None,
     seed: int = 0,
+    downbeats: Optional[list[float]] = None,
 ) -> dict[str, Any]:
     """Returns `{"tracks": [...]}` ready to store on a Timeline row."""
-    options = options or {}
-    flash = bool(options.get("flash_on_strong_downbeats", True))
+    options = dict(options or {})
+    seed = int(options.get("seed", seed))
     ken_burns_variety = bool(options.get("ken_burns_variety", True))
+    if downbeats is None:
+        downbeats = beat_times[0::4]
 
-    cuts = _cut_points(beat_times, sections or [], flash)
-    starts = [c["start_s"] for c in cuts]
-    flashes = [c["flash"] for c in cuts]
-    starts.append(song_duration_s)  # sentinel so the last clip covers the tail
-
-    assets = _assign_assets(asset_pool, len(starts) - 1, seed=seed)
+    cuts = _cut_points(beat_times, downbeats, sections or [], song_duration_s, options)
+    starts = [c["start_s"] for c in cuts] + [song_duration_s]
+    assets = _assign_assets(asset_pool, len(cuts), seed=seed)
 
     rng = random.Random(seed)
     visual_clips = []
-    for i in range(len(starts) - 1):
-        start_s = round(starts[i], 3)
-        duration_s = round(max(MIN_CLIP_S, starts[i + 1] - starts[i]), 3)
+    last_pan = None
+    for i, cut in enumerate(cuts):
+        duration_s = round(starts[i + 1] - starts[i], 3)
         asset = assets[i]
-        transition_type = "flash_white" if flashes[i] and i > 0 else ("cut" if i == 0 else "cut")
-        pan = rng.choice(PAN_DIRECTIONS[:-1]) if ken_burns_variety else "none"
+        transition = {"type": "flash_white", "duration_s": 0.15} if cut["flash"] and i > 0 else {"type": "cut", "duration_s": 0.0}
         clip: dict[str, Any] = {
-            "asset_id": asset["id"],
-            "kind": asset.get("kind", "image"),
-            "start_s": start_s,
-            "duration_s": duration_s,
-            "trim_start_s": 0.0,
-            "transition_in": {"type": transition_type, "duration_s": 0.0 if transition_type == "cut" else 0.15},
+            "asset_id": asset["id"], "kind": asset.get("kind", "image"), "start_s": round(starts[i], 3),
+            "duration_s": duration_s, "trim_start_s": 0.0, "transition_in": transition,
         }
-        if asset.get("kind", "image") == "image":
-            clip["ken_burns"] = {
-                "zoom_start": 1.0,
-                "zoom_end": round(rng.uniform(1.08, 1.18), 3) if ken_burns_variety else 1.1,
-                "pan": pan,
-            }
+        if clip["kind"] == "image":
+            if ken_burns_variety:
+                choices = [p for p in PAN_DIRECTIONS[:-1] if p != last_pan]
+                pan = rng.choice(choices)
+                zoom_in = rng.random() < 0.7
+                amount = round(rng.uniform(1.06, 1.16), 3)
+                clip["ken_burns"] = {"zoom_start": 1.0 if zoom_in else amount, "zoom_end": amount if zoom_in else 1.0, "pan": pan}
+                last_pan = pan
+            else:
+                clip["ken_burns"] = {"zoom_start": 1.0, "zoom_end": 1.08, "pan": "none"}
         visual_clips.append(clip)
 
     tracks: list[dict[str, Any]] = [{"type": "visual", "clips": visual_clips}]
-
     if lyrics_lines:
-        lyric_clips = []
-        for idx, line in enumerate(lyrics_lines):
-            end = lyrics_lines[idx + 1]["time_s"] if idx + 1 < len(lyrics_lines) else song_duration_s
-            lyric_clips.append({
-                "text": line["text"], "start_s": line["time_s"], "end_s": round(end, 3),
-                "karaoke": bool(options.get("karaoke", False)),
-            })
-        tracks.append({"type": "lyrics", "clips": lyric_clips})
-
+        tracks.append({"type": "lyrics", "clips": lyrics_clips_from_lines(lyrics_lines, song_duration_s,
+                                                                          bool(options.get("karaoke", False)))})
     return {"tracks": tracks}
+
+
+def lyrics_clips_from_lines(lines: list[dict[str, Any]], song_duration_s: float, karaoke: bool) -> list[dict[str, Any]]:
+    clips = []
+    ordered = sorted((ln for ln in lines if ln.get("text", "").strip()), key=lambda ln: ln["time_s"])
+    for idx, line in enumerate(ordered):
+        start = float(line["time_s"])
+        if start >= song_duration_s:
+            break
+        nxt = ordered[idx + 1]["time_s"] if idx + 1 < len(ordered) else song_duration_s
+        end = min(song_duration_s, nxt, start + 8.0)
+        if end - start < 0.2:
+            continue
+        clips.append({"text": line["text"].strip()[:300], "start_s": round(start, 3), "end_s": round(end, 3), "karaoke": karaoke})
+    return clips
+
+
+# ------------------------------------------------------------ validation
+
+def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Validate an edited `tracks` value and return a clean copy (derived
+    `start_s`, defaults filled). `asset_lookup(id)` returns the asset or
+    None. Raises TimelineError with the index of the offending clip."""
+    if not isinstance(tracks, list) or not tracks:
+        raise TimelineError("tracks must be a non-empty list")
+    out: list[dict[str, Any]] = []
+    seen_types = set()
+    for track in tracks:
+        if not isinstance(track, dict) or track.get("type") not in ("visual", "lyrics"):
+            raise TimelineError("each track needs type 'visual' or 'lyrics'")
+        if track["type"] in seen_types:
+            raise TimelineError(f"only one '{track['type']}' track is allowed")
+        seen_types.add(track["type"])
+        clips = track.get("clips")
+        if not isinstance(clips, list) or len(clips) > 2000:
+            raise TimelineError(f"{track['type']} track needs a 'clips' list (at most 2000)")
+        if track["type"] == "visual":
+            if not clips:
+                raise TimelineError("the visual track needs at least one clip")
+            clean, t = [], 0.0
+            for i, clip in enumerate(clips):
+                if not isinstance(clip, dict):
+                    raise TimelineError(f"visual clip {i} must be an object")
+                asset = asset_lookup(str(clip.get("asset_id", "")))
+                if asset is None:
+                    raise TimelineError(f"visual clip {i}: asset '{clip.get('asset_id')}' does not exist")
+                if asset["kind"] not in ("image", "video"):
+                    raise TimelineError(f"visual clip {i}: asset {asset['id']} is {asset['kind']}, not an image or video")
+                try:
+                    duration = float(clip.get("duration_s"))
+                    trim = float(clip.get("trim_start_s") or 0.0)
+                except (TypeError, ValueError):
+                    raise TimelineError(f"visual clip {i}: duration_s must be a number") from None
+                if not MIN_CLIP_S - 1e-6 <= duration <= MAX_CLIP_S:
+                    raise TimelineError(f"visual clip {i}: duration_s must be between {MIN_CLIP_S} and {MAX_CLIP_S} seconds")
+                if trim < 0 or (asset.get("duration_s") and trim >= float(asset["duration_s"])):
+                    raise TimelineError(f"visual clip {i}: trim_start_s is outside the video")
+                transition = clip.get("transition_in") or {"type": "cut", "duration_s": 0.0}
+                if not isinstance(transition, dict) or transition.get("type", "cut") not in TRANSITIONS:
+                    raise TimelineError(f"visual clip {i}: transition type must be one of {', '.join(TRANSITIONS)}")
+                t_dur = float(transition.get("duration_s") or 0.0)
+                if transition.get("type", "cut") != "cut" and not 0.05 <= t_dur <= min(2.0, duration / 2 + 1e-6):
+                    raise TimelineError(f"visual clip {i}: transition duration must be 0.05-2 s and at most half the clip")
+                c: dict[str, Any] = {
+                    "asset_id": asset["id"], "kind": asset["kind"], "start_s": round(t, 3), "duration_s": round(duration, 3),
+                    "trim_start_s": round(trim, 3),
+                    "transition_in": {"type": transition.get("type", "cut"), "duration_s": round(t_dur, 3)},
+                }
+                if asset["kind"] == "image":
+                    kb = clip.get("ken_burns") or {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"}
+                    try:
+                        zs, ze = float(kb.get("zoom_start", 1.0)), float(kb.get("zoom_end", 1.0))
+                    except (TypeError, ValueError, AttributeError):
+                        raise TimelineError(f"visual clip {i}: ken_burns zoom values must be numbers") from None
+                    if not (1.0 <= zs <= 2.0 and 1.0 <= ze <= 2.0):
+                        raise TimelineError(f"visual clip {i}: ken_burns zoom must be between 1.0 and 2.0")
+                    if kb.get("pan", "none") not in PAN_DIRECTIONS:
+                        raise TimelineError(f"visual clip {i}: pan must be one of {', '.join(PAN_DIRECTIONS)}")
+                    c["ken_burns"] = {"zoom_start": round(zs, 3), "zoom_end": round(ze, 3), "pan": kb.get("pan", "none")}
+                clean.append(c)
+                t += duration
+            out.append({"type": "visual", "clips": clean})
+        else:
+            clean = []
+            for i, clip in enumerate(clips):
+                if not isinstance(clip, dict) or not isinstance(clip.get("text"), str):
+                    raise TimelineError(f"lyrics clip {i} needs a 'text' string")
+                try:
+                    start, end = float(clip["start_s"]), float(clip["end_s"])
+                except (KeyError, TypeError, ValueError):
+                    raise TimelineError(f"lyrics clip {i} needs numeric start_s and end_s") from None
+                if start < 0 or end <= start:
+                    raise TimelineError(f"lyrics clip {i}: end_s must be after start_s")
+                clean.append({"text": clip["text"][:300], "start_s": round(start, 3), "end_s": round(end, 3),
+                              "karaoke": bool(clip.get("karaoke", False))})
+            out.append({"type": "lyrics", "clips": sorted(clean, key=lambda c: c["start_s"])})
+    if "visual" not in seen_types:
+        raise TimelineError("a timeline needs a visual track")
+    return out
+
+
+def apply_clip_updates(tracks: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`updates`: [{"index": 3, "duration_s": 2.0, ...}] merged into visual
+    clip `index`; {"index": 3, "delete": true} removes it;
+    {"index": 3, "move_to": 0} reorders."""
+    if not isinstance(updates, list) or len(updates) > 500:
+        raise TimelineError("clip_updates must be a list of at most 500 {index, ...} objects")
+    tracks = [dict(t, clips=[dict(c) for c in t["clips"]]) for t in tracks]
+    visual = next(t for t in tracks if t["type"] == "visual")
+    clips = visual["clips"]
+    allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind"}
+    for upd in updates:
+        if not isinstance(upd, dict) or not isinstance(upd.get("index"), int):
+            raise TimelineError("each clip update needs an integer 'index'")
+        i = upd["index"]
+        if not 0 <= i < len(clips):
+            raise TimelineError(f"clip index {i} is out of range (0-{len(clips) - 1})")
+        if upd.get("delete"):
+            clips.pop(i)
+            continue
+        if "move_to" in upd:
+            j = int(upd["move_to"])
+            if not 0 <= j < len(clips):
+                raise TimelineError(f"move_to {j} is out of range")
+            clips.insert(j, clips.pop(i))
+            continue
+        unknown = set(upd) - allowed - {"index"}
+        if unknown:
+            raise TimelineError(f"unknown clip field(s): {', '.join(sorted(unknown))}")
+        for k, v in upd.items():
+            if k != "index":
+                clips[i][k] = v
+    return tracks
 
 
 def validate_auto_cut_invariants(tracks: list[dict[str, Any]], beat_times: list[float], song_duration_s: float) -> list[str]:
@@ -153,9 +302,36 @@ def validate_auto_cut_invariants(tracks: list[dict[str, Any]], beat_times: list[
             problems.append(f"clip {i} does not start on a beat")
     if clips:
         last_end = clips[-1]["start_s"] + clips[-1]["duration_s"]
-        if abs(last_end - song_duration_s) > 0.5:
+        if abs(last_end - song_duration_s) > 0.01:
             problems.append(f"timeline ends at {last_end}, song is {song_duration_s}")
     for i in range(1, len(clips)):
         if clips[i]["asset_id"] == clips[i - 1]["asset_id"]:
             problems.append(f"clip {i} immediately repeats asset {clips[i]['asset_id']}")
     return problems
+
+
+def compact_view(timeline: dict[str, Any], clip_offset: int = 0, clip_limit: int = 24) -> dict[str, Any]:
+    """A model-sized view: summary + one page of visual clips (index kept)."""
+    visual = next((t for t in timeline["tracks"] if t["type"] == "visual"), {"clips": []})
+    lyrics = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), {"clips": []})
+    clips = visual["clips"]
+    clip_limit = max(1, min(int(clip_limit), 100))
+    clip_offset = max(0, int(clip_offset))
+    page = []
+    for i, c in enumerate(clips[clip_offset:clip_offset + clip_limit], start=clip_offset):
+        item = {"index": i, "asset_id": c["asset_id"], "kind": c["kind"], "start_s": c["start_s"], "duration_s": c["duration_s"],
+                "transition": c.get("transition_in", {}).get("type", "cut")}
+        if c.get("ken_burns"):
+            kb = c["ken_burns"]
+            item["ken_burns"] = f"{kb['zoom_start']}->{kb['zoom_end']} {kb['pan']}"
+        page.append(item)
+    total = sum(c["duration_s"] for c in clips)
+    has_more = clip_offset + clip_limit < len(clips)
+    return {
+        "id": timeline["id"], "project_id": timeline["project_id"], "name": timeline["name"], "aspect": timeline["aspect"],
+        "fps": timeline["fps"], "width": timeline["width"], "height": timeline["height"],
+        "audio_asset_id": timeline.get("audio_asset_id"), "duration_s": round(total, 3),
+        "clips_total": len(clips), "lyrics_lines": len(lyrics["clips"]),
+        "clips": page, "has_more": has_more, "next_clip_offset": clip_offset + clip_limit if has_more else None,
+        "updated_at": timeline.get("updated_at"),
+    }
