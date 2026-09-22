@@ -179,8 +179,8 @@ def build_image_clip_cmd(
         f"format=yuv420p"
     )
     return [
-        ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-loop", "1", "-i", str(src), "-t", f"{duration_s:.3f}",
-        "-vf", vf, "-r", str(fps), "-an", "-c:v", "libx264", "-preset", "ultrafast",
+        ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-loop", "1", "-i", str(src), "-t", f"{duration_s + 0.5 / fps:.3f}",
+        "-vf", vf, "-r", str(fps), "-frames:v", str(n_frames), "-an", "-c:v", "libx264", "-preset", "ultrafast",
         "-pix_fmt", "yuv420p", str(out_path),
     ]
 
@@ -194,8 +194,9 @@ def build_video_clip_cmd(
     vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps},"
           f"tpad=stop_mode=clone:stop_duration={duration_s:.3f},format=yuv420p")
     return [
-        ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-ss", f"{trim_start_s:.3f}", "-i", str(src), "-t", f"{duration_s:.3f}",
-        "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
+        ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-ss", f"{trim_start_s:.3f}", "-i", str(src),
+        "-t", f"{duration_s + 0.5 / fps:.3f}", "-vf", vf, "-frames:v", str(max(1, round(duration_s * fps))),
+        "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
     ]
 
 
@@ -237,8 +238,12 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
     inputs: list[str] = []
     for p in clip_paths:
         inputs += ["-i", str(p)]
-    filters = []
-    label = "0:v"
+    # Every input is pinned to the timeline's constant frame rate first:
+    # without it the xfade chain's output carries no frame rate, the encoder
+    # falls back to the stream's 1/12288 time base and drops everything after
+    # the second clip (a two-minute cut came out 6.9 s long).
+    filters = [f"[{i}:v]fps={fps},setpts=PTS-STARTPTS[s{i}]" for i in range(len(clip_paths))]
+    label = "s0"
     start = 0.0
     for i in range(1, len(clip_paths)):
         start += durations[i - 1]
@@ -246,12 +251,12 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
         xfade_type = TRANSITION_MAP.get(t.get("type", "cut"), "fade")
         dur = transition_duration(t, fps)
         out_label = f"v{i}"
-        filters.append(f"[{label}][{i}:v]xfade=transition={xfade_type}:duration={dur:.3f}:offset={start:.3f}[{out_label}]")
+        filters.append(f"[{label}][s{i}]xfade=transition={xfade_type}:duration={dur:.3f}:offset={start:.3f}[{out_label}]")
         label = out_label
     filter_complex = ";".join(filters)
     return [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error", *inputs, "-filter_complex", filter_complex, "-map", f"[{label}]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
+        "-r", str(fps), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
     ]
 
 
@@ -506,14 +511,31 @@ def render_timeline(
     transitions = [c.get("transition_in") or {"type": "cut"} for c in clips]
     all_cuts = all(t.get("type", "cut") == "cut" for t in transitions)
 
+    # Everything on the frame grid: each clip starts on the frame nearest its
+    # beat and lasts a whole number of frames, and (with transitions) is
+    # rendered one overlap + one spare frame longer. Float seconds drift as
+    # they accumulate, and an xfade whose outgoing clip ends a fraction of a
+    # frame before the overlap does silently ends the whole chain.
+    start_frames, acc = [], 0.0
+    for c in clips:
+        start_frames.append(int(round(acc * fps)))
+        acc += float(c["duration_s"])
+    start_frames.append(int(round(acc * fps)))
+    clip_frames = [max(1, start_frames[i + 1] - start_frames[i]) for i in range(len(clips))]
+    overlap_frames = [max(1, int(round(transition_duration(t, fps) * fps))) for t in transitions]
+    grid_durations = [n / fps for n in clip_frames]
+    grid_transitions = [dict(t, duration_s=overlap_frames[i] / fps) if t.get("type", "cut") != "cut" else t
+                        for i, t in enumerate(transitions)]
+
     clip_paths: list[Path] = []
     for i, clip in enumerate(clips):
         check_cancel()
         out_clip = work_dir / f"clip_{i:03d}.mp4"
         src = asset_path_for(clip["asset_id"])
-        duration = float(clip["duration_s"])
+        frames = clip_frames[i]
         if not all_cuts and i + 1 < len(clips):
-            duration += transition_duration(transitions[i + 1], fps)
+            frames += overlap_frames[i + 1] + 1
+        duration = frames / fps
         if clip["kind"] == "video":
             cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)))
         else:
@@ -529,8 +551,7 @@ def render_timeline(
         list_file.write_text(concat_list_text(clip_paths), encoding="utf-8")
         _run(build_concat_cmd(ffmpeg, list_file, concatenated))
     else:
-        durations = [float(c["duration_s"]) for c in clips]
-        _run(build_xfade_cmd(ffmpeg, clip_paths, durations, transitions, concatenated, fps=fps))
+        _run(build_xfade_cmd(ffmpeg, clip_paths, grid_durations, grid_transitions, concatenated, fps=fps))
     report(0.65, "joined clips")
 
     lyrics_track = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), None)
