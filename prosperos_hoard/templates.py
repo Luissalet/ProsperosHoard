@@ -30,6 +30,7 @@ TEMPLATE_FIELDS: dict[str, dict[str, tuple[str, bool, str]]] = {
         "cover_image": ("image", True, "cover art"),
         "title": ("text", True, "album or group title"),
         "subtitle": ("text", False, "e.g. '1st Mini Album'"),
+        "artist": ("text", False, "artist line (night variant: small, top left)"),
         "accent": ("colour", False, "subtitle colour"),
     },
     "teaser_poster": {
@@ -46,9 +47,11 @@ TEMPLATE_FIELDS: dict[str, dict[str, tuple[str, bool, str]]] = {
         "accent": ("colour", False, "attribution colour"),
     },
     "tracklist_back": {
-        "cover_image": ("image", False, "small cover"),
+        "cover_image": ("image", False, "small cover (night variant: blurred full-bleed backdrop)"),
         "group_name": ("text", True, "group name"),
+        "title": ("text", False, "release title under the name"),
         "tracks": ("text", True, "one track per line"),
+        "credits": ("text", False, "small print at the bottom"),
         "accent": ("colour", False, "title colour"),
     },
     "thumbnail": {
@@ -58,7 +61,16 @@ TEMPLATE_FIELDS: dict[str, dict[str, tuple[str, bool, str]]] = {
     },
 }
 
-VARIANTS = {"album_cover": ["center_title", "bottom_band", "corner_minimal"]}
+# The first variant of each list is the default. "night" is the horror /
+# thriller look: bone-white condensed titles with a faded-red print
+# misregistration, sodium accents, typewriter small print, vignette and
+# heavy grain.
+VARIANTS = {
+    "album_cover": ["center_title", "bottom_band", "corner_minimal", "night"],
+    "teaser_poster": ["classic", "night"],
+    "lyric_card": ["classic", "night"],
+    "tracklist_back": ["classic", "night"],
+}
 
 TEMPLATE_DIMENSIONS = {
     "photocard_front": (1100, 1700),
@@ -72,6 +84,11 @@ TEMPLATE_DIMENSIONS = {
 
 _ACCENT = {"field": "accent", "default": "#ff4d8dff"}
 _GOLD = {"field": "accent", "default": "#f5c26bff"}
+# night variants
+_SODIUM = {"field": "accent", "default": "#f28c28ff"}
+_BONE = "#ede6daff"
+_FOG = "#8a9099ff"
+_SMILE_RED = "#a33a2ecc"
 
 
 def photocard_front() -> dict[str, Any]:
@@ -146,6 +163,21 @@ def album_cover(variant: str = "center_title") -> dict[str, Any]:
             {"type": "text", "x": 140, "y": h - 260, "w": w - 280, "h": 120, "text": {"field": "subtitle", "default": ""},
              "font": "inter", "size": 70, "colour": _GOLD, "align": "right", "letter_spacing": 0.1},
         ]
+    elif variant == "night":
+        extra = [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": 900, "gradient": {"colours": ["#000000b3", "#00000000"]}},
+            {"type": "rect", "x": 0, "y": 1400, "w": w, "h": h - 1400, "gradient": {"colours": ["#00000000", "#000000f0"]}},
+            {"type": "vignette", "strength": 0.6, "radius": 0.4},
+            {"type": "text", "x": 170, "y": 170, "w": 1500, "h": 120, "text": {"field": "artist", "default": ""},
+             "font": "space-grotesk", "size": 84, "colour": _SODIUM, "letter_spacing": 0.55, "uppercase": True},
+            {"type": "text", "x": 1600, "y": 180, "w": w - 1770, "h": 110, "text": {"field": "subtitle", "default": ""},
+             "font": "special-elite", "size": 66, "colour": _FOG, "align": "right", "uppercase": True, "letter_spacing": 0.06},
+            {"type": "text", "x": 150, "y": 1450, "w": w - 300, "h": 1290, "text": {"field": "title"},
+             "font": "bebas-neue", "size": 700, "colour": _BONE, "valign": "bottom", "line_height": 0.86, "uppercase": True,
+             "shadow": {"dx": 16, "dy": 0, "colour": _SMILE_RED}},
+            {"type": "rect", "x": 170, "y": h - 200, "w": 380, "h": 14, "fill": _SODIUM},
+        ]
+        return {"width": w, "height": h, "layers": base_layers + extra + [{"type": "grain", "amount": 7}]}
     else:  # center_title
         extra = [
             {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0000004d"},
@@ -158,8 +190,27 @@ def album_cover(variant: str = "center_title") -> dict[str, Any]:
     return {"width": w, "height": h, "layers": base_layers + extra + [{"type": "grain", "amount": 4}]}
 
 
-def teaser_poster() -> dict[str, Any]:
+def teaser_poster(variant: str = "classic") -> dict[str, Any]:
     w, h = 1600, 2400
+    if variant == "night":
+        return {
+            "width": w, "height": h,
+            "layers": [
+                {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover", "focal": [0.5, 0.4]},
+                {"type": "rect", "x": 0, "y": 0, "w": w, "h": 700, "gradient": {"colours": ["#000000cc", "#00000000"]}},
+                {"type": "rect", "x": 0, "y": 1150, "w": w, "h": h - 1150, "gradient": {"colours": ["#00000000", "#000000f2"]}},
+                {"type": "vignette", "strength": 0.65, "radius": 0.35},
+                {"type": "text", "x": 110, "y": 150, "w": w - 220, "h": 90, "text": {"field": "tagline", "default": ""},
+                 "font": "special-elite", "size": 58, "colour": _SODIUM, "align": "center", "letter_spacing": 0.16, "uppercase": True},
+                {"type": "text", "x": 80, "y": 1500, "w": w - 160, "h": 640, "text": {"field": "title"},
+                 "font": "bebas-neue", "size": 560, "colour": _BONE, "align": "center", "valign": "bottom", "line_height": 0.88,
+                 "uppercase": True, "shadow": {"dx": 9, "dy": 0, "colour": _SMILE_RED}},
+                {"type": "text", "x": 110, "y": 2180, "w": w - 220, "h": 70, "text": {"field": "date", "default": ""},
+                 "font": "space-grotesk", "size": 40, "colour": _FOG, "align": "center", "letter_spacing": 0.45, "uppercase": True},
+                {"type": "frame", "width": 3, "inset": 44, "colour": "#ede6da40"},
+                {"type": "grain", "amount": 8},
+            ],
+        }
     return {
         "width": w, "height": h,
         "layers": [
@@ -177,8 +228,25 @@ def teaser_poster() -> dict[str, Any]:
     }
 
 
-def lyric_card() -> dict[str, Any]:
+def lyric_card(variant: str = "classic") -> dict[str, Any]:
     w = h = 1080
+    if variant == "night":
+        return {
+            "width": w, "height": h,
+            "layers": [
+                {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0b0c10ff"},
+                {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover", "placeholder": False},
+                {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#000000a6"},
+                {"type": "vignette", "strength": 0.6, "radius": 0.35},
+                {"type": "text", "x": 90, "y": 130, "w": w - 180, "h": 680, "text": {"field": "quote"},
+                 "font": "bebas-neue", "size": 140, "colour": _BONE, "valign": "middle", "line_height": 0.95, "uppercase": True,
+                 "shadow": {"dx": 5, "dy": 0, "colour": _SMILE_RED}},
+                {"type": "rect", "x": 92, "y": 862, "w": 120, "h": 6, "fill": _SODIUM},
+                {"type": "text", "x": 90, "y": 892, "w": w - 180, "h": 60, "text": {"field": "attribution", "default": ""},
+                 "font": "special-elite", "size": 34, "colour": _SODIUM, "letter_spacing": 0.1, "uppercase": True},
+                {"type": "grain", "amount": 7},
+            ],
+        }
     return {
         "width": w, "height": h,
         "layers": [
@@ -194,8 +262,31 @@ def lyric_card() -> dict[str, Any]:
     }
 
 
-def tracklist_back() -> dict[str, Any]:
+def tracklist_back(variant: str = "classic") -> dict[str, Any]:
     w = h = 3000
+    if variant == "night":
+        return {
+            "width": w, "height": h,
+            "layers": [
+                {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0b0c10ff"},
+                {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "cover_image"}, "fit": "cover",
+                 "blur": 22, "opacity": 0.6, "placeholder": False},
+                {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#000000b0"},
+                {"type": "vignette", "strength": 0.6, "radius": 0.35},
+                {"type": "text", "x": 220, "y": 250, "w": w - 440, "h": 340, "text": {"field": "group_name"},
+                 "font": "bebas-neue", "size": 320, "colour": _BONE, "letter_spacing": 0.04, "uppercase": True,
+                 "shadow": {"dx": 10, "dy": 0, "colour": _SMILE_RED}},
+                {"type": "text", "x": 224, "y": 610, "w": w - 440, "h": 130, "text": {"field": "title", "default": ""},
+                 "font": "special-elite", "size": 92, "colour": _SODIUM, "letter_spacing": 0.08, "uppercase": True},
+                {"type": "rect", "x": 224, "y": 800, "w": w - 448, "h": 4, "fill": "#ede6da40"},
+                {"type": "text", "x": 224, "y": 920, "w": w - 448, "h": 1450, "text": {"field": "tracks"},
+                 "font": "space-grotesk", "size": 112, "colour": _BONE, "line_height": 1.7, "letter_spacing": 0.04,
+                 "columns": {"indent": 0.09}, "muted_colour": _FOG},
+                {"type": "text", "x": 224, "y": 2480, "w": w - 448, "h": 320, "text": {"field": "credits", "default": ""},
+                 "font": "special-elite", "size": 54, "colour": _FOG, "line_height": 1.45},
+                {"type": "grain", "amount": 6},
+            ],
+        }
     return {
         "width": w, "height": h,
         "layers": [
@@ -258,6 +349,10 @@ def get_layout(template: str, variant: str | None = None) -> dict[str, Any]:
     builder = _BUILDERS.get(template)
     if builder is None:
         raise ValueError(f"unknown design template '{template}'; use one of {', '.join(TEMPLATE_FIELDS)}")
+    if template in VARIANTS:
+        if variant and variant not in VARIANTS[template]:
+            raise ValueError(f"unknown {template} variant '{variant}'; use one of {', '.join(VARIANTS[template])}")
+        return builder(variant or VARIANTS[template][0])
     if variant:
         raise ValueError(f"template '{template}' has no variants")
     return builder()
