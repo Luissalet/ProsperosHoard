@@ -204,7 +204,7 @@ def studio_generate_image(
     scheduler: Optional[str] = None, seed: Optional[int] = None, count: int = 1,
     reference_asset_id: Optional[str] = None, strength: Optional[float] = None,
     template: Optional[str] = None, wait_s: float = 0, use_character_reference: bool = False,
-    checkpoint: Optional[str] = None, include_image: bool = False,
+    checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; img2img when reference_asset_id is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
@@ -213,6 +213,11 @@ def studio_generate_image(
     "Pastel dream", "Neon night city", "Album art minimal"). aspect: 1:1, 9:16, 16:9, 2:3, 3:2, 4:5.
     template: sdxl_txt2img (default), sdxl_img2img, sd15_txt2img (low VRAM), sdxl_hires, flux_schnell_txt2img,
     flux_kontext_edit (needs reference_asset_id), wan22_ti2v, or an imported wf_ id.
+    consistent=true keeps a mentioned character's face/design exact: routes through flux_kontext_edit
+    with their canonical reference image and the prompt turned into "the same character from the
+    reference, now <scene>" (needs a @Character with a canonical_asset_id set - see studio_cast; fails
+    with code consistent_needs_reference otherwise). Prefer this over use_character_reference for a
+    character whose canonical shot came from a Flux/Kontext reference sheet.
     seed: fix it to reproduce or keep a look consistent (random when omitted, always returned).
     checkpoint: a file name from studio_status (default: the template's; a wrong name fails listing the installed ones).
     count 1-8 (seeds seed..seed+count-1). Returns the job (poll studio_job), the exact final prompt and
@@ -221,14 +226,14 @@ def studio_generate_image(
     block on its turn - use studio_show once you need to look).
     A job in "waiting_gpu" is waiting for free VRAM - normal, not an error.
 
-    Keywords: generate image, txt2img, make a photo, draw, render a portrait, generar imagen, crear foto, dibujar, hacer una foto
+    Keywords: generate image, txt2img, make a photo, draw, render a portrait, character consistency, same character, generar imagen, crear foto, dibujar, hacer una foto, personaje consistente
     """
     body = {
         "prompt": prompt, "style": style, "negative": negative, "aspect": aspect, "width": width,
         "height": height, "steps": steps, "cfg": cfg, "sampler": sampler, "scheduler": scheduler,
         "seed": seed, "count": count, "reference_asset_id": reference_asset_id, "strength": strength,
         "template": template, "wait_s": wait_s, "use_character_reference": use_character_reference,
-        "checkpoint": checkpoint,
+        "checkpoint": checkpoint, "consistent": consistent,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)
