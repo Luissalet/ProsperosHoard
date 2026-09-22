@@ -4,13 +4,19 @@ import { api, thumbUrl, type DesignTemplate } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, useApp, useAsync, useDebounced } from "../components/ui";
 
-const LABELS: Record<string, string> = {
-  photocard_front: "Photocard · front", photocard_back: "Photocard · back", album_cover: "Album cover",
-  teaser_poster: "Teaser poster", lyric_card: "Lyric card", tracklist_back: "Tracklist back", thumbnail: "Video thumbnail",
+const LABELS: Record<string, Record<string, string>> = {
+  en: {
+    photocard_front: "Photocard · front", photocard_back: "Photocard · back", album_cover: "Album cover",
+    teaser_poster: "Teaser poster", lyric_card: "Lyric card", tracklist_back: "Tracklist back", thumbnail: "Video thumbnail",
+  },
+  es: {
+    photocard_front: "Photocard · anverso", photocard_back: "Photocard · reverso", album_cover: "Portada de álbum",
+    teaser_poster: "Cartel teaser", lyric_card: "Tarjeta de letra", tracklist_back: "Contraportada", thumbnail: "Miniatura de vídeo",
+  },
 };
 
 export function DesignerView() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const templates = useAsync(() => api.templates(), []);
@@ -95,7 +101,7 @@ export function DesignerView() {
           <div className="panel-title">{t("templates")}</div>
           {(templates.data?.items || []).map((x) => (
             <button key={x.template} className={`template-item${x.template === name ? " on" : ""}`} onClick={() => setName(x.template)}>
-              <div>{LABELS[x.template] || x.template}</div>
+              <div>{LABELS[lang]?.[x.template] || x.template}</div>
               <div className="dims">{x.width} x {x.height}</div>
             </button>
           ))}
