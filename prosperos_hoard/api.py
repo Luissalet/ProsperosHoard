@@ -731,7 +731,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def run():
             tl = op_timeline(project, body)
             opts = body.options or {}
-            return timeline_mod.compact_view(tl, clip_offset=int(opts.get("clip_offset", 0)), clip_limit=int(opts.get("clip_limit", 24)))
+            return timeline_mod.compact_view(tl, clip_offset=int(opts.get("clip_offset", 0)), clip_limit=int(opts.get("clip_limit", 16)))
         return agent("studio_timeline", f"{body.action}:{body.timeline_id or body.song_asset_id or ''}", run)
 
     @app.get("/api/projects/{project_id}/timelines")
@@ -883,8 +883,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             counts = {s: len(store.list_jobs(state=s, limit=50)["items"]) for s in ("queued", "waiting_gpu", "running")}
             return {
                 "demo_backend": status["demo"],
-                "capabilities": {cap: {"state": r.get("state"), "provider": r.get("provider"), "model": r.get("model"),
-                                       "reason": engine._clip(r.get("reason"), 200)} for cap, r in link.items()},
+                "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
+                                                         "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
+                                 for cap, r in link.items()},
                 "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
                 "ffmpeg": status["ffmpeg"]["found"],
                 "piper_tts": status["piper"]["installed"],

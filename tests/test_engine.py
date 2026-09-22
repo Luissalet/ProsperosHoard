@@ -203,3 +203,24 @@ def test_show_assets_uses_contact_sheet_above_four_and_stays_small(store, projec
     sheet = engine.show_assets(store, ids, 768)
     assert len(sheet) == 1 and sheet[0]["kind"] == "contact_sheet" and sheet[0]["order"] == ids
     assert len(sheet[0]["bytes"]) <= engine.SHOW_MAX_BYTES
+
+
+def test_inpaint_and_hires_run_on_the_backend(store, backend_with_comfy, project):
+    from PIL import Image
+
+    base = _run_job(store, backend_with_comfy, "generate_image",
+                    {"positive_prompt": "idol portrait", "width": 512, "height": 512, "seed": 2, "template": "sdxl_txt2img"}, project["id"])
+    src = base["outputs"]["asset_ids"][0]
+    mask_path = store.data_dir / "inbox" / "mask.png"
+    mask_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (512, 512), (0, 0, 0)).save(mask_path)
+    mask = engine.import_asset(store, project["id"], mask_path)
+    inp = _run_job(store, backend_with_comfy, "edit_image",
+                   {"asset_id": src, "operation": "inpaint", "mask_asset_id": mask["id"], "prompt": "gold earrings"}, project["id"])
+    assert inp["state"] == "done", inp
+    recipe = store.get_asset(inp["outputs"]["asset_ids"][0])["recipe"]
+    assert recipe["input_asset_ids"] == [src, mask["id"]] and recipe["params"]["denoise"] == 1.0
+    up = _run_job(store, backend_with_comfy, "edit_image", {"asset_id": src, "operation": "hires"}, project["id"])
+    assert up["state"] == "done", up
+    big = store.get_asset(up["outputs"]["asset_ids"][0])
+    assert (big["width"], big["height"]) == (768, 768)
