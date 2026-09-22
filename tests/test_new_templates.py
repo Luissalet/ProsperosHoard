@@ -237,6 +237,9 @@ def test_wan_defaults_and_size_follow_the_start_frame(store, backend_with_comfy,
         assert _node(wf, "ModelSamplingSD3")["shift"] == 8
         assert _node(wf, "CreateVideo")["fps"] == 24
         assert _node(wf, "SaveVideo")["format.codec"] == "auto"
+        # no negative given: Wan keeps the official negative prompt it was trained with
+        workflow, _ = comfy_driver.load_template("wan22_ti2v")
+        assert wf["7"]["inputs"]["text"] == workflow["7"]["inputs"]["text"] != ""
 
 
 def test_kontext_output_size_is_the_requested_one(store, backend_with_comfy, fake_comfy, project):

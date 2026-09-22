@@ -664,7 +664,7 @@ def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[
     values = {
         "checkpoint": _first(params.get("checkpoint"), d.get("checkpoint")),
         "positive_prompt": params["positive_prompt"],
-        "negative_prompt": params.get("negative_prompt") or "",
+        "negative_prompt": params.get("negative_prompt") or t.get("negative_prompt") or "",
         "width": _first(params.get("width"), (params.get("style_defaults") or {}).get("width"), t.get("width"), 1024),
         "height": _first(params.get("height"), (params.get("style_defaults") or {}).get("height"), t.get("height"), 1024),
         "batch_size": 1,
@@ -1079,7 +1079,7 @@ def time_lyrics(store: Store, project_id: str, song_asset_id: str, lyrics: str, 
                                   "created_at": now_iso()})
     return {"id": asset["id"], "lines": len(timed["lines"]), "sections": timed["sections"],
             "note": "estimated from the lyrics' [Section] tags and the song's bars, not from the vocals: "
-                    "re-time by ear in Audio > Lyrics before a final render"}
+                    "re-time by ear in Audio > Lyrics timing before a final render"}
 
 
 # --------------------------------------------------------------- design --
@@ -1456,7 +1456,7 @@ def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], a
         lyrics = read_lyrics(store, lyrics_asset_id)
         lyrics_lines = lyrics["lines"]
         if not lyrics_lines:
-            raise EngineError("lyrics_untimed", "the lyrics have no [mm:ss.xx] timestamps; time them in Audio > Lyrics first")
+            raise EngineError("lyrics_untimed", "the lyrics have no [mm:ss.xx] timestamps; time them in Audio > Lyrics timing first")
         # timed [Section] markers are the song's real structure (verse,
         # chorus...), which beats energy-based segmentation for cut density
         if lyrics["sections"] and options.get("sections", "auto") != "analysis":
