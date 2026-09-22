@@ -41,15 +41,18 @@ class TimelineError(ValueError):
 
 # ------------------------------------------------------------- auto-cut
 
+# a beat "belongs" to a section that starts up to this much after it: LRC
+# stamps are rounded to 1/100 s, beat times to 1/1000 s
+_SECTION_EPS_S = 0.06
+
+
 def _energy_at(t: float, sections: list[dict[str, Any]]) -> str:
-    for s in sections:
-        if s["start_s"] <= t < s["end_s"]:
-            return s.get("energy", "mid")
-    return sections[-1].get("energy", "mid") if sections else "mid"
+    section = _section_at(t, sections)
+    return section.get("energy", "mid") if section else "mid"
 
 
 def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[dict[str, Any]], duration_s: float,
-                options: dict[str, Any]) -> list[dict[str, Any]]:
+                options: dict[str, Any], line_times: Optional[list[float]] = None) -> list[dict[str, Any]]:
     """Cut times on beats: every `beats_low` beats (default 4) in low-energy
     sections, `beats_mid` (4) in mid, `beats_high` (2) in high. Returns
     [{"start_s", "flash"}] starting at 0.0; no clip shorter than MIN_CLIP_S,
@@ -87,6 +90,11 @@ def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[
         first = next((b for b in beats if b >= s["start_s"] - 0.05), None)
         if first is not None:
             section_starts.add(round(first, 3))
+    # `cut_on_lyrics`: a new shot on the beat nearest each sung line, so a
+    # shot chosen for a line appears with it
+    for t in line_times or []:
+        if beats:
+            section_starts.add(round(min(beats, key=lambda b: abs(b - t)), 3))
     points = [{"start_s": 0.0, "flash": False}]
     since = 0
     for i, b in enumerate(beats):
@@ -121,6 +129,7 @@ def _assign_assets(pool: list[dict[str, Any]], count: int, seed: int = 0) -> lis
 
 
 def _section_at(t: float, sections: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    t = t + _SECTION_EPS_S
     for s in sections or []:
         if s["start_s"] <= t < s["end_s"]:
             return s
@@ -188,7 +197,8 @@ def build_auto_cut(
     if downbeats is None:
         downbeats = beat_times[0::4]
 
-    cuts = _cut_points(beat_times, downbeats, sections or [], song_duration_s, options)
+    line_times = [float(ln["time_s"]) for ln in (lyrics_lines or [])] if options.get("cut_on_lyrics") else None
+    cuts = _cut_points(beat_times, downbeats, sections or [], song_duration_s, options, line_times)
     starts = [c["start_s"] for c in cuts] + [song_duration_s]
     section_pools = options.get("section_pools")
     if section_pools:
