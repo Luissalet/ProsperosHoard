@@ -19,12 +19,18 @@ from typing import Any, Optional
 from . import procutil
 from .hoard_link import Link, LinkConfig, Unavailable
 
-# SDXL/SD1.5/SVD figures from the model notes; editable at runtime via
-# data/backend.json -> "vram_estimates_mb".
+# SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step figures from the model notes; editable
+# at runtime via data/backend.json -> "vram_estimates_mb". Flux and Kontext
+# fp8: ~13 GB; Wan 5B at 1280x704 (lower at 960x544): ~12 GB; ACE-Step 1.5
+# turbo: ~8 GB.
 DEFAULT_VRAM_ESTIMATES_MB = {
     "sdxl": 7000,
     "sd15": 3500,
     "svd": 10000,
+    "flux": 13000,
+    "kontext": 13000,
+    "wan": 12000,
+    "ace": 8000,
 }
 
 
@@ -44,35 +50,59 @@ class MusicBackend:
 
 
 class ComfyMusic(MusicBackend):
-    """Enabled only when ComfyUI exposes an audio-generation node family."""
+    """Enabled when ComfyUI exposes ACE-Step's text-encode node *and* an
+    `ace_step*` checkpoint is actually on disk - either alone would still
+    fail the first real call (the node with no weights, or weights with no
+    node from an older ComfyUI). Real generation goes through the
+    `ace15_song` built-in template (see `engine.compose_song`), the same
+    way image/video templates work; this class only answers "can I?" for
+    `studio_status` and `studio_compose`. Also recognises the broader
+    audio-gen family (StableAudio, MusicGen, AudioGen custom nodes) for the
+    status reason text, though only ACE-Step has a built-in template today.
+    """
 
     name = "comfy_music"
+    ACE_STEP_NODE = "TextEncodeAceStepAudio1.5"
 
     def __init__(self, object_info: dict[str, Any] | None):
         self._object_info = object_info or {}
-        # Known node class names shipped by the common audio-gen custom node
-        # packs (ACE-Step, StableAudio, MusicGen wrappers). None of these
-        # are installed on a stock ComfyUI (no custom nodes) - this
-        # flag simply stays False until one is.
         self._audio_nodes = [
             n for n in self._object_info
             if any(tag in n for tag in ("AceStep", "StableAudio", "MusicGen", "AudioGen"))
         ]
+        self._ace_checkpoints = [
+            name for name in _checkpoint_choices(self._object_info) if "ace_step" in name.lower()
+        ]
 
     def available(self) -> bool:
-        return bool(self._audio_nodes)
+        return self.ACE_STEP_NODE in self._object_info and bool(self._ace_checkpoints)
 
     def reason(self) -> str:
         if self.available():
-            return f"ComfyUI has audio-generation nodes: {', '.join(self._audio_nodes)}"
+            return f"ComfyUI has {self.ACE_STEP_NODE} and checkpoint(s): {', '.join(self._ace_checkpoints)}"
+        if self.ACE_STEP_NODE not in self._object_info:
+            extra = f" (other audio nodes present: {', '.join(self._audio_nodes)})" if self._audio_nodes else ""
+            return f"music: not installed - ComfyUI's /object_info has no {self.ACE_STEP_NODE} node{extra}."
         return (
-            "music: not installed - ComfyUI's /object_info shows no audio-generation "
-            "node family (no ACE-Step / StableAudio / MusicGen custom nodes). "
-            "Install one of those custom node packs to enable this."
+            "music: not installed - ComfyUI has the ACE-Step node but no 'ace_step*' checkpoint on disk; "
+            "download one (e.g. ace_step_1.5_turbo_aio.safetensors) into models/checkpoints."
         )
 
     def generate(self, prompt: str, lyrics: str | None, duration_s: float, seed: int | None) -> bytes:
-        raise Unavailable("music", [self.reason()])
+        # Real generation goes through engine.compose_song (the ace15_song
+        # template, like every other ComfyUI job) so it gets the same
+        # lineage, VRAM-wait and job-queue handling as images and video;
+        # this narrower interface only exists for the generic HttpMusic
+        # contract's shape and is not used for ComfyMusic.
+        raise NotImplementedError("ComfyMusic generates through engine.compose_song, not this interface")
+
+
+def _checkpoint_choices(object_info: dict[str, Any]) -> list[str]:
+    try:
+        first = object_info["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+        return list(first) if isinstance(first, list) else []
+    except (KeyError, IndexError, TypeError):
+        return []
 
 
 class HttpMusic(MusicBackend):

@@ -76,9 +76,9 @@ async def test_mcp_protocol_end_to_end(running_app):
             tools = await session.list_tools()
             by_name = {t.name: t for t in tools.tools}
             expected = {"studio_status", "studio_projects", "studio_create_project", "studio_cast", "studio_generate_image",
-                        "studio_edit_image", "studio_animate", "studio_voice", "studio_import", "studio_analyze_audio",
-                        "studio_design", "studio_photocard_set", "studio_timeline", "studio_render", "studio_jobs",
-                        "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage"}
+                        "studio_edit_image", "studio_animate", "studio_voice", "studio_compose", "studio_import",
+                        "studio_analyze_audio", "studio_design", "studio_photocard_set", "studio_timeline", "studio_render",
+                        "studio_jobs", "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
@@ -90,7 +90,10 @@ async def test_mcp_protocol_end_to_end(running_app):
             result = await session.call_tool("studio_status", {})
             status = json.loads(result.content[0].text)
             assert status["comfyui"]["reachable"] is True
-            assert status["music_generation"][0]["available"] is False
+            # the fake backend now serves a real ComfyUI /object_info (patched with the
+            # models the production example uses), so ComfyMusic (ACE-Step) resolves.
+            assert status["music_generation"][0]["name"] == "comfy_music"
+            assert status["music_generation"][0]["available"] is True
 
             result = await session.call_tool("studio_create_project", {"name": "MCP Test"})
             project_id = json.loads(result.content[0].text)["id"]
@@ -104,9 +107,17 @@ async def test_mcp_protocol_end_to_end(running_app):
             gen = json.loads(result.content[0].text)
             assert gen["job"]["state"] == "done"
             assert "platinum hair idol" in gen["final_prompt"]
-            assert any(type(c).__name__ == "ImageContent" for c in result.content)  # finished within wait_s
+            # include_image defaults to false: a text-only model must not get an ImageContent block
+            assert not any(type(c).__name__ == "ImageContent" for c in result.content)
             asset_id = gen["job"]["asset_ids"][0]
             assert len(result.content[0].text) < 4000  # compact
+
+            result = await session.call_tool(
+                "studio_generate_image",
+                {"project": project_id, "prompt": "@Iris Volt on a rooftop", "count": 1, "wait_s": 20,
+                 "seed": 11, "include_image": True},
+            )
+            assert any(type(c).__name__ == "ImageContent" for c in result.content)  # asked for explicitly
 
             result = await session.call_tool("studio_show", {"asset_ids": [asset_id]})
             images = [c for c in result.content if type(c).__name__ == "ImageContent"]
@@ -120,7 +131,23 @@ async def test_mcp_protocol_end_to_end(running_app):
             result = await session.call_tool("studio_design", {"project": project_id, "template": "thumbnail",
                                                                "fields": {"title": "Afterglow"}, "image_asset_id": asset_id})
             assert json.loads(result.content[0].text)["kind"] == "image"
+            assert not any(type(c).__name__ == "ImageContent" for c in result.content)  # include_image default false
+
+            result = await session.call_tool("studio_design", {"project": project_id, "template": "thumbnail",
+                                                               "fields": {"title": "Afterglow"}, "image_asset_id": asset_id,
+                                                               "include_image": True})
             assert any(type(c).__name__ == "ImageContent" for c in result.content)
+
+            result = await session.call_tool("studio_compose", {
+                "project": project_id, "tags": "dark trap, horror rap, heavy 808, half-time 140 bpm",
+                "lyrics": "[Verse]\nCuenta las farolas, una, dos.\n", "bpm": 140, "duration": 5,
+                "key": "F# minor", "language": "es", "seed": 31, "wait_s": 20,
+            })
+            song = json.loads(result.content[0].text)
+            assert song["job"]["state"] == "done"
+            song_asset_id = song["job"]["asset_ids"][0]
+            result = await session.call_tool("studio_lineage", {"asset_id": song_asset_id})
+            assert json.loads(result.content[0].text)["recipe"]["template"] == "ace15_song"
 
             result = await session.call_tool("studio_job", {"job_id": "job_does_not_exist"})
             assert result.isError is True

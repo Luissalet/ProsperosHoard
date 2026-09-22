@@ -1,0 +1,23 @@
+{
+  "template": "ace15_song",
+  "kind": "audio",
+  "vram_class": "ace",
+  "map": {
+    "checkpoint": "97.ckpt_name",
+    "tags": "94.tags",
+    "lyrics": "94.lyrics",
+    "seed": "94.seed",
+    "bpm": "94.bpm",
+    "duration": "94.duration",
+    "timesignature": "94.timesignature",
+    "language": "94.language",
+    "key": "94.keyscale",
+    "shift": "78.shift",
+    "steps": "3.steps",
+    "cfg": "3.cfg"
+  },
+  "linked_seeds": ["3.seed"],
+  "output_node": "104",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "notes": "ACE-Step 1.5 turbo, song with vocals and lyrics; outputs mp3. `key` is the friendly name for the node's `keyscale` combo (e.g. 'F# minor'), `timesignature` one of '2'|'3'|'4'|'6'. seed drives both the text-encode and sampler nodes (linked_seeds). generate_audio_codes/cfg_scale/temperature/top_p/top_k/min_p are left at ACE-Step's own defaults (not exposed) - steps 8, cfg 1, shift 3 per the turbo model's settings. Converted from the official audio_ace_step_1_5_checkpoint.json template, hand-checked: its two PrimitiveNode helpers (seed, duration) resolve to literal values, not links."
+}
