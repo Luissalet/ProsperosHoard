@@ -1,14 +1,12 @@
-Vendored from: HoardLink (https://github.com/Luissalet/HoardLink)
-Vendored at: 2026-09-22T18:52:18Z
-Source commit: none yet - the source repository had not made its first git
-commit when this snapshot was taken (built concurrently by a sibling agent).
-This is a byte-for-byte copy of hoard_link/*.py at that point in time.
+Vendored from: hoard-link (the shared model-backend resolver), package hoard_link/
+Source: a pre-release snapshot
+Vendored at: 2026-09-22
+License: MIT (same as this repository)
 
-Do not modify these files directly. Prospero's Hoard talks to Hoard Link
-only through prosperos_hoard/backend.py, which wraps this package (adds
-Prospero-specific VRAM estimates and a tiny "not installed" MusicBackend
-layer) without editing any vendored file. When re-vendoring a
-later hoard-link commit, drop in the new files here and re-run
-`pytest tests/test_backend.py` to confirm the wrapper still lines up with
-the public API (Link, LinkConfig, ComfyClient, Resolution, Unavailable,
-BackendError, gpu_free_mb).
+This is a byte-for-byte copy of every hoard_link/*.py file at that commit.
+Do not modify these files. Prospero's Hoard talks to Hoard Link only
+through prosperos_hoard/backend.py, which wraps it (VRAM estimates per
+workflow family, ffmpeg/fonts/music status, the ComfyUI client on Hoard
+Link's own event loop). To update: replace every .py file here with the
+new commit's copies, update the commit line above, and run
+`pytest tests/test_backend.py tests/test_api.py`.
