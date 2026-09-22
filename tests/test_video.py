@@ -77,11 +77,90 @@ def test_ass_escaping_makes_lyrics_inert():
     assert "\\NDialogue" in body  # the real newline became an ASS line break
 
 
+def test_validate_finishing_rejects_bad_values():
+    assert video.validate_finishing(None) == {}
+    assert video.validate_finishing({}) == {}
+    with pytest.raises(video.RenderError):
+        video.validate_finishing({"color_grade": "sepia"})
+    with pytest.raises(video.RenderError):
+        video.validate_finishing({"grain": 4})
+    with pytest.raises(video.RenderError):
+        video.validate_finishing({"lyric_style": "spooky"})
+    with pytest.raises(video.RenderError):
+        video.validate_finishing({"nonsense": True})
+    clean = video.validate_finishing({"color_grade": "teal_orange", "grain": 0.5, "vignette": True,
+                                       "letterbox": True, "glitch_on_downbeats": True, "lyric_style": "horror"})
+    assert clean == {"color_grade": "teal_orange", "grain": 0.5, "vignette": True, "letterbox": True,
+                      "glitch_on_downbeats": True, "lyric_style": "horror"}
+
+
+def test_finishing_vf_builds_each_effect():
+    assert video.build_finishing_vf(None, 1080, 1920) == ""
+    assert video.build_finishing_vf({}, 1080, 1920) == ""
+
+    grade_vf = video.build_finishing_vf({"color_grade": "sodium_night"}, 1080, 1920)
+    assert grade_vf == video.COLOR_GRADE_PRESETS["sodium_night"]
+
+    bleach_vf = video.build_finishing_vf({"color_grade": "bleach_bypass"}, 1080, 1920)
+    assert "curves=preset=strong_contrast" in bleach_vf
+
+    grain_vf = video.build_finishing_vf({"grain": 0.5}, 1080, 1920)
+    assert "noise=alls=20.0:allf=t+u" in grain_vf
+
+    vignette_vf = video.build_finishing_vf({"vignette": True}, 1080, 1920)
+    assert vignette_vf == "vignette=PI/5"
+
+    letterbox_vf = video.build_finishing_vf({"letterbox": True}, 1080, 1920)
+    parts = letterbox_vf.split(",")
+    assert len(parts) == 2 and all(p.startswith("drawbox=") for p in parts)
+    assert "y=0:w=1080:h=192" in parts[0]
+    assert "y=1728" in parts[1]  # 1920 - 192
+
+    glitch_vf = video.build_finishing_vf({"glitch_on_downbeats": True}, 1080, 1920, glitch_points=[(4.0, 0.15)])
+    assert "rgbashift=rh=6:bv=-6:enable='between(t\\,4.000\\,4.150)'" in glitch_vf
+
+    # combined: order is grade, grain, vignette, letterbox, glitch
+    combo = video.build_finishing_vf(
+        {"color_grade": "teal_orange", "grain": 0.2, "vignette": True, "letterbox": True, "glitch_on_downbeats": True},
+        200, 400, glitch_points=[(1.0, 0.1)],
+    )
+    assert combo.index("eq=") < combo.index("noise=") < combo.index("vignette=") < combo.index("drawbox=") < combo.index("rgbashift=")
+
+
+def test_build_ass_horror_style_uppercases_and_jitters():
+    clips = [{"text": "walk home alone", "start_s": 1.0, "end_s": 2.5}]
+    default_ass = video.build_ass(1080, 1920, clips, style="default")
+    horror_ass = video.build_ass(1080, 1920, clips, style="horror")
+    assert "WALK HOME ALONE" in horror_ass
+    assert "walk home alone" not in horror_ass
+    assert "Bebas Neue" in horror_ass
+    assert "Bebas Neue" not in default_ass
+    assert r"\frz" in horror_ass and r"\fax" in horror_ass
+    # deterministic: same input renders byte-identical
+    assert horror_ass == video.build_ass(1080, 1920, clips, style="horror")
+    with pytest.raises(video.RenderError):
+        video.build_ass(1080, 1920, clips, style="creepy")
+
+
 def test_mux_cmd_uses_bare_subtitle_name():
     cmd = video.build_mux_cmd("ffmpeg", Path("C:/Users/me/Prospero's Hoard/v.mp4"), None, "lyrics.ass", Path("o.mp4"), "ultrafast", 28, "128k")
     assert "ass=lyrics.ass:fontsdir=fonts" in cmd
     with pytest.raises(ValueError):
         video.build_mux_cmd("ffmpeg", Path("v.mp4"), None, "C:/x/it's.ass", Path("o.mp4"), "ultrafast", 28, "128k")
+
+
+def test_mux_cmd_finishing_runs_before_captions():
+    cmd = video.build_mux_cmd("ffmpeg", Path("v.mp4"), None, "lyrics.ass", Path("o.mp4"), "ultrafast", 28, "128k",
+                               finishing_vf="vignette=PI/5")
+    vf = cmd[cmd.index("-vf") + 1]
+    assert vf == "vignette=PI/5,ass=lyrics.ass:fontsdir=fonts"
+    # no lyrics, still applies the grade
+    cmd2 = video.build_mux_cmd("ffmpeg", Path("v.mp4"), None, None, Path("o.mp4"), "ultrafast", 28, "128k",
+                                finishing_vf="vignette=PI/5")
+    assert cmd2[cmd2.index("-vf") + 1] == "vignette=PI/5"
+    # neither: no -vf at all (unchanged from before this feature)
+    cmd3 = video.build_mux_cmd("ffmpeg", Path("v.mp4"), None, None, Path("o.mp4"), "ultrafast", 28, "128k")
+    assert "-vf" not in cmd3
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
@@ -172,6 +251,54 @@ def test_animated_webp_is_converted_to_mp4(tmp_path):
     dest = tmp_path / "anim.mp4"
     n = video.animated_webp_to_mp4(src, dest, 8, tmp_path / "work")
     assert n == 6 and dest.is_file() and dest.stat().st_size > 0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_real_render_with_finishing_applies_grade_grain_vignette_letterbox_and_glitch(tmp_path):
+    from PIL import Image
+
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    for i in range(3):
+        Image.new("RGB", (400, 700), (40 * i, 80, 120)).save(assets_dir / f"img{i}.png")
+
+    timeline = {
+        "width": 400, "height": 700, "fps": 15, "audio_asset_id": None,
+        "finishing": {"color_grade": "sodium_night", "grain": 0.4, "vignette": True, "letterbox": True,
+                      "glitch_on_downbeats": True, "lyric_style": "horror"},
+        "tracks": [
+            {"type": "visual", "clips": [
+                {"asset_id": "img0", "kind": "image", "duration_s": 1.0, "trim_start_s": 0.0,
+                 "transition_in": {"type": "cut", "duration_s": 0.0}},
+                {"asset_id": "img1", "kind": "image", "duration_s": 1.0, "trim_start_s": 0.0,
+                 "transition_in": {"type": "flash_white", "duration_s": 0.15}},
+                {"asset_id": "img2", "kind": "image", "duration_s": 1.0, "trim_start_s": 0.0,
+                 "transition_in": {"type": "cut", "duration_s": 0.0}},
+            ]},
+            {"type": "lyrics", "clips": [{"text": "it followed me home", "start_s": 0.1, "end_s": 1.5}]},
+        ],
+    }
+
+    def asset_path_for(asset_id):
+        return assets_dir / f"{asset_id}.png"
+
+    out = tmp_path / "out.mp4"
+    result = video.render_timeline(timeline, asset_path_for, tmp_path / "work", out, quality="preview")
+    assert out.is_file() and out.stat().st_size > 0
+    assert result["duration_s"] == pytest.approx(3.0)
+
+
+def test_render_timeline_rejects_bad_finishing(tmp_path):
+    timeline = {
+        "width": 400, "height": 700, "fps": 15, "audio_asset_id": None,
+        "finishing": {"color_grade": "sepia-tone-that-does-not-exist"},
+        "tracks": [{"type": "visual", "clips": [
+            {"asset_id": "img0", "kind": "image", "duration_s": 1.0, "trim_start_s": 0.0,
+             "transition_in": {"type": "cut", "duration_s": 0.0}},
+        ]}],
+    }
+    with pytest.raises(video.RenderError):
+        video.render_timeline(timeline, lambda _i: Path("/nonexistent.png"), tmp_path / "work", tmp_path / "out.mp4")
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")

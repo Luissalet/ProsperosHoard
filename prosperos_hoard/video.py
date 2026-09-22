@@ -12,6 +12,7 @@ AAC 192k.
 
 from __future__ import annotations
 
+import random
 import re
 import shutil
 import tempfile
@@ -29,6 +30,101 @@ QUALITY_PRESETS = {
 }
 
 TRANSITION_MAP = {"crossfade": "fade", "dip_black": "fadeblack", "flash_white": "fadewhite"}
+
+# Finishing: an optional grade/texture pass applied once over the whole cut
+# (not per clip), plus a lyric caption style. All keys are optional; an
+# empty/absent `finishing` dict renders exactly as before this feature.
+#
+#   {"color_grade": "teal_orange"|"sodium_night"|"bleach_bypass",
+#    "grain": 0.0-1.0, "vignette": bool, "letterbox": bool,
+#    "glitch_on_downbeats": bool, "lyric_style": "default"|"horror"}
+#
+# Colour grades are single-pass `eq`/`colorbalance`/`curves` approximations,
+# not a real 3D LUT - good enough for a fast local render, not a colourist's
+# tool. `curves=preset=strong_contrast` is one of ffmpeg's built-in curve
+# presets (see the `curves` filter docs), used as-is for bleach bypass.
+COLOR_GRADE_PRESETS = {
+    "teal_orange": "eq=contrast=1.12:saturation=1.12,"
+                   "colorbalance=rs=-0.12:gs=0.02:bs=0.16:rm=0.04:bm=-0.02:rh=0.18:gh=0.02:bh=-0.14",
+    "sodium_night": "eq=brightness=-0.04:contrast=1.08:saturation=0.55,"
+                    "colorbalance=rs=0.1:bs=-0.22:rm=0.18:gm=0.03:bm=-0.22:rh=0.1:bh=-0.12",
+    "bleach_bypass": "curves=preset=strong_contrast,eq=saturation=0.35:contrast=1.18",
+}
+FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style"}
+LYRIC_STYLES = ("default", "horror")
+
+
+def validate_finishing(finishing: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Returns a clean copy, or raises RenderError for a bad value. `None`
+    and `{}` both mean "no finishing", so old timelines keep rendering as
+    before."""
+    if not finishing:
+        return {}
+    if not isinstance(finishing, dict):
+        raise RenderError("finishing must be an object")
+    unknown = set(finishing) - FINISHING_KEYS
+    if unknown:
+        raise RenderError(f"unknown finishing field(s): {', '.join(sorted(unknown))}")
+    out: dict[str, Any] = {}
+    grade = finishing.get("color_grade")
+    if grade:
+        if grade not in COLOR_GRADE_PRESETS:
+            raise RenderError(f"color_grade must be one of {', '.join(COLOR_GRADE_PRESETS)}")
+        out["color_grade"] = grade
+    if "grain" in finishing and finishing["grain"]:
+        try:
+            grain = float(finishing["grain"])
+        except (TypeError, ValueError):
+            raise RenderError("grain must be a number between 0 and 1") from None
+        if not 0.0 < grain <= 1.0:
+            raise RenderError("grain must be between 0 and 1")
+        out["grain"] = grain
+    if finishing.get("vignette"):
+        out["vignette"] = True
+    if finishing.get("letterbox"):
+        out["letterbox"] = True
+    if finishing.get("glitch_on_downbeats"):
+        out["glitch_on_downbeats"] = True
+    style = finishing.get("lyric_style")
+    if style and style != "default":
+        if style not in LYRIC_STYLES:
+            raise RenderError(f"lyric_style must be one of {', '.join(LYRIC_STYLES)}")
+        out["lyric_style"] = style
+    return out
+
+
+def _escape_enable_arg(value: str) -> str:
+    """Commas inside a filter's own function args (e.g. `between(t,0,1)`)
+    must be backslash-escaped once the filter sits in a comma-joined
+    filtergraph string."""
+    return value.replace(",", "\\,")
+
+
+def build_finishing_vf(finishing: Optional[dict[str, Any]], width: int, height: int,
+                        glitch_points: Optional[list[tuple[float, float]]] = None) -> str:
+    """Builds the finishing portion of a `-vf` chain (no leading/trailing
+    comma), applied to the whole joined cut before the lyric captions are
+    burned on top. Pure and snapshot-testable: no I/O."""
+    finishing = finishing or {}
+    parts: list[str] = []
+    grade = finishing.get("color_grade")
+    if grade:
+        parts.append(COLOR_GRADE_PRESETS[grade])
+    grain = finishing.get("grain")
+    if grain:
+        parts.append(f"noise=alls={float(grain) * 40:.1f}:allf=t+u")
+    if finishing.get("vignette"):
+        parts.append("vignette=PI/5")
+    if finishing.get("letterbox"):
+        bar = max(2, int(round(height * 0.10 / 2) * 2))
+        parts.append(f"drawbox=x=0:y=0:w={width}:h={bar}:color=black:t=fill")
+        parts.append(f"drawbox=x=0:y={height - bar}:w={width}:h={bar}:color=black:t=fill")
+    if finishing.get("glitch_on_downbeats"):
+        for start, dur in glitch_points or []:
+            end = start + max(0.08, min(dur, 0.22))
+            enable = _escape_enable_arg(f"between(t,{start:.3f},{end:.3f})")
+            parts.append(f"rgbashift=rh=6:bv=-6:enable='{enable}'")
+    return ",".join(parts)
 
 
 class RenderError(RuntimeError):
@@ -160,19 +256,24 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
 
 
 def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass_name: Optional[str],
-                   out_path: Path, preset: str, crf: int, audio_bitrate: str) -> list[str]:
+                   out_path: Path, preset: str, crf: int, audio_bitrate: str, finishing_vf: str = "") -> list[str]:
     """`ass_name` is a bare file name inside the ffmpeg working directory
     (`render_timeline` runs this with `cwd=work_dir`): the `ass=` filter
     argument is parsed by ffmpeg's filter-graph syntax, where the drive
     colon of a Windows path and the apostrophe in the install folder name
-    are both special. A plain name like `lyrics.ass` needs no escaping."""
+    are both special. A plain name like `lyrics.ass` needs no escaping.
+    `finishing_vf` (from `build_finishing_vf`) runs first, so the grade/
+    grain/vignette/glitch pass sits under the captions, not over them."""
     cmd = [ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-i", str(video_path)]
     if audio_path:
         cmd += ["-i", str(audio_path)]
+    vf_parts = [finishing_vf] if finishing_vf else []
     if ass_name:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", ass_name):
             raise ValueError(f"unsafe subtitle file name for the ass filter: {ass_name!r}")
-        cmd += ["-vf", f"ass={ass_name}:fontsdir=fonts"]
+        vf_parts.append(f"ass={ass_name}:fontsdir=fonts")
+    if vf_parts:
+        cmd += ["-vf", ",".join(vf_parts)]
     cmd += ["-map", "0:v"]
     if audio_path:
         cmd += ["-map", "1:a", "-shortest"]
@@ -192,12 +293,31 @@ PlayResY: {height}
 WrapStyle: 0
 
 [V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Lyrics,Inter,{fontsize},&H00FFFFFF,&H0000D8FF,&H00201018,&H80000000,1,0,1,2,1,2,60,60,80,1
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Spacing, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Lyrics,{fontname},{fontsize},{primary},&H0000D8FF,{outline},{back},{bold},0,1,{border},{shadow},{spacing},2,60,60,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+# "horror" lyric style: a condensed display face (Bebas Neue, already
+# bundled) set fully uppercase, a heavier dark-red outline, and a small
+# per-line rotation/shear "jitter" seeded from the line's own text so the
+# same lyrics always render the same wobble (snapshot-testable) without
+# every line looking identically stamped.
+_LYRIC_STYLE_ASS = {
+    "default": {"fontname": "Inter", "primary": "&H00FFFFFF", "outline": "&H00201018", "back": "&H80000000",
+                "bold": 1, "border": 2, "shadow": 1, "spacing": 0},
+    "horror": {"fontname": "Bebas Neue", "primary": "&H00E6E6E6", "outline": "&H001018B0", "back": "&HA0000000",
+               "bold": 0, "border": 3, "shadow": 2, "spacing": 2},
+}
+
+
+def _horror_jitter(seed_text: str) -> tuple[float, float]:
+    """(z-rotation degrees, x-shear factor) for one lyric line, deterministic
+    per line so re-rendering the same song produces byte-identical output."""
+    rng = random.Random(f"horror-jitter:{seed_text}")
+    return round(rng.uniform(-3.0, 3.0), 2), round(rng.uniform(-0.06, 0.06), 3)
 
 
 def _ass_time(seconds: float) -> str:
@@ -221,14 +341,19 @@ def ass_escape(text: str) -> str:
     return text[:500]
 
 
-def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]]) -> str:
+def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style: str = "default") -> str:
+    if style not in LYRIC_STYLES:
+        raise RenderError(f"lyric_style must be one of {', '.join(LYRIC_STYLES)}")
     fontsize = max(28, height // 24)
-    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize)]
+    style_vars = _LYRIC_STYLE_ASS[style]
+    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize, **style_vars)]
     for clip in lyric_clips:
         start, end = float(clip["start_s"]), float(clip["end_s"])
         text = str(clip.get("text", ""))
         if end <= start or not text.strip():
             continue
+        if style == "horror":
+            text = text.upper()
         if clip.get("karaoke"):
             words = text.split() or [text]
             total_cs = max(1, int(round((end - start) * 100)))
@@ -236,6 +361,9 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]]) -> str
             text_out = " ".join(f"{{\\k{per_word_cs}}}{ass_escape(w)}" for w in words)
         else:
             text_out = ass_escape(text)
+        if style == "horror":
+            frz, fax = _horror_jitter(f"{start}:{text}")
+            text_out = f"{{\\frz{frz}\\fax{fax}}}{text_out}"
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Lyrics,,0,0,0,,{text_out}")
     return "\n".join(lines) + "\n"
 
@@ -321,6 +449,7 @@ def render_timeline(
     fps = int(timeline["fps"])
     work_dir.mkdir(parents=True, exist_ok=True)
     work_dir = work_dir.resolve()
+    finishing = validate_finishing(timeline.get("finishing"))
 
     visual = next((t for t in timeline["tracks"] if t["type"] == "visual"), None)
     if not visual or not visual["clips"]:
@@ -370,7 +499,8 @@ def render_timeline(
     ass_name = None
     if lyrics_track and lyrics_track["clips"]:
         ass_name = "lyrics.ass"
-        (work_dir / ass_name).write_text(build_ass(width, height, lyrics_track["clips"]), encoding="utf-8")
+        lyric_style = finishing.get("lyric_style", "default")
+        (work_dir / ass_name).write_text(build_ass(width, height, lyrics_track["clips"], style=lyric_style), encoding="utf-8")
         fonts_out = work_dir / "fonts"
         fonts_out.mkdir(exist_ok=True)
         for ttf in FONTS_DIR.glob("*/*.ttf"):
@@ -378,12 +508,23 @@ def render_timeline(
 
     audio_path = asset_path_for(timeline["audio_asset_id"]) if timeline.get("audio_asset_id") else None
 
+    # `start_s` is derived (not required on the caller's clip dicts - see
+    # the module docstring), so it is recomputed here from durations rather
+    # than trusted from the clip, exactly like `total_duration` above.
+    glitch_points: list[tuple[float, float]] = []
+    running = 0.0
+    for i, c in enumerate(clips):
+        if transitions[i].get("type") == "flash_white":
+            glitch_points.append((running, float(c["duration_s"])))
+        running += float(c["duration_s"])
+    finishing_vf = build_finishing_vf(finishing, width, height, glitch_points)
+
     def ffmpeg_progress(frac: float) -> None:
         report(0.65 + 0.35 * frac, "encoding with audio and lyrics")
 
     run_ffmpeg_with_progress(
         build_mux_cmd(ffmpeg, concatenated, audio_path.resolve() if audio_path else None, ass_name, out_path.resolve(),
-                      preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"]),
+                      preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"], finishing_vf=finishing_vf),
         total_duration, ffmpeg_progress, cwd=work_dir, should_cancel=should_cancel,
     )
     report(1.0, "done")

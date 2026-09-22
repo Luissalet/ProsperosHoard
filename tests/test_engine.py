@@ -228,3 +228,32 @@ def test_inpaint_and_hires_run_on_the_backend(store, backend_with_comfy, project
     design_asset = engine.render_design(store, project["id"], "thumbnail", {"title": "x"})
     refused = _run_job(store, backend_with_comfy, "edit_image", {"asset_id": design_asset["id"], "operation": "hires"}, project["id"])
     assert refused["state"] == "failed" and "img2img" in refused["message"]
+
+
+# ------------------------------------------------------------- finishing
+
+def test_update_timeline_finishing_persists_and_validates(store, project):
+    img = engine.render_design(store, project["id"], "thumbnail", {"title": "cover"})
+    tl = store.create_timeline(project["id"], "Test cut", tracks=[
+        {"type": "visual", "clips": [{"asset_id": img["id"], "kind": "image", "start_s": 0.0, "duration_s": 1.0,
+                                       "trim_start_s": 0.0, "ken_burns": {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"},
+                                       "transition_in": {"type": "cut", "duration_s": 0.0}}]},
+    ])
+    assert tl["finishing"] == {}  # new timelines render exactly as before this feature
+
+    updated = engine.update_timeline(store, tl["id"], {
+        "finishing": {"color_grade": "sodium_night", "grain": 0.3, "vignette": True, "letterbox": True,
+                      "glitch_on_downbeats": True, "lyric_style": "horror"},
+    })
+    assert updated["finishing"]["color_grade"] == "sodium_night"
+    assert updated["finishing"]["lyric_style"] == "horror"
+    # persisted, not just returned in-memory
+    assert store.get_timeline(tl["id"])["finishing"] == updated["finishing"]
+
+    with pytest.raises(engine.EngineError) as exc:
+        engine.update_timeline(store, tl["id"], {"finishing": {"color_grade": "not-a-real-preset"}})
+    assert exc.value.code == "bad_finishing"
+
+    # clearing it back to {} is a valid patch too
+    cleared = engine.update_timeline(store, tl["id"], {"finishing": {}})
+    assert cleared["finishing"] == {}

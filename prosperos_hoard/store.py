@@ -619,11 +619,12 @@ class Store:
         height = fields.get("height", wh[1])
         self.conn.execute(
             """INSERT INTO timelines (id, project_id, name, aspect, fps, width, height,
-                audio_asset_id, tracks_json, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                audio_asset_id, tracks_json, finishing_json, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 tid, project_id, name, aspect, fps, width, height,
-                fields.get("audio_asset_id"), dumps(fields.get("tracks", [])), ts, ts,
+                fields.get("audio_asset_id"), dumps(fields.get("tracks", [])),
+                dumps(fields.get("finishing", {})), ts, ts,
             ),
         )
         self.conn.commit()
@@ -635,6 +636,7 @@ class Store:
             raise NotFound("timeline", timeline_id)
         d = row_to_dict(row)
         d["tracks"] = loads(d.pop("tracks_json"), [])
+        d["finishing"] = loads(d.pop("finishing_json", None), {})
         return d
 
     def update_timeline(self, timeline_id: str, **fields: Any) -> dict[str, Any]:
@@ -647,6 +649,9 @@ class Store:
         if "tracks" in fields and fields["tracks"] is not None:
             cols.append("tracks_json=?")
             params.append(dumps(fields["tracks"]))
+        if "finishing" in fields and fields["finishing"] is not None:
+            cols.append("finishing_json=?")
+            params.append(dumps(fields["finishing"]))
         cols.append("updated_at=?")
         params.append(now_iso())
         params.append(timeline_id)
