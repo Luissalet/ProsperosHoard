@@ -31,9 +31,9 @@ OFFICIAL_TEMPLATES = [
     "image_qwen_image_2_1_image_edit.json",
 ]
 # Inputs the frontend sends that carry no information for the server:
-# seeds (randomised when the frontend loads a template), a legacy bare
-# duplicate of SaveVideo's flattened "format.codec", and the socketless
-# ImageCompare view widget (a UI-only preview).
+# seeds (randomised when the frontend loads a template), the hidden,
+# optional legacy SaveVideo "codec" (superseded by the required
+# "format.codec"), and the socketless ImageCompare view (a UI preview).
 IGNORED_INPUTS = {"seed", "noise_seed"}
 FRONTEND_ONLY = {("SaveVideo", "codec"), ("ImageCompare", "compare_view")}
 

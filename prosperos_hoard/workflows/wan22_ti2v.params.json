@@ -22,5 +22,17 @@
     "scheduler": "3.scheduler"
   },
   "output_node": "58",
-  "notes": "Wan 2.2 TI2V 5B, image-to-video only (a still becomes the start frame, matching how the production uses it - 'the best still of shot N'). The official template also supports pure text-to-video with its LoadImage bypassed; that path is not exposed here. 1280x704 @ 121 frames/24 fps = 5.04 s by default (lower to 960x544 for less VRAM, per the VRAM estimate table). Converted from the official video_wan2_2_5B_ti2v.json template, hand-checked; steps 20, cfg 5, shift 8 match the model's recommendation."
+  "notes": "Wan 2.2 TI2V 5B, image-to-video only (a still becomes the start frame, matching how the production uses it - 'the best still of shot N'). The official template also supports pure text-to-video with its LoadImage bypassed; that path is not exposed here. 1280x704 @ 121 frames/24 fps = 5.04 s by default (lower to 960x544 for less VRAM, per the VRAM estimate table). Converted from the official video_wan2_2_5B_ti2v.json template, hand-checked against the API prompt the real 0.37 frontend exports (SaveVideo's dynamic-combo child `format.codec` included - the server rejects the prompt without it); steps 20, cfg 5, shift 8 match the model's recommendation.",
+  "defaults": {
+    "width": 1280,
+    "height": 704,
+    "length": 121,
+    "fps": 24,
+    "steps": 20,
+    "cfg": 5,
+    "sampler": "uni_pc",
+    "scheduler": "simple",
+    "shift": 8
+  },
+  "size_from_reference": "wan"
 }
