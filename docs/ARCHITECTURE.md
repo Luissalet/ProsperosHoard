@@ -4,101 +4,141 @@
 
 ```
 prosperos_hoard/
-  db.py           SQLite schema (WAL) + connection cache (one conn per thread)
-  store.py        Store: every CRUD operation, no FastAPI/HTTP knowledge
-  ids.py          ULID-like sortable ids ("a_...", "job_...", "proj_...")
-  jobs.py         JobQueue: one GPU + one CPU worker thread, SQLite-backed
-  hoard_link/     vendored shared model backend (see VENDORED.txt)
-  backend.py      Prospero's own wrapper: VRAM estimates, ffmpeg/font status,
-                  MusicBackend adapters (ComfyMusic, HttpMusic - neither installed)
-  comfy_driver.py workflow templates, parameter mapping, object_info validation
-  workflows/      *.json (API-format) + *.params.json (friendly-name map) per template
-  devtools/fake_comfy.py   procedural ComfyUI stand-in for --demo and tests
-  design.py       Pillow layout renderer (rect/image/text/holo/grain/frame/badge)
-  templates.py    the 7 named design layouts
-  fonts/          5 bundled OFL font families
-  audio.py        ffmpeg decode, waveform peaks, beat tracker, LRC
-  voices.py       Piper (on-demand HF download) + Hoard Link TTS
-  timeline.py     Timeline domain model + auto-cut algorithm (pure Python)
-  video.py        ffmpeg command builders + the actual renderer
-  engine.py       the business logic behind every /api/agent/* route
-  api.py          FastAPI app, guard middleware, all HTTP routes
-  mcp_server.py   standalone stdio MCP adapter (httpx + mcp only)
-  __main__.py     CLI entrypoint
+  __main__.py      CLI: --port, --data-dir, --demo, --no-browser; uvicorn on 127.0.0.1
+  api.py           FastAPI app: guard middleware, JSON errors, /api/agent/* (compact,
+                   logged) and the richer UI routes, SPA serving
+  engine.py        the business logic behind every route (no FastAPI imports)
+  store.py, db.py  SQLite (WAL, per-thread connections, schema v2 with in-place upgrade)
+  jobs.py          JobQueue: one GPU worker + one CPU worker thread, cancel, VRAM waits
+  comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
+                   /object_info pre-flight, checkpoint resolution, template hash
+  workflows/       API-format *.json + *.params.json per built-in template
+  backend.py       wrapper around the vendored Hoard Link: ComfyUI client on Hoard
+                   Link's loop, free VRAM, "free ComfyUI memory", import folders,
+                   overrides in data/backend.json, MusicBackend adapters
+  hoard_link/      vendored shared model-backend resolver (see VENDORED.txt, never edited)
+  design.py        Pillow layout renderer (rect/gradient, image, text, holo, grain,
+                   frame, badge, qr placeholder), blends, bleed
+  templates.py     the 7 named layouts and their field contract
+  fonts/           5 bundled OFL families
+  audio.py         ffmpeg decode/probe, waveform, onset envelope, tempo, beat tracker,
+                   downbeats, sections, LRC
+  voices.py        Piper (curated voices, atomic download) and Faustus TTS via Hoard Link
+  timeline.py      auto-cut, edit validation, clip updates, compact view (pure Python)
+  video.py         ffmpeg command builders, ASS subtitles and escaping, renderer,
+                   animated WebP -> mp4
+  procutil.py      subprocess helpers: CREATE_NO_WINDOW on Windows, UTF-8 decoding
+  mcp_server.py    standalone stdio MCP adapter (stdlib + httpx + mcp only)
+  devtools/        fake_comfy.py (procedural ComfyUI stand-in), demo_seed.py (--demo data)
+frontend/          React 19 + Vite + TypeScript UI, built to frontend/dist
 ```
 
-`engine.py` is the seam: it has no FastAPI imports and is what
-`tests/test_engine.py` exercises directly. `api.py` is a thin HTTP
-wrapper around it (parsing request bodies, enqueueing jobs, formatting
-errors), and `mcp_server.py` never imports the package at all - it only
-calls the HTTP surface `api.py` exposes, so the MCP protocol test is a
-genuine end-to-end proof rather than a shortcut.
+`api.py` stays thin: each operation (`op_generate`, `op_timeline`, ...) is a
+small function used by both the agent route (compact result, logged in
+`agent_calls`) and the UI route (full rows). `mcp_server.py` never imports the
+package; the MCP protocol test spawns it over stdio against a live server, so
+it proves the HTTP surface alone is enough.
 
 ## Data model
 
-SQLite, WAL mode, one file at `<data_dir>/prosperos.sqlite3`. Tables:
-`projects`, `assets` (with `recipe_json` = full lineage), `characters`,
-`groups`, `style_presets` (6 built-in + project-specific), `boards`,
-`timelines` (tracks stored as JSON), `jobs`, `agent_calls` (the audit
-log). JSON columns are read/written through `store.py` only; nothing
-else touches SQL directly.
+One SQLite file, `<data>/prosperos.sqlite3`, WAL mode:
 
-Files live under `<data_dir>/`: `assets/` (originals), `thumbs/`
-(512px WebP), `voices/` (downloaded Piper models), `fake_comfy/`
-(demo backend's own input/output), `tmp/<job_id>/` (render scratch,
-deleted after each render), `logs/app.log` (rotating).
+- `projects` (name, brief, cover asset)
+- `assets` (kind image|video|audio|lyrics|font, name, file path relative to
+  the data folder, mime, size, duration, thumbnail, waveform, cached audio
+  analysis, tags, rating, favourite, notes, source
+  import|generated|derived|rendered, `recipe_json`)
+- `characters` (role, bio, prompt, negative, palette, references, canonical
+  reference, voice), `groups` (ordered member ids, logo, colours)
+- `style_presets` (6 built-in, refreshed on start-up; project presets possible)
+- `boards` (ordered `{asset_id, note}` items), `timelines` (aspect, fps, size,
+  song, `tracks_json`)
+- `jobs` (type, lane gpu|cpu, params, state, progress, message, outputs, log
+  excerpt, cancel flag, timestamps), `agent_calls` (tool, arguments summary,
+  duration, ok, error)
+
+A **recipe** for a ComfyUI asset holds `operation, backend, template,
+template_hash, checkpoint, params` (every friendly parameter written into the
+workflow, including the seed), `input_asset_ids, elapsed_s, job_id,
+created_at` and for re-runs `derived_from, rerun`. Re-running it builds the
+same workflow graph, so the same backend returns the same image (the test uses
+the deterministic demo backend and compares pixel hashes).
+
+Files under `<data>/`: `assets/`, `thumbs/` (WebP 512), `voices/` (Piper),
+`workflows/` (imported workflows), `inbox/` (always-allowed import folder),
+`tmp/` (render and upload scratch), `logs/app.log` (rotating), `backend.json`
+(overrides and the Faustus token), `fake_comfy/` in demo mode.
 
 ## Threads and processes
 
-- The FastAPI app runs on uvicorn's asyncio event loop in the main
-  process/thread.
-- `JobQueue` starts two daemon threads (`job-worker-gpu`,
-  `job-worker-cpu`) that each loop: pop the oldest `queued` job for their
-  lane, run its handler, write the result back to SQLite. A GPU handler
-  that raises `WaitingForResources` is requeued and retried every 15s (up
-  to a 30-minute timeout) instead of failing.
-- ComfyUI calls go through vendored Hoard Link's async `Link`/
-  `ComfyClient`, which runs its own background asyncio loop in a third
-  daemon thread (`hoard-link-sync`); `Backend.run_async()` bridges a
-  worker thread's synchronous call into that loop.
-- `FakeComfyServer` (demo/tests) runs its own uvicorn instance in a
-  fourth daemon thread on a free port.
-- ffmpeg is always a plain `subprocess.run`/`Popen` from whichever worker
-  thread is rendering; no shared ffmpeg process.
+- uvicorn's event loop serves HTTP; sync route handlers run in its thread pool.
+  Every thread gets its own SQLite connection (a single shared connection
+  interleaved transactions between the pool and the workers).
+- `JobQueue` runs two daemon threads, `job-worker-gpu` and `job-worker-cpu`,
+  each taking the oldest `queued` job of its lane. A GPU handler that finds too
+  little free VRAM raises `WaitingForResources`: the job shows `waiting_gpu`
+  with the reason and keeps its place in the lane, retrying every 15 s for up
+  to 30 minutes. Cancelling a queued or waiting job is immediate; a running
+  handler stops at its next progress call (ComfyUI polling asks ComfyUI to
+  interrupt, ffmpeg is killed).
+- Hoard Link's sync facade owns a private event-loop thread; ComfyUI calls run
+  there through `Backend.run_async()`.
+- On start-up, jobs left `running` or `waiting_gpu` by a crash go back to
+  `queued` (restart recovery, tested).
+- No `multiprocessing` anywhere; uvicorn runs the app object in-process with no
+  reload or workers, so Windows' spawn start method is never involved.
+- Child processes (ffmpeg, ffprobe) are started through `procutil` with
+  `CREATE_NO_WINDOW` on Windows and UTF-8 decoding; `nvidia-smi` goes through
+  Hoard Link, which does the same.
 
-On restart, `Store.requeue_running_jobs()` (called from
-`JobQueue.start()`) flips any job stuck `running`/`waiting_gpu` back to
-`queued`, so an interrupted render or generation is retried rather than
-lost or stuck forever.
+## Rendering pipeline
+
+1. Each visual clip is rendered to `clip_NNN.mp4` at the target size: images
+   with a `zoompan` Ken Burns move on a 2x-scaled cover crop, videos trimmed,
+   cover-cropped and padded with their last frame if shorter than the clip.
+2. All-cut timelines are joined with the concat demuxer, listing clips by
+   relative name. With any real transition, clips are rendered longer by the
+   next transition's length and chained with `xfade` whose offsets are the
+   nominal starts, so cuts stay on the beat and the video keeps the song's
+   length.
+3. Lyrics become an ASS file (escaped: braces, backslash codes and newlines
+   cannot inject tags or events; karaoke `\k` per word). ffmpeg runs the final
+   pass with the work folder as its cwd and `ass=lyrics.ass:fontsdir=fonts`,
+   because the filter-graph parser treats the drive colon and the apostrophe
+   of `C:\...\Prospero's Hoard\` specially.
+4. The song is muxed with `-shortest`; progress comes from `-progress pipe:1`;
+   stderr goes to a temporary file so it can never block the pipe.
+
+## Audio analysis
+
+Centred STFT frames, onset strength = positive log-flux summed over 40
+log-spaced bands (so a kick counts as much as a broadband snare), minus a local
+mean. Tempo = autocorrelation peak weighted by a one-octave log-normal prior
+around 120 BPM, refined parabolically; beats = Ellis-style dynamic programming,
+extended to the first and last onsets; BPM = regression slope of the beat grid.
+Downbeat phase = the beat phase with the most low-frequency onset energy.
+Sections: per-bar loudness and three band levels, boundaries at novelty peaks
+(loudness change plus a quarter of the timbre change, at least 4 dB, two bars
+apart), segments that sound alike share a letter, energy relative to the song.
 
 ## Decisions and deviations
 
-- **Ken Burns parameterisation**: a design describing raw per-frame
-  "start/end rect" pans; this implementation instead exposes
-  `{zoom_start, zoom_end, pan: left|right|up|down|none}`, which maps onto
-  a single ffmpeg `zoompan` invocation (the standard technique for this
-  exact effect) instead of a bespoke per-frame `crop` expression graph.
-  Documented in `timeline.py` and `docs/API.md`.
-- **No librosa**: the beat tracker is a from-scratch spectral-flux onset
-  envelope + autocorrelation tempo + a compact Ellis-style DP beat
-  tracker (numpy/scipy only), as a deliberate fallback, to avoid
-  librosa's heavier native-wheel chain (numba/llvmlite) on Windows
-  cp313. Verified against 90/120/140 BPM synthetic click tracks
-  (`tests/test_audio.py`).
-- **studio_voice / studio_import / studio_analyze_audio / studio_design /
-  studio_photocard_set / studio_timeline run synchronously**, not as
-  jobs - their tools take no `wait_s` parameter,
-  and each is fast enough (Pillow render, ffmpeg probe, or a Piper
-  synth) that a job round trip would only add latency and UI complexity.
-  Only ComfyUI generation/edit/animate (GPU) and timeline rendering
-  (CPU, potentially slow) are real jobs.
-- **QR layer**: recognised by the design renderer's layout schema but
-  renders a placeholder box, not a real QR code - no QR library is in
-  the pinned dependency set (see `design.py`).
-- **Polling, not SSE**: the HTTP API has no streaming endpoint; the UI is
-  expected to poll `/api/jobs` and `/api/agent-calls` (see `docs/API.md`).
-- **Hoard Link vendoring**: it was still being built by a sibling agent
-  when this repository was scaffolded; work proceeded against the public
-  API in its own spec, and the final available snapshot was vendored at
-  the end (see `prosperos_hoard/hoard_link/VENDORED.txt`). No vendored
-  file was ever edited - `backend.py` only wraps it.
+- **Ken Burns** is `{zoom_start, zoom_end, pan}` rather than free start/end
+  rectangles: it maps onto one `zoompan` filter.
+- **No librosa**: a numpy/scipy tracker instead, because librosa's native
+  chain is a risk on cp313 Windows; the tracker above is tested on click tracks,
+  kick-and-snare patterns (90, 100 with hats, 120, 140 BPM) and the demo song.
+- **Synchronous operations**: voice, import, analysis, design, photocard sets and
+  timeline building return directly (each takes seconds at most); generation,
+  edits, animation, renders and voice downloads are jobs.
+- **Default auto-cut pool** is the project's generated and imported pictures and
+  clips; rendered designs (cards, covers, contact sheets) are used only when
+  passed explicitly or through a board.
+- **QR layer** renders a placeholder (no QR library pinned).
+- **Polling, no SSE**: the UI polls `/api/jobs` (1.2 s while something runs, 5 s
+  otherwise); agents use `studio_job(wait_s=...)`.
+- **Hoard Link** is vendored byte for byte at the commit in
+  `hoard_link/VENDORED.txt`; only `backend.py` wraps it.
+- **Import folders**: agents may pass paths, so imports are limited to the home
+  folder, `data/inbox` and folders added in Settings, with symlinks and `..`
+  resolved first and content checked against the extension.
