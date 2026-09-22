@@ -16,8 +16,15 @@
     "steps": "3.steps",
     "cfg": "3.cfg"
   },
-  "linked_seeds": ["3.seed"],
+  "linked_seeds": [
+    "3.seed"
+  ],
   "output_node": "104",
   "checkpoint_node": "CheckpointLoaderSimple",
-  "notes": "ACE-Step 1.5 turbo, song with vocals and lyrics; outputs mp3. `key` is the friendly name for the node's `keyscale` combo (e.g. 'F# minor'), `timesignature` one of '2'|'3'|'4'|'6'. seed drives both the text-encode and sampler nodes (linked_seeds). generate_audio_codes/cfg_scale/temperature/top_p/top_k/min_p are left at ACE-Step's own defaults (not exposed) - steps 8, cfg 1, shift 3 per the turbo model's settings. Converted from the official audio_ace_step_1_5_checkpoint.json template, hand-checked: its two PrimitiveNode helpers (seed, duration) resolve to literal values, not links."
+  "notes": "ACE-Step 1.5 turbo, song with vocals and lyrics; outputs mp3. `key` is the friendly name for the node's `keyscale` combo (e.g. 'F# minor'), `timesignature` one of '2'|'3'|'4'|'6'. seed drives both the text-encode and sampler nodes (linked_seeds). generate_audio_codes/cfg_scale/temperature/top_p/top_k/min_p are left at ACE-Step's own defaults (not exposed) - steps 8, cfg 1, shift 3 per the turbo model's settings. Converted from the official audio_ace_step_1_5_checkpoint.json template, hand-checked: its two PrimitiveNode helpers (seed, duration) resolve to literal values, not links. duration is written to both the text encoder and the empty latent (98.seconds), as the official template's shared primitive does.",
+  "linked_params": {
+    "duration": [
+      "98.seconds"
+    ]
+  }
 }

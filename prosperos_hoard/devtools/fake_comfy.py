@@ -33,6 +33,8 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, ImageDraw, ImageFont
 
+from ..workflows.convert import validate_values
+
 CHECKPOINTS_SDXL = ["sd_xl_base_1.0.safetensors"]
 CHECKPOINTS_SD15 = ["v1-5-pruned-emaonly-fp16.safetensors"]
 CHECKPOINTS_SVD = ["svd_xt.safetensors"]
@@ -357,6 +359,13 @@ class FakeComfyServer:
         missing = sorted({n.get("class_type") for n in workflow.values() if n.get("class_type") not in object_info})
         if missing:
             raise HTTPException(status_code=400, detail={"error": f"unknown node types: {missing}"})
+        # the real server validates every input before queueing (required
+        # inputs incl. dynamic-combo children, combo choices, number ranges);
+        # doing the same here makes a template bug fail in the cloud first
+        problems = validate_values(workflow, object_info)
+        if problems:
+            raise HTTPException(status_code=400, detail={"error": "prompt_outputs_failed_validation",
+                                                         "node_errors": problems[:20]})
         self.prompts_seen.append(workflow)
 
         audio_node = _first(workflow, "SaveAudioMP3") or _first(workflow, "SaveAudio")

@@ -12,8 +12,15 @@
     "unet_name": "192:37.unet_name",
     "clip_name1": "192:38.clip_name1",
     "clip_name2": "192:38.clip_name2",
-    "vae_name": "192:39.vae_name"
+    "vae_name": "192:39.vae_name",
+    "width": "200.width",
+    "height": "200.height"
   },
   "output_node": "136",
-  "notes": "FLUX.1 Kontext dev, reference-guided edit (same character, new scene): the instruction prompt describes the change, not the whole scene from scratch. Single reference image only - the official template's second LoadImage (multi-reference via ImageStitch) stays bypassed and is not exposed here. Model files are separate (UNETLoader/DualCLIPLoader/VAELoader, not a single checkpoint), so unet_name/clip_name1/clip_name2/vae_name are ordinary editable parameters rather than going through the checkpoint_node cross-check sdxl/flux_schnell get. Converted from the official flux_kontext_dev_basic.json template (its subgraph expanded), hand-checked against object_info; default guidance 2.5, steps 20 match the model's recommendation."
+  "notes": "FLUX.1 Kontext dev, reference-guided edit (same character, new scene): the instruction prompt describes the change, not the whole scene from scratch. Single reference image only - the official template's second LoadImage (multi-reference via ImageStitch) stays bypassed and is not exposed here. Model files are separate (UNETLoader/DualCLIPLoader/VAELoader, not a single checkpoint), so unet_name/clip_name1/clip_name2/vae_name are ordinary editable parameters rather than going through the checkpoint_node cross-check sdxl/flux_schnell get. Converted from the official flux_kontext_dev_basic.json template (its subgraph expanded), hand-checked against object_info; default guidance 2.5, steps 20 match the model's recommendation. One addition to the official graph: the sampler's latent comes from an EmptySD3LatentImage (node 200, width/height) instead of the encoded reference, so a still can be 16:9 or 4:5 whatever the reference sheet's shape - at denoise 1.0 the sampler only uses that latent's size, and the reference still reaches the model through ReferenceLatent. Without an explicit size the output follows the reference's aspect at about 1 MP.",
+  "defaults": {
+    "steps": 20,
+    "guidance": 2.5
+  },
+  "size_from_reference": "kontext"
 }

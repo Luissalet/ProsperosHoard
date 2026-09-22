@@ -365,3 +365,55 @@ def validate_converted(api_workflow: dict[str, Any], object_info: dict[str, Any]
                 if not isinstance(src_slot, int) or src_slot >= len(outputs):
                     problems.append(f"node {node_id} input '{name}': slot {src_slot} does not exist on node '{src_id}'")
     return problems
+
+
+def _options(type_: Any, cfg: dict) -> Optional[list]:
+    if isinstance(type_, list):
+        return type_
+    if type_ == "COMBO" and isinstance(cfg.get("options"), list):
+        return cfg["options"]
+    return None
+
+
+def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -> list[str]:
+    """What ComfyUI's `/prompt` rejects on top of `validate_converted`'s
+    structure: a literal that is not one of a combo's options (a model file
+    that is not installed, a sampler name that does not exist, a
+    dynamic-combo key) or a number outside the input's min/max. Upload
+    combos (LoadImage's file list) are skipped - the file arrives with the
+    job. Returns human-readable problems, empty when the prompt would queue."""
+    problems = list(validate_converted(api_workflow, object_info))
+    for node_id, node in api_workflow.items():
+        class_type = node.get("class_type")
+        spec = (object_info.get(class_type) or {}).get("input") or {}
+        inputs = node.get("inputs", {})
+
+        def check(entries: list[tuple[str, Any]], prefix: str) -> None:
+            for short, raw in entries:
+                name = f"{prefix}{short}"
+                type_, cfg = _entry(raw)
+                if name not in inputs or cfg.get("image_upload"):
+                    continue
+                value = inputs[name]
+                if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
+                    continue  # a link, checked structurally
+                if type_ == DYNAMIC_COMBO:
+                    keys = [o.get("key") for o in cfg.get("options") or []]
+                    if value not in keys:
+                        problems.append(f"node {node_id} ({class_type}): '{name}' = {value!r} is not one of {keys}")
+                        continue
+                    chosen = next(o for o in cfg["options"] if o.get("key") == value)
+                    check(_ordered_entries(chosen.get("inputs") or {}), f"{name}.")
+                    continue
+                options = _options(type_, cfg)
+                if options is not None and value not in options:
+                    shown = ", ".join(str(o) for o in options[:8]) + (" ..." if len(options) > 8 else "")
+                    problems.append(f"node {node_id} ({class_type}): '{name}' = {value!r} is not available (choices: {shown})")
+                elif type_ in ("INT", "FLOAT") and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if "min" in cfg and value < cfg["min"]:
+                        problems.append(f"node {node_id} ({class_type}): '{name}' = {value} is below the minimum {cfg['min']}")
+                    if "max" in cfg and value > cfg["max"]:
+                        problems.append(f"node {node_id} ({class_type}): '{name}' = {value} is above the maximum {cfg['max']}")
+
+        check(_ordered_entries(spec), "")
+    return problems

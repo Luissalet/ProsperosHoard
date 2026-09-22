@@ -347,6 +347,15 @@ def apply_params(workflow: dict[str, Any], spec: dict[str, Any], values: dict[st
         node_id, _, input_name = linked.partition(".")
         if values.get("seed") is not None and node_id in wf:
             wf[node_id]["inputs"][input_name] = values["seed"]
+    # one friendly value that several nodes must agree on (e.g. ACE-Step's
+    # song duration lives on both the text encoder and the empty latent)
+    for friendly, targets in (spec.get("linked_params") or {}).items():
+        if values.get(friendly) is None:
+            continue
+        for linked in targets:
+            node_id, _, input_name = linked.partition(".")
+            if node_id in wf:
+                wf[node_id].setdefault("inputs", {})[input_name] = values[friendly]
     return wf
 
 

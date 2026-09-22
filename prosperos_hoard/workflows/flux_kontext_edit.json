@@ -1,157 +1,168 @@
 {
- "136": {
-  "class_type": "SaveImage",
-  "inputs": {
-   "images": [
-    "192:8",
-    0
-   ],
-   "filename_prefix": "flux.1_kontext_dev"
+  "136": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "192:8",
+        0
+      ],
+      "filename_prefix": "flux.1_kontext_dev"
+    }
+  },
+  "190": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "flux_kontext_dev_basic_input_image.jpg"
+    }
+  },
+  "192:39": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "192:38": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "flux",
+      "device": "default"
+    }
+  },
+  "192:135": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "192:6",
+        0
+      ]
+    }
+  },
+  "192:8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "192:31",
+        0
+      ],
+      "vae": [
+        "192:39",
+        0
+      ]
+    }
+  },
+  "192:124": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "192:42",
+        0
+      ],
+      "vae": [
+        "192:39",
+        0
+      ]
+    }
+  },
+  "192:35": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "conditioning": [
+        "192:177",
+        0
+      ],
+      "guidance": 2.5
+    }
+  },
+  "192:37": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux1-dev-kontext_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "192:177": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "192:6",
+        0
+      ],
+      "latent": [
+        "192:124",
+        0
+      ]
+    }
+  },
+  "192:146": {
+    "class_type": "ImageStitch",
+    "inputs": {
+      "image1": [
+        "190",
+        0
+      ],
+      "direction": "right",
+      "match_image_size": true,
+      "spacing_width": 0,
+      "spacing_color": "white"
+    }
+  },
+  "192:42": {
+    "class_type": "FluxKontextImageScale",
+    "inputs": {
+      "image": [
+        "192:146",
+        0
+      ]
+    }
+  },
+  "192:31": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "192:37",
+        0
+      ],
+      "seed": 169405236028824,
+      "steps": 20,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "192:35",
+        0
+      ],
+      "negative": [
+        "192:135",
+        0
+      ],
+      "latent_image": [
+        "200",
+        0
+      ],
+      "denoise": 1
+    }
+  },
+  "192:6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "Using this elegant style, create a portrait of a swan wearing a pearl tiara and lace collar, maintaining the same refined quality and soft color tones.",
+      "clip": [
+        "192:38",
+        0
+      ]
+    }
+  },
+  "200": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Output size"
+    }
   }
- },
- "190": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": "flux_kontext_dev_basic_input_image.jpg"
-  }
- },
- "192:39": {
-  "class_type": "VAELoader",
-  "inputs": {
-   "vae_name": "ae.safetensors"
-  }
- },
- "192:38": {
-  "class_type": "DualCLIPLoader",
-  "inputs": {
-   "clip_name1": "clip_l.safetensors",
-   "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors",
-   "type": "flux",
-   "device": "default"
-  }
- },
- "192:135": {
-  "class_type": "ConditioningZeroOut",
-  "inputs": {
-   "conditioning": [
-    "192:6",
-    0
-   ]
-  }
- },
- "192:8": {
-  "class_type": "VAEDecode",
-  "inputs": {
-   "samples": [
-    "192:31",
-    0
-   ],
-   "vae": [
-    "192:39",
-    0
-   ]
-  }
- },
- "192:124": {
-  "class_type": "VAEEncode",
-  "inputs": {
-   "pixels": [
-    "192:42",
-    0
-   ],
-   "vae": [
-    "192:39",
-    0
-   ]
-  }
- },
- "192:35": {
-  "class_type": "FluxGuidance",
-  "inputs": {
-   "conditioning": [
-    "192:177",
-    0
-   ],
-   "guidance": 2.5
-  }
- },
- "192:37": {
-  "class_type": "UNETLoader",
-  "inputs": {
-   "unet_name": "flux1-dev-kontext_fp8_scaled.safetensors",
-   "weight_dtype": "default"
-  }
- },
- "192:177": {
-  "class_type": "ReferenceLatent",
-  "inputs": {
-   "conditioning": [
-    "192:6",
-    0
-   ],
-   "latent": [
-    "192:124",
-    0
-   ]
-  }
- },
- "192:146": {
-  "class_type": "ImageStitch",
-  "inputs": {
-   "image1": [
-    "190",
-    0
-   ],
-   "direction": "right",
-   "match_image_size": true,
-   "spacing_width": 0,
-   "spacing_color": "white"
-  }
- },
- "192:42": {
-  "class_type": "FluxKontextImageScale",
-  "inputs": {
-   "image": [
-    "192:146",
-    0
-   ]
-  }
- },
- "192:31": {
-  "class_type": "KSampler",
-  "inputs": {
-   "model": [
-    "192:37",
-    0
-   ],
-   "seed": 169405236028824,
-   "steps": 20,
-   "cfg": 1,
-   "sampler_name": "euler",
-   "scheduler": "simple",
-   "positive": [
-    "192:35",
-    0
-   ],
-   "negative": [
-    "192:135",
-    0
-   ],
-   "latent_image": [
-    "192:124",
-    0
-   ],
-   "denoise": 1
-  }
- },
- "192:6": {
-  "class_type": "CLIPTextEncode",
-  "inputs": {
-   "text": "Using this elegant style, create a portrait of a swan wearing a pearl tiara and lace collar, maintaining the same refined quality and soft color tones.",
-   "clip": [
-    "192:38",
-    0
-   ]
-  }
- }
 }

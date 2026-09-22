@@ -165,3 +165,118 @@ def test_ace15_song_uses_checkpoint_node_validation(store, backend_with_comfy):
         spec, {"checkpoint": "ace_step_1.5_turbo_aio.safetensors"}, object_info, workflow
     )
     assert values["checkpoint"] == "ace_step_1.5_turbo_aio.safetensors"
+
+
+# ------------------------------------ what the real ComfyUI actually receives
+
+def _last_prompt(fake_comfy) -> dict:
+    server, _ = fake_comfy
+    return server.prompts_seen[-1]
+
+
+def _node(workflow: dict, class_type: str) -> dict:
+    return next(n for n in workflow.values() if n["class_type"] == class_type)["inputs"]
+
+
+def test_every_builtin_template_passes_server_side_validation():
+    """With its own defaults applied, every built-in template is a prompt
+    a real ComfyUI 0.37 accepts as-is (required inputs including
+    dynamic-combo children, combo choices, number ranges)."""
+    from prosperos_hoard.devtools.fake_comfy import real_object_info
+    from prosperos_hoard.workflows.convert import validate_values
+
+    for entry in comfy_driver.list_builtin_templates():
+        workflow, spec = comfy_driver.load_template(entry["template"])
+        values = dict(spec.get("defaults") or {})
+        if spec.get("checkpoint_node"):
+            values["checkpoint"] = comfy_driver.default_value(workflow, spec, "checkpoint")
+        wf = comfy_driver.apply_params(workflow, spec, values)
+        assert validate_values(wf, real_object_info()) == [], entry["template"]
+
+
+def test_flux_schnell_without_explicit_settings_uses_its_own_defaults(store, backend_with_comfy, fake_comfy, project):
+    params = {"prompt": "a lantern", "positive_prompt": "a lantern", "negative_prompt": "", "seed": 5, "count": 1,
+              "template": "flux_schnell_txt2img"}
+    done = _run_job(store, backend_with_comfy, "generate_image", params, project["id"])
+    assert done["state"] == "done", done
+    sampler = _node(_last_prompt(fake_comfy), "KSampler")
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]) == (4, 1, "euler", "simple")
+
+
+def test_style_preset_does_not_leak_sdxl_sampling_into_flux(store, backend_with_comfy, fake_comfy, project):
+    params = {"prompt": "a lantern", "positive_prompt": "a lantern", "negative_prompt": "", "seed": 5, "count": 1,
+              "template": "flux_schnell_txt2img",
+              "style_defaults": {"steps": 32, "cfg": 7, "sampler": "dpmpp_2m", "scheduler": "karras", "width": 1344, "height": 768}}
+    done = _run_job(store, backend_with_comfy, "generate_image", params, project["id"])
+    assert done["state"] == "done", done
+    wf = _last_prompt(fake_comfy)
+    assert _node(wf, "KSampler")["cfg"] == 1 and _node(wf, "KSampler")["steps"] == 4
+    assert (_node(wf, "EmptySD3LatentImage")["width"], _node(wf, "EmptySD3LatentImage")["height"]) == (1344, 768)
+
+
+def _still(store, backend, project, width, height, seed=2):
+    done = _run_job(store, backend, "generate_image",
+                    {"prompt": "street", "positive_prompt": "street", "negative_prompt": "", "width": width,
+                     "height": height, "seed": seed, "count": 1, "template": "sdxl_txt2img"}, project["id"])
+    return done["outputs"]["asset_ids"][0]
+
+
+def test_wan_defaults_and_size_follow_the_start_frame(store, backend_with_comfy, fake_comfy, project):
+    for (w, h), expected in (((1344, 768), (1280, 704)), ((768, 1344), (704, 1280))):
+        still_id = _still(store, backend_with_comfy, project, w, h)
+        clip = _run_job(store, backend_with_comfy, "generate_image",
+                        {"prompt": "rain", "positive_prompt": "rain", "negative_prompt": "", "seed": 6, "count": 1,
+                         "template": "wan22_ti2v", "reference_asset_id": still_id}, project["id"])
+        assert clip["state"] == "done", clip
+        wf = _last_prompt(fake_comfy)
+        latent = _node(wf, "Wan22ImageToVideoLatent")
+        assert (latent["width"], latent["height"], latent["length"]) == (*expected, 121)
+        sampler = _node(wf, "KSampler")
+        assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]) == (20, 5, "uni_pc", "simple")
+        assert _node(wf, "ModelSamplingSD3")["shift"] == 8
+        assert _node(wf, "CreateVideo")["fps"] == 24
+        assert _node(wf, "SaveVideo")["format.codec"] == "auto"
+
+
+def test_kontext_output_size_is_the_requested_one(store, backend_with_comfy, fake_comfy, project):
+    sheet = _still(store, backend_with_comfy, project, 1344, 768)
+    post = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "x", "positive_prompt": "the same character from the reference, now at a bus stop",
+                     "negative_prompt": "", "width": 896, "height": 1120, "seed": 4, "count": 1,
+                     "template": "flux_kontext_edit", "reference_asset_id": sheet}, project["id"])
+    assert post["state"] == "done", post
+    asset = store.get_asset(post["outputs"]["asset_ids"][0])
+    assert (asset["width"], asset["height"]) == (896, 1120)
+    sampler = _node(_last_prompt(fake_comfy), "KSampler")
+    assert sampler["steps"] == 20 and sampler["cfg"] == 1
+    assert _node(_last_prompt(fake_comfy), "FluxGuidance")["guidance"] == 2.5
+    # no size given: the reference's aspect at about one megapixel
+    same = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "x", "positive_prompt": "the same character from the reference, now in fog",
+                     "negative_prompt": "", "seed": 5, "count": 1, "template": "flux_kontext_edit",
+                     "reference_asset_id": sheet}, project["id"])
+    latent = _node(_last_prompt(fake_comfy), "EmptySD3LatentImage")
+    assert latent["width"] > latent["height"] and latent["width"] % 16 == 0
+    assert abs(latent["width"] / latent["height"] - 1344 / 768) < 0.03
+
+
+def test_compose_song_duration_reaches_both_ace_nodes(store, backend_with_comfy, fake_comfy, project):
+    params = {"tags": _TAGS, "lyrics": _LYRICS, "bpm": 140, "duration": 9, "key": "F# minor",
+              "language": "es", "time_signature": 4, "seed": 31, "count": 1}
+    done = _run_job(store, backend_with_comfy, "compose_song", params, project["id"])
+    assert done["state"] == "done", done
+    wf = _last_prompt(fake_comfy)
+    assert _node(wf, "TextEncodeAceStepAudio1.5")["duration"] == 9
+    assert _node(wf, "EmptyAceStep1.5LatentAudio")["seconds"] == 9
+
+
+def test_fake_comfy_rejects_what_the_real_server_rejects(fake_comfy):
+    import httpx
+
+    _, port = fake_comfy
+    workflow, spec = comfy_driver.load_template("wan22_ti2v")
+    broken = comfy_driver.apply_params(workflow, spec, spec["defaults"])
+    del broken["58"]["inputs"]["format.codec"]
+    resp = httpx.post(f"http://127.0.0.1:{port}/prompt", json={"prompt": broken, "client_id": "t"})
+    assert resp.status_code == 400
+    assert "format.codec" in resp.text

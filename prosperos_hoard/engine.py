@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import mimetypes
 import random
 import re
@@ -536,29 +537,68 @@ def _video_thumbnail(path: Path, dest: Path) -> Optional[str]:
     return dest.relative_to(dest.parent.parent).as_posix()
 
 
-def _generation_values(params: dict[str, Any]) -> dict[str, Any]:
-    d = params.get("style_defaults") or {}
-    return {
+_SAMPLING_KEYS = ("steps", "cfg", "sampler", "scheduler")
+
+
+def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Explicit params win; then the template's own `defaults` (a Flux,
+    Kontext or Wan template declares the sampler settings it was converted
+    with - schnell at 4 steps/cfg 1, not the SDXL 30/6.5 the generic
+    fallbacks below are tuned for); then a style preset's defaults (only
+    for templates without their own, since a preset is tuned for SDXL);
+    then the generic SDXL fallbacks."""
+    t = dict(template_defaults or {})
+    d = {} if t else (params.get("style_defaults") or {})
+    values = {
         "checkpoint": _first(params.get("checkpoint"), d.get("checkpoint")),
         "positive_prompt": params["positive_prompt"],
         "negative_prompt": params.get("negative_prompt") or "",
-        "width": _first(params.get("width"), d.get("width"), 1024),
-        "height": _first(params.get("height"), d.get("height"), 1024),
+        "width": _first(params.get("width"), (params.get("style_defaults") or {}).get("width"), t.get("width"), 1024),
+        "height": _first(params.get("height"), (params.get("style_defaults") or {}).get("height"), t.get("height"), 1024),
         "batch_size": 1,
         "seed": params.get("seed"),
-        "steps": _first(params.get("steps"), d.get("steps"), 30),
-        "cfg": _first(params.get("cfg"), d.get("cfg"), 6.5),
-        "sampler": _first(params.get("sampler"), d.get("sampler"), "dpmpp_2m"),
-        "scheduler": _first(params.get("scheduler"), d.get("scheduler"), "karras"),
+        "steps": _first(params.get("steps"), t.get("steps"), d.get("steps"), 30),
+        "cfg": _first(params.get("cfg"), t.get("cfg"), d.get("cfg"), 6.5),
+        "sampler": _first(params.get("sampler"), t.get("sampler"), d.get("sampler"), "dpmpp_2m"),
+        "scheduler": _first(params.get("scheduler"), t.get("scheduler"), d.get("scheduler"), "karras"),
         "denoise": _first(params.get("strength"), 1.0 if not params.get("reference_asset_id") else 0.6),
     }
+    for key, value in t.items():  # template-only knobs (guidance, shift, length, fps, ...)
+        values.setdefault(key, value)
+    return values
+
+
+def _size_from_reference(mode: str, ref_w: int, ref_h: int) -> tuple[int, int]:
+    """Output size when the caller gave none, following the reference's
+    aspect: Kontext keeps it at ~1 MP (multiples of 16); Wan 2.2 TI2V 5B
+    uses its native 1280x704 / 704x1280 (960x960 for near-square)."""
+    ratio = (ref_w or 1) / float(ref_h or 1)
+    if mode == "wan":
+        if ratio > 1.2:
+            return 1280, 704
+        if ratio < 1 / 1.2:
+            return 704, 1280
+        return 960, 960
+    area = 1024 * 1024
+    width = int(round(math.sqrt(area * ratio) / 16) * 16)
+    height = int(round(math.sqrt(area / ratio) / 16) * 16)
+    return max(256, min(2048, width)), max(256, min(2048, height))
 
 
 def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
     template = params.get("template") or ("sdxl_img2img" if params.get("reference_asset_id") else "sdxl_txt2img")
+    try:
+        _, spec = comfy_driver.load_template(template, store.data_dir)
+    except comfy_driver.WorkflowError as exc:
+        raise EngineError("unknown_template", str(exc)) from exc
+    values = _generation_values(params, spec.get("defaults"))
+    size_mode = spec.get("size_from_reference")
+    if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
+        ref = store.get_asset(params["reference_asset_id"])
+        values["width"], values["height"] = _size_from_reference(size_mode, ref.get("width") or 1024, ref.get("height") or 1024)
     return run_template(
-        store, backend, job, progress, template_name=template, values=_generation_values(params),
+        store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or []},
