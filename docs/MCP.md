@@ -67,16 +67,17 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_status` | yes | - | `demo_backend`, `capabilities{cap: state, provider, model, reason}`, `comfyui{reachable, url, checkpoints, vram_free_mb}`, `ffmpeg`, `piper_tts`, `music_generation[]`, `vram_estimates_mb`, `queue{queued, waiting_gpu, running}`, `recent_jobs[5]` |
 | `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
 | `studio_create_project` | no | `name, brief=None` | `{id, name, brief}` |
-| `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` | list: `characters[], groups[]`; create/update: the object |
+| `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |
 | `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, strength, template, checkpoint, consistent=False, wait_s=0, use_character_reference=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, seed}` (+ picture only when `include_image=true`) |
 | `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0, include_image=False` | `{job}`; the output is an mp4 video asset |
-| `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1, wait_s=0` | `{job}`; the output is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage |
+| `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
 | `studio_voice` | no | `project, text, character_id, voice, speed` | audio asset summary + `provider` (`piper`, `faustus`, `piper_fallback`) |
 | `studio_import` | no | `project, path, kind=None` | asset summary |
 | `studio_analyze_audio` | yes | `asset_id` | `{duration_s, tempo_bpm, beat_count, beat_times[<=32], beats_truncated, downbeats[<=8], sections[{label, start_s, end_s, energy}], notes}` |
+| `studio_time_lyrics` | no | `project, song_asset_id, lyrics, name=None` | `{id, lines, sections[{label, kind, energy, start_s, end_s}], note}` - a lyrics asset (LRC with timed `[Section]` markers) |
 | `studio_design` | no | `project, template, fields, image_asset_id, variant, options={"print": bool}, include_image=False` | asset summary (+ picture only when `include_image=true`) |
-| `studio_photocard_set` | no | `project, group_id, template_front, template_back, image_asset_ids={char_id: asset_id}, include_image=False` | `{asset_ids, front_ids, back_ids, contact_sheet_id, skipped_members?}` (+ picture only when `include_image=true`) |
+| `studio_photocard_set` | no | group: `project, group_id, template_front, template_back, image_asset_ids={char_id: asset_id}`; solo: `project, character_id, cards[{image_asset_id, role, message, accent}], set_name`; `include_image=False` | `{asset_ids, front_ids, back_ids, contact_sheet_id, skipped_members?}` (+ picture only when `include_image=true`) |
 | `studio_timeline` | no | `project, action="auto"|"get"|"update", song_asset_id, asset_ids, board_id, aspect="9:16", lyrics_asset_id, options, timeline_id, patch` | compact timeline: `{id, name, aspect, fps, width, height, audio_asset_id, duration_s, clips_total, lyrics_lines, finishing, clips[{index, asset_id, kind, start_s, duration_s, transition, ken_burns}], has_more, next_clip_offset}` |
 | `studio_render` | no | `timeline_id, quality="preview"|"final", wait_s=0` | `{job}`; when done `asset_ids` holds the mp4 |
 | `studio_jobs` | yes | `state=None ("active" = queued+waiting+running), limit=10` | `items[job]`, `has_more` |
@@ -104,36 +105,72 @@ whole is annotated as writing because create/update do.
   `reuse`/`vary` need a ComfyUI recipe; `img2img` and `inpaint` work on any image.
 - **Templates:** `sdxl_txt2img` (default), `sdxl_img2img` (default when a
   reference is given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`,
-  `svd_img2vid`, `flux_schnell_txt2img` (4 steps, cfg 1), `flux_kontext_edit`
-  (reference-guided edit; single reference image), `wan22_ti2v` (Wan 2.2,
-  image-to-video only; a still becomes the start frame), `ace15_song` (used
-  by `studio_compose`, not `studio_generate_image`), or an imported `wf_...`
-  workflow (from a UI **or** API format export - `workflows/convert.py`
-  expands subgraphs, `PrimitiveNode`/`Reroute`, bypass/mute).
+  `svd_img2vid`, and the four converted from the official ComfyUI templates
+  and checked input for input against what a real ComfyUI 0.37
+  frontend exports:
+
+  | Template | Models | Defaults when not given | Notes |
+  | --- | --- | --- | --- |
+  | `flux_schnell_txt2img` | checkpoint `flux1-schnell-fp8` | 1024x1024, 4 steps, cfg 1, euler/simple | no real negative prompt (distilled model); SDXL style presets do not change its sampler |
+  | `flux_kontext_edit` | `flux1-dev-kontext_fp8_scaled` + `clip_l` / `t5xxl_fp8_e4m3fn_scaled` + `ae` | 20 steps, guidance 2.5, cfg 1; size = the reference's aspect at ~1 MP | reference-guided edit (same character, new scene); `width`/`height`/`aspect` set the output size; single reference image |
+  | `wan22_ti2v` | `wan2.2_ti2v_5B_fp16` + `umt5_xxl_fp8_e4m3fn_scaled` + `wan2.2_vae` | 1280x704 (704x1280 for a vertical still, 960x960 square), 121 frames at 24 fps = 5 s, 20 steps, cfg 5, shift 8, uni_pc/simple | image-to-video: `reference_asset_id` is the start frame |
+  | `ace15_song` | checkpoint `ace_step_1.5_turbo_aio` | 8 steps, cfg 1, shift 3; the duration reaches both the encoder and the latent | used by `studio_compose`, not `studio_generate_image` |
+
+  VRAM estimates (editable in Settings): Flux ~13 GB, Kontext ~13 GB, Wan
+  5B ~12 GB at 1280x704, ACE-Step turbo ~8 GB. An imported `wf_...`
+  workflow can come from a UI **or** API format export -
+  `workflows/convert.py` expands subgraphs (promoted widgets included),
+  `PrimitiveNode`/`Reroute`, bypass/mute, dynamic combos and autogrow
+  inputs.
 - **Character consistency:** `consistent=true` keeps a mentioned character's
   exact design: it routes through `flux_kontext_edit` with their
   `canonical_asset_id` as the reference and the prompt turned into "the
-  same character from the reference, now &lt;scene&gt;" instead of inlining
-  the look description. Needs a `@Character` with a canonical reference set
+  same character from the reference image, with exactly the same design,
+  proportions and colours, now &lt;scene&gt;" instead of inlining the look
+  description. Needs a `@Character` with a canonical reference set
   (`studio_cast` update) or an explicit `reference_asset_id`; otherwise
   fails with `consistent_needs_reference`. Build the reference itself with
   a plain `flux_schnell_txt2img` turnaround-sheet prompt (front / three-
-  quarter / back on a neutral backdrop), then set the best crop as
-  `canonical_asset_id`.
+  quarter / back on a neutral backdrop), then set it as
+  `canonical_asset_id` together with `canonical_crop` (`left_third` |
+  `middle_third` | `right_third` or `[x, y, w, h]` fractions): the crop
+  becomes a new image asset with lineage and the canonical; the sheet is
+  kept in `reference_asset_ids`. Leave the character out of shots it must
+  not appear in (a Kontext edit keeps it in frame).
 - **Timeline finishing** (patch field, applied once at render): `{color_grade:
   "teal_orange"|"sodium_night"|"bleach_bypass", grain: 0-1, vignette: bool,
   letterbox: bool, glitch_on_downbeats: bool, lyric_style: "default"|"horror"}`.
   See [API.md](API.md#timeline-finishing) for what each one does.
 - **Design fields:** photocard_front `image, member_name*, role, group_name,
   accent`; photocard_back `member_name*, group_name, group_logo, message,
-  serial, accent`; album_cover `cover_image, title*, subtitle, accent`
-  (variant center_title | bottom_band | corner_minimal); teaser_poster `image,
-  title*, tagline, date, accent`; lyric_card `image, quote*, attribution,
-  accent`; tracklist_back `cover_image, group_name*, tracks*, accent`;
-  thumbnail `image, title*, accent`. Unknown fields fail with the field list.
+  serial, accent`; album_cover `cover_image, title*, subtitle, artist,
+  accent` (variant center_title | bottom_band | corner_minimal | night);
+  teaser_poster `image, title*, tagline, date, accent` (classic | night);
+  lyric_card `image, quote*, attribution, accent` (classic | night);
+  tracklist_back `cover_image, group_name*, title, tracks*, credits, accent`
+  (classic | night; tracks one per line or a list, "01  Title  2:00" sets
+  as columns in night); thumbnail `image, title*, accent`. "night" is the
+  horror/thriller look: condensed bone-white titles with a faded-red print
+  misregistration, sodium accents, typewriter small print, vignette, grain.
+  Unknown fields fail with the field list.
+- **Lyric timing** (`studio_time_lyrics`): the lyrics' own `[Section]` tags
+  and the song's bars give a first pass - a line per bar in rap verses, two
+  in hooks, pre-choruses, intros, bridges and outros, each section sized to
+  its lines (the rest instrumental) and snapped to the analysis'
+  boundaries, every line on a beat. The LRC stores a section as a timed tag
+  line, `[01:01.71][Chorus]` - the same thing tapping a `[Chorus]` line in
+  Audio > Lyrics timing produces - and those lines never become captions. An
+  estimate from the structure, not vocal detection: re-time by ear.
 - **Timeline options** (auto): `beats_low`, `beats_mid` (4), `beats_high` (2),
   `flash_on_strong_downbeats` (true), `ken_burns_variety` (true), `karaoke`
-  (false), `seed`, `fps` (24/25/30); get: `clip_offset`, `clip_limit`.
+  (false), `seed`, `fps` (24/25/30); `sections` ("auto": the lyrics'
+  timed `[Section]` markers when present - verse mid, chorus high, intro /
+  bridge / outro low - else the analysis); `cut_on_lyrics` (a new shot on
+  the beat of every sung line); `section_pools` (`{"Verse 1" | "verse" |
+  "chorus": [asset ids in story order]}` - matched by exact label, then
+  without its number, then by kind; a pool keeps its place across
+  repeats). Every section starts on a new shot. get: `clip_offset`,
+  `clip_limit`.
   **Patch** (update): `clip_updates[{index, duration_s | asset_id | kind |
   trim_start_s | ken_burns | transition_in}]`, `{index, delete: true}`,
   `{index, move_to}`, plus `name`, `aspect`, `fps`, `audio_asset_id`,
@@ -162,7 +199,9 @@ studio_import(project, "C:/Users/me/Music/single.mp3")   -> a_song
 # or compose one instead of importing:
 studio_compose(project, tags="dark trap, heavy 808, male rap vocals", lyrics="[Verse]\n...", bpm=140, wait_s=120) -> a_song
 studio_analyze_audio(a_song)                     -> 128 BPM, sections A/B/A
-studio_timeline(project, "auto", song_asset_id=a_song, aspect="9:16")  -> tl_...
+studio_time_lyrics(project, a_song, lyrics="[Verse]\n...\n[Chorus]\n...")  -> lyrics a_lrc, sections
+studio_timeline(project, "auto", song_asset_id=a_song, aspect="9:16", lyrics_asset_id=a_lrc,
+                options={"karaoke": true, "cut_on_lyrics": true})  -> tl_...
 studio_timeline(project, "update", timeline_id=tl_..., patch={"finishing": {"color_grade": "sodium_night", "grain": 0.3, "vignette": true}})
 studio_render(tl_..., "preview")                 -> job; studio_job(job, wait_s=120) -> mp4 asset
 ```

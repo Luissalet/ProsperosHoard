@@ -35,15 +35,15 @@ with ids and pictures.
 | Area | Available now | Boundary |
 | --- | --- | --- |
 | Projects and cast | Projects, characters (look prompt, negative, palette, canonical reference, voice), ordered groups, `@Name` mentions that match multi-word names and report unknown ones, 6 style presets | Single local user; names must be unique per project (they are the mention) |
-| Generation (ComfyUI) | SDXL txt2img, img2img, inpaint and a two-pass hires fix, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; pre-flight check of nodes, checkpoints, samplers and schedulers against `/object_info` with the installed options in the error; a UI-format **or** API-format workflow converter/importer (subgraphs, `PrimitiveNode`/`Reroute`, bypass/mute) with an editable parameter map; `consistent=true` keeps a `@Character`'s exact design via Kontext and their canonical reference | Prospero hosts no model; Kontext is single-reference, Wan is image-to-video only |
+| Generation (ComfyUI) | SDXL txt2img, img2img, inpaint and a two-pass hires fix, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; each with its own sampler/size defaults; the whole prompt checked against `/object_info` before queueing (nodes, every model file, samplers, combo choices, ranges) with the installed options in the error; a UI-format **or** API-format workflow importer whose converter matches the real ComfyUI 0.37 frontend's export input for input on the official templates (subgraphs and promoted widgets, dynamic combos, `PrimitiveNode`/`Reroute`, bypass/mute), with an editable parameter map and a cached node list for when ComfyUI is off; `consistent=true` keeps a `@Character`'s exact design via Kontext and their canonical reference, cropped to one pose of a turnaround sheet | Prospero hosts no model; Kontext is single-reference, Wan is image-to-video only |
 | GPU etiquette | VRAM estimate per workflow family (editable) checked against nvidia-smi or ComfyUI's `system_stats`; a job that does not fit waits in `waiting_gpu` with the reason, every 15 s for up to 30 min; cancel at any time | Nothing is ever unloaded unless you press "Free ComfyUI memory" |
 | Lineage | Every generated asset records template, template hash, checkpoint, every parameter and seed, inputs and timing; "Reuse recipe" reproduces an image byte for byte on the same backend (tested), "Vary seed" re-runs it with new seeds | Reproduction is only guaranteed on the same backend, models and ComfyUI version |
-| Design | Pillow renderer, no browser: photocard front and back, album cover (3 layouts), teaser poster, lyric card, tracklist back, thumbnail; gradients, holographic foil, blends, letter spacing, shadows, shrink-to-fit text; photocard sets for a whole group with a contact sheet; print mode with 3 mm bleed at 300 dpi; 5 bundled OFL font families | The QR layer draws a placeholder box (no QR library is pinned) |
-| Audio | Import (mp3, wav, flac, ogg, m4a), waveform, own beat tracker (band-balanced spectral flux, tempo prior, dynamic programming) tested within 1 BPM and 50 ms on click tracks and kick-and-snare patterns at 90-140 BPM, downbeat and section estimates, LRC lyrics with a tap-to-time tool | Section labels are "section A/B" with low/mid/high energy, not verse/chorus; very fast songs (170 BPM) are reported at half time |
+| Design | Pillow renderer, no browser: photocard front and back, album cover (4 layouts), teaser poster, lyric card, tracklist back, thumbnail, with a "night" horror/thriller variant for the cover, poster, lyric card and tracklist; gradients, holographic foil, blends, vignette, letter spacing, shadows, shrink-to-fit text, tracklist columns; photocard sets for a whole group or a solo artist in several looks, with a contact sheet; print mode with 3 mm bleed at 300 dpi; 6 bundled font families | The QR layer draws a placeholder box (no QR library is pinned) |
+| Audio | Import (mp3, wav, flac, ogg, m4a), waveform, own beat tracker (band-balanced spectral flux, tempo prior, dynamic programming) tested within 1 BPM and 50 ms on click tracks and kick-and-snare patterns at 90-140 BPM, downbeat and section estimates, LRC lyrics with a tap-to-time tool and a first-pass auto-timing from the lyrics' `[Section]` tags and the song's bars | Auto-timing is an estimate from the structure, not vocal alignment; section labels are "section A/B" with low/mid/high energy, not verse/chorus; very fast songs (170 BPM) are reported at half time |
 | Voices | Piper TTS, six curated Spanish and English voices downloaded on first use; Faustus TTS through Hoard Link with Piper as fallback; per-character voice and speed | Generic synthetic voices only: no voice cloning of anyone |
-| Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP contract for another local server; composed songs get lineage and are analysed automatically | Neither is installed by default; imported songs work fully either way |
-| Video | Beat-synced auto-cut (density per energy, flashes on phrase downbeats, no immediate repeats, whole song covered) into an editable timeline; ffmpeg renderer with Ken Burns moves, cut/crossfade/dip/flash transitions that keep cuts on the beat, burned lyric captions with optional karaoke, the song muxed in; 540p preview or 1080p final; SVD/Wan clips converted to mp4; optional finishing pass (colour grade presets, film grain, vignette, letterbox, downbeat glitch flashes, a condensed-uppercase horror caption style) | Ken Burns is a zoom range plus pan direction, not free start/end rectangles; colour grades are `eq`/`colorbalance`/`curves` approximations, not a 3D LUT |
-| Agent control | 21 MCP tools mirroring `/api/agent/*`, compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job` can wait server-side); no push events |
+| Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP contract for another local server; composed songs get lineage and are analysed automatically | Needs the ACE-Step checkpoint in ComfyUI; no song has been composed on a real GPU yet; imported songs work fully either way |
+| Video | Beat-synced auto-cut (density per energy - from the lyrics' verse/chorus markers when present - flashes on phrase downbeats, a new shot per section and optionally per sung line, per-section storyboards in story order, no immediate repeats, whole song covered) into an editable timeline; ffmpeg renderer with Ken Burns moves, cut/crossfade/dip/flash transitions that keep cuts on the beat, burned lyric captions with optional karaoke, the song muxed in; 540p preview or 1080p final; SVD/Wan clips converted to mp4; optional finishing pass (colour grade presets, film grain, vignette, letterbox, downbeat glitch flashes, a condensed-uppercase horror caption style) | Ken Burns is a zoom range plus pan direction, not free start/end rectangles; colour grades are `eq`/`colorbalance`/`curves` approximations, not a 3D LUT |
+| Agent control | 22 MCP tools mirroring `/api/agent/*`, compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job` can wait server-side); no push events |
 | Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
@@ -118,31 +118,47 @@ renders its preview video. To use your ComfyUI, leave it on
 ## Production example
 
 [`scripts/productions/no_mires_atras.py`](scripts/productions/no_mires_atras.py)
-drives a full single end to end **through the MCP adapter only** (it spawns
-`mcp_server.py` over stdio, the same path Faustus uses): a project, a
-consistent original character, a composed song, twelve stills, a handful
-of Wan image-to-video clips, a set of idol-style photocards, album art,
-and a beat-synced, colour-graded timeline rendered to mp4 - finishing with
-a `REPORT.md` listing every asset id and what to review.
+produces a single, "NO MIRES ATRÁS" by FAROL (an original night creature:
+a paper-lantern head, always still, always a little closer), end to end
+**through the MCP adapter only** - it spawns `mcp_server.py` over stdio,
+the same path Faustus uses, and fails if any result carries a picture it
+did not ask for. Nine steps: the project; a Flux turnaround sheet cropped
+to its front view as FAROL's canonical reference; the song with ACE-Step;
+twelve stills (Kontext with that reference when FAROL is in frame, Flux in
+the same night look when not); Wan clips from the best stills; a solo
+photocard set in five idol looks with its contact sheet; the "night" cover,
+tracklist back, teaser poster and lyric card; lyrics timed to the song's
+bars; 9:16 and 16:9 cuts that follow a storyboard per section and change
+shot on every sung line, graded sodium-night with grain, vignette and a
+flash + RGB glitch on the chorus downbeats, horror karaoke captions; and a
+`REPORT.md` with every asset id, timings and what to review. It checkpoints
+every still, clip, card and render, so an interrupted run resumes where it
+stopped; `--only <step>` redoes one step.
+
+On Windows, with the app running and ComfyUI started on a 16 GB card:
 
 ```powershell
+# the demo backend (no GPU), a few minutes
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend fake --quality draft
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lrc-path C:\lyrics.lrc
+# the real thing against the running app and ComfyUI
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
+# after re-timing the lyrics by ear in Audio > Lyrics timing and exporting the LRC
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<you>\Music\no_mires_atras.lrc
 ```
 
-Honest about what ran where: the run in this repository's own CPU-only
-setup used `--backend fake` (the same procedural stand-in the `--demo`
-flag uses), which is why its images are labelled placeholders rather than
-real Flux/Kontext/Wan/ACE-Step output. It still proves the whole pipeline:
-every step completes, every asset kind is produced, the timeline renders
-with its colour grade, grain, vignette and glitch flashes, and the
-captions burn in on time. The real run - with a real ComfyUI and the
-Flux, Kontext, Wan and ACE-Step checkpoints it now has on disk - is
-pending a real GPU run; `--backend real` drives the exact same script
-against it once ComfyUI is up, no code changes needed. The script is
-idempotent (`--only <step>` re-runs one step; delete its `state.json` to
-start over) and never names another product or franchise, in its prompts
-or its output.
+What has run and what has not: the whole production ran in this
+repository's CPU-only test setup against `--backend fake`, the procedural
+stand-in `--demo` uses - so its pictures, clips and song are labelled
+placeholders, not Flux, Kontext, Wan or ACE-Step output. What that run does
+prove is everything Prospero itself decides: every step completes and every
+asset kind is produced; the design layouts, typography, grade, grain,
+glitch, cut rhythm, storyboard and karaoke timing render as intended (the
+review of those frames is what led to the night variants, the caption
+rework and a frame-accurate transition fix). The fake ComfyUI serves the
+real ComfyUI 0.37 install's node list and rejects any prompt the real server
+would, and the four templates were checked input for input against what
+the real frontend exports - but **no real GPU run has happened yet**; that
+is the next step, with the same script.
 
 ## Architecture
 
@@ -161,15 +177,20 @@ Every endpoint: [docs/API.md](docs/API.md).
 cd frontend; npm ci; npm run build
 ```
 
-The last full run: **139 tests passed** in about 90 s, offline, with
+The last full run: **173 tests passed** in about 90 s, offline, with
 the demo backend standing in for ComfyUI. They cover: the MCP protocol end
 to end (the adapter spawned over stdio against a live app: tool keywords and
 annotations, generation with a picture, lineage, design, readable errors,
 the app-not-running message); the UI-format-to-API workflow converter
-against the five official ComfyUI templates (subgraphs, bypass/mute,
-`PrimitiveNode`/`Reroute`); the four new templates (Flux schnell, Kontext
-edit, Wan 2.2 TI2V, ACE-Step song) generating against the fake backend's
-real `/object_info`; character-consistency routing and its
+against seven official ComfyUI templates, compared input for input with
+what the real frontend exports (subgraphs and promoted widgets, dynamic
+combos, autogrow inputs, bypass/mute, `PrimitiveNode`/`Reroute`) and UI
+exports imported through the API with and without ComfyUI; the four new
+templates (Flux schnell, Kontext edit, Wan 2.2 TI2V, ACE-Step song)
+passing server-side validation with their own defaults and generating
+against the fake backend's real `/object_info`; lyric timing from section
+tags, storyboard pools and cut-on-lyrics; a long transition render that
+must keep its full length; character-consistency routing and its
 `consistent_needs_reference` error; the finishing filter graphs (colour
 grade, grain, vignette, letterbox, glitch) snapshot-tested plus a real
 ffmpeg render; byte-identical reproduction through "reuse recipe";
@@ -195,4 +216,4 @@ voice cloning, and the demo uses invented people only. Data stays in
 `data/` (or your `--data-dir`); the Faustus token is stored in
 `data/backend.json` and never returned by the API.
 
-MIT licence. Fonts under the SIL Open Font License (see `prosperos_hoard/fonts/*/OFL.txt`).
+MIT licence. Fonts under the SIL Open Font License (see `prosperos_hoard/fonts/*/OFL.txt`), except Special Elite (Apache License 2.0, `prosperos_hoard/fonts/SpecialElite/LICENSE.txt`).

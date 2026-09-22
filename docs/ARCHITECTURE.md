@@ -13,18 +13,20 @@ prosperos_hoard/
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
                    /object_info pre-flight, checkpoint resolution, template hash
   workflows/       API-format *.json + *.params.json per built-in template, plus
-    convert.py     UI-format (nodes/links, subgraphs, PrimitiveNode/Reroute, bypass/mute)
-                   -> API-format, against a live or cached /object_info
+    convert.py     UI-format -> API-format converter (see "Workflow conversion") and
+                   validate_values(): the checks ComfyUI's /prompt runs
   backend.py       wrapper around the vendored Hoard Link: ComfyUI client on Hoard
                    Link's loop, free VRAM, "free ComfyUI memory", import folders,
                    overrides in data/backend.json, MusicBackend adapters
   hoard_link/      vendored shared model-backend resolver (see VENDORED.txt, never edited)
-  design.py        Pillow layout renderer (rect/gradient, image, text, holo, grain,
-                   frame, badge, qr placeholder), blends, bleed
-  templates.py     the 7 named layouts and their field contract
-  fonts/           5 bundled OFL families
+  design.py        Pillow layout renderer (rect/gradient, image with blur, text with
+                   columns, holo, grain, vignette, frame, badge, qr placeholder),
+                   blends, bleed
+  templates.py     the 7 named layouts, their variants ("night" = horror look) and
+                   their field contract
+  fonts/           5 bundled OFL families + Special Elite (Apache 2.0)
   audio.py         ffmpeg decode/probe, waveform, onset envelope, tempo, beat tracker,
-                   downbeats, sections, LRC
+                   downbeats, sections, LRC, lyric timing from [Section] tags + bars
   voices.py        Piper (curated voices, atomic download) and Faustus TTS via Hoard Link
   timeline.py      auto-cut, edit validation, clip updates, compact view (pure Python)
   video.py         ffmpeg command builders, ASS subtitles and escaping, renderer,
@@ -95,16 +97,60 @@ Files under `<data>/`: `assets/`, `thumbs/` (WebP 512), `voices/` (Piper),
   `CREATE_NO_WINDOW` on Windows and UTF-8 decoding; `nvidia-smi` goes through
   Hoard Link, which does the same.
 
+## Workflow conversion
+
+ComfyUI saves what its editor shows (UI format: `nodes`, `links`,
+`definitions.subgraphs`, widgets as positional `widgets_values`); `/prompt`
+wants API format (`{id: {class_type, inputs}}`, every input a literal or a
+`[node_id, slot]` link). `workflows/convert.py` walks the UI graph against an
+`/object_info` (live, or the cached `data/comfy/object_info.json`):
+
+- inputs are taken in schema order (required, then optional); a widget-typed
+  input consumes the next `widgets_values` slot even when a link feeds it
+  (the link wins), plus the UI-only `control_after_generate` slot after a
+  seed; missing trailing "advanced" widgets fall back to their defaults
+- a **dynamic combo** (`COMFY_DYNAMICCOMBO_V3`, e.g. `SaveVideo.format`)
+  consumes its chosen option's own inputs next, emitted flattened as
+  `format.codec` (recursively) - the server requires them
+- **autogrow** sockets (`COMFY_AUTOGROW_V3`) are emitted under their own
+  flattened names (`images.image_1`) when linked
+- `PrimitiveNode` and `Reroute` resolve to the value or link they carry;
+  bypassed nodes pass a same-typed input through, muted ones drop out;
+  notes and socketless UI widgets are skipped
+- **subgraph** instances are expanded in place (inner ids become
+  `<instance>:<inner>`); a subgraph input is matched to the instance's socket
+  by name, and an unlinked promoted widget takes its value from the
+  instance's `widgets_values` (one per widget-typed subgraph input, in order)
+
+`tests/fixtures/comfy/` holds the official templates of a real ComfyUI install
+(comfyui-workflow-templates 0.11.68, ComfyUI 0.37) and, for each, the API
+prompt the real frontend produced (`graphToPrompt()` in a headless browser);
+`test_convert.py` requires the converter to match it input for input.
+`validate_values()` then runs what `/prompt` checks - required inputs
+(dynamic-combo children included), links to existing output slots, combo
+choices (so a model file that is not installed is caught), number ranges -
+and `run_template` calls it on every workflow before queueing; the fake
+ComfyUI rejects the same prompts the real server would.
+
+The built-in Flux/Kontext/Wan/ACE templates were converted this way and then
+hand-checked node by node; each `*.params.json` carries its `defaults`
+(sampler, steps, cfg, size, fps, length) so no SDXL fallback ever reaches a
+Flux or Wan graph, and Kontext samples into an `EmptySD3LatentImage` of the
+requested size (the reference still conditions through `ReferenceLatent`).
+
 ## Rendering pipeline
 
 1. Each visual clip is rendered to `clip_NNN.mp4` at the target size: images
    with a `zoompan` Ken Burns move on a 2x-scaled cover crop, videos trimmed,
    cover-cropped and padded with their last frame if shorter than the clip.
 2. All-cut timelines are joined with the concat demuxer, listing clips by
-   relative name. With any real transition, clips are rendered longer by the
-   next transition's length and chained with `xfade` whose offsets are the
-   nominal starts, so cuts stay on the beat and the video keeps the song's
-   length.
+   relative name. With any real transition, everything moves to the frame
+   grid: each clip starts on the frame nearest its beat, is rendered a whole
+   number of frames (`-frames:v`) plus the next overlap and one spare frame,
+   and the clips are chained with `xfade` (each input pinned to the
+   timeline's fps) at those exact starts - so cuts stay on the beat and the
+   video keeps the song's length (float offsets drifting past frame-rounded
+   clips used to end the chain early, silently).
 3. If the timeline has a `finishing` config, its filters (colour grade
    `eq`/`colorbalance`/`curves`, `noise` grain, `vignette`, letterbox
    `drawbox` bars, downbeat `rgbashift` glitches timed to the clips the
@@ -112,8 +158,11 @@ Files under `<data>/`: `assets/`, `thumbs/` (WebP 512), `voices/` (Piper),
    chain that runs on the whole joined cut, before the captions.
 4. Lyrics become an ASS file (escaped: braces, backslash codes and newlines
    cannot inject tags or events; karaoke `\k` per word; the `horror` lyric
-   style swaps in a condensed uppercase face with a per-line rotation/shear
-   jitter seeded from the line text). ffmpeg runs the final pass with the
+   style swaps in a condensed uppercase face that lights each word from
+   fog grey to bone white as it is sung - weighted by syllables, within two
+   bars - with a soft dark outline, a short fade and a per-line
+   rotation/shear jitter seeded from the line text, sized from the short
+   side and kept above the bottom fifth on vertical video). ffmpeg runs the final pass with the
    work folder as its cwd and `ass=lyrics.ass:fontsdir=fonts`, because the
    filter-graph parser treats the drive colon and the apostrophe of
    `C:\...\Prospero's Hoard\` specially.
@@ -153,17 +202,20 @@ apart), segments that sound alike share a letter, energy relative to the song.
 - **Import folders**: agents may pass paths, so imports are limited to the home
   folder, `data/inbox` and folders added in Settings, with symlinks and `..`
   resolved first and content checked against the extension.
+- **Lyric timing is an estimate** (`studio_time_lyrics`): it reads the
+  structure from the lyrics' `[Section]` tags and the song's bars, not from
+  the vocals (no source separation or alignment model is in the dependency
+  set); re-time by ear in Audio > Lyrics timing.
 - **`flux_kontext_edit` is single-reference only**: the official template's
   multi-reference image-stitching path is not exposed; `wan22_ti2v` is
   image-to-video only (a still becomes the start frame) - its pure
   text-to-video path (bypassing `LoadImage`) is not exposed either. Both are
   scope cuts, not converter limitations (the converter itself expands
   either path correctly).
-- **Checkpoint cross-validation** (against `/object_info`) only runs for
-  `CheckpointLoaderSimple`-based templates (SDXL, SD1.5, `flux_schnell_txt2img`,
-  `ace15_song`); `UNETLoader`/`DualCLIPLoader`/`CLIPLoader`/`VAELoader`-based
-  ones (`flux_kontext_edit`, `wan22_ti2v`) do not get the same file-name
-  cross-check yet.
+- **Checkpoint resolution** (a style preset saying `sd_xl_base_1.0` finds
+  `sd_xl_base_1.0.safetensors`) runs for `CheckpointLoaderSimple`-based
+  templates; for every template, `validate_values()` checks every model file
+  (UNet, text encoders, VAE included) against `/object_info` before queueing.
 - **Finishing colour grades** are single-pass `eq`/`colorbalance`/`curves`
   approximations named for their look (teal-orange, sodium-night, bleach
   bypass), not a calibrated 3D LUT.

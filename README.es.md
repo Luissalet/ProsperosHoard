@@ -36,15 +36,15 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Área | Disponible ahora | Límite |
 | --- | --- | --- |
 | Proyectos y reparto | Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), grupos ordenados, menciones `@Nombre` que reconocen nombres de varias palabras y avisan de los desconocidos, 6 estilos predefinidos | Un único usuario local; los nombres no se pueden repetir en un proyecto (son la mención) |
-| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix»), SD 1.5 txt2img, SVD imagen a vídeo, FLUX.1 schnell txt2img, FLUX.1 Kontext (edición guiada por referencia), Wan 2.2 TI2V imagen a vídeo, todo como plantillas en formato API; comprobación previa de nodos, checkpoints, samplers y schedulers contra `/object_info`, con las opciones instaladas en el error; conversor/importador de flujos en formato de interfaz **o** API (subgrafos, `PrimitiveNode`/`Reroute`, bypass/mute) con mapa de parámetros editable; `consistent=true` mantiene el diseño exacto de un `@Personaje` vía Kontext y su referencia canónica | Prospero no aloja ningún modelo; Kontext admite una sola referencia, Wan solo imagen a vídeo |
+| Generación (ComfyUI) | SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix»), SD 1.5 txt2img, SVD imagen a vídeo, FLUX.1 schnell txt2img, FLUX.1 Kontext (edición guiada por referencia), Wan 2.2 TI2V imagen a vídeo, todo como plantillas en formato API, cada una con sus propios valores de sampler y tamaño; el prompt entero se comprueba contra `/object_info` antes de encolarlo (nodos, cada archivo de modelo, samplers, opciones, rangos), con las opciones instaladas en el error; importador de flujos en formato de interfaz **o** API cuyo conversor coincide entrada a entrada con la exportación del propio frontend de ComfyUI 0.37 en las plantillas oficiales (subgrafos y widgets promovidos, combos dinámicos, `PrimitiveNode`/`Reroute`, bypass/mute), con mapa de parámetros editable y una copia de la lista de nodos para cuando ComfyUI está apagado; `consistent=true` mantiene el diseño exacto de un `@Personaje` vía Kontext y su referencia canónica, recortada a una pose de la hoja de referencia | Prospero no aloja ningún modelo; Kontext admite una sola referencia, Wan solo imagen a vídeo |
 | Uso compartido de la GPU | VRAM estimada por familia de flujo (editable), comparada con nvidia-smi o con `system_stats` de ComfyUI; si falta memoria, el trabajo espera en `waiting_gpu` con el motivo, reintentando cada 15 s hasta 30 min; se puede cancelar en cualquier momento | Nunca se descarga nada salvo que pulses «Liberar memoria de ComfyUI» |
 | Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
-| Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (3 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura; degradados, lámina holográfica, modos de fusión, espaciado de letras, sombras y texto que se encoge para caber; sets de photocards de un grupo entero con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 5 familias tipográficas OFL incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
-| Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla | Las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
+| Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (4 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura, con una variante «night» de terror/thriller para portada, cartel, tarjeta de letra y contraportada; degradados, lámina holográfica, modos de fusión, viñeta, espaciado de letras, sombras, texto que se encoge para caber y columnas para la lista de canciones; sets de photocards de un grupo entero o de un solista en varios looks, con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 6 familias tipográficas incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
+| Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla y una primera sincronización automática a partir de las etiquetas `[Section]` de la letra y los compases | La sincronización automática es una estimación por estructura, no alineación con la voz; las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
 | Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Solo voces sintéticas genéricas: no se clona la voz de nadie |
-| Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o un contrato HTTP mínimo documentado para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Ninguno de los dos viene instalado por defecto; las canciones importadas funcionan del todo igualmente |
-| Vídeo | Montaje automático al ritmo (densidad según la energía, destellos al inicio de cada frase musical, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
-| Control por agentes | 21 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
+| Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o un contrato HTTP mínimo documentado para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Necesita el checkpoint de ACE-Step en ComfyUI; aún no se ha compuesto ninguna canción en una GPU real; las canciones importadas funcionan del todo igualmente |
+| Vídeo | Montaje automático al ritmo (densidad según la energía - según las marcas de estrofa/estribillo de la letra cuando las hay - destellos al inicio de cada frase musical, plano nuevo en cada sección y, si se pide, en cada verso cantado, guiones por sección en orden de historia, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
+| Control por agentes | 22 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
 | Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
@@ -121,33 +121,51 @@ encuentra) o pon su URL en Ajustes.
 ## Ejemplo de producción
 
 [`scripts/productions/no_mires_atras.py`](scripts/productions/no_mires_atras.py)
-dirige un sencillo completo de principio a fin **solo a través del
-adaptador MCP** (lanza `mcp_server.py` por stdio, el mismo camino que usa
-Faustus): un proyecto, un personaje original consistente, una canción
-compuesta, doce fotogramas, varios clips de imagen a vídeo con Wan, un set
-de photocards estilo idol, las artes del álbum y un montaje sincronizado
-al ritmo, con gradación de color, renderizado a mp4 - terminando con un
-`REPORT.md` que lista cada id de recurso y qué revisar.
+produce un sencillo, «NO MIRES ATRÁS» de FAROL (una criatura nocturna
+original: cabeza de farolillo de papel, siempre quieta, siempre un poco más
+cerca), de principio a fin **solo a través del adaptador MCP**: lanza
+`mcp_server.py` por stdio, el mismo camino que usa Faustus, y falla si algún
+resultado trae una imagen que no pidió. Nueve pasos: el proyecto; una hoja
+de referencia con Flux recortada a su vista frontal como referencia
+canónica de FAROL; la canción con ACE-Step; doce fotogramas (Kontext con esa
+referencia cuando FAROL sale en plano, Flux con la misma estética nocturna
+cuando no); clips de Wan a partir de los mejores fotogramas; un set de
+photocards de solista en cinco looks idol con su hoja de contactos; la
+portada, contraportada, cartel teaser y tarjeta de letra en variante
+«night»; la letra sincronizada con los compases; montajes 9:16 y 16:9 que
+siguen un guion por sección y cambian de plano en cada verso cantado, con
+gradación sodium-night, grano, viñeta y destello + glitch RGB en los
+tiempos fuertes del estribillo, y subtítulos karaoke de terror; y un
+`REPORT.md` con cada id de recurso, los tiempos y qué revisar. Guarda cada
+fotograma, clip, tarjeta y render según termina, así que una ejecución
+interrumpida sigue donde se quedó; `--only <paso>` repite un paso.
+
+En Windows, con la aplicación en marcha y ComfyUI arrancado en una tarjeta
+de 16 GB:
 
 ```powershell
+# el backend de demostración (sin GPU), unos minutos
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend fake --quality draft
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lrc-path C:\letra.lrc
+# la producción real contra la aplicación y ComfyUI en marcha
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
+# tras resincronizar la letra de oído en Audio > Sincronizar letra y exportar el LRC
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<tu-usuario>\Music\no_mires_atras.lrc
 ```
 
-Con honestidad sobre qué se ejecutó y dónde: la ejecución sin GPU de
-este propio repositorio usó `--backend fake` (el mismo sustituto
-procedural que usa la opción `--demo`), por lo que sus imágenes llevan la
-etiqueta de marcador de posición en vez de una salida real de
-Flux/Kontext/Wan/ACE-Step. Aun así demuestra toda la tubería: cada paso
-termina, se produce cada tipo de recurso, el montaje se renderiza con su
-gradación de color, grano, viñeta y destellos de glitch, y la letra se
-graba a tiempo. La ejecución real - con el ComfyUI del dueño y los
-checkpoints de Flux, Kontext, Wan y ACE-Step que ya tiene en disco - está
-pendiente de sus GPUs; `--backend real` dirige el mismo script contra
-ella en cuanto ComfyUI esté arriba, sin cambiar nada de código. El script
-es idempotente (`--only <paso>` repite un paso; borra su `state.json` para
-empezar de cero) y nunca nombra otro producto o franquicia, ni en sus
-prompts ni en su salida.
+Qué se ha ejecutado y qué no: la producción completa se ejecutó en una máquina sin GPU
+de este repositorio con `--backend fake`, el sustituto procedural que usa
+`--demo`, así que sus imágenes, clips y canción son marcadores de posición
+etiquetados, no salida de Flux, Kontext, Wan ni ACE-Step. Lo que sí
+demuestra es todo lo que decide el propio Prospero: cada paso termina y se
+produce cada tipo de recurso; composiciones, tipografía, gradación, grano,
+glitch, ritmo de corte, guion y sincronización del karaoke se renderizan
+como deben (revisar esos fotogramas es lo que trajo las variantes «night»,
+el rediseño de los subtítulos y la corrección de las transiciones al
+fotograma). El ComfyUI falso sirve la lista de nodos real del ComfyUI 0.37
+y rechaza cualquier prompt que rechazaría el servidor real,
+y las cuatro plantillas se han comparado entrada a entrada con lo que
+exporta el frontend real, pero **aún no ha habido ninguna ejecución en una
+GPU real**: ese es el siguiente paso, con el mismo script.
 
 ## Arquitectura
 
@@ -167,16 +185,22 @@ con la aplicación. Detalles, modelo de datos y decisiones:
 cd frontend; npm ci; npm run build
 ```
 
-La última ejecución completa: **139 pruebas superadas** en unos 90 s,
+La última ejecución completa: **173 pruebas superadas** en unos 90 s,
 sin red, con el backend de demostración en lugar de ComfyUI. Cubren: el
 protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
 aplicación en marcha: palabras clave y anotaciones de cada herramienta,
 generación con imagen, linaje, diseño, errores legibles y el mensaje de
 aplicación apagada); el conversor de flujos de formato de interfaz a API
-contra las cinco plantillas oficiales de ComfyUI (subgrafos, bypass/mute,
-`PrimitiveNode`/`Reroute`); las cuatro plantillas nuevas (Flux schnell,
-edición Kontext, Wan 2.2 TI2V, canción ACE-Step) generando contra el
-`/object_info` real del backend falso; el enrutado de consistencia de
+contra siete plantillas oficiales de ComfyUI, comparado entrada a entrada
+con lo que exporta el frontend real (subgrafos y widgets promovidos, combos
+dinámicos, entradas autogrow, bypass/mute, `PrimitiveNode`/`Reroute`) y la
+importación de exportaciones de interfaz por la API con y sin ComfyUI; las
+cuatro plantillas nuevas (Flux schnell, edición Kontext, Wan 2.2 TI2V,
+canción ACE-Step) pasando la validación del servidor con sus propios
+valores y generando contra el `/object_info` real del backend falso; la
+sincronización de letras por secciones, los guiones por sección y el corte
+por verso; un render largo con transiciones que debe conservar su
+duración; el enrutado de consistencia de
 personaje y su error `consistent_needs_reference`; los grafos de filtro del
 acabado (gradación de color, grano, viñeta, barras, glitch) probados por
 comparación exacta más un renderizado real con ffmpeg; la reproducción byte
@@ -206,4 +230,4 @@ demostración usa únicamente personas inventadas. Los datos se quedan en
 `data/` (o en tu `--data-dir`); el token de Faustus se guarda en
 `data/backend.json` y la API nunca lo devuelve.
 
-Licencia MIT. Tipografías con licencia SIL Open Font License (ver `prosperos_hoard/fonts/*/OFL.txt`).
+Licencia MIT. Tipografías con licencia SIL Open Font License (ver `prosperos_hoard/fonts/*/OFL.txt`), salvo Special Elite (Apache License 2.0, `prosperos_hoard/fonts/SpecialElite/LICENSE.txt`).
