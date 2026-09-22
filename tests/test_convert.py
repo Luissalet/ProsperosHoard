@@ -1,5 +1,11 @@
-"""The UI->API converter against the five official ComfyUI example
-templates and their real `/object_info` (0.34.0, 906 node classes)."""
+"""The UI->API converter against the official ComfyUI example templates
+(comfyui-workflow-templates 0.11.68) and a real `/object_info`
+(ComfyUI 0.37.0, 962 node classes).
+
+`fixtures/comfy/api_truth/` holds, for every template, the API prompt the
+real ComfyUI frontend (1.53.6) produced from it (`graphToPrompt()` in a
+headless browser against a real install): the converter must match
+it input for input, not merely produce something that validates."""
 
 from __future__ import annotations
 
@@ -13,13 +19,23 @@ from prosperos_hoard.workflows import convert
 FIXTURES = Path(__file__).parent / "fixtures" / "comfy"
 OBJECT_INFO_PATH = Path(__file__).parent.parent / "prosperos_hoard" / "devtools" / "comfy_object_info.json"
 
+TRUTH = FIXTURES / "api_truth"
 OFFICIAL_TEMPLATES = [
     "flux_schnell.json",
     "flux_schnell_full_text_to_image.json",
     "flux_kontext_dev_basic.json",
     "video_wan2_2_5B_ti2v.json",
     "audio_ace_step_1_5_checkpoint.json",
+    # subgraph-promoted widgets, dynamic combos and autogrow sockets
+    "image_qwen_image_2_1_t2i.json",
+    "image_qwen_image_2_1_image_edit.json",
 ]
+# Inputs the frontend sends that carry no information for the server:
+# seeds (randomised when the frontend loads a template), a legacy bare
+# duplicate of SaveVideo's flattened "format.codec", and the socketless
+# ImageCompare view widget (a UI-only preview).
+IGNORED_INPUTS = {"seed", "noise_seed"}
+FRONTEND_ONLY = {("SaveVideo", "codec"), ("ImageCompare", "compare_view")}
 
 
 @pytest.fixture(scope="module")
@@ -40,6 +56,46 @@ def test_official_template_converts_and_validates(name: str, object_info: dict) 
         for value in node["inputs"].values():
             if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
                 assert value[0] in api, f"{node_id}: dangling link to {value[0]!r}"
+
+
+@pytest.mark.parametrize("name", OFFICIAL_TEMPLATES)
+def test_matches_the_real_frontend_export(name: str, object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    truth = json.loads((TRUTH / name.replace(".json", ".api.json")).read_text(encoding="utf-8"))
+    api = convert.ui_to_api(ui_workflow, object_info)
+    assert sorted(api) == sorted(truth)
+    for node_id, expected in truth.items():
+        ours = api[node_id]
+        assert ours["class_type"] == expected["class_type"], node_id
+        ctype = expected["class_type"]
+        want = {k: v for k, v in expected["inputs"].items()
+                if k not in IGNORED_INPUTS and (ctype, k) not in FRONTEND_ONLY}
+        got = {k: v for k, v in ours["inputs"].items() if k not in IGNORED_INPUTS}
+        assert got == want, f"{name} node {node_id} ({ctype})"
+
+
+def test_dynamic_combo_children_are_flattened_and_required(object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / "video_wan2_2_5B_ti2v.json").read_text(encoding="utf-8"))
+    api = convert.ui_to_api(ui_workflow, object_info)
+    save = api["58"]["inputs"]
+    assert save["format"] == "auto" and save["format.codec"] == "auto"
+    # the server validates the chosen option's children: dropping one is caught
+    broken = json.loads(json.dumps(api))
+    del broken["58"]["inputs"]["format.codec"]
+    assert any("format.codec" in p for p in convert.validate_converted(broken, object_info))
+
+
+def test_subgraph_promoted_widgets_come_from_the_instance(object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / "image_qwen_image_2_1_image_edit.json").read_text(encoding="utf-8"))
+    api = convert.ui_to_api(ui_workflow, object_info)
+    encode = api["459:474"]["inputs"]
+    assert encode["prompt"].startswith("Keep the character and pose in <image1>")
+    assert encode["resolution"] == 0
+    # autogrow sockets: only the linked reference images are sent
+    assert encode["images.image_1"] == ["470", 0] and encode["images.image_2"] == ["475", 0]
+    assert not any(k.startswith("images.image_3") for k in encode)
+    # matched by name, not slot: cfg is the literal promoted value, not a width link
+    assert api["459:458"]["inputs"]["cfg"] == 1
 
 
 def test_flux_schnell_values(object_info: dict) -> None:

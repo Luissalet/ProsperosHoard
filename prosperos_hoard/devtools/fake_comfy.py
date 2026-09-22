@@ -10,12 +10,12 @@ a real beat for ACE-Step, from the prompt/tags/lyrics + seed, with Pillow
 and numpy. Same seed + same prompt -> byte-identical output, which is what
 the lineage-reproduces-the-same-asset test relies on.
 
-`/object_info` is a real ComfyUI 0.34.0 dump (906 node classes,
-`comfy_object_info.json`, see `workflows/convert.py`'s docstring for where
-it comes from), patched with the checkpoint/model file names the production's
-brief says are on disk now (Flux, Kontext, Wan, ACE-Step) -- so the new
-built-in templates validate and queue against this fake exactly as they
-would against the real thing.
+`/object_info` is a real ComfyUI 0.37.0 dump (962 node classes,
+`comfy_object_info.json`, taken live from an install with the Flux,
+Kontext, Wan and ACE-Step files already on disk), with the model file
+names merged in once more so the fixture keeps working if a future dump
+is taken on a machine without them -- the built-in templates validate and
+queue against this fake exactly as they would against the real thing.
 """
 
 from __future__ import annotations
@@ -61,9 +61,9 @@ def _set_choices(object_info: dict[str, Any], class_type: str, input_name: str, 
 
 
 def real_object_info() -> dict[str, Any]:
-    """A real ComfyUI 0.34.0 `/object_info` dump (906 node classes),
-    patched with the checkpoint/model files of the production example, on
-    disk now. Loaded and patched once (module-level cache, ~1.7 MB): every
+    """A real ComfyUI 0.37.0 `/object_info` dump (962 node classes),
+    with the checkpoint/model files of the production example
+    merged in (a no-op for this dump, which already lists them). Loaded and patched once (module-level cache, ~1.7 MB): every
     caller in this process only ever reads it, so it is returned by
     reference rather than re-parsed or deep-copied per request."""
     global _real_object_info_cache
