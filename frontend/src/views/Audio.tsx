@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines, Download, Loader2, Mic, Pause, Play, RefreshCw, Save, Square, Timer } from "lucide-react";
+import { AudioLines, Download, Loader2, Mic, Pause, Play, RefreshCw, Save, Sparkles, Square, Timer } from "lucide-react";
 import { api, fileUrl, type Analysis, type Asset } from "../api";
 import { useT } from "../i18n";
 import { Empty, fmtTime, useApp, useAsync } from "../components/ui";
@@ -106,7 +106,8 @@ export function AudioView() {
     if (!lyricsId) { setLines([]); setRawText(""); return; }
     api.lyrics(lyricsId).then((l) => {
       setRawText(l.text);
-      setLines(l.lines.length ? l.lines : l.text.split("\n").filter((x) => x.trim()).map((text) => ({ time_s: null, text })));
+      const timed = l.all_lines || l.lines;
+      setLines(timed.length ? timed : l.text.split("\n").filter((x) => x.trim()).map((text) => ({ time_s: null, text })));
     });
   }, [lyricsId]);
   useEffect(() => { if (!lyricsId && lyricsList.data?.items[0]) setLyricsId(lyricsList.data.items[0].id); }, [lyricsList.data, lyricsId]);
@@ -160,6 +161,23 @@ export function AudioView() {
     const s = (l.time_s! - m * 60).toFixed(2).padStart(5, "0");
     return `[${String(m).padStart(2, "0")}:${s}]${l.text}`;
   }).join("\n");
+
+  const [autoTiming, setAutoTiming] = useState(false);
+  const autoTime = async () => {
+    if (!song) return;
+    setAutoTiming(true);
+    try {
+      const text = rawText.split("\n").map((x) => x.replace(/^(\[[\d:.]+\])+/, "").trim()).filter(Boolean).join("\n");
+      const r = await api.timeLyrics(pid, song.id, text, `${song.name || "Song"} - timed lyrics`);
+      setLyricsId(r.id);
+      app.toast(t("autoTimed", { n: r.lines, s: r.sections.length }), "ok");
+      app.bump();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setAutoTiming(false);
+    }
+  };
 
   const saveLyrics = async () => {
     try {
@@ -265,6 +283,8 @@ export function AudioView() {
                 {timing === null
                   ? <button className="btn" onClick={startTiming} disabled={!rawText.trim() || !song}><Play size={14} /> {t("start")}</button>
                   : <button className="btn" onClick={() => { setTiming(null); audio.current?.pause(); }}><Square size={14} /> {t("stop")}</button>}
+                {timing === null && <button className="btn" onClick={autoTime} disabled={!rawText.trim() || !song || autoTiming}
+                  title={t("autoTimeHint")}>{autoTiming ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} {t("autoTime")}</button>}
                 <button className="btn primary" onClick={saveLyrics} disabled={!rawText.trim() && !lrc}><Save size={14} /> {t("saveLrc")}</button>
                 {lrc && <a className="btn ghost" download="lyrics.lrc" href={`data:text/plain;charset=utf-8,${encodeURIComponent(lrc)}`}><Download size={14} /> {t("exportLrc")}</a>}
               </div>

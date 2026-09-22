@@ -182,7 +182,9 @@ def studio_cast(
 ) -> dict[str, Any]:
     """List, create or update the cast. action "list" | "create" | "update"; kind "character" | "group".
     Character fields: role, bio, prompt (the look, inlined wherever @Name appears), negative, palette
-    (hex list), canonical_asset_id (reference image), voice {backend: piper|faustus, voice_id, speed}.
+    (hex list), canonical_asset_id (reference image), canonical_crop (crop that image into the canonical:
+    "left_third"|"middle_third"|"right_third" - one pose of a turnaround sheet - or [x, y, w, h] fractions;
+    the sheet is kept in reference_asset_ids), voice {backend: piper|faustus, voice_id, speed}.
     Group fields: concept, member_ids (ordered character ids), colours, logo_asset_id.
     update needs `id`. Names must be unique in a project (they are the @mention).
 
@@ -320,6 +322,22 @@ def studio_import(project: str, path: str, kind: Optional[str] = None) -> dict[s
     Keywords: import file, add asset, add a song, use this photo, importar archivo, agregar recurso, subir cancion
     """
     return _call("POST", "/api/agent/studio_import", params={"project": project}, json={"path": path, "kind": kind})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Optional[str] = None) -> dict[str, Any]:
+    """First-pass karaoke timing: lyrics with [Section] tags (the same text given to studio_compose)
+    are timed to the song's bars - a line per bar in rap verses, two per bar in hooks, intros and
+    bridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a
+    lyrics asset (LRC with timed [Section] markers) for studio_timeline action="auto"
+    lyrics_asset_id=..., whose cut density then follows verse/chorus. An estimate from the structure,
+    not vocal detection: re-time by ear in Audio > Lyrics before a final render.
+    Returns {id, lines, sections: [{label, energy, start_s, end_s}], note}.
+
+    Keywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra
+    """
+    return _call("POST", "/api/agent/studio_time_lyrics", params={"project": project},
+                 json={"song_asset_id": song_asset_id, "lyrics": lyrics, "name": name})
 
 
 @tool(_ro(readOnlyHint=True))

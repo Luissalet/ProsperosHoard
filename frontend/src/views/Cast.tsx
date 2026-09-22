@@ -5,10 +5,10 @@ import { useT } from "../i18n";
 import { AssetPicker, Empty, Modal, useApp, useAsync } from "../components/ui";
 
 type Draft = { id?: string; name: string; role: string; bio: string; prompt: string; negative: string; palette: string;
-  canonical_asset_id: string | null; voice_backend: string; voice_id: string; speed: number };
+  canonical_asset_id: string | null; crop: string; voice_backend: string; voice_id: string; speed: number };
 
 const emptyDraft: Draft = { name: "", role: "", bio: "", prompt: "", negative: "", palette: "#ff4d8d", canonical_asset_id: null,
-  voice_backend: "piper", voice_id: "es_ES-davefx-medium", speed: 1 };
+  crop: "full", voice_backend: "piper", voice_id: "es_ES-davefx-medium", speed: 1 };
 
 export function CastView() {
   const { t } = useT();
@@ -28,7 +28,7 @@ export function CastView() {
 
   const edit = (c: Character) => setDraft({
     id: c.id, name: c.name, role: c.role || "", bio: c.bio || "", prompt: c.prompt || "", negative: c.negative || "",
-    palette: c.palette.join(" "), canonical_asset_id: c.canonical_asset_id, voice_backend: c.voice?.backend || "piper",
+    palette: c.palette.join(" "), canonical_asset_id: c.canonical_asset_id, crop: "full", voice_backend: c.voice?.backend || "piper",
     voice_id: c.voice?.voice_id || "es_ES-davefx-medium", speed: c.voice?.speed || 1,
   });
 
@@ -38,8 +38,9 @@ export function CastView() {
       role: draft.role, bio: draft.bio, prompt: draft.prompt, negative: draft.negative,
       palette: draft.palette.split(/[\s,]+/).filter(Boolean),
       canonical_asset_id: draft.canonical_asset_id || undefined,
+      ...(draft.canonical_asset_id && draft.crop !== "full" ? { canonical_crop: draft.crop } : {}),
       voice: { backend: draft.voice_backend, voice_id: draft.voice_id, speed: draft.speed },
-    } as Partial<Character>;
+    } as Partial<Character> & { canonical_crop?: string };
     try {
       if (draft.id) await api.updateCharacter(draft.id, { ...fields, name: draft.name });
       else await api.createCharacter(pid, draft.name, fields);
@@ -203,6 +204,15 @@ export function CastView() {
                 <button className="btn sm" onClick={() => setPicking(true)}>{t("pickReference")}</button>
                 {draft.canonical_asset_id && <button className="btn sm ghost" onClick={() => setDraft({ ...draft, canonical_asset_id: null })}><X size={14} /></button>}
               </div>
+              {draft.canonical_asset_id && (
+                <label className="field" style={{ marginTop: 8 }}>{t("canonicalCrop")} <span className="hint">{t("cropHint")}</span>
+                  <select value={draft.crop} onChange={(e) => setDraft({ ...draft, crop: e.target.value })}>
+                    <option value="full">{t("cropFull")}</option>
+                    <option value="left_third">{t("cropLeft")}</option>
+                    <option value="middle_third">{t("cropMiddle")}</option>
+                    <option value="right_third">{t("cropRight")}</option>
+                  </select></label>
+              )}
             </div>
             <div className="grid-3">
               <label className="field">{t("voiceBackend")}
@@ -221,7 +231,7 @@ export function CastView() {
         </Modal>
       )}
       {picking && draft && <AssetPicker projectId={pid} onClose={() => setPicking(false)}
-        onPick={(a) => { setDraft({ ...draft, canonical_asset_id: a.id }); setPicking(false); }} />}
+        onPick={(a) => { setDraft({ ...draft, canonical_asset_id: a.id, crop: "full" }); setPicking(false); }} />}
 
       {groupDraft && (
         <Modal title={groupDraft.id ? groupDraft.name : t("newGroup")} onClose={() => setGroupDraft(null)}

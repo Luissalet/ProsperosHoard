@@ -356,7 +356,10 @@ export const api = {
   importPath: (pid: string, path: string) => request<Asset>("POST", `/api/projects/${pid}/import-path`, { path }),
 
   analyze: (assetId: string, force = false) => request<Analysis>("POST", `/api/assets/${assetId}/analyze${q({ force })}`),
-  lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[] }>("GET", `/api/assets/${assetId}/lyrics`),
+  lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[]; all_lines?: { time_s: number; text: string }[] }>("GET", `/api/assets/${assetId}/lyrics`),
+  timeLyrics: (pid: string, songAssetId: string, lyrics: string, name?: string) =>
+    request<{ id: string; lines: number; sections: { label: string; energy: string; start_s: number; end_s: number }[]; note: string }>(
+      "POST", `/api/agent/studio_time_lyrics${q({ project: pid })}`, { song_asset_id: songAssetId, lyrics, name }),
   saveLyrics: (assetId: string, text: string) => request<{ lines: { time_s: number; text: string }[] }>("PUT", `/api/assets/${assetId}/lyrics`, { text }),
   createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/api/projects/${pid}/lyrics`, { text, name }),
 
