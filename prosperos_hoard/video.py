@@ -294,22 +294,25 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Spacing, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Lyrics,{fontname},{fontsize},{primary},&H0000D8FF,{outline},{back},{bold},0,1,{border},{shadow},{spacing},2,60,60,80,1
+Style: Lyrics,{fontname},{fontsize},{primary},{secondary},{outline},{back},{bold},0,1,{border},{shadow},{spacing},2,60,60,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 # "horror" lyric style: a condensed display face (Bebas Neue, already
-# bundled) set fully uppercase, a heavier dark-red outline, and a small
-# per-line rotation/shear "jitter" seeded from the line's own text so the
-# same lyrics always render the same wobble (snapshot-testable) without
-# every line looking identically stamped.
+# bundled) set fully uppercase; a line appears in dim fog grey and each word
+# lights up bone white as it is sung (karaoke), with a near-black soft
+# outline that stays legible over sodium-orange footage; a short fade in and
+# out; and a small per-line rotation/shear "jitter" seeded from the line's
+# own text so the same lyrics always render the same wobble
+# (snapshot-testable) without every line looking identically stamped.
+# ASS colours are &HAABBGGRR (AA = transparency).
 _LYRIC_STYLE_ASS = {
-    "default": {"fontname": "Inter", "primary": "&H00FFFFFF", "outline": "&H00201018", "back": "&H80000000",
-                "bold": 1, "border": 2, "shadow": 1, "spacing": 0},
-    "horror": {"fontname": "Bebas Neue", "primary": "&H00E6E6E6", "outline": "&H001018B0", "back": "&HA0000000",
-               "bold": 0, "border": 3, "shadow": 2, "spacing": 2},
+    "default": {"fontname": "Inter", "primary": "&H00FFFFFF", "secondary": "&H0000D8FF", "outline": "&H00201018",
+                "back": "&H80000000", "bold": 1, "border": 2, "shadow": 1, "spacing": 0},
+    "horror": {"fontname": "Bebas Neue", "primary": "&H00DAE6ED", "secondary": "&H5099908A", "outline": "&H00100C0B",
+               "back": "&H90000000", "bold": 0, "border": 3, "shadow": 1, "spacing": 2},
 }
 
 
@@ -317,7 +320,22 @@ def _horror_jitter(seed_text: str) -> tuple[float, float]:
     """(z-rotation degrees, x-shear factor) for one lyric line, deterministic
     per line so re-rendering the same song produces byte-identical output."""
     rng = random.Random(f"horror-jitter:{seed_text}")
-    return round(rng.uniform(-3.0, 3.0), 2), round(rng.uniform(-0.06, 0.06), 3)
+    return round(rng.uniform(-2.0, 2.0), 2), round(rng.uniform(-0.05, 0.05), 3)
+
+
+_VOWEL_GROUPS = re.compile(r"[aeiouáéíóúüy]+", re.IGNORECASE)
+
+
+def _word_weight(word: str) -> int:
+    """Rough syllable count (vowel groups), so a long word takes longer to
+    light up than "la" - closer to how a line is actually sung than an even
+    split per word."""
+    return max(1, len(_VOWEL_GROUPS.findall(word)))
+
+
+# the whole line lights up within this long at most: a sung line rarely
+# takes more than two bars, even when its caption stays up longer
+KARAOKE_MAX_FILL_S = 3.6
 
 
 def _ass_time(seconds: float) -> str:
@@ -344,9 +362,17 @@ def ass_escape(text: str) -> str:
 def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style: str = "default") -> str:
     if style not in LYRIC_STYLES:
         raise RenderError(f"lyric_style must be one of {', '.join(LYRIC_STYLES)}")
-    fontsize = max(28, height // 24)
     style_vars = _LYRIC_STYLE_ASS[style]
-    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize, **style_vars)]
+    if style == "horror":
+        # sized from the short side so 16:9 captions are not tiny; lifted
+        # above the bottom fifth on vertical video, where the short-video
+        # apps draw their own buttons and captions
+        fontsize = max(28, min(width, height) // 13)
+        margin_v = int(height * (0.2 if height > width else 0.09))
+    else:
+        fontsize = max(28, height // 24)
+        margin_v = 80
+    lines = [_ASS_HEADER.format(width=width, height=height, fontsize=fontsize, margin_v=margin_v, **style_vars)]
     for clip in lyric_clips:
         start, end = float(clip["start_s"]), float(clip["end_s"])
         text = str(clip.get("text", ""))
@@ -356,14 +382,26 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
             text = text.upper()
         if clip.get("karaoke"):
             words = text.split() or [text]
-            total_cs = max(1, int(round((end - start) * 100)))
-            per_word_cs = max(1, total_cs // len(words))
-            text_out = " ".join(f"{{\\k{per_word_cs}}}{ass_escape(w)}" for w in words)
+            if style == "horror":
+                fill_cs = max(len(words), int(round(min(0.92 * (end - start), KARAOKE_MAX_FILL_S) * 100)))
+                weights = [_word_weight(w) for w in words]
+                total_w = sum(weights)
+                parts, used = [], 0
+                for k, (w, wt) in enumerate(zip(words, weights)):
+                    cs = fill_cs - used if k == len(words) - 1 else max(1, int(round(fill_cs * wt / total_w)))
+                    used += cs
+                    parts.append(f"{{\\k{cs}}}{ass_escape(w)}")
+                text_out = " ".join(parts)
+            else:
+                total_cs = max(1, int(round((end - start) * 100)))
+                per_word_cs = max(1, total_cs // len(words))
+                text_out = " ".join(f"{{\\k{per_word_cs}}}{ass_escape(w)}" for w in words)
         else:
             text_out = ass_escape(text)
         if style == "horror":
             frz, fax = _horror_jitter(f"{start}:{text}")
-            text_out = f"{{\\frz{frz}\\fax{fax}}}{text_out}"
+            fade_out = 120 if end - start > 0.6 else 0
+            text_out = f"{{\\frz{frz}\\fax{fax}\\blur1.2\\fad(90,{fade_out})}}{text_out}"
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Lyrics,,0,0,0,,{text_out}")
     return "\n".join(lines) + "\n"
 

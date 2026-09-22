@@ -318,3 +318,19 @@ def test_short_video_clip_is_padded_to_its_slot(tmp_path):
 
     m = re.search(r"Duration: 00:00:(\d+\.\d+)", probe.stderr)
     assert m and abs(float(m.group(1)) - 2.5) < 0.15
+
+
+def test_horror_karaoke_lights_words_by_syllable_within_two_bars():
+    import re as _re
+
+    clips = [{"text": "la luz que te sigue", "start_s": 10.0, "end_s": 16.0, "karaoke": True}]
+    ass = video.build_ass(1080, 1920, clips, style="horror")
+    ks = [int(x) for x in _re.findall(r"\\k(\d+)", ass)]
+    assert len(ks) == 5
+    assert sum(ks) == int(video.KARAOKE_MAX_FILL_S * 100)  # a 6 s caption still lights up within ~2 bars
+    assert ks[4] > ks[0]  # "SIGUE" (2 syllables) takes longer than "LA"
+    assert r"\fad(90,120)" in ass
+    style = next(ln for ln in ass.splitlines() if ln.startswith("Style: Lyrics"))
+    assert style.endswith(f",2,60,60,{int(1920 * 0.2)},1")  # above the short-video apps' own UI
+    landscape = next(ln for ln in video.build_ass(1920, 1080, clips, style="horror").splitlines() if ln.startswith("Style:"))
+    assert landscape.split(",")[2] == str(1080 // 13) and landscape.endswith(f",{int(1080 * 0.09)},1")
