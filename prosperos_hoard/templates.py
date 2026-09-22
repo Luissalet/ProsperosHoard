@@ -1,150 +1,64 @@
 """Named design layouts. Each function returns a layout spec for
 `design.render_layout()`. Fields referenced by `{"field": "..."}` are
-supplied by the caller (`studio_design` / `POST /api/design/render`).
-
-Field contracts (documented here, also in docs/API.md):
-  photocard_front:  image, member_name, role, accent
-  photocard_back:   group_logo (asset), member_name, serial, message, accent
-  album_cover:      cover_image, title, subtitle, accent  (variant chooses layout)
-  teaser_poster:    image, title, tagline, accent
-  lyric_card:       image, quote, attribution, accent
-  tracklist_back:   cover_image, group_name, tracks (str, one per line), accent
-  thumbnail:        image, title, accent
+supplied by the caller (`studio_design` / the Designer screen);
+`TEMPLATE_FIELDS` is the contract (shown in the UI, the MCP docstring and
+the error for a wrong field).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+# field -> (type, required, description). Types: text, image (asset id), colour.
+TEMPLATE_FIELDS: dict[str, dict[str, tuple[str, bool, str]]] = {
+    "photocard_front": {
+        "image": ("image", True, "member photo"),
+        "member_name": ("text", True, "name printed on the card"),
+        "role": ("text", False, "position, e.g. 'Main Vocal'"),
+        "group_name": ("text", False, "small group name above the member name"),
+        "accent": ("colour", False, "frame and name colour"),
+    },
+    "photocard_back": {
+        "member_name": ("text", True, "name"),
+        "group_name": ("text", False, "used for the monogram when there is no logo"),
+        "group_logo": ("image", False, "logo image"),
+        "message": ("text", False, "handwritten-style message"),
+        "serial": ("text", False, "e.g. 'No. 007/250'"),
+        "accent": ("colour", False, "gradient and frame colour"),
+    },
+    "album_cover": {
+        "cover_image": ("image", True, "cover art"),
+        "title": ("text", True, "album or group title"),
+        "subtitle": ("text", False, "e.g. '1st Mini Album'"),
+        "accent": ("colour", False, "subtitle colour"),
+    },
+    "teaser_poster": {
+        "image": ("image", True, "key visual"),
+        "title": ("text", True, "headline"),
+        "tagline": ("text", False, "second line"),
+        "date": ("text", False, "release date line"),
+        "accent": ("colour", False, "tagline colour"),
+    },
+    "lyric_card": {
+        "image": ("image", False, "background image"),
+        "quote": ("text", True, "the lyric"),
+        "attribution": ("text", False, "song / artist line"),
+        "accent": ("colour", False, "attribution colour"),
+    },
+    "tracklist_back": {
+        "cover_image": ("image", False, "small cover"),
+        "group_name": ("text", True, "group name"),
+        "tracks": ("text", True, "one track per line"),
+        "accent": ("colour", False, "title colour"),
+    },
+    "thumbnail": {
+        "image": ("image", True, "background"),
+        "title": ("text", True, "video title"),
+        "accent": ("colour", False, "title colour"),
+    },
+}
 
-def photocard_front() -> dict[str, Any]:
-    w, h = 1100, 1700
-    return {
-        "width": w, "height": h, "radius": 48,
-        "layers": [
-            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#141018ff"},
-            {"type": "image", "x": 0, "y": 0, "w": w, "h": int(h * 0.82), "asset": {"field": "image"}, "fit": "cover"},
-            {"type": "holo", "x": 0, "y": 0, "w": w, "h": int(h * 0.82), "seed": {"field": "holo_seed", "default": 7}, "opacity": 0.22},
-            {"type": "rect", "x": 0, "y": int(h * 0.78), "w": w, "h": int(h * 0.22), "fill": "#0b0710e6"},
-            {"type": "text", "x": 60, "y": int(h * 0.82), "w": w - 120, "h": 100, "text": {"field": "member_name"},
-             "font": "playfair-display", "size": 72, "colour": {"field": "accent", "default": "#ff4d8dff"}, "align": "left"},
-            {"type": "badge", "x": 60, "y": int(h * 0.90), "w": 260, "h": 60, "text": {"field": "role", "default": ""},
-             "font": "space-grotesk", "size": 26, "fill": "#ffffff22", "colour": "#ffffffff"},
-            {"type": "grain", "amount": 6},
-            {"type": "frame", "width": 4, "colour": {"field": "accent", "default": "#ff4d8dff"}},
-        ],
-    }
-
-
-def photocard_back() -> dict[str, Any]:
-    w, h = 1100, 1700
-    return {
-        "width": w, "height": h, "radius": 48,
-        "layers": [
-            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0b0710ff"},
-            {"type": "image", "x": w // 2 - 90, "y": 90, "w": 180, "h": 180, "asset": {"field": "group_logo"}, "fit": "contain"},
-            {"type": "text", "x": 60, "y": 340, "w": w - 120, "h": 140, "text": {"field": "member_name"},
-             "font": "playfair-display", "size": 64, "colour": {"field": "accent", "default": "#ff4d8dff"}, "align": "center"},
-            {"type": "text", "x": 60, "y": h - 260, "w": w - 120, "h": 200, "text": {"field": "message", "default": ""},
-             "font": "caveat", "size": 46, "colour": "#e8e2f0ff", "align": "center", "valign": "middle"},
-            {"type": "badge", "x": w // 2 - 140, "y": h - 90, "w": 280, "h": 56, "text": {"field": "serial"},
-             "font": "space-grotesk", "size": 26, "fill": "#ffffff1a", "colour": "#ffffffff"},
-            {"type": "grain", "amount": 6},
-            {"type": "frame", "width": 4, "colour": {"field": "accent", "default": "#ff4d8dff"}},
-        ],
-    }
-
-
-def album_cover(variant: str = "center_title") -> dict[str, Any]:
-    w = h = 3000
-    base_layers = [
-        {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "cover_image"}, "fit": "cover"},
-    ]
-    if variant == "bottom_band":
-        extra = [
-            {"type": "rect", "x": 0, "y": int(h * 0.78), "w": w, "h": int(h * 0.22), "fill": "#000000b3"},
-            {"type": "text", "x": 120, "y": int(h * 0.82), "w": w - 240, "h": 260, "text": {"field": "title"},
-             "font": "bebas-neue", "size": 220, "colour": "#ffffffff", "align": "left"},
-            {"type": "text", "x": 120, "y": int(h * 0.92), "w": w - 240, "h": 130, "text": {"field": "subtitle", "default": ""},
-             "font": "space-grotesk", "size": 64, "colour": {"field": "accent", "default": "#f5c26bff"}, "align": "left"},
-        ]
-    elif variant == "corner_minimal":
-        extra = [
-            {"type": "text", "x": 100, "y": h - 420, "w": w - 200, "h": 220, "text": {"field": "title"},
-             "font": "space-grotesk", "size": 130, "colour": "#ffffffff", "align": "left"},
-            {"type": "text", "x": 100, "y": h - 200, "w": w - 200, "h": 120, "text": {"field": "subtitle", "default": ""},
-             "font": "inter", "size": 54, "colour": {"field": "accent", "default": "#f5c26bff"}, "align": "left"},
-        ]
-    else:  # center_title
-        extra = [
-            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#00000066"},
-            {"type": "text", "x": 200, "y": int(h * 0.42), "w": w - 400, "h": 400, "text": {"field": "title"},
-             "font": "playfair-display", "size": 200, "colour": "#ffffffff", "align": "center", "valign": "middle"},
-            {"type": "text", "x": 200, "y": int(h * 0.60), "w": w - 400, "h": 140, "text": {"field": "subtitle", "default": ""},
-             "font": "space-grotesk", "size": 70, "colour": {"field": "accent", "default": "#f5c26bff"}, "align": "center"},
-        ]
-    return {"width": w, "height": h, "layers": base_layers + extra + [{"type": "grain", "amount": 5}]}
-
-
-def teaser_poster() -> dict[str, Any]:
-    w, h = 1600, 2400
-    return {
-        "width": w, "height": h,
-        "layers": [
-            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover"},
-            {"type": "rect", "x": 0, "y": int(h * 0.65), "w": w, "h": int(h * 0.35), "fill": "#00000099"},
-            {"type": "text", "x": 90, "y": int(h * 0.70), "w": w - 180, "h": 320, "text": {"field": "title"},
-             "font": "bebas-neue", "size": 180, "colour": "#ffffffff", "align": "left"},
-            {"type": "text", "x": 90, "y": int(h * 0.86), "w": w - 180, "h": 160, "text": {"field": "tagline", "default": ""},
-             "font": "caveat", "size": 70, "colour": {"field": "accent", "default": "#ff4d8dff"}, "align": "left"},
-            {"type": "grain", "amount": 6},
-        ],
-    }
-
-
-def lyric_card() -> dict[str, Any]:
-    w = h = 1080
-    return {
-        "width": w, "height": h,
-        "layers": [
-            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover"},
-            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#00000073"},
-            {"type": "text", "x": 100, "y": 340, "w": w - 200, "h": 320, "text": {"field": "quote"},
-             "font": "playfair-display", "size": 64, "colour": "#ffffffff", "align": "center", "valign": "middle"},
-            {"type": "text", "x": 100, "y": 700, "w": w - 200, "h": 80, "text": {"field": "attribution", "default": ""},
-             "font": "space-grotesk", "size": 32, "colour": {"field": "accent", "default": "#f5c26bff"}, "align": "center"},
-        ],
-    }
-
-
-def tracklist_back() -> dict[str, Any]:
-    w = h = 3000
-    return {
-        "width": w, "height": h,
-        "layers": [
-            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0b0710ff"},
-            {"type": "image", "x": w // 2 - 260, "y": 140, "w": 520, "h": 520, "asset": {"field": "cover_image"}, "fit": "cover", "radius": 24},
-            {"type": "text", "x": 200, "y": 760, "w": w - 400, "h": 200, "text": {"field": "group_name"},
-             "font": "bebas-neue", "size": 130, "colour": {"field": "accent", "default": "#f5c26bff"}, "align": "center"},
-            {"type": "text", "x": 300, "y": 1000, "w": w - 600, "h": 1600, "text": {"field": "tracks"},
-             "font": "space-grotesk", "size": 60, "colour": "#e8e2f0ff", "align": "left", "auto_fit": True},
-            {"type": "grain", "amount": 5},
-        ],
-    }
-
-
-def thumbnail() -> dict[str, Any]:
-    w, h = 1280, 720
-    return {
-        "width": w, "height": h,
-        "layers": [
-            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover"},
-            {"type": "rect", "x": 0, "y": h - 160, "w": w, "h": 160, "fill": "#000000b3"},
-            {"type": "text", "x": 48, "y": h - 140, "w": w - 96, "h": 120, "text": {"field": "title"},
-             "font": "space-grotesk", "size": 60, "colour": {"field": "accent", "default": "#ff4d8dff"}, "align": "left", "valign": "middle"},
-        ],
-    }
-
+VARIANTS = {"album_cover": ["center_title", "bottom_band", "corner_minimal"]}
 
 TEMPLATE_DIMENSIONS = {
     "photocard_front": (1100, 1700),
@@ -156,20 +70,194 @@ TEMPLATE_DIMENSIONS = {
     "thumbnail": (1280, 720),
 }
 
+_ACCENT = {"field": "accent", "default": "#ff4d8dff"}
+_GOLD = {"field": "accent", "default": "#f5c26bff"}
+
+
+def photocard_front() -> dict[str, Any]:
+    w, h = 1100, 1700
+    photo_h = int(h * 0.80)
+    return {
+        "width": w, "height": h, "radius": 48,
+        "layers": [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#120d18ff"},
+            {"type": "image", "x": 0, "y": 0, "w": w, "h": photo_h, "asset": {"field": "image"}, "fit": "cover", "focal": [0.5, 0.35]},
+            {"type": "holo", "x": 0, "y": 0, "w": w, "h": photo_h, "seed": {"field": "holo_seed", "default": 7}, "opacity": 0.16, "blend": "screen"},
+            {"type": "rect", "x": 0, "y": photo_h - 260, "w": w, "h": 262,
+             "gradient": {"colours": ["#120d1800", "#120d18ff"], "direction": "vertical"}},
+            {"type": "rect", "x": 0, "y": photo_h, "w": w, "h": h - photo_h, "fill": "#120d18ff"},
+            {"type": "text", "x": 72, "y": photo_h - 70, "w": w - 144, "h": 50, "text": {"field": "group_name", "default": ""},
+             "font": "space-grotesk", "size": 30, "colour": "#ffffffb3", "letter_spacing": 0.25, "uppercase": True},
+            {"type": "text", "x": 72, "y": photo_h - 10, "w": w - 144, "h": 150, "text": {"field": "member_name"},
+             "font": "playfair-display", "size": 104, "colour": _ACCENT, "valign": "middle"},
+            {"type": "badge", "x": 72, "y": h - 170, "w": 360, "h": 68, "text": {"field": "role", "default": ""},
+             "font": "space-grotesk", "size": 28, "fill": "#ffffff1f", "colour": "#ffffffff"},
+            {"type": "grain", "amount": 4},
+            {"type": "frame", "width": 6, "inset": 22, "radius": 30, "colour": _ACCENT},
+        ],
+    }
+
+
+def photocard_back() -> dict[str, Any]:
+    w, h = 1100, 1700
+    return {
+        "width": w, "height": h, "radius": 48,
+        "layers": [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h,
+             "gradient": {"colours": [_ACCENT, "#1a1022ff", "#0b0710ff"], "direction": "vertical"}},
+            {"type": "holo", "x": 0, "y": int(h * 0.60), "w": w, "h": 14, "seed": 3, "opacity": 0.9, "blend": "screen"},
+            {"type": "rect", "x": w // 2 - 170, "y": 210, "w": 340, "h": 340, "radius": 170, "fill": "#ffffff14"},
+            {"type": "text", "x": w // 2 - 170, "y": 210, "w": 340, "h": 340, "text": {"field": "monogram", "default": ""},
+             "font": "bebas-neue", "size": 170, "colour": "#ffffffee", "align": "center", "valign": "middle"},
+            {"type": "image", "x": w // 2 - 150, "y": 230, "w": 300, "h": 300, "asset": {"field": "group_logo"},
+             "fit": "contain", "placeholder": False},
+            {"type": "text", "x": 80, "y": 640, "w": w - 160, "h": 60, "text": {"field": "group_name", "default": ""},
+             "font": "space-grotesk", "size": 34, "colour": "#ffffffb3", "align": "center", "letter_spacing": 0.3, "uppercase": True},
+            {"type": "text", "x": 80, "y": 710, "w": w - 160, "h": 170, "text": {"field": "member_name"},
+             "font": "playfair-display", "size": 110, "colour": "#ffffffff", "align": "center", "valign": "middle"},
+            {"type": "text", "x": 120, "y": 1080, "w": w - 240, "h": 300, "text": {"field": "message", "default": ""},
+             "font": "caveat", "size": 64, "colour": "#f3ecffff", "align": "center", "valign": "middle"},
+            {"type": "badge", "x": w // 2 - 170, "y": h - 190, "w": 340, "h": 66, "text": {"field": "serial", "default": ""},
+             "font": "space-grotesk", "size": 28, "fill": "#ffffff1f", "colour": "#ffffffff"},
+            {"type": "grain", "amount": 4},
+            {"type": "frame", "width": 6, "inset": 22, "radius": 30, "colour": "#ffffff66"},
+        ],
+    }
+
+
+def album_cover(variant: str = "center_title") -> dict[str, Any]:
+    w = h = 3000
+    base_layers: list[dict[str, Any]] = [
+        {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "cover_image"}, "fit": "cover"},
+    ]
+    if variant == "bottom_band":
+        extra = [
+            {"type": "rect", "x": 0, "y": int(h * 0.70), "w": w, "h": int(h * 0.30),
+             "gradient": {"colours": ["#00000000", "#000000d9"], "direction": "vertical"}},
+            {"type": "text", "x": 150, "y": int(h * 0.76), "w": w - 300, "h": 380, "text": {"field": "title"},
+             "font": "bebas-neue", "size": 360, "colour": "#ffffffff", "letter_spacing": 0.04, "valign": "bottom"},
+            {"type": "text", "x": 150, "y": int(h * 0.895), "w": w - 300, "h": 150, "text": {"field": "subtitle", "default": ""},
+             "font": "space-grotesk", "size": 90, "colour": _GOLD, "letter_spacing": 0.2, "uppercase": True},
+        ]
+    elif variant == "corner_minimal":
+        extra = [
+            {"type": "text", "x": 140, "y": 140, "w": w - 280, "h": 200, "text": {"field": "title"},
+             "font": "space-grotesk", "size": 150, "colour": "#ffffffff", "letter_spacing": 0.12, "uppercase": True},
+            {"type": "text", "x": 140, "y": h - 260, "w": w - 280, "h": 120, "text": {"field": "subtitle", "default": ""},
+             "font": "inter", "size": 70, "colour": _GOLD, "align": "right", "letter_spacing": 0.1},
+        ]
+    else:  # center_title
+        extra = [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#0000004d"},
+            {"type": "text", "x": 240, "y": int(h * 0.36), "w": w - 480, "h": 560, "text": {"field": "title"},
+             "font": "playfair-display", "size": 300, "colour": "#ffffffff", "align": "center", "valign": "middle",
+             "shadow": {"dx": 0, "dy": 10, "colour": "#00000088"}},
+            {"type": "text", "x": 240, "y": int(h * 0.56), "w": w - 480, "h": 160, "text": {"field": "subtitle", "default": ""},
+             "font": "space-grotesk", "size": 90, "colour": _GOLD, "align": "center", "letter_spacing": 0.25, "uppercase": True},
+        ]
+    return {"width": w, "height": h, "layers": base_layers + extra + [{"type": "grain", "amount": 4}]}
+
+
+def teaser_poster() -> dict[str, Any]:
+    w, h = 1600, 2400
+    return {
+        "width": w, "height": h,
+        "layers": [
+            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover"},
+            {"type": "rect", "x": 0, "y": int(h * 0.55), "w": w, "h": int(h * 0.45),
+             "gradient": {"colours": ["#00000000", "#000000e6"], "direction": "vertical"}},
+            {"type": "text", "x": 110, "y": int(h * 0.70), "w": w - 220, "h": 360, "text": {"field": "title"},
+             "font": "bebas-neue", "size": 300, "colour": "#ffffffff", "letter_spacing": 0.03, "valign": "bottom"},
+            {"type": "text", "x": 110, "y": int(h * 0.855), "w": w - 220, "h": 150, "text": {"field": "tagline", "default": ""},
+             "font": "caveat", "size": 110, "colour": _ACCENT},
+            {"type": "text", "x": 110, "y": int(h * 0.93), "w": w - 220, "h": 80, "text": {"field": "date", "default": ""},
+             "font": "space-grotesk", "size": 46, "colour": "#ffffffcc", "letter_spacing": 0.3, "uppercase": True},
+            {"type": "grain", "amount": 5},
+        ],
+    }
+
+
+def lyric_card() -> dict[str, Any]:
+    w = h = 1080
+    return {
+        "width": w, "height": h,
+        "layers": [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "gradient": {"colours": ["#2a1236ff", "#0b0710ff"]}},
+            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover", "placeholder": False},
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#00000080"},
+            {"type": "text", "x": 110, "y": 300, "w": w - 220, "h": 400, "text": {"field": "quote"},
+             "font": "playfair-display", "size": 76, "colour": "#ffffffff", "align": "center", "valign": "middle",
+             "line_height": 1.25},
+            {"type": "text", "x": 110, "y": 740, "w": w - 220, "h": 70, "text": {"field": "attribution", "default": ""},
+             "font": "space-grotesk", "size": 32, "colour": _GOLD, "align": "center", "letter_spacing": 0.2, "uppercase": True},
+        ],
+    }
+
+
+def tracklist_back() -> dict[str, Any]:
+    w = h = 3000
+    return {
+        "width": w, "height": h,
+        "layers": [
+            {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "gradient": {"colours": ["#1a1022ff", "#0b0710ff"]}},
+            {"type": "image", "x": w // 2 - 300, "y": 180, "w": 600, "h": 600, "asset": {"field": "cover_image"},
+             "fit": "cover", "radius": 28, "placeholder": False},
+            {"type": "text", "x": 200, "y": 860, "w": w - 400, "h": 260, "text": {"field": "group_name"},
+             "font": "bebas-neue", "size": 220, "colour": _GOLD, "align": "center", "letter_spacing": 0.08},
+            {"type": "text", "x": 420, "y": 1220, "w": w - 840, "h": 1500, "text": {"field": "tracks"},
+             "font": "space-grotesk", "size": 96, "colour": "#e8e2f0ff", "align": "left", "line_height": 1.5},
+            {"type": "grain", "amount": 4},
+        ],
+    }
+
+
+def thumbnail() -> dict[str, Any]:
+    w, h = 1280, 720
+    return {
+        "width": w, "height": h,
+        "layers": [
+            {"type": "image", "x": 0, "y": 0, "w": w, "h": h, "asset": {"field": "image"}, "fit": "cover"},
+            {"type": "rect", "x": 0, "y": h - 260, "w": w, "h": 260, "gradient": {"colours": ["#00000000", "#000000d9"]}},
+            {"type": "text", "x": 56, "y": h - 200, "w": w - 112, "h": 160, "text": {"field": "title"},
+             "font": "bebas-neue", "size": 120, "colour": _ACCENT, "valign": "bottom", "letter_spacing": 0.03},
+        ],
+    }
+
+
+_BUILDERS = {
+    "photocard_front": photocard_front,
+    "photocard_back": photocard_back,
+    "teaser_poster": teaser_poster,
+    "lyric_card": lyric_card,
+    "tracklist_back": tracklist_back,
+    "thumbnail": thumbnail,
+}
+
+
+def describe_templates() -> list[dict[str, Any]]:
+    out = []
+    for name, fields in TEMPLATE_FIELDS.items():
+        w, h = TEMPLATE_DIMENSIONS[name]
+        out.append({
+            "template": name, "width": w, "height": h, "variants": VARIANTS.get(name, []),
+            "fields": [{"name": f, "type": t, "required": r, "description": d} for f, (t, r, d) in fields.items()],
+        })
+    return out
+
+
+def fields_hint(template: str) -> str:
+    fields = TEMPLATE_FIELDS.get(template, {})
+    return ", ".join(f"{f} ({t}{', required' if r else ''})" for f, (t, r, _) in fields.items())
+
 
 def get_layout(template: str, variant: str | None = None) -> dict[str, Any]:
-    if template == "photocard_front":
-        return photocard_front()
-    if template == "photocard_back":
-        return photocard_back()
     if template == "album_cover":
+        if variant and variant not in VARIANTS["album_cover"]:
+            raise ValueError(f"unknown album_cover variant '{variant}'; use one of {', '.join(VARIANTS['album_cover'])}")
         return album_cover(variant or "center_title")
-    if template == "teaser_poster":
-        return teaser_poster()
-    if template == "lyric_card":
-        return lyric_card()
-    if template == "tracklist_back":
-        return tracklist_back()
-    if template == "thumbnail":
-        return thumbnail()
-    raise ValueError(f"unknown design template '{template}'")
+    builder = _BUILDERS.get(template)
+    if builder is None:
+        raise ValueError(f"unknown design template '{template}'; use one of {', '.join(TEMPLATE_FIELDS)}")
+    if variant:
+        raise ValueError(f"template '{template}' has no variants")
+    return builder()
