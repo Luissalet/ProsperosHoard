@@ -33,8 +33,8 @@ with ids and pictures.
 | Area | Available now | Boundary |
 | --- | --- | --- |
 | Projects and cast | Projects, characters (look prompt, negative, palette, canonical reference, voice), ordered groups, `@Name` mentions that match multi-word names and report unknown ones, 6 style presets | Single local user; names must be unique per project (they are the mention) |
-| Generation (ComfyUI) | SDXL txt2img, img2img, inpaint and two-pass upscale, SD 1.5 txt2img, SVD image-to-video, all as API-format templates; pre-flight check of nodes, checkpoints, samplers and schedulers against `/object_info` with the installed options in the error; import of your own API-format workflows with prompt nodes found through the sampler links and an editable parameter map | Prospero hosts no model; UI-format exports are refused with instructions, not converted |
-| GPU etiquette | VRAM estimate per workflow family (editable) checked against nvidia-smi or ComfyUI's `system_stats`; short jobs wait in `waiting_gpu` with the reason, every 15 s for up to 30 min; cancel at any time | Nothing is ever unloaded unless you press "Free ComfyUI memory" |
+| Generation (ComfyUI) | SDXL txt2img, img2img, inpaint and a two-pass hires fix for images generated here, SD 1.5 txt2img, SVD image-to-video, all as API-format templates; pre-flight check of nodes, checkpoints, samplers and schedulers against `/object_info` with the installed options in the error; import of your own API-format workflows with prompt nodes found through the sampler links and an editable parameter map | Prospero hosts no model; UI-format exports are refused with instructions, not converted |
+| GPU etiquette | VRAM estimate per workflow family (editable) checked against nvidia-smi or ComfyUI's `system_stats`; a job that does not fit waits in `waiting_gpu` with the reason, every 15 s for up to 30 min; cancel at any time | Nothing is ever unloaded unless you press "Free ComfyUI memory" |
 | Lineage | Every generated asset records template, template hash, checkpoint, every parameter and seed, inputs and timing; "Reuse recipe" reproduces an image byte for byte on the same backend (tested), "Vary seed" re-runs it with new seeds | Reproduction is only guaranteed on the same backend, models and ComfyUI version |
 | Design | Pillow renderer, no browser: photocard front and back, album cover (3 layouts), teaser poster, lyric card, tracklist back, thumbnail; gradients, holographic foil, blends, letter spacing, shadows, shrink-to-fit text; photocard sets for a whole group with a contact sheet; print mode with 3 mm bleed at 300 dpi; 5 bundled OFL font families | The QR layer draws a placeholder box (no QR library is pinned) |
 | Audio | Import (mp3, wav, flac, ogg, m4a), waveform, own beat tracker (band-balanced spectral flux, tempo prior, dynamic programming) tested within 1 BPM and 50 ms on click tracks and kick-and-snare patterns at 90-140 BPM, downbeat and section estimates, LRC lyrics with a tap-to-time tool | Section labels are "section A/B" with low/mid/high energy, not verse/chorus; very fast songs (170 BPM) are reported at half time |
@@ -129,7 +129,7 @@ Every endpoint: [docs/API.md](docs/API.md).
 cd frontend; npm ci; npm run build
 ```
 
-The last full run: **TEST_COUNT tests passed** in about 40 s, offline, with
+The last full run: **107 tests passed** in about 35 s, offline, with
 the demo backend standing in for ComfyUI. They cover: the MCP protocol end
 to end (the adapter spawned over stdio against a live app: tool keywords and
 annotations, generation with a picture, lineage, design, readable errors,
