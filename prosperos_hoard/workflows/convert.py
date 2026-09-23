@@ -369,6 +369,18 @@ def validate_converted(api_workflow: dict[str, Any], object_info: dict[str, Any]
     return problems
 
 
+# Loader (class_type, input_name) pairs whose COMBO list is "what's on
+# disk", not a fixed enum: a value missing from it means a model file is not
+# installed, not a broken workflow, so validate_values reports it distinctly
+# (a "download X" a caller can act on) rather than lumping it in with a bad
+# sampler/scheduler choice.
+MODEL_FILE_INPUTS = {
+    ("CheckpointLoaderSimple", "ckpt_name"), ("ImageOnlyCheckpointLoader", "ckpt_name"),
+    ("UNETLoader", "unet_name"), ("CLIPLoader", "clip_name"),
+    ("DualCLIPLoader", "clip_name1"), ("DualCLIPLoader", "clip_name2"), ("VAELoader", "vae_name"),
+}
+
+
 def _options(type_: Any, cfg: dict) -> Optional[list]:
     if isinstance(type_, list):
         return type_
@@ -383,7 +395,10 @@ def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -
     that is not installed, a sampler name that does not exist, a
     dynamic-combo key) or a number outside the input's min/max. Upload
     combos (LoadImage's file list) are skipped - the file arrives with the
-    job. Returns human-readable problems, empty when the prompt would queue."""
+    job. A model-file COMBO (`MODEL_FILE_INPUTS`) that is missing gets its
+    own "model not installed: ..." wording, since that is a download away,
+    not a broken workflow. Returns human-readable problems, empty when the
+    prompt would queue."""
     problems = list(validate_converted(api_workflow, object_info))
     for node_id, node in api_workflow.items():
         class_type = node.get("class_type")
@@ -410,7 +425,11 @@ def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -
                 options = _options(type_, cfg)
                 if options is not None and value not in options:
                     shown = ", ".join(str(o) for o in options[:8]) + (" ..." if len(options) > 8 else "")
-                    problems.append(f"node {node_id} ({class_type}): '{name}' = {value!r} is not available (choices: {shown})")
+                    if (class_type, name) in MODEL_FILE_INPUTS:
+                        problems.append(f"model not installed: node {node_id} ({class_type}) '{name}' wants "
+                                        f"{value!r}; download it, or choose one of: {shown}")
+                    else:
+                        problems.append(f"node {node_id} ({class_type}): '{name}' = {value!r} is not available (choices: {shown})")
                 elif type_ in ("INT", "FLOAT") and isinstance(value, (int, float)) and not isinstance(value, bool):
                     if "min" in cfg and value < cfg["min"]:
                         problems.append(f"node {node_id} ({class_type}): '{name}' = {value} is below the minimum {cfg['min']}")
