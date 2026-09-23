@@ -707,7 +707,12 @@ def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[
         "cfg": _first(params.get("cfg"), t.get("cfg"), d.get("cfg"), 6.5),
         "sampler": _first(params.get("sampler"), t.get("sampler"), d.get("sampler"), "dpmpp_2m"),
         "scheduler": _first(params.get("scheduler"), t.get("scheduler"), d.get("scheduler"), "karras"),
-        "denoise": _first(params.get("strength"), 1.0 if not params.get("reference_asset_id") else 0.6),
+        # a template that declares its own denoise wins over the img2img
+        # fallback: Qwen-Image 2.1 edit reads its references through the
+        # text encoder and samples a fresh latent, so 0.6 there turns the
+        # empty canvas into noise texture
+        "denoise": _first(params.get("strength"), t.get("denoise"),
+                          1.0 if not params.get("reference_asset_id") else 0.6),
     }
     for key, value in t.items():  # template-only knobs (guidance, shift, length, fps, ...)
         values.setdefault(key, value)
