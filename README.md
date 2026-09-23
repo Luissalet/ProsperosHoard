@@ -232,30 +232,34 @@ On Windows, with the app running and ComfyUI started on a 16 GB card:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
 # pin the image engine instead of "auto" reaching for Qwen-Image 2.1 first
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --engine flux
-# the English version on top of a finished run: new song, designs and cut, same pictures
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
+# the English version on top of a finished run: same pictures, a sung song, a clip for every shot
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras --motion full --song-takes 4
 # after re-timing the lyrics by ear in Audio > Lyrics timing and exporting the LRC
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<you>\Music\no_mires_atras.lrc
 ```
 
 ### The real run
 
-The same script ran against a real ComfyUI 0.37 on **one 16 GB card**, in
-both languages (the English version reuses every picture and clip of the
-Spanish run with `--reuse-from`, so only its song, designs and cut were made
-again). Qwen-Image 2.1 made the reference sheet, the stills and the
-photocards, Wan 2.2 TI2V 5B the clips and ACE-Step 1.5 the song. The
-canonical reference and the best variant of each shot were picked by eye.
-The lyrics were aligned to the vocals with faster-whisper (outside Prospero)
-and imported as an LRC. Everything below comes straight out of the app,
+The same script ran against a real ComfyUI 0.37 on 16 GB cards, in two
+versions that share every picture and clip. **DON'T LOOK BACK**
+(`--lang en --motion full`) is a sung English horror anthem told by the
+creature, with a clip for every shot, rendered on a render pool of three
+ComfyUI servers, one per card. **NO MIRES ATRÁS** is the first take, a
+Spanish horror rap cut from seven clips on one card. Qwen-Image 2.1 made the
+reference sheet, the stills and the photocards, Wan 2.2 TI2V 5B the clips
+and ACE-Step 1.5 the songs. The canonical reference, the best variant of each
+shot and the song take were picked by eye and by ear. The lyrics were aligned
+to the vocals with faster-whisper (outside Prospero) and imported as an LRC
+with timed section markers. Everything below comes straight out of the app,
 only downscaled for this page: nothing was retouched. The prompts, seeds,
-settings, timings and the seven problems the run found (all fixed) are in the
+settings, timings and the nine problems the run found (all fixed) are in the
 [full example](docs/examples/no-mires-atras.md).
 
 ![Album cover: the lantern head close-up with the title set in Prospero's typographic layer](docs/media/farol/cover.jpg)
 
-<p><img src="docs/media/farol/clip-over-shoulder.gif" width="49%" alt="Wan clip: over the shoulder, FAROL standing still under the closer lamp, slow push-in">
-<img src="docs/media/farol/clip-lantern.gif" width="49%" alt="Wan clip: the candle flame flickering inside the lantern, raindrops on the paper"></p>
+<p><img src="docs/media/farol/clip-over-shoulder.gif" width="32%" alt="Wan clip: over the shoulder, FAROL standing still under the closer lamp, slow push-in">
+<img src="docs/media/farol/clip-lantern.gif" width="32%" alt="Wan clip: the candle flame flickering inside the lantern, raindrops on the paper">
+<img src="docs/media/farol/clip-fingers.gif" width="32%" alt="Wan clip: long paper fingers curling over the stairwell rail"></p>
 
 ![The best still of each of the twelve shots: FAROL is the same creature in every one](docs/media/farol/stills.jpg)
 
@@ -263,8 +267,11 @@ settings, timings and the seven problems the run found (all fixed) are in the
 
 ![Frames of the 9:16 cut with the horror karaoke captions](docs/media/farol/cut-9x16.jpg)
 
-On that card: 48 stills in 57 min, seven 5 s clips in about 70 min, the
-song in 41 s, and both cuts (preview and 1080p final) in 6.5 min.
+![Frames of the 16:9 cut: the story follows the lyric, section by section](docs/media/farol/cut-16x9.jpg)
+
+On 16 GB cards: 48 stills in 57 min, the first seven 5 s clips in about
+70 min on one card and eleven more in about 40 min on three, four song takes
+in 2 min, and both cuts (preview and 1080p final) in about 7 min.
 
 ## Architecture
 

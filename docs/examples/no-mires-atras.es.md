@@ -2,14 +2,15 @@
 
 [English](no-mires-atras.md) · [Volver al README](../../README.es.md#ejemplo-de-producción)
 
-Un single de rap de terror de dos minutos con un personaje original, hecho
-de principio a fin en una sola máquina local con
+Una canción de terror de dos minutos y medio con un personaje original,
+hecha de principio a fin en una sola máquina local con
 [`scripts/productions/no_mires_atras.py`](../../scripts/productions/no_mires_atras.py).
 Tiene dos versiones que comparten todas las imágenes y clips: **DON'T LOOK
-BACK**, en inglés (`--lang en`, la que se muestra aquí), y la primera toma,
-**NO MIRES ATRÁS**, en español (la opción por defecto). La inglesa se hizo
-con `--reuse-from` a partir de la española, así que solo se rehicieron la
-canción, los diseños y el montaje. El script maneja Prospero **solo a través de su adaptador MCP**, el mismo
+BACK**, un himno de terror cantado en inglés y contado por la criatura
+(`--lang en --motion full`, la que se muestra aquí), y la primera toma,
+**NO MIRES ATRÁS**, un rap de terror en español (la opción por defecto). La
+inglesa se hizo con `--reuse-from` a partir de la española, así que solo se
+rehicieron la canción, los clips que faltaban, los diseños y el montaje. El script maneja Prospero **solo a través de su adaptador MCP**, el mismo
 camino que usa Faustus. Aquí está todo lo necesario para entenderlo o
 repetirlo: la biblia del personaje, cada prompt y cada negativo, las
 semillas, los ajustes de modelo y sampler, los tiempos reales y los
@@ -20,13 +21,13 @@ prompts van en inglés porque es lo que mejor entienden los modelos.
 
 | | |
 | --- | --- |
-| Hardware | ComfyUI 0.37 en **una sola tarjeta de 16 GB** (una RTX 5060 Ti); Prospero, ffmpeg y el diseñador en la CPU |
+| Hardware | ComfyUI 0.37 en tarjetas de 16 GB (RTX 5060 Ti): una para la versión española y tres como grupo de render para la inglesa; Prospero, ffmpeg y el diseñador en la CPU |
 | Modelo de imagen | Qwen-Image 2.1 (int8): la hoja de referencia, los fotogramas y las photocards; la plantilla de edición lleva la referencia de FAROL |
-| Modelo de vídeo | Wan 2.2 TI2V 5B: siete clips de 5 s a 1280×704, 24 fps |
-| Modelo de música | ACE-Step 1.5 turbo: dos tomas de 120 s por versión |
+| Modelo de vídeo | Wan 2.2 TI2V 5B: 18 clips de 5 s a 1280×704, 24 fps (todos los planos, más segundos clips para las secciones que más se repiten) |
+| Modelo de música | ACE-Step 1.5 turbo: cuatro tomas de 150 s para la versión inglesa y dos de 120 s para la española |
 | Sincronía de la letra | marcas de tiempo por palabra de faster-whisper (`small`, fuera de Prospero), alineadas con la letra escrita e importadas como LRC |
-| Tiempo real | hoja de referencia 4,7 min · canción 41 s · 48 fotogramas 57 min · 7 clips ≈ 70 min con la tarjeta libre · 5 photocards ≈ 10 min · diseño del álbum 5 s · dos montajes con vista previa y render final a 1080p 6,5 min |
-| Elegido a ojo | la referencia canónica (hoja 4 de 4) y la mejor de las tres variantes de cada uno de los 12 planos |
+| Tiempo real | hoja de referencia 4,7 min · 48 fotogramas 57 min · primeros 7 clips ≈ 70 min en una tarjeta · otros 11 clips ≈ 40 min en tres · cuatro tomas de canción 2 min · 5 photocards ≈ 10 min · diseño del álbum 5 s · dos montajes con vista previa y render final a 1080p ≈ 7 min |
+| Elegido a ojo (y a oído) | la referencia canónica (hoja 4 de 4), la mejor de las tres variantes de cada uno de los 12 planos y la toma de la canción |
 
 ## 1. La biblia
 
@@ -74,23 +75,29 @@ text, watermark, extra limbs, deformed hands`.
 
 ## 3. Canción
 
-`studio_compose` con ACE-Step 1.5 turbo, semillas 2001 y 2002. En los dos
-idiomas el single es la primera toma.
+`studio_compose` con ACE-Step 1.5 turbo, cuatro semillas (2001…2004). El
+single es la toma que canta la letra entera y en orden.
 
-- Etiquetas: `dark trap, horror rap, eerie music box melody, detuned piano, heavy 808, half-time 140 bpm, whispered ad-libs, male rap vocals, english, minor key, cinematic, tape hiss, rain ambience` (`spanish` en lugar de `english` para NO MIRES ATRÁS).
-- 140 bpm, fa sostenido menor, 4/4, idioma `en` (o `es`), 120 s.
-- Las letras están en el script (`SONG_LYRICS_EN`, `SONG_LYRICS`). Las dos cuentan la misma historia con las mismas secciones (`[Intro]`, `[Verse 1]`, `[Pre-Chorus]`, `[Chorus]`, `[Verse 2]`, `[Bridge]`, `[Chorus]`, `[Outro]`), así que el mismo guion vale para ambas. El gancho: *Don't look back, don't look back, / the light behind you ain't the city's, that's a fact, / every streetlamp, one more step, / when it cuts out… it's already at your back.*
+- Etiquetas: `electronic rock, horror anthem, catchy sung chorus, melodic male vocals, vocal harmonies, dark synth, distorted synth bass, driving drums, music box intro, eerie, dramatic, minor key, 130 bpm, english, storytelling, cinematic`.
+- 130 bpm, re menor, 4/4, idioma `en`, 150 s.
+- La letra (`SONG_LYRICS_EN` en el script) la canta el propio FAROL, al estilo de las canciones de fans sobre villanos de videojuegos de terror: el camino a casa contado por lo que te sigue. El gancho: *So don't look back, don't look back, / I'm the glow on the glass, I'm the light through the crack, / every step that you take, I'm a little more near, / when the streetlight dies, you'll find me here.*
+- La toma española es otra canción: `dark trap, horror rap, eerie music box melody, detuned piano, heavy 808, half-time 140 bpm, whispered ad-libs, male rap vocals, spanish…`, 140 bpm, fa sostenido menor, 120 s (`SONG_LYRICS`). El primer intento en inglés también fue un rap. Sonaba a rap de calle más que a canción de terror, y se sustituyó por el himno.
 
 Sincronía: `studio_time_lyrics`, de Prospero, estima cada verso a partir de
-las secciones y los compases. Para el montaje final, la toma se transcribió
+las secciones y los compases. Para el montaje final, cada toma se transcribió
 con faster-whisper (`small`, con marcas por palabra), cada verso escrito se
-emparejó con las palabras (difflib) y el resultado se guardó como LRC y se
-importó (`--only timeline --lrc-path <archivo>`). En inglés, 42 de los 48
-versos coincidieron con una palabra cantada; los otros seis (susurros,
-coletillas) se interpolaron. El primer estribillo empieza en 0:40,1, el
-puente en 1:17,0 y el último verso en 1:42,0. Una lección del alineador: a
-whisper solo hay que darle el título como pista. Whisper toma la pista como
-texto ya escuchado, así que darle los primeros versos le hacía saltárselos.
+emparejó con las palabras (difflib) y se guardó como LRC **con marcas de
+`[Sección]` con tiempo**, y el resultado se importó
+(`--only timeline --lrc-path <archivo>`). Eso sirvió también para comparar
+las tomas: la elegida tenía 41 de sus 42 versos reconocidos, mientras que las
+otras tres se saltaban trozos de la primera estrofa o metían coletillas que
+no están en la letra. El estribillo entra en 0:46,7 y 1:44,6, y el puente
+en 1:33,7.
+
+Dos lecciones del alineador:
+
+- **A whisper solo hay que darle el título como pista.** Whisper toma la pista como texto ya escuchado, así que darle los primeros versos le hacía saltárselos.
+- **Hay que conservar las marcas de sección.** Sin ellas, el montaje automático usa secciones por energía, los grupos del guion nunca coinciden y cada sección saca planos de un único grupo barajado.
 
 ## 4. Fotogramas: 12 planos
 
@@ -128,29 +135,38 @@ Ajustes de la edición de Qwen: 25 pasos, cfg 1, euler / simple, denoise 1,
 `resolution` 1024, `custom_size` activado con el lienzo explícito de
 1344×768. Unos 70 s por imagen.
 
-## 5. Clips: Wan 2.2 TI2V desde los mejores fotogramas
+## 5. Clips: Wan 2.2 TI2V, todos los planos se mueven
 
-Planos 1, 2, 3, 5, 7, 10 y 12, cada uno de 121 fotogramas a 24 fps (5,04 s),
-a 1280×704. Ajustes: 20 pasos, cfg 5, shift 8, uni_pc / simple, semilla
-`5000 + n`. Cada clip tardó unos 9,5 min con la tarjeta libre.
+Cada clip tiene 121 fotogramas a 24 fps (5,04 s), a 1280×704. Ajustes: 20
+pasos, cfg 5, shift 8, uni_pc / simple, semilla `5000 + n` (`+100` en un
+segundo clip). Unos 9,5 min por clip en una tarjeta.
 
-<p><img src="../media/farol/clip-over-shoulder.gif" width="49%" alt="Clip 2: por encima del hombro, FAROL quieto bajo la farola más cercana, acercamiento lento">
-<img src="../media/farol/clip-lantern.gif" width="49%" alt="Clip 3: la llama temblando dentro del farolillo, gotas en el papel"></p>
+- **Primera pasada (la versión española):** 7 clips, para los planos 1, 2, 3, 5, 7, 10 y 12. Con solo siete, la mayoría de los ~130 cortes eran fotogramas fijos con un zoom lento, y el vídeo parecía un pase de diapositivas.
+- **Segunda pasada (`--motion full`):** 11 clips más: los cinco planos que no tenían (4, 6, 8, 9 y 11) y un segundo clip, hecho desde el segundo mejor fotograma, para los seis planos que más usa el montaje (1, 2, 3, 5, 10 y 11). El script los encola todos antes de esperar, y un grupo de render de tres servidores ComfyUI, uno por tarjeta de 16 GB, los sacó de tres en tres en unos 40 min.
+
+<p><img src="../media/farol/clip-over-shoulder.gif" width="32%" alt="Clip 2: por encima del hombro, FAROL quieto bajo la farola más cercana, acercamiento lento">
+<img src="../media/farol/clip-lantern.gif" width="32%" alt="Clip 3: la llama temblando dentro del farolillo, gotas en el papel">
+<img src="../media/farol/clip-fingers.gif" width="32%" alt="Clip 6: los dedos largos de papel curvándose sobre la barandilla"></p>
 
 | # | Prompt de movimiento |
 | --- | --- |
 | 1 | light rain falling, the far lamp flickering, fog drifting; the tall figure under the lamp stands perfectly still and does not walk |
 | 2 | light rain falling, a subtle slow push-in; the figure under the lamp stays perfectly still |
 | 3 | the candle flame flickering gently inside the lantern, raindrops sliding down the paper |
+| 4 | the phone screen's cold glow flickering on the frightened wet face, the hand trembling, rain falling behind |
 | 5 | rain streaking down the glass, a slow push-in; the reflected figure stays perfectly still |
+| 6 | the long paper fingers slowly curling tighter around the stairwell rail, the dim light flickering |
 | 7 | a washing machine spinning, faint fluorescent flicker; the seated figure stays perfectly still |
+| 8 | the amber glow in the elevator mirror slowly brightening, a faint flicker; the lantern head stays perfectly still |
+| 9 | rain dripping, the wet footprints glistening on the doormat, a slow push-in towards the door |
 | 10 | rain on the window glass, the street lamp flickering; the figure on the street stays perfectly still, looking up |
+| 11 | the candle flame flaring and flickering, sodium lamps strobing, the painted smile lit by the flicker; the figure stays perfectly still |
 | 12 | the room slowly brightening into sodium orange, a very slow push-in |
 
 **La quietud necesita su propio negativo.** El negativo de serie de Wan pide
 evitar lo «estático» y los «fotogramas inmóviles», así que en el primer
 intento FAROL caminaba hacia la cámara. En los planos donde se le ve (1, 2,
-5, 7 y 10) el negativo es el de serie sin esos términos de quietud, más el
+5, 7, 8, 10 y 11) el negativo es el de serie sin esos términos de quietud, más el
 caminar (`走路，迈步, walking, stepping, striding, moving figure, turning
 around`). El resto conserva el negativo de serie. La toma del plano 1 en la
 que camina sigue en el proyecto, por si quieres un inserto de «se ha
@@ -181,9 +197,9 @@ La capa tipográfica de Prospero (texto exacto, tipografías incluidas), en
 las variantes de noche, con el acento `#F28C28`:
 
 - Portada (3000×3000): fotograma 3, el primer plano del farolillo. Título «DON'T LOOK BACK», artista «FAROL», «single».
-- Contraportada con la lista de canciones: el mismo fotograma desenfocado, con «01 DON'T LOOK BACK 2:00» y los créditos.
+- Contraportada con la lista de canciones: el mismo fotograma desenfocado, con «01 DON'T LOOK BACK 2:30» y los créditos.
 - Póster teaser: fotograma 1, el plano de situación. «FAROL», lema «Don't look back», línea «Always a little closer».
-- Tarjeta con letra: fotograma 11, el inserto del estribillo, con el principio del gancho.
+- Tarjeta con letra: fotograma 11, el inserto del estribillo, con el principio del gancho («Don't look back, don't look back, I'm the glow on the glass, I'm the light through the crack»).
 
 La versión española imprime los mismos diseños en español: «NO MIRES ATRÁS», «Siempre un poco más cerca», los reversos «gracias por venir», etcétera.
 
@@ -194,13 +210,16 @@ La versión española imprime los mismos diseños en español: «NO MIRES ATRÁS
 ## 8. El montaje
 
 `studio_timeline action=auto` en 9:16 y 16:9, con los 12 mejores fotogramas y
-los 7 clips:
+los 18 clips:
 
-- **Corte:** plano nuevo en cada verso cantado y en cada inicio de sección. La intro, el puente y el outro aguantan cada plano dos compases, las estrofas cambian una vez por compás (o por verso, lo que llegue antes) y el estribillo corta cada medio compás. Cada sección saca los planos de su propio grupo (`STORYBOARD` en el script); por ejemplo, el preestribillo es el clip de la parada de autobús y luego el fotograma por encima del hombro. Salen unos 130 cortes en dos minutos (131 en inglés, 132 en español).
+- **Corte:** plano nuevo en cada verso cantado y en cada inicio de sección. La intro, el puente y el outro aguantan cada plano dos compases, las estrofas cambian una vez por compás (o por verso, lo que llegue antes) y el estribillo corta cada medio compás. Cada sección saca los planos de su propio grupo, en el orden de la historia (`STORYBOARD_EN` en el script); por ejemplo, el preestribillo es la llama que se aviva y luego el clip de la parada de autobús. Todas las entradas son clips.
+- **Puntos de entrada del vídeo:** los clips de Wan empiezan en su fotograma de origen, así que cada corte de vídeo entra un segundo después (`video_lead_in_s`) y cada vez que un clip se repite entra más adelante (`video_rotate_offsets`). Un clip que suena cuatro veces en un estribillo enseña cuatro momentos distintos.
 - **Acabado:** gradación `sodium_night`, grano 0,3, viñeta, un destello blanco con glitch de separación de color en los tiempos fuertes del estribillo y karaoke de terror (tipografía estrecha en mayúsculas, un temblor por verso y resaltado progresivo).
-- **Renders:** primero una vista previa y después el final: 1080×1920 y 1920×1080 en H.264 con la canción en AAC (CRF 18, unos 150 MB por final de 2 min).
+- **Renders:** primero una vista previa y después el final: 1080×1920 y 1920×1080 en H.264 con la canción en AAC (CRF 18, unos 75 MB por minuto de final).
 
-![Fotogramas del montaje 9:16, del susurro de la intro al último verso](../media/farol/cut-9x16.jpg)
+![Fotogramas del montaje 9:16, de la intro al último verso](../media/farol/cut-9x16.jpg)
+
+![Fotogramas del montaje 16:9](../media/farol/cut-16x9.jpg)
 
 ## 9. Lo que encontró la ejecución (corregido en la app)
 
@@ -232,6 +251,16 @@ los 7 clips:
   recorte que busca al sujeto, y los prompts de idol piden aire por encima de
   la cabeza.
 - **FAROL caminaba.** Mira la sección de clips.
+- **El vídeo parecía un pase de diapositivas.** Siete clips para unos 130
+  cortes hacían que la mayoría fueran fotogramas fijos con un zoom lento, y
+  cada corte de vídeo empezaba en el fotograma fijo del propio clip.
+  `--motion full` hace un clip por plano, el montaje salta el arranque de cada
+  clip y varía sus repeticiones, y un grupo de render reparte los clips entre
+  todas las tarjetas.
+- **El guion no se respetaba.** El LRC de whisper no llevaba marcas de
+  `[Sección]`, así que el montaje usaba secciones por energía cuyas etiquetas
+  no coincidían con ningún grupo del guion, y los planos salían de un único
+  grupo barajado. El alineador ahora escribe las marcas.
 
 ## Cómo repetirla
 
@@ -242,11 +271,18 @@ del repositorio:
 ```powershell
 # la producción entera, reanudable (cada fotograma, clip, tarjeta y render queda guardado)
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
-# la versión inglesa encima: reutiliza las imágenes y rehace canción, diseños y montaje
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
-# tras alinear o resincronizar la letra: rehace solo el montaje con tu LRC
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --only timeline --lrc-path C:\Users\<tú>\Music\dont_look_back.lrc
+# la versión inglesa encima: mismas imágenes, canción cantada (4 tomas para elegir) y un clip por plano
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras --motion full --only song --song-takes 4
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --motion full --only clips --keep
+# después de escucharlas: monta con la toma elegida y su LRC alineado
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --motion full --use-take 4 --lrc-path C:\Users\<tú>\Music\dont_look_back.lrc
 ```
+
+Para el grupo de render, arranca el mismo ComfyUI una vez por tarjeta
+(`main.py --cuda-device N --port P` con sus propios `--output-directory`,
+`--temp-directory`, `--user-directory` y `--database-url`), añade los
+servidores extra en Ajustes o en `data/backend.json` (`"render_pool":
+["http://127.0.0.1:8189", "http://127.0.0.1:8190"]`) y reinicia Prospero.
 
 Las semillas son fijas, pero solo dan las mismas imágenes con los mismos
 modelos, la misma versión de ComfyUI y la misma tarjeta. El linaje de cada

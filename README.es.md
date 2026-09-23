@@ -242,30 +242,35 @@ de 16 GB:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
 # fijar el motor de imagen en vez de dejar que «auto» use Qwen-Image 2.1 primero
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --engine flux
-# la versión inglesa sobre una ejecución terminada: canción, diseños y montaje nuevos, mismas imágenes
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
+# la versión inglesa sobre una ejecución terminada: mismas imágenes, canción cantada, un clip por plano
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras --motion full --song-takes 4
 # tras resincronizar la letra de oído en Audio > Sincronizar letra y exportar el LRC
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<tu-usuario>\Music\no_mires_atras.lrc
 ```
 
 ### La ejecución real
 
-El mismo script se ejecutó contra un ComfyUI 0.37 real en **una sola tarjeta
-de 16 GB**, en los dos idiomas (la versión inglesa reutiliza todas las
-imágenes y clips de la española con `--reuse-from`, así que solo se
-rehicieron su canción, sus diseños y su montaje). Qwen-Image 2.1 hizo la
-hoja de referencia, los fotogramas y las photocards; Wan 2.2 TI2V 5B, los
-clips, y ACE-Step 1.5, la canción. La referencia canónica y la mejor variante de cada plano se eligieron a ojo.
-La letra se alineó con la voz con faster-whisper (fuera de Prospero) y se
-importó como LRC. Todo lo de abajo sale tal cual de la aplicación, solo
-reducido de tamaño para esta página: no hay retoques. Los prompts, semillas,
-ajustes, tiempos y los siete problemas que encontró la ejecución (todos
-corregidos) están en el [ejemplo completo](docs/examples/no-mires-atras.es.md).
+El mismo script se ejecutó contra un ComfyUI 0.37 real en tarjetas de 16 GB,
+en dos versiones que comparten todas las imágenes y clips. **DON'T LOOK
+BACK** (`--lang en --motion full`) es un himno de terror cantado en inglés y
+contado por la criatura, con un clip para cada plano, renderizado en un grupo
+de tres servidores ComfyUI, uno por tarjeta. **NO MIRES ATRÁS** es la primera
+toma, un rap de terror en español montado con siete clips en una sola
+tarjeta. Qwen-Image 2.1 hizo la hoja de referencia, los fotogramas y las
+photocards; Wan 2.2 TI2V 5B, los clips, y ACE-Step 1.5, las canciones. La
+referencia canónica, la mejor variante de cada plano y la toma de la canción
+se eligieron a ojo y a oído. La letra se alineó con la voz con faster-whisper
+(fuera de Prospero) y se importó como LRC con marcas de sección. Todo lo de
+abajo sale tal cual de la aplicación, solo reducido de tamaño para esta
+página: no hay retoques. Los prompts, semillas, ajustes, tiempos y los nueve
+problemas que encontró la ejecución (todos corregidos) están en el
+[ejemplo completo](docs/examples/no-mires-atras.es.md).
 
 ![Portada: primer plano de la cabeza-farolillo con el título en la capa tipográfica de Prospero](docs/media/farol/cover.jpg)
 
-<p><img src="docs/media/farol/clip-over-shoulder.gif" width="49%" alt="Clip de Wan: por encima del hombro, FAROL quieto bajo la farola más cercana, acercamiento lento">
-<img src="docs/media/farol/clip-lantern.gif" width="49%" alt="Clip de Wan: la llama temblando dentro del farolillo, gotas en el papel"></p>
+<p><img src="docs/media/farol/clip-over-shoulder.gif" width="32%" alt="Clip de Wan: por encima del hombro, FAROL quieto bajo la farola más cercana, acercamiento lento">
+<img src="docs/media/farol/clip-lantern.gif" width="32%" alt="Clip de Wan: la llama temblando dentro del farolillo, gotas en el papel">
+<img src="docs/media/farol/clip-fingers.gif" width="32%" alt="Clip de Wan: los dedos largos de papel curvándose sobre la barandilla de la escalera"></p>
 
 ![El mejor fotograma de cada uno de los doce planos: FAROL es la misma criatura en todos](docs/media/farol/stills.jpg)
 
@@ -273,9 +278,12 @@ corregidos) están en el [ejemplo completo](docs/examples/no-mires-atras.es.md).
 
 ![Fotogramas del montaje 9:16 con los subtítulos karaoke de terror](docs/media/farol/cut-9x16.jpg)
 
-En esa tarjeta: 48 fotogramas en 57 min, siete clips de 5 s en unos 70 min,
-la canción en 41 s y los dos montajes (vista previa y final a 1080p) en
-6,5 min.
+![Fotogramas del montaje 16:9: la historia sigue a la letra, sección a sección](docs/media/farol/cut-16x9.jpg)
+
+En tarjetas de 16 GB: 48 fotogramas en 57 min, los primeros siete clips de
+5 s en unos 70 min en una tarjeta y otros once en unos 40 min en tres, cuatro
+tomas de canción en 2 min y los dos montajes (vista previa y final a 1080p)
+en unos 7 min.
 
 ## Arquitectura
 
