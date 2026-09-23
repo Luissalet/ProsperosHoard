@@ -517,9 +517,12 @@ STORYBOARD_EN = {
 }
 
 
-def storyboard_pools(stills: dict[str, Any], clips: dict[str, str], lang: str = "es") -> dict[str, list[str]]:
+def storyboard_pools(stills: dict[str, Any], clips: dict[str, str], lang: str = "es",
+                     all_clips: bool = False) -> dict[str, list[str]]:
+    """`all_clips` (--motion full): every storyboard entry plays its clip when
+    one exists, not only the ones flagged "c"."""
     board = STORYBOARD_EN if lang == "en" else STORYBOARD
-    return {section: [shot_asset(stills, clips, n, prefer_clip=(flag == "c")) for n, flag in shots]
+    return {section: [shot_asset(stills, clips, n, prefer_clip=all_clips or flag == "c") for n, flag in shots]
             for section, shots in board.items()}
 
 
@@ -752,7 +755,7 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
         # quiet dread in the intro/bridge/outro (two-bar holds), a shot a bar
         # in the verses (or a line, whichever comes first), half a bar in the chorus
         "beats_low": 8, "beats_mid": 4, "beats_high": 2,
-        "section_pools": storyboard_pools(stills, clips, LANG),
+        "section_pools": storyboard_pools(stills, clips, LANG, all_clips=args.motion == "full"),
     }
     if args.motion == "full":
         # Wan clips open on their source still: start a second in, and let
@@ -1079,6 +1082,11 @@ def seed_from(folder: Path) -> None:
     for step in ("1", "2", "4", "5"):
         if step in source.get("done", {}) and step not in state["done"]:
             state["done"][step] = source["done"][step]
+    # clips are language-free too: merge any the source has that this run lacks
+    if "5" in source.get("done", {}) and "5" in state["done"]:
+        merged = dict(source["done"]["5"].get("clips") or {})
+        merged.update(state["done"]["5"].get("clips") or {})
+        state["done"]["5"]["clips"] = merged
     photos = source.get("done", {}).get("6", {}).get("photo_ids") or []
     if photos and "6" not in state["done"] and not state.get("partial", {}).get("6"):
         state.setdefault("partial", {})["6"] = {str(i): pid for i, pid in enumerate(photos, start=1)}
