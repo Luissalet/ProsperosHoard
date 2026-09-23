@@ -555,6 +555,156 @@ def studio_lineage(asset_id: str) -> dict[str, Any]:
     return _call("GET", "/api/agent/studio_lineage", params={"asset_id": asset_id})
 
 
+# -------------------------------------------------------------- voice studio
+
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def voice_engines() -> dict[str, Any]:
+    """Which TTS/STT engines are installed right now, with capabilities (languages, voice cloning,
+    streaming, GPU need) and an install hint for anything missing. Piper is the same engine used by
+    studio_voice; the others (XTTS, F5-TTS, Kokoro, Chatterbox, faster-whisper) add cloning and dictation.
+    Nothing is installed automatically - the app's Voice screen has an explicit install action per engine.
+
+    Keywords: voice engines, tts, stt, speech to text, install engine, motores de voz, texto a voz, instalar motor
+    """
+    return _call("GET", "/api/agent/voice_engines")
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_create(name: str, engine_id: str, source_path: str, language: Optional[str] = None,
+                  project: Optional[str] = None) -> dict[str, Any]:
+    """Create a reusable voice in the library from a clean sample (source_path, an absolute path on the
+    PC running the app - see studio_import for the allowed folders): trims silence, normalises loudness,
+    runs a quality check (duration, signal-to-noise, clipping) and, when an STT engine is installed,
+    a reference transcript. engine_id picks which TTS engine will use this voice later (see voice_engines);
+    it needs voice cloning support (xtts, f5-tts, chatterbox) to actually clone the sample's voice - piper
+    stores the sample too but always speaks with its own curated voices. Returns the voice (id first) with
+    its quality report; low SNR or clipping warnings mean the source recording should be cleaner.
+
+    Keywords: create voice, clone voice, voice library, upload sample, crear voz, clonar voz, biblioteca de voces
+    """
+    return _call("POST", "/api/agent/voice_create",
+                json={"name": name, "engine_id": engine_id, "source_path": source_path, "language": language,
+                      "project": project})
+
+
+@tool(_ro(readOnlyHint=True))
+def voice_list(project: Optional[str] = None) -> dict[str, Any]:
+    """List saved voices in the library (id, engine, language, whether a sample was cloned, quality,
+    preset names). project filters to one project's voices plus the shared ones. Use a voice's id as
+    voice_id in voice_speak, voice_audiobook or voice_dub, or as a character's voice
+    {"backend": "studio", "voice_id": "..."} in studio_cast.
+
+    Keywords: list voices, voice library, my voices, listar voces, biblioteca de voces, mis voces
+    """
+    return _call("GET", "/api/agent/voice_list", params={"project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_speak(text: str, engine_id: Optional[str] = None, voice_id: Optional[str] = None,
+                voice_ref: Optional[str] = None, preset: Optional[str] = None, speed: Optional[float] = None,
+                language: Optional[str] = None, project: Optional[str] = None) -> dict[str, Any]:
+    """Synthesize a line of text with any installed engine (unlike studio_voice, which is Piper-only):
+    voice_id picks a saved library voice (its own engine and sample, unless engine_id/voice_ref override
+    it), voice_ref is an engine-native voice id (e.g. a Piper voice id) for a non-cloning engine, preset is
+    a named preset saved on that library voice. project saves the result as a project's audio asset
+    (recommended - otherwise only a byte count is returned, since MCP tool results are text/JSON).
+
+    Keywords: speak, text to speech, synthesize voice, tts, hablar, sintetizar voz, texto a voz
+    """
+    body = {"text": text, "project": project,
+            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "preset": preset,
+                      "speed": speed, "language": language}}
+    return _call("POST", "/api/agent/voice_speak", json=body)
+
+
+@tool(_ro(readOnlyHint=True))
+def voice_transcribe(path: Optional[str] = None, asset_id: Optional[str] = None, language: Optional[str] = None,
+                     engine_id: Optional[str] = None) -> dict[str, Any]:
+    """Transcribe an audio/video file (word-level timestamps when the engine supports it): give either
+    path (an absolute path - see studio_import for allowed folders) or asset_id (an existing library
+    asset). language auto-detects when omitted. engine_id picks faster-whisper or whisper (see
+    voice_engines); fails clearly if neither is installed.
+
+    Keywords: transcribe, speech to text, stt, subtitles, transcribir, voz a texto, subtitulos
+    """
+    return _call("POST", "/api/agent/voice_transcribe",
+                json={"path": path, "asset_id": asset_id, "language": language, "engine_id": engine_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_audiobook(
+    text: Optional[str] = None, source_path: Optional[str] = None, title: Optional[str] = None,
+    engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
+    speed: Optional[float] = None, format: str = "mp3", project: Optional[str] = None, wait_s: float = 0,
+) -> dict[str, Any]:
+    """Narrate text (or a .txt/.md/.epub file at source_path) as a long-form audiobook: splits it into
+    chapters and sentences, synthesizes each as a background job with progress (poll with voice_job),
+    then assembles the chapters into one file (format "mp3", or "m4b" for chapter markers) plus an SRT/LRC
+    aligned transcript. Re-running the exact same text and voice resumes from whatever chapters already
+    rendered. project saves the final file as an audio asset. Returns the job (poll voice_job); its
+    finished outputs list each chapter's timing and the file paths.
+
+    Keywords: audiobook, narrate, long text to speech, chapters, audiolibro, narrar, texto largo a voz, capitulos
+    """
+    body = {"text": text, "source_path": source_path, "title": title, "format": format, "project": project,
+            "wait_s": wait_s,
+            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "speed": speed}}
+    return _call("POST", "/api/agent/voice_audiobook", json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_dub(
+    target_language: str, source_path: Optional[str] = None, video_asset_id: Optional[str] = None,
+    source_language: Optional[str] = None, glossary: Optional[dict[str, str]] = None,
+    engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
+    title: Optional[str] = None, project: Optional[str] = None, wait_s: float = 0,
+) -> dict[str, Any]:
+    """Dub a video into target_language as a background job: extracts its audio, transcribes it with
+    timestamps, translates each line with the local LLM (glossary maps names/terms; fails clearly with no
+    local LLM available - see studio_status's llm capability), synthesizes each line in the chosen voice,
+    time-fits it back onto the original line's duration, mixes it under the original track (ducked, or
+    replacing vocals when a background separator is installed) and muxes a new video with target-language
+    subtitles. Give source_path (an absolute path) or video_asset_id. Every stage's files are kept, so a
+    single line can be fixed with voice_resynthesize_segment instead of re-running the whole job.
+    Poll with voice_job; its finished outputs include a per-segment table (source/translated text, timing).
+
+    Keywords: dub video, translate video, voice dubbing, subtitles, doblar video, traducir video, doblaje, subtitulos
+    """
+    body = {"target_language": target_language, "source_path": source_path, "video_asset_id": video_asset_id,
+            "source_language": source_language, "glossary": glossary, "title": title, "project": project,
+            "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
+    return _call("POST", "/api/agent/voice_dub", json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_resynthesize_segment(job_id: str, index: int, text: Optional[str] = None,
+                               engine_id: Optional[str] = None, voice_id: Optional[str] = None,
+                               voice_ref: Optional[str] = None, remix: bool = True) -> dict[str, Any]:
+    """Fix one line of a finished voice_dub job without re-running transcription or translation: edit its
+    translated text and/or swap the voice, re-synthesize and re-time-fit just that segment, and (remix=true,
+    default) rebuild the mixed audio and re-mux the final video. index is the segment's position in the
+    dub job's outputs.segments table (0-based).
+
+    Keywords: fix dub line, re-synthesize segment, redo translation, corregir linea doblaje, resintetizar segmento
+    """
+    voice = None
+    if engine_id or voice_id or voice_ref:
+        voice = {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}
+    return _call("POST", "/api/agent/voice_resynthesize_segment", params={"job_id": job_id, "index": index},
+                json={"text": text, "voice": voice, "remix": remix})
+
+
+@tool(_ro(readOnlyHint=True))
+def voice_job(job_id: str, wait_s: float = 0) -> dict[str, Any]:
+    """One voice-studio job's (audiobook, dub, engine install) state, progress and message; when done,
+    its full outputs (chapters, segments, file paths). wait_s (up to 300) waits server-side instead of
+    polling in a tight loop - use 30-120 for an audiobook or dub job, which can take a while.
+
+    Keywords: voice job status, dub progress, audiobook progress, estado del trabajo de voz, progreso doblaje
+    """
+    return _call("GET", "/api/agent/voice_job", params={"job_id": job_id, "wait_s": wait_s})
+
+
 def main() -> None:
     mcp.run()
 
