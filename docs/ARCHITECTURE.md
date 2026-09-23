@@ -128,15 +128,62 @@ prompt the real frontend produced (`graphToPrompt()` in a headless browser);
 `test_convert.py` requires the converter to match it input for input.
 `validate_values()` then runs what `/prompt` checks - required inputs
 (dynamic-combo children included), links to existing output slots, combo
-choices (so a model file that is not installed is caught), number ranges -
-and `run_template` calls it on every workflow before queueing; the fake
-ComfyUI rejects the same prompts the real server would.
+choices, number ranges - and `run_template` calls it on every workflow
+before queueing; the fake ComfyUI rejects the same prompts the real server
+would. A combo mismatch on a **model-file input** (`MODEL_FILE_INPUTS`:
+`CheckpointLoaderSimple.ckpt_name`, `UNETLoader.unet_name`,
+`CLIPLoader.clip_name`, `DualCLIPLoader.clip_name1`/`clip_name2`,
+`VAELoader.vae_name`) gets its own `"model not installed: ... download it,
+or choose one of: ..."` wording instead of the generic "is not available"
+one, since that is a download away, not a broken workflow;
+`comfy_driver.validate_against_object_info`'s `checkpoint_node` cross-check
+(a single `CheckpointLoaderSimple`) gives the same friendly, pre-flight
+version for SDXL/SD1.5/ACE-Step's checkpoints, with the installed list in
+the message.
 
-The built-in Flux/Kontext/Wan/ACE templates were converted this way and then
-hand-checked node by node; each `*.params.json` carries its `defaults`
-(sampler, steps, cfg, size, fps, length) so no SDXL fallback ever reaches a
-Flux or Wan graph, and Kontext samples into an `EmptySD3LatentImage` of the
-requested size (the reference still conditions through `ReferenceLatent`).
+The built-in Flux/Kontext/Wan/ACE/Qwen-Image 2.1 templates were converted
+this way and then hand-checked node by node; each `*.params.json` carries
+its `defaults` (sampler, steps, cfg, size, fps, length) so no SDXL fallback
+ever reaches a Flux, Wan or Qwen graph, and Kontext samples into an
+`EmptySD3LatentImage` of the requested size (the reference still conditions
+through `ReferenceLatent`). Qwen-Image 2.1's official templates additionally
+use a `ResolutionSelector` (aspect-ratio preset + megapixel budget) that the
+built-in templates replace with a literal, editable `width`/`height` on
+`EmptyLatentImage`, and, for the edit template, a `ComfySwitchNode` whose
+`switch` (the `custom_size` parameter) picks that canvas when `true` or
+`TextEncodeQwenImage21`'s own reference-sized latent when `false` (the
+default). Its `images.image_1..N` autogrow socket (1-10 references, the
+first the edit target/main identity) is not fixed at build time: only
+`image_1`/`image_2` ship in the template file, and
+`comfy_driver.wire_reference_group()` adds or drops `LoadImage` nodes 3-10
+and their `images.image_N` links at run time to match how many references
+a call actually gives (`engine.run_template`'s `reference_group` spec key),
+so the graph queued never carries an unused reference socket.
+
+## Image engine choice
+
+`engine.resolve_image_engine(object_info, requested)` turns `auto | qwen21
+| flux | sdxl` into the engine a call actually gets: `auto` (the default,
+everywhere) picks Qwen-Image 2.1 when both its node class
+(`TextEncodeQwenImage21`) and a model file containing "qwen" are in
+`/object_info`'s `UNETLoader.unet_name` list, else Flux schnell when a
+"flux" checkpoint is installed, else SDXL, which - like Flux schnell -
+always works, since both ship as built-in checkpoints/templates. An engine
+requested by name that turns out not to be installed falls back the same
+way, so a project already set to `qwen21` keeps rendering before the model
+finishes downloading, instead of failing. `engine.ENGINE_TEMPLATES` maps
+each engine to its `txt2img`/`edit` built-in template name;
+`engine.generate_image` resolves this once per call (skipped entirely when
+the caller names an exact `template`) and records which engine was used in
+the asset's recipe (`image_engine`). The choice has two levels: a
+project's own `image_engine` column (`auto` by default, set at
+`studio_create_project` or `PATCH /api/projects/{id}`) and a per-call
+`engine` parameter on `studio_generate_image`, which wins when given.
+`consistent=true` character-consistency generation routes through the
+resolved engine's `edit` template too (`engine.build_kontext_instruction`'s
+`engine=` parameter phrases the instruction Qwen-Image 2.1's way,
+addressing references as `<image1>`, `<image2>`..., or Flux Kontext's
+"the reference image" otherwise).
 
 ## Rendering pipeline
 
