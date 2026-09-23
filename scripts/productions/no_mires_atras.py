@@ -13,15 +13,21 @@ Usage (from the repo root):
     .venv/bin/python scripts/productions/no_mires_atras.py --backend real \\
         --app-url http://127.0.0.1:8815 --quality final
 
+    # pin the image engine instead of letting "auto" reach for Qwen-Image
+    # 2.1 first (see engine.resolve_image_engine)
+    .venv/bin/python scripts/productions/no_mires_atras.py --backend fake --engine flux
+
     # re-run a single step once its inputs exist (e.g. after picking a
     # different canonical reference, or after reviewing the output)
     .venv/bin/python scripts/productions/no_mires_atras.py --backend fake --only stills
 
-Steps: 1 project, 2 character
-(FAROL reference sheet -> front-view crop as the canonical), 3 song
-(studio_compose, 2 seeds), 4 stills (12 shots: Kontext with the canonical
-reference when FAROL is in frame, Flux schnell in the same night look
-when not), 5 clips (Wan 2.2 TI2V from the best still of shots 1,2,3,5,7,
+Steps: 1 project (sets the
+--engine choice as the project's own image_engine), 2 character (FAROL
+reference sheet -> front-view crop as the canonical), 3 song
+(studio_compose, 2 seeds), 4 stills (12 shots: an edit template with the
+canonical reference when FAROL is in frame, a fresh txt2img in the same
+night look when not - both through --engine, auto reaching for Qwen-Image
+2.1 first), 5 clips (Wan 2.2 TI2V from the best still of shots 1,2,3,5,7,
 10,12), 6 photocards (a solo set: 5 idol looks, fronts, backs, contact
 sheet), 7 album art (night variants: cover, tracklist back, teaser poster,
 lyric card), 8 timeline (lyrics timed to the song's bars, a storyboard per
@@ -373,8 +379,9 @@ async def step_project(session: Any, state: dict[str, Any], args: argparse.Names
         return
     brief = ("A single by FAROL: dark trap horror-rap, a night creature that is always a little closer, "
              "sodium-lit empty streets, idol-style photocards as the fun contrast.")
-    created = await call(session, "studio_create_project", {"name": PROJECT_NAME, "brief": brief})
-    print(f"  created project {created['id']}")
+    created = await call(session, "studio_create_project",
+                        {"name": PROJECT_NAME, "brief": brief, "image_engine": args.engine})
+    print(f"  created project {created['id']} (image_engine={created.get('image_engine')})")
     mark_done(state, 1, {"project_id": created["id"]})
 
 
@@ -396,7 +403,7 @@ async def step_character(session: Any, state: dict[str, Any], args: argparse.Nam
     seeds = QUALITY[args.quality]["ref_seeds"]
     gen = await call(session, "studio_generate_image", {
         "project": pid, "prompt": REFERENCE_SHEET_PROMPT, "negative": FAROL_NEGATIVE,
-        "template": "flux_schnell_txt2img", "aspect": "16:9", "count": seeds, "seed": 1001, "wait_s": 240,
+        "engine": args.engine, "aspect": "16:9", "count": seeds, "seed": 1001, "wait_s": 240,
     })
     job = await wait_job(session, gen["job"])
     ref_ids = job["asset_ids"]
@@ -452,13 +459,14 @@ async def step_stills(session: Any, state: dict[str, Any], args: argparse.Namesp
             print(f"  shot {n}: {stills[str(n)]['aspect_16_9']} (already made)")
             continue
         if shot["farol"]:
-            base = {"project": pid, "prompt": f"@{CHARACTER_NAME} {shot['prompt']}, {NIGHT_LOOK}", "consistent": True}
+            base = {"project": pid, "prompt": f"@{CHARACTER_NAME} {shot['prompt']}, {NIGHT_LOOK}",
+                    "consistent": True, "engine": args.engine}
         else:
             base = {"project": pid, "prompt": f"{shot['prompt']}, {NIGHT_LOOK}", "negative": FAROL_NEGATIVE,
-                    "template": "flux_schnell_txt2img"}
+                    "engine": args.engine}
         wide = await _generate(session, {**base, "width": 1344, "height": 768, "count": variants, "seed": 3000 + n * 10})
         entry: dict[str, Any] = {"aspect_16_9": wide, "best": wide[0],
-                                 "route": "kontext (FAROL reference)" if shot["farol"] else "flux schnell txt2img (no FAROL)"}
+                                 "route": f"{args.engine} edit (FAROL reference)" if shot["farol"] else f"{args.engine} txt2img (no FAROL)"}
         if want_posts:
             entry["aspect_4_5"] = await _generate(session, {**base, "aspect": "4:5", "count": 1, "seed": 3000 + n * 10 + 1})
         stills[str(n)] = entry
@@ -821,6 +829,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--backend", choices=["fake", "real"], default="fake")
     parser.add_argument("--quality", choices=["draft", "final"], default="draft")
+    parser.add_argument("--engine", choices=["auto", "qwen21", "flux"], default="auto",
+                        help="image engine for the reference sheet, stills, photocards and cover: "
+                             "auto (default) uses Qwen-Image 2.1 when it is installed, else Flux schnell; "
+                             "set on the project once at creation (step 1) so a resumed run stays consistent")
     parser.add_argument("--app-url", default=None, help="real backend only; default PROSPERO_URL or 127.0.0.1:8815")
     parser.add_argument("--lrc-path", default=None,
                         help="a timed .lrc (re-timed by ear in Audio > Lyrics timing) to use instead of the bar-grid estimate; "
