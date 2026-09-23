@@ -97,6 +97,7 @@ class BackendOverrides(BaseModel):
     comfy_url: Optional[str] = None
     vram_estimates_mb: Optional[dict[str, int]] = None
     import_roots: Optional[list[str]] = None
+    render_pool: Optional[list[str]] = None  # extra ComfyUI servers, one per GPU; applied on restart
 
 
 class CreateProjectBody(BaseModel):
@@ -300,7 +301,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     data_dir = Path(data_dir)
     store = Store(data_dir)
     backend = Backend(data_dir, demo=demo)
-    queue = JobQueue(store)
+    # one GPU worker for the main ComfyUI plus one per render-pool server
+    queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
+                     target_ready=backend.pool_server_ready)
     queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
     queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))
@@ -552,7 +555,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             _check_loopback_or_lan_url(body.comfy_url)
         if body.faustus_url:
             _check_loopback_or_lan_url(body.faustus_url)
-        backend.set_overrides(body.faustus_url, body.faustus_token, body.comfy_url, body.vram_estimates_mb, body.import_roots)
+        backend.set_overrides(body.faustus_url, body.faustus_token, body.comfy_url, body.vram_estimates_mb, body.import_roots,
+                              body.render_pool)
         return backend.status()
 
     @app.post("/api/backend/comfy/free")

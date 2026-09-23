@@ -143,9 +143,18 @@ each line's own text so a re-render is byte-identical.
   "capabilities": {"music": {"url": "http://127.0.0.1:9000"}},
   "vram_estimates_mb": {"sdxl": 7000, "sd15": 3500, "svd": 10000,
                         "flux": 13000, "kontext": 13000, "wan": 12000, "ace": 8000},
-  "import_roots": ["D:\\Music", "E:\\Photos"]
+  "import_roots": ["D:\\Music", "E:\\Photos"],
+  "render_pool": ["http://127.0.0.1:8189", "http://127.0.0.1:8190"]
 }
 ```
+
+`render_pool` lists extra ComfyUI servers, one per GPU (the same ComfyUI
+install started again with `--cuda-device N --port P`). Each gets its own
+GPU worker, and all of them take jobs from the one GPU queue, so a batch of
+clips renders on every card at once. A pool server that is not answering
+takes no jobs. The VRAM check for a job runs against the card of the
+server that takes it. `POST /api/backend` accepts `render_pool` too, and a
+restart applies a changed list.
 
 Environment: `PROSPERO_DATA_DIR`, `PROSPERO_COMFY_TIMEOUT_S` (how long a job
 may run on ComfyUI before it is reported as timed out; defaults 3600 s for

@@ -73,20 +73,33 @@ class Progress:
 
 
 class JobQueue:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, gpu_targets: Optional[list[Optional[str]]] = None,
+                 bind: Optional[Callable[[Optional[str]], None]] = None,
+                 target_ready: Optional[Callable[[str], bool]] = None):
+        """`gpu_targets`: one GPU worker per entry (None = the main ComfyUI,
+        a URL = a render-pool server); they all take jobs from the one GPU
+        queue. `bind(target)` pins a worker thread to its server,
+        `target_ready(url)` lets a pool worker skip taking jobs while its
+        server is down."""
         self.store = store
         self._handlers: dict[str, Handler] = {}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._wake = {"gpu": threading.Event(), "cpu": threading.Event()}
+        self._gpu_targets: list[Optional[str]] = list(gpu_targets or [None])
+        self._bind = bind
+        self._target_ready = target_ready
+        self._claim_lock = threading.Lock()
 
     def register(self, type_: str, handler: Handler) -> None:
         self._handlers[type_] = handler
 
     def start(self) -> None:
         self.store.requeue_running_jobs()
-        for lane in ("gpu", "cpu"):
-            t = threading.Thread(target=self._worker_loop, args=(lane,), daemon=True, name=f"job-worker-{lane}")
+        workers: list[tuple[str, Optional[str]]] = [("gpu", target) for target in self._gpu_targets] + [("cpu", None)]
+        for i, (lane, target) in enumerate(workers):
+            name = f"job-worker-{lane}" + (f"-{i}" if lane == "gpu" and i else "")
+            t = threading.Thread(target=self._worker_loop, args=(lane, target), daemon=True, name=name)
             t.start()
             self._threads.append(t)
 
@@ -117,19 +130,34 @@ class JobQueue:
         return job
 
     # ------------------------------------------------------------------
-    def _worker_loop(self, lane: str) -> None:
+    def _worker_loop(self, lane: str, target: Optional[str] = None) -> None:
+        if self._bind is not None and lane == "gpu":
+            self._bind(target)
         while not self._stop.is_set():
+            if target and self._target_ready is not None and not self._target_ready(target):
+                self._stop.wait(5.0)  # this worker's server is off: leave the queue to the others
+                continue
             try:
-                job = self.store.next_queued_job(lane)
+                job = self._claim(lane)
             except Exception:  # pragma: no cover - a locked db must not kill the worker
                 logger.exception("could not read the job queue")
                 self._stop.wait(1.0)
                 continue
             if job is None:
                 self._wake[lane].wait(timeout=1.0)
-                self._wake[lane].clear()
+                self._wake[lane].clear()  # a GPU worker that misses a wake-up finds the job on its next 1 s poll
                 continue
             self._run_job(job)
+
+    def _claim(self, lane: str) -> Optional[dict[str, Any]]:
+        """Take the oldest queued job of a lane; with several GPU workers the
+        read and the state change happen under one lock, so no two workers
+        start the same job."""
+        with self._claim_lock:
+            job = self.store.next_queued_job(lane)
+            if job is not None:
+                self.store.update_job(job["id"], state="running", started_at=now_iso(), message="starting")
+            return job
 
     def _run_job(self, job: dict[str, Any]) -> None:
         job_id = job["id"]
