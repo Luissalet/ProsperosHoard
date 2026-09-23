@@ -171,12 +171,25 @@ CLIP_MOTION = {
     10: "rain on the window glass, the street lamp flickering; the figure on the street stays perfectly "
         "still, looking up",
     12: "the room slowly brightening into sodium orange, a very slow push-in",
+    # --motion full: the shots that were stills in the first cut
+    4: "the phone screen's cold glow flickering on the frightened wet face, the hand trembling, rain falling behind",
+    6: "the long paper fingers slowly curling tighter around the stairwell rail, the dim light flickering",
+    8: "the amber glow in the elevator mirror slowly brightening, a faint flicker; the lantern head stays "
+       "perfectly still",
+    9: "rain dripping, the wet footprints glistening on the doormat, a slow push-in towards the door",
+    11: "the candle flame flaring and flickering, sodium lamps strobing, the painted smile lit by the flicker; "
+        "the figure stays perfectly still",
 }
+# `--motion full`: every shot moves. The five shots that had no clip, plus a
+# second clip made from the runner-up still of the shots the cut uses most,
+# so repeats in a chorus are not the same clip over and over ("3v2" = shot 3,
+# its second-best variant).
+FULL_MOTION_EXTRA = ["4", "6", "8", "9", "11", "1v2", "2v2", "3v2", "5v2", "10v2", "11v2"]
 # FAROL is "never shown mid-stride - always still, always a little closer".
 # Wan's stock negative prompt pushes *away* from stillness (it lists
 # "static" and "motionless frame"), so the shots where FAROL is visible
 # get the stock negative without those terms, plus walking.
-CLIP_STILL_FIGURE = {1, 2, 5, 7, 10}
+CLIP_STILL_FIGURE = {1, 2, 5, 7, 8, 10, 11}
 CLIP_NEGATIVE_STILL = ("色调艳丽，过曝，细节模糊不清，字幕，风格，作品，画作，画面，整体发灰，最差质量，低质量，"
                        "JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
                        "形态畸形的肢体，手指融合，杂乱的背景，三条腿，背景人很多，倒着走，走路，迈步，"
@@ -251,69 +264,67 @@ Una… dos… tres…
 """
 
 SONG_LYRICS_EN = """[Intro]
-(shh…)
-Count the streetlights… one… two…
-If the third one flickers… it wasn't me.
+One little light at the end of your street,
+two little lights where the shadows meet…
 
 [Verse 1]
-Two-fifteen and the street is wet,
-the asphalt shining like it hasn't blinked yet,
-headphones on but there's nothing playing,
-just a lighter clicking right behind me, waiting.
-Switch the sidewalk, switch my pace,
-my shadow's stretching way out of place,
-counting the lamps so my mind goes numb,
-and there's one still burning where there shouldn't be one.
-Orange glow on the paper skin,
-a crooked smile somebody painted in,
-it's never rushing, it's got no face,
-just a candle flame that nothing can erase.
+I've been waiting where the lamplight bends,
+on the corner where the pavement ends,
+paper skin and a candle heart,
+I've been with you right from the start.
+You count the lamps on your way back home,
+you tell yourself that you're all alone,
+but every light that you leave behind
+is one more step, and I'm right behind.
 
 [Pre-Chorus]
-Turn around… nothing there.
-Look away… and it's one step nearer.
+Hear the flicker, hear the hum,
+close your eyes… and here I come.
 
 [Chorus]
+So don't look back, don't look back,
+I'm the glow on the glass, I'm the light through the crack,
+every step that you take, I'm a little more near,
+when the streetlight dies, you'll find me here.
 Don't look back, don't look back,
-the light behind you ain't the city's, that's a fact,
-every streetlamp, one more step,
-when it cuts out… it's already at your back.
-Don't look back, don't look back,
-your shadow's got company walking its track,
-count to three and start to walk,
-'cause the lantern never sleeps… and tonight, neither do you.
+there's a smile on my face that the rain can't crack,
+count to three, hold your breath, I'll be right there,
+just a candle in the dark and a lantern stare.
 
 [Verse 2]
-At the bus stop, the glass all fogged,
-my reflection's got a friend I never brought,
-no bus coming and the app won't load,
-and a message on the screen: "why won't you stop?"
-Taking the stairs three at a time,
-wire fingers on the railing, one flight behind,
-the elevator mirror's staring through,
-and a candle's shaking just behind me too.
-Reach my door, there's a puddle on the mat,
-wet bare footprints, no shoe ever made that,
-lock it twice, then a third for luck,
-and down on the street there's a light looking up.
+At the bus stop, in the fogged-up glass,
+there are two reflections, and you're the last,
+you climb the stairs, but I climb too,
+my wire fingers right behind you.
+The mirror hums in the elevator light,
+a little flame at your shoulder, bright,
+wet footprints lead to your front door,
+you lock it twice… I was here before.
 
 [Bridge]
 Turn off the light… turn off the light…
-if you can't see it, it isn't there… right?
-Turn off the light…
+if you can't see me, I'm not here… right?
 (click)
 …and the room turns orange.
 
 [Chorus]
+So don't look back, don't look back,
+I'm the glow on the glass, I'm the light through the crack,
+every step that you take, I'm a little more near,
+when the streetlight dies, you'll find me here.
 Don't look back, don't look back,
-the light behind you ain't the city's, that's a fact,
-every streetlamp, one more step,
-when it cuts out… it's already at your back.
+there's a smile on my face that the rain can't crack,
+count to three, hold your breath, I'll be right there,
+just a candle in the dark and a lantern stare.
 
 [Outro]
-One… two… three…
-(it's here.)
+One little light… two little lights…
+(don't look back.)
 """
+
+SONG_TAGS_EN = ("electronic rock, horror anthem, catchy sung chorus, melodic male vocals, vocal harmonies, "
+                "dark synth, distorted synth bass, driving drums, music box intro, eerie, dramatic, minor key, "
+                "130 bpm, english, storytelling, cinematic")
 
 # Everything language-bound: the song and every text the designs print.
 # The pictures and clips carry no language, so an English version reuses
@@ -327,11 +338,13 @@ TEXTS = {
            "messages": ["gracias por venir", "abrígate, fuera hace frío", "¡clic!", "te veo desde aquí",
                         "perdón por seguirte"],
            "out_dir": "no_mires_atras"},
-    "en": {"title": "DON'T LOOK BACK", "tags": SONG_TAGS.replace("spanish", "english"), "lyrics": SONG_LYRICS_EN,
-           "language": "en",
+    # a sung horror anthem (electronic rock, big melodic chorus, the
+    # creature telling it), not the rap of the Spanish take
+    "en": {"title": "DON'T LOOK BACK", "tags": SONG_TAGS_EN, "lyrics": SONG_LYRICS_EN,
+           "language": "en", "params": {"bpm": 130, "key": "D minor", "duration": 150.0},
            "credits": "Words and music: FAROL\nMade at night, under sodium lamps, with Prospero's Hoard.",
            "tagline": "Don't look back", "date": "Always a little closer",
-           "quote": "Don't look back,\ndon't look back,\nthe light behind you\nain't the city's",
+           "quote": "Don't look back,\ndon't look back,\nI'm the glow on the glass,\nI'm the light through the crack",
            "messages": ["thanks for coming", "wrap up, it's cold out", "click!", "I can see you from here",
                         "sorry for following you"],
            "out_dir": "dont_look_back"},
@@ -344,7 +357,7 @@ def text(key: str) -> Any:
 
 
 def song_params() -> dict[str, Any]:
-    return {**SONG_PARAMS, "language": text("language")}
+    return {**SONG_PARAMS, **TEXTS[LANG].get("params", {}), "language": text("language")}
 
 
 # --quality knobs: (spec numbers under "final"; a fast, cheap subset under "draft")
@@ -451,12 +464,26 @@ async def wait_job(session: Any, job: dict[str, Any], timeout_s: float = 600.0) 
     return job
 
 
-def shot_asset(stills: dict[str, Any], clips: dict[str, str], n: int, prefer_clip: bool = True) -> str:
+def shot_number(key: Any) -> int:
+    return int(str(key).split("v")[0])
+
+
+def variant_still(stills: dict[str, Any], key: Any) -> str:
+    """The still a shot key stands for: "3" = shot 3's best still, "3v2" =
+    its runner-up (the first of its other 16:9 variants)."""
+    entry = stills[str(shot_number(key))]
+    if "v" not in str(key):
+        return entry["best"]
+    others = [a for a in entry["aspect_16_9"] if a != entry["best"]]
+    return others[0] if others else entry["best"]
+
+
+def shot_asset(stills: dict[str, Any], clips: dict[str, str], n: Any, prefer_clip: bool = True) -> str:
     """The asset that shows shot `n` in the edit: its Wan clip when one was
-    made (and wanted), else its best still."""
+    made (and wanted), else its still."""
     if prefer_clip and str(n) in clips:
         return clips[str(n)]
-    return stills[str(n)]["best"]
+    return variant_still(stills, n)
 
 
 # The storyboard: which shots play under which part of the song, in the
@@ -475,9 +502,25 @@ STORYBOARD = {
 }
 
 
-def storyboard_pools(stills: dict[str, Any], clips: dict[str, str]) -> dict[str, list[str]]:
+# The sung English version tells the walk home from the creature's side,
+# line by line; every entry prefers a clip (with --motion full every shot
+# has one, and the runner-up clips alternate with the first ones).
+STORYBOARD_EN = {
+    "Intro": [("1", "c"), ("12", "c")],
+    "Verse 1": [("1", "c"), ("2", "c"), ("3", "c"), ("11", "c"), ("1v2", "c"), ("4", "c"), ("2v2", "c"), ("10", "c")],
+    "Pre-Chorus": [("11v2", "c"), ("5", "c")],
+    "Chorus": [("3", "c"), ("2", "c"), ("11", "c"), ("10v2", "c"), ("3v2", "c"), ("1", "c"), ("6", "c"),
+               ("11v2", "c"), ("8", "c"), ("5v2", "c"), ("2v2", "c"), ("3", "c"), ("7", "c"), ("10", "c")],
+    "Verse 2": [("5", "c"), ("5v2", "c"), ("6", "c"), ("6", "c"), ("8", "c"), ("3v2", "c"), ("9", "c"), ("10", "c")],
+    "Bridge": [("12", "c"), ("7", "c"), ("12", "c"), ("3", "c")],
+    "Outro": [("1", "c"), ("3", "c")],
+}
+
+
+def storyboard_pools(stills: dict[str, Any], clips: dict[str, str], lang: str = "es") -> dict[str, list[str]]:
+    board = STORYBOARD_EN if lang == "en" else STORYBOARD
     return {section: [shot_asset(stills, clips, n, prefer_clip=(flag == "c")) for n, flag in shots]
-            for section, shots in STORYBOARD.items()}
+            for section, shots in board.items()}
 
 
 # ------------------------------------------------------------------ steps
@@ -542,7 +585,7 @@ async def step_character(session: Any, state: dict[str, Any], args: argparse.Nam
 
 async def step_song(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
-    count = QUALITY[args.quality]["song_seeds"]
+    count = args.song_takes or QUALITY[args.quality]["song_seeds"]
     res = await call(session, "studio_compose", {
         "project": pid, "tags": text("tags"), "lyrics": text("lyrics"), "count": count, "seed": 2001,
         "wait_s": 240, **song_params(),
@@ -552,7 +595,8 @@ async def step_song(session: Any, state: dict[str, Any], args: argparse.Namespac
     durations = {a["id"]: a.get("duration_s") for a in job.get("assets") or []}
     print(f"  composed {len(song_ids)} song take(s): {song_ids}")
     mark_done(state, 3, {"song_asset_ids": song_ids, "song_asset_id": song_ids[0],
-                         "duration_s": durations.get(song_ids[0]) or SONG_PARAMS["duration"]})
+                         "durations_s": [durations.get(i) for i in song_ids],
+                         "duration_s": durations.get(song_ids[0]) or song_params()["duration"]})
 
 
 async def _generate(session: Any, args: dict[str, Any], timeout_s: float = 600.0) -> list[str]:
@@ -590,22 +634,34 @@ async def step_stills(session: Any, state: dict[str, Any], args: argparse.Namesp
 async def step_clips(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
     stills = state["done"]["4"]["stills"]
+    keys = [str(n) for n in QUALITY[args.quality]["clip_shots"]]
+    if args.motion == "full":
+        keys += [k for k in FULL_MOTION_EXTRA if k not in keys]
     clips: dict[str, str] = dict(partial(state, 5))
-    for n in QUALITY[args.quality]["clip_shots"]:
-        if str(n) in clips:
-            print(f"  shot {n} clip: {clips[str(n)]} (already made)")
+    if args.keep:
+        for k, v in (state["done"].get("5", {}).get("clips") or {}).items():
+            clips.setdefault(k, v)
+    # queue every missing clip first, then collect them: with a render pool
+    # (one ComfyUI per GPU) they render side by side
+    pending: list[tuple[str, str]] = []
+    for key in keys:
+        if key in clips:
+            print(f"  shot {key} clip: {clips[key]} (already made)")
             continue
-        best = stills[str(n)]["best"]
-        # template defaults: 1280x704 (follows the still's aspect), 121 frames
-        # at 24 fps = 5 s, 20 steps, cfg 5, shift 8, uni_pc
-        gen: dict[str, Any] = {"project": pid, "template": "wan22_ti2v", "reference_asset_id": best,
-                               "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "seed": 5000 + n}
+        n = shot_number(key)
+        gen: dict[str, Any] = {"project": pid, "template": "wan22_ti2v", "reference_asset_id": variant_still(stills, key),
+                               "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"),
+                               "seed": 5000 + n + (100 if "v" in key else 0)}
         if n in CLIP_STILL_FIGURE:
             gen["negative"] = CLIP_NEGATIVE_STILL
-        ids = await _generate(session, gen, timeout_s=3900)  # the app itself waits up to 3600 s for a video
-        clips[str(n)] = ids[0]
-        save_partial(state, 5, str(n), ids[0])
-        print(f"  shot {n} clip: {clips[str(n)]}")
+        queued = await call(session, "studio_generate_image", {**gen, "wait_s": 0})
+        pending.append((key, queued["job"]))
+    for i, (key, job) in enumerate(pending):
+        # the app itself waits up to 3600 s per video; later clips also wait for the ones ahead of them
+        done = await wait_job(session, job, timeout_s=3900 + 900 * i)
+        clips[key] = done["asset_ids"][0]
+        save_partial(state, 5, key, clips[key])
+        print(f"  shot {key} clip: {clips[key]}")
     mark_done(state, 5, {"clips": clips})
 
 
@@ -643,7 +699,7 @@ def _mmss(seconds: float) -> str:
 async def step_album(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     pid = state["done"]["1"]["project_id"]
     stills = state["done"]["4"]["stills"]
-    duration = state["done"]["3"].get("duration_s") or SONG_PARAMS["duration"]
+    duration = state["done"]["3"].get("duration_s") or song_params()["duration"]
     cover_image = stills["3"]["best"]        # lantern close-up: the strongest single graphic
     poster_image = stills["1"]["best"]       # the establishing shot: small, far, under the lamp
     lyric_image = stills["11"]["best"]       # chorus insert
@@ -696,8 +752,12 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
         # quiet dread in the intro/bridge/outro (two-bar holds), a shot a bar
         # in the verses (or a line, whichever comes first), half a bar in the chorus
         "beats_low": 8, "beats_mid": 4, "beats_high": 2,
-        "section_pools": storyboard_pools(stills, clips),
+        "section_pools": storyboard_pools(stills, clips, LANG),
     }
+    if args.motion == "full":
+        # Wan clips open on their source still: start a second in, and let
+        # each reuse of a clip show a later moment
+        options.update({"video_lead_in_s": 1.0, "video_rotate_offsets": True})
     timelines: dict[str, Any] = dict(partial(state, 8).get("timelines", {}))
     finishing = {"color_grade": "sodium_night", "grain": 0.3, "vignette": True, "glitch_on_downbeats": True,
                  "lyric_style": "horror"}
@@ -756,8 +816,8 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
     lines += ["## Song", "", f"- Takes: {done['3']['song_asset_ids']}",
               f"- Used for the timeline: `{done['3']['song_asset_id']}` ({_mmss(done['3'].get('duration_s') or 0)})",
               f"- Tags: `{text('tags')}`",
-              f"- bpm {SONG_PARAMS['bpm']}, key {SONG_PARAMS['key']}, language {text('language')}, "
-              f"time signature {SONG_PARAMS['time_signature']}, duration {SONG_PARAMS['duration']}s", ""]
+              f"- bpm {song_params()['bpm']}, key {song_params()['key']}, language {text('language')}, "
+              f"time signature {song_params()['time_signature']}, duration {song_params()['duration']}s", ""]
 
     lines += ["## Stills (12 shots)", "", "| Shot | route | 16:9 variants | best | 4:5 post |", "| --- | --- | --- | --- | --- |"]
     for n, entry in sorted(done["4"]["stills"].items(), key=lambda kv: int(kv[0])):
@@ -768,10 +828,11 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
               "instead of edited from FAROL's reference - an edit from the reference keeps the character in frame.", ""]
 
     if "5" in done:
-        lines += ["## Clips (Wan 2.2 TI2V, 5 s from the best still)", "", "| Shot | clip asset | motion |", "| --- | --- | --- |"]
-        for n, cid in sorted(done["5"]["clips"].items(), key=lambda kv: int(kv[0])):
-            still = " (negative without the stock stillness terms, plus walking)" if int(n) in CLIP_STILL_FIGURE else ""
-            lines.append(f"| {n} | `{cid}` | {CLIP_MOTION.get(int(n), '')}{still} |")
+        lines += ["## Clips (Wan 2.2 TI2V, 5 s from a still)", "", "| Shot | clip asset | motion |", "| --- | --- | --- |"]
+        for n, cid in sorted(done["5"]["clips"].items(), key=lambda kv: (shot_number(kv[0]), kv[0])):
+            still = " (negative without the stock stillness terms, plus walking)" if shot_number(n) in CLIP_STILL_FIGURE else ""
+            source = " (from the runner-up still)" if "v" in n else ""
+            lines.append(f"| {n} | `{cid}` | {CLIP_MOTION.get(shot_number(n), '')}{still}{source} |")
         lines.append("")
 
     if "6" in done:
@@ -899,6 +960,18 @@ async def run(args: argparse.Namespace) -> int:
     from mcp.client.stdio import stdio_client
 
     state = load_state()
+    if args.use_take and "3" in state["done"]:
+        song = state["done"]["3"]
+        takes = song["song_asset_ids"]
+        if not 1 <= args.use_take <= len(takes):
+            print(f"error: --use-take must be between 1 and {len(takes)}")
+            return 1
+        song["song_asset_id"] = takes[args.use_take - 1]
+        durations = song.get("durations_s") or []
+        if len(durations) >= args.use_take and durations[args.use_take - 1]:
+            song["duration_s"] = durations[args.use_take - 1]
+        song["take_used"] = args.use_take
+        save_state(state)
     fake_app: Optional[FakeAppHandle] = None
     try:
         if args.backend == "fake":
@@ -939,7 +1012,7 @@ async def run(args: argparse.Namespace) -> int:
                         print(f"[{n}/9] {STEP_NAMES[n]}: already done, skipping (use --only to force)")
                         continue
                     print(f"[{n}/9] {STEP_NAMES[n]}...")
-                    if args.only:
+                    if args.only and not args.keep:
                         state.get("partial", {}).pop(str(n), None)  # --only redoes the step from scratch
                     for dep in range(1, n):
                         if dep in (1,) and not is_done(state, dep) and n != 1:
@@ -973,6 +1046,15 @@ def main() -> int:
     parser.add_argument("--lang", choices=sorted(TEXTS), default="es",
                         help="language of the song and of every printed text: es (NO MIRES ATRÁS, the default) "
                              "or en (DON'T LOOK BACK)")
+    parser.add_argument("--motion", choices=["clips", "full"], default="clips",
+                        help="clips (default): Wan clips for the seven key shots, stills for the rest; full: a clip "
+                             "for every shot plus runner-up clips for the busiest sections, and cuts that skip each "
+                             "clip's still opening")
+    parser.add_argument("--song-takes", type=int, default=None, help="how many song takes to compose (default by --quality)")
+    parser.add_argument("--use-take", type=int, default=None,
+                        help="which composed take (1-based) the cut and the report use, e.g. after listening to them")
+    parser.add_argument("--keep", action="store_true",
+                        help="with --only: keep what the step already made and only add what is missing")
     parser.add_argument("--reuse-from", default=None,
                         help="another run's folder (its state.json): reuse its project, character, stills, clips and "
                              "photocard photos, so only the song, the designs and the cut are made again")
