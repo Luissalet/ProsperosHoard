@@ -4,26 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image
-
-from prosperos_hoard.api import create_app
-
-
-@pytest.fixture
-def client(data_dir, fake_comfy, tmp_path):
-    _, port = fake_comfy
-    (data_dir / "backend.json").write_text(json.dumps({"comfy": {"url": f"http://127.0.0.1:{port}"},
-                                                       "import_roots": [str(tmp_path / "allowed")]}), encoding="utf-8")
-    (tmp_path / "allowed").mkdir()
-    static = tmp_path / "dist"
-    (static / "assets").mkdir(parents=True)
-    (static / "index.html").write_text("<html>spa</html>", encoding="utf-8")
-    (static / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
-    app = create_app(data_dir, static_dir=static, port=8815)
-    with TestClient(app, base_url="http://127.0.0.1:8815") as c:
-        yield c, app, tmp_path / "allowed"
-    app.state.queue.stop()
 
 
 def _project(c, name="Flow Test"):
@@ -275,18 +256,22 @@ def test_custom_workflow_import_edit_and_generate(client):
 
 
 def test_unknown_checkpoint_and_sampler_fail_with_available_options(client):
+    # pinned to sdxl_txt2img: the default engine is "auto" (Qwen-Image 2.1
+    # when installed, see engine.resolve_image_engine), which does not use
+    # a single checkpoint_node at all - this test is about that cross-check.
     c, _, _ = client
     project_id = _project(c, "Ckpt")
     r = c.post(f"/api/agent/studio_generate_image?project={project_id}",
-               json={"prompt": "x", "checkpoint": "dreamy_v9.safetensors", "wait_s": 20})
+               json={"prompt": "x", "template": "sdxl_txt2img", "checkpoint": "dreamy_v9.safetensors", "wait_s": 20})
     job = r.json()["job"]
     assert job["state"] == "failed"
     assert "sd_xl_base_1.0.safetensors" in job["error"]
-    r = c.post(f"/api/agent/studio_generate_image?project={project_id}", json={"prompt": "x", "sampler": "euler_a", "wait_s": 20})
+    r = c.post(f"/api/agent/studio_generate_image?project={project_id}",
+               json={"prompt": "x", "template": "sdxl_txt2img", "sampler": "euler_a", "wait_s": 20})
     assert "euler_ancestral" in r.json()["job"]["error"]
     # a preset naming the checkpoint without its extension still resolves
     r = c.post(f"/api/agent/studio_generate_image?project={project_id}",
-               json={"prompt": "x", "style": "Anime cel", "wait_s": 20})
+               json={"prompt": "x", "template": "sdxl_txt2img", "style": "Anime cel", "wait_s": 20})
     assert r.json()["job"]["state"] == "done", r.json()
 
 
