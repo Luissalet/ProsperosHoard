@@ -1,12 +1,12 @@
-Vendored from: hoard-link (the shared model-backend resolver), package hoard_link/
-Source: a pre-release snapshot
-Vendored at: 2026-09-22
-License: MIT (same as this repository)
+Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.1.1
 
-This is a byte-for-byte copy of every hoard_link/*.py file at that commit.
+This is a byte-for-byte copy of every hoard_link/*.py file from that
+release. License: MIT
+(same as this repository).
+
 Do not modify these files. Prospero's Hoard talks to Hoard Link only
 through prosperos_hoard/backend.py, which wraps it (VRAM estimates per
 workflow family, ffmpeg/fonts/music status, the ComfyUI client on Hoard
 Link's own event loop). To update: replace every .py file here with the
-new commit's copies, update the commit line above, and run
+new release's copies, update the version line above, and run
 `pytest tests/test_backend.py tests/test_api.py`.
