@@ -118,8 +118,14 @@ def test_spa_fallback_never_serves_files_outside_dist(client):
         assert "root:" not in r.text and "def create_app" not in r.text and "comfy" not in r.text
 
 
-def test_import_refuses_traversal_outside_roots_and_renamed_files(client, tmp_path):
+def test_import_refuses_traversal_outside_roots_and_renamed_files(client, tmp_path, monkeypatch):
     c, app, allowed = client
+    # The home folder is an import root by design; on Windows the pytest
+    # tmp_path lives under it, so point home somewhere else first.
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
     project_id = _project(c, "Imports")
     outside = tmp_path / "secret.png"
     Image.new("RGB", (8, 8)).save(outside)
