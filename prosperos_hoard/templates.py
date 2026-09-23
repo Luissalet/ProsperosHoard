@@ -98,7 +98,8 @@ def photocard_front() -> dict[str, Any]:
         "width": w, "height": h, "radius": 48,
         "layers": [
             {"type": "rect", "x": 0, "y": 0, "w": w, "h": h, "fill": "#120d18ff"},
-            {"type": "image", "x": 0, "y": 0, "w": w, "h": photo_h, "asset": {"field": "image"}, "fit": "cover", "focal": [0.5, 0.35]},
+            {"type": "image", "x": 0, "y": 0, "w": w, "h": photo_h, "asset": {"field": "image"}, "fit": "cover",
+             "focal": "subject", "focal_fallback": [0.5, 0.35]},
             {"type": "holo", "x": 0, "y": 0, "w": w, "h": photo_h, "seed": {"field": "holo_seed", "default": 7}, "opacity": 0.16, "blend": "screen"},
             {"type": "rect", "x": 0, "y": photo_h - 260, "w": w, "h": 262,
              "gradient": {"colours": ["#120d1800", "#120d18ff"], "direction": "vertical"}},
