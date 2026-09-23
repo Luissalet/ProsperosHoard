@@ -322,6 +322,7 @@ class FakeComfyServer:
         self.history: dict[str, dict[str, Any]] = {}
         self.prompts_seen: list[dict[str, Any]] = []
         self.vram_free_bytes = 20_000_000_000
+        self.devices_override: Optional[list[dict]] = None  # tests: a custom /system_stats device list
         self._server = None
         self._thread: Optional[threading.Thread] = None
         self.port: Optional[int] = None
@@ -505,7 +506,8 @@ class FakeComfyServer:
         def system_stats():
             return {
                 "system": {"os": "linux", "comfyui_version": "fake-0.0"},
-                "devices": [{"name": "fake-gpu", "type": "cuda", "vram_total": 24_000_000_000, "vram_free": self.vram_free_bytes}],
+                "devices": self.devices_override if self.devices_override is not None else
+                [{"name": "fake-gpu", "type": "cuda", "vram_total": 24_000_000_000, "vram_free": self.vram_free_bytes}],
             }
 
         @app.get("/object_info")
