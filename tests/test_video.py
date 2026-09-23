@@ -106,7 +106,7 @@ def test_finishing_vf_builds_each_effect():
     assert "curves=preset=strong_contrast" in bleach_vf
 
     grain_vf = video.build_finishing_vf({"grain": 0.5}, 1080, 1920)
-    assert "noise=alls=20.0:allf=t+u" in grain_vf
+    assert "noise=c0s=12.0:c0f=t+u" in grain_vf  # luma only: chroma grain bloats the encode
 
     vignette_vf = video.build_finishing_vf({"vignette": True}, 1080, 1920)
     assert vignette_vf == "vignette=PI/5"

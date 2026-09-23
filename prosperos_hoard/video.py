@@ -118,7 +118,11 @@ def build_finishing_vf(finishing: Optional[dict[str, Any]], width: int, height: 
         parts.append(COLOR_GRADE_PRESETS[grade])
     grain = finishing.get("grain")
     if grain:
-        parts.append(f"noise=alls={float(grain) * 40:.1f}:allf=t+u")
+        # luma-only temporal grain: film grain lives in brightness, and noise
+        # on the chroma planes of a yuv420p frame is both uglier (coloured
+        # speckle) and far harder to encode - it made a 2 min 1080p final
+        # eight times bigger at the same CRF
+        parts.append(f"noise=c0s={float(grain) * 24:.1f}:c0f=t+u")
     if finishing.get("vignette"):
         parts.append("vignette=PI/5")
     if finishing.get("letterbox"):
