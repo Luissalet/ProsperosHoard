@@ -309,27 +309,46 @@ class Backend:
 
     # -- GPU ------------------------------------------------------------
     def vram_free_mb(self) -> Optional[int]:
-        """Free VRAM on the best GPU: nvidia-smi through Hoard Link first,
-        then ComfyUI's own `/system_stats` (covers non-NVIDIA or a ComfyUI
-        on another card). None when neither answers.
+        """VRAM a ComfyUI job can use, in MB; None when nothing answers.
+
+        ComfyUI's own `/system_stats` comes first: it describes the card
+        ComfyUI really runs on (a `--cuda-device` pick on a multi-GPU
+        machine, not whichever card happens to be freest), and its
+        `vram_free` already counts the models it keeps cached as evictable.
+        Memory its allocator has reserved is added back too - ComfyUI frees
+        both itself when the next job needs room, so treating them as used
+        would make a job wait for memory its own renderer is keeping warm.
+        nvidia-smi through Hoard Link (the freest card) is the fallback when
+        ComfyUI does not report devices.
 
         In demo mode the jobs run on the procedural fake ComfyUI, so only its
         `/system_stats` counts: the machine's real GPUs may be busy with other
         models, and that must not stop the demo from seeding."""
         from .hoard_link.gpu import gpu_free_mb
 
-        gpus = None if self.demo else gpu_free_mb()
+        comfy_free = self._comfy_available_mb()
+        if comfy_free is not None or self.demo:
+            return comfy_free
+        gpus = gpu_free_mb()
         if gpus:
             return max(g.free_mb for g in gpus)
+        return None
+
+    def _comfy_available_mb(self) -> Optional[int]:
         try:
             comfy = self.comfy()
             if comfy is None:
                 return None
             stats = self.run_async(comfy.system_stats())
-            frees = [int(d.get("vram_free", 0)) // (1024 * 1024) for d in stats.get("devices", []) if d.get("vram_free") is not None]
-            return max(frees) if frees else None
         except Exception:
             return None
+        frees: list[int] = []
+        for dev in stats.get("devices") or []:
+            if dev.get("vram_free") is None or str(dev.get("type") or "").lower() == "cpu":
+                continue
+            reserved_in_use = int(dev.get("torch_vram_total") or 0) - int(dev.get("torch_vram_free") or 0)
+            frees.append((int(dev["vram_free"]) + max(0, reserved_in_use)) // (1024 * 1024))
+        return max(frees) if frees else None
 
     def free_comfy_memory(self) -> dict[str, Any]:
         comfy = self.comfy()
