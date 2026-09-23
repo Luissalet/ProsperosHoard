@@ -3,8 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/
-data-demo/
-data-uxtest/
+data-*/
 node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
