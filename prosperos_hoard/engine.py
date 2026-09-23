@@ -10,6 +10,7 @@ import io
 import json
 import math
 import mimetypes
+import os
 import random
 import re
 import shutil
@@ -407,6 +408,27 @@ def _comfy(backend: Backend):
     return comfy
 
 
+# How long a job may take on ComfyUI. A render on a busy or shared card
+# takes far longer than on an idle one (a 5 s Wan clip: ~10 min on an idle
+# 16 GB card, 40+ min when a language model spills onto the same GPU), so
+# the wait is generous per output kind and PROSPERO_COMFY_TIMEOUT_S
+# overrides it for every kind.
+COMFY_TIMEOUT_S = {"video": 3600.0, "audio": 1800.0}
+COMFY_TIMEOUT_DEFAULT_S = 1200.0
+
+
+def comfy_timeout_s(kind: Optional[str]) -> float:
+    raw = os.environ.get("PROSPERO_COMFY_TIMEOUT_S", "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if value > 0:
+            return value
+    return COMFY_TIMEOUT_S.get(kind or "", COMFY_TIMEOUT_DEFAULT_S)
+
+
 def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
                          progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
     comfy = _comfy(backend)
@@ -428,7 +450,9 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
             break
         except TimeoutError:
             if time.monotonic() > deadline:
-                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s") from None
+                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
+                                  "(it may still be running there - check ComfyUI's queue; on a shared or busy "
+                                  "GPU raise PROSPERO_COMFY_TIMEOUT_S)") from None
     outputs = backend.run_async(comfy.outputs(prompt_id))
     saved = [o for o in outputs if o.type == "output"]
     if output_node:
@@ -582,7 +606,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
         t0 = time.monotonic()
         outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,
-                                      timeout_s=900.0 if spec.get("kind") == "video" else 600.0,
+                                      timeout_s=comfy_timeout_s(spec.get("kind")),
                                       output_node=spec.get("output_node"))
         if not outputs:
             raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")

@@ -147,8 +147,11 @@ each line's own text so a re-render is byte-identical.
 }
 ```
 
-Environment: `PROSPERO_DATA_DIR`, and Hoard Link's `HOARD_*_URL` overrides
-(for example `HOARD_COMFY_URL`, `HOARD_MUSIC_URL`).
+Environment: `PROSPERO_DATA_DIR`, `PROSPERO_COMFY_TIMEOUT_S` (how long a job
+may run on ComfyUI before it is reported as timed out; defaults 3600 s for
+video, 1800 s for audio, 1200 s for images - raise it when the GPU is shared
+with a language model), and Hoard Link's `HOARD_*_URL` overrides (for example
+`HOARD_COMFY_URL`, `HOARD_MUSIC_URL`).
 
 ## Music generation
 
