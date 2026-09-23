@@ -4,7 +4,7 @@
 ### Estamos hechos de la misma materia que los sueños: ¿puede un agente dirigir una producción entera?
 **Un estudio multimedia local que maneja tu ComfyUI, ffmpeg y una voz sintética local para crear personajes coherentes, photocards, portadas y videoclips montados al ritmo, a mano o por completo desde MCP, y que recuerda exactamente cómo se hizo cada recurso.**
 
-[English](README.md) · [Inicio rápido](#inicio-rápido) · [Conectar con Faustus](#conectarlo-a-faustus) · [Referencia MCP](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
+[English](README.md) · [Inicio rápido](#inicio-rápido) · [Producción real de ejemplo](#la-ejecución-real) · [Conectar con Faustus](#conectarlo-a-faustus) · [Referencia MCP](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
 
 ![Pantalla Generar: dos miembros del reparto mencionados con @, el prompt final con su aspecto insertado, el panel de parámetros y resultados anteriores](docs/media/01-generate.png)
 *Aplicación real, datos de demostración sintéticos. Todas las imágenes salen del backend de demostración incluido, un sustituto procedural de ComfyUI que dibuja escenas de relleno rotuladas; con tu ComfyUI conectado, las mismas pantallas muestran resultados reales de los modelos.*
@@ -62,7 +62,7 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (4 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura, con una variante «night» de terror/thriller para portada, cartel, tarjeta de letra y contraportada; degradados, lámina holográfica, modos de fusión, viñeta, espaciado de letras, sombras, texto que se encoge para caber y columnas para la lista de canciones; sets de photocards de un grupo entero o de un solista en varios looks, con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 6 familias tipográficas incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
 | Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla y una primera sincronización automática a partir de las etiquetas `[Section]` de la letra y los compases | La sincronización automática es una estimación por estructura, no alineación con la voz; las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
 | Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Solo voces sintéticas genéricas: no se clona la voz de nadie |
-| Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o una API HTTP mínima documentada para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Necesita el checkpoint de ACE-Step en ComfyUI; aún no se ha compuesto ninguna canción en una GPU real; las canciones importadas funcionan del todo igualmente |
+| Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o una API HTTP mínima documentada para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Necesita el checkpoint de ACE-Step en ComfyUI (el single del ejemplo se compuso con ACE-Step 1.5 turbo); las canciones importadas funcionan del todo igualmente |
 | Vídeo | Montaje automático al ritmo (densidad según la energía - según las marcas de estrofa/estribillo de la letra cuando las hay - destellos al inicio de cada frase musical, plano nuevo en cada sección y, si se pide, en cada verso cantado, guiones por sección en orden de historia, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
 | Control por agentes | 22 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
 | Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
@@ -210,7 +210,8 @@ a tus espaldas.
 ## Ejemplo de producción
 
 [`scripts/productions/no_mires_atras.py`](scripts/productions/no_mires_atras.py)
-produce un sencillo, «NO MIRES ATRÁS» de FAROL (una criatura nocturna
+produce un sencillo de FAROL, «NO MIRES ATRÁS» en español o, con `--lang en`,
+«DON'T LOOK BACK» en inglés (una criatura nocturna
 original: cabeza de farolillo de papel, siempre quieta, siempre un poco más
 cerca), de principio a fin **solo a través del adaptador MCP**: lanza
 `mcp_server.py` por stdio, el mismo camino que usa Faustus, y falla si algún
@@ -225,7 +226,7 @@ photocards de solista en cinco looks idol con su hoja de contactos; la
 portada, contraportada, cartel teaser y tarjeta de letra en variante
 «night»; la letra sincronizada con los compases; montajes 9:16 y 16:9 que
 siguen un guion por sección y cambian de plano en cada verso cantado, con
-gradación sodium-night, grano, viñeta y destello + glitch RGB en los
+gradación sodium-night, grano, viñeta y destello + glitch de separación de color en los
 tiempos fuertes del estribillo, y subtítulos karaoke de terror; y un
 `REPORT.md` con cada id de recurso, los tiempos y qué revisar. Guarda cada
 fotograma, clip, tarjeta y render según termina, así que una ejecución
@@ -241,28 +242,40 @@ de 16 GB:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
 # fijar el motor de imagen en vez de dejar que «auto» use Qwen-Image 2.1 primero
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --engine flux
+# la versión inglesa sobre una ejecución terminada: canción, diseños y montaje nuevos, mismas imágenes
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
 # tras resincronizar la letra de oído en Audio > Sincronizar letra y exportar el LRC
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<tu-usuario>\Music\no_mires_atras.lrc
 ```
 
-Qué se ha ejecutado y qué no: la producción completa se ejecutó en una
-máquina Linux sin GPU con `--backend fake --engine auto`, el sustituto
-procedural que usa `--demo`, así que sus imágenes, clips y canción son
-marcadores de posición etiquetados, no salida de Qwen-Image 2.1, Flux,
-Kontext, Wan ni ACE-Step (el backend falso reporta Qwen-Image 2.1 como
-instalado, así que «auto» usó `qwen21_txt2img` para la hoja de referencia y
-`qwen21_edit` para los fotogramas de FAROL - confirmado en el
-`recipe.image_engine` de cada recurso). Lo que sí demuestra es todo lo que
-decide el propio Prospero: cada paso termina y se produce cada tipo de
-recurso; composiciones, tipografía, gradación, grano, glitch, ritmo de
-corte, guion y sincronización del karaoke se renderizan como deben (revisar
-esos fotogramas es lo que trajo las variantes «night», el rediseño de los
-subtítulos y la corrección de las transiciones al fotograma). El ComfyUI
-falso sirve la lista de nodos de una instalación real de ComfyUI 0.37 y
-rechaza cualquier prompt que rechazaría el servidor real, y las seis
-plantillas se han comparado entrada a entrada con lo que exporta el
-frontend real, pero **aún no ha habido ninguna ejecución en una GPU
-real**: ese es el siguiente paso, con el mismo script.
+### La ejecución real
+
+El mismo script se ejecutó contra un ComfyUI 0.37 real en **una sola tarjeta
+de 16 GB**, en los dos idiomas (la versión inglesa reutiliza todas las
+imágenes y clips de la española con `--reuse-from`, así que solo se
+rehicieron su canción, sus diseños y su montaje). Qwen-Image 2.1 hizo la
+hoja de referencia, los fotogramas y las photocards; Wan 2.2 TI2V 5B, los
+clips, y ACE-Step 1.5, la canción. La referencia canónica y la mejor variante de cada plano se eligieron a ojo.
+La letra se alineó con la voz con faster-whisper (fuera de Prospero) y se
+importó como LRC. Todo lo de abajo sale tal cual de la aplicación, solo
+reducido de tamaño para esta página: no hay retoques. Los prompts, semillas,
+ajustes, tiempos y los siete problemas que encontró la ejecución (todos
+corregidos) están en el [ejemplo completo](docs/examples/no-mires-atras.es.md).
+
+![Portada: primer plano de la cabeza-farolillo con el título en la capa tipográfica de Prospero](docs/media/farol/cover.jpg)
+
+<p><img src="docs/media/farol/clip-over-shoulder.gif" width="49%" alt="Clip de Wan: por encima del hombro, FAROL quieto bajo la farola más cercana, acercamiento lento">
+<img src="docs/media/farol/clip-lantern.gif" width="49%" alt="Clip de Wan: la llama temblando dentro del farolillo, gotas en el papel"></p>
+
+![El mejor fotograma de cada uno de los doce planos: FAROL es la misma criatura en todos](docs/media/farol/stills.jpg)
+
+![El set de photocards: cinco looks idol, anversos y reversos](docs/media/farol/photocards.jpg)
+
+![Fotogramas del montaje 9:16 con los subtítulos karaoke de terror](docs/media/farol/cut-9x16.jpg)
+
+En esa tarjeta: 48 fotogramas en 57 min, siete clips de 5 s en unos 70 min,
+la canción en 41 s y los dos montajes (vista previa y final a 1080p) en
+6,5 min.
 
 ## Arquitectura
 
@@ -362,17 +375,17 @@ Python 3.11, 3.12 y 3.13 y compila la interfaz con Node.js 22.
 
 ## Hoja de ruta y límites conocidos
 
-- **Aún no hay ninguna ejecución en una GPU real**: las plantillas se
-  validan contra la lista de nodos de un ComfyUI 0.37 real y el conversor
-  coincide con la exportación del frontend real, pero desde este repositorio
-  todavía no se ha generado ninguna imagen, clip ni canción en una GPU. El
-  ejemplo de producción es el script para esa primera ejecución.
+- Elegir la mejor variante es manual (la producción guarda lo elegido); está
+  previsto un revisor automático que puntúe cada salida contra la biblia y
+  repita las flojas, y también recetas de producción que se puedan volver a
+  lanzar con otro reparto.
 - `consistent=true` mantiene el diseño de un personaje a partir de su
   referencia canónica; Kontext admite una sola referencia (Qwen-Image 2.1
   hasta 10) y Wan solo hace imagen a vídeo.
 - La sincronización automática de la letra es una estimación a partir de la
   estructura de la canción, no una alineación con la voz; para el montaje
-  final, resincronízala de oído en **Audio > Sincronizar letra**.
+  final, resincronízala de oído en **Audio > Sincronizar letra** o importa un
+  LRC alineado fuera (el ejemplo usó faster-whisper).
 - Las secciones se llaman «section A/B» con un nivel de energía, no
   estrofa/estribillo; las canciones muy rápidas (unos 170 BPM) se detectan a
   la mitad.
@@ -382,8 +395,6 @@ Python 3.11, 3.12 y 3.13 y compila la interfaz con Node.js 22.
   dirección de desplazamiento y las gradaciones de color son aproximaciones
   con filtros, no LUT 3D.
 - La capa QR del diseñador dibuja un recuadro de relleno.
-- Aún sin probar: una ejecución completa en Windows contra un ComfyUI real
-  con GPU.
 
 ## Licencia
 
