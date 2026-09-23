@@ -9,6 +9,7 @@
   or older than the sources. Extra arguments go to the app, e.g.
     scripts\start.ps1 --demo
     scripts\start.ps1 --port 8816 --no-browser
+    scripts\start.ps1 -Port 8816 -NoBrowser -Demo   (sibling-style switches)
 #>
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -94,5 +95,16 @@ if ($needBuild) {
     }
 }
 
-& $VenvPython -m prosperos_hoard @args
+# The sibling launchers take -Port/-Demo/-NoBrowser; accept those too and
+# pass everything else to the app unchanged.
+$AppArgs = @()
+foreach ($a in $args) {
+    switch -Exact ([string]$a) {
+        "-Port" { $AppArgs += "--port" }
+        "-Demo" { $AppArgs += "--demo" }
+        "-NoBrowser" { $AppArgs += "--no-browser" }
+        default { $AppArgs += $a }
+    }
+}
+& $VenvPython -m prosperos_hoard @AppArgs
 exit $LASTEXITCODE
