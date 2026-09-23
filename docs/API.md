@@ -157,7 +157,7 @@ once ComfyUI's `/object_info` has `TextEncodeAceStepAudio1.5` and a
 checkpoint named `ace_step*` (the `ace15_song` template), and `HttpMusic`
 below is the fallback for anything else.
 
-### Music backend contract (HttpMusic)
+### Music backend API (HttpMusic)
 
 Any local server implementing `POST {url}/generate` with
 `{"prompt", "lyrics", "duration_s", "seed"}` and answering audio bytes (wav or
