@@ -78,7 +78,9 @@ async def test_mcp_protocol_end_to_end(running_app):
             expected = {"studio_status", "studio_projects", "studio_create_project", "studio_cast", "studio_generate_image",
                         "studio_edit_image", "studio_animate", "studio_voice", "studio_compose", "studio_import",
                         "studio_analyze_audio", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_timeline", "studio_render",
-                        "studio_jobs", "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage"}
+                        "studio_jobs", "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage",
+                        "voice_engines", "voice_create", "voice_list", "voice_speak", "voice_transcribe",
+                        "voice_audiobook", "voice_dub", "voice_resynthesize_segment", "voice_job"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
@@ -166,6 +168,82 @@ async def test_mcp_protocol_end_to_end(running_app):
 
     calls = app.state.store.list_agent_calls(50)
     assert {c["tool"] for c in calls} >= {"studio_status", "studio_generate_image", "studio_show", "studio_design"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_voice_tools_end_to_end(running_app, monkeypatch):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    from prosperos_hoard import voice_engines as ve
+
+    class FakeTTS(ve.TTSEngine):
+        id = "fake-tts"
+        capabilities = ve.EngineCapabilities(languages=["en"], cloning=False)
+
+        def is_installed(self):
+            return True
+
+        def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
+            import numpy as np
+
+            n = max(1, len(text)) * 100
+            return ve.wav_bytes_mono16((np.sin(np.linspace(0, 10, n)) * 0.2).astype("float32"), 16000)
+
+    class FakeSTT(ve.STTEngine):
+        id = "fake-stt"
+        capabilities = ve.EngineCapabilities()
+
+        def is_installed(self):
+            return True
+
+        def transcribe(self, path, language=None, word_timestamps=True):
+            return {"language": "en", "text": "hello there",
+                    "segments": [{"start_s": 0.0, "end_s": 1.0, "text": "hello there", "words": []}]}
+
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_tts_engines", lambda **kw: [FakeTTS()])
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_stt_engines", lambda: [FakeSTT()])
+
+    url, app = running_app
+    params = StdioServerParameters(
+        command=sys.executable, args=[str(REPO_ROOT / "prosperos_hoard" / "mcp_server.py")],
+        env={**os.environ, "PROSPERO_URL": url},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            result = await session.call_tool("voice_engines", {})
+            data = json.loads(result.content[0].text)
+            assert any(e["id"] == "fake-tts" for e in data["tts"])
+            assert any(e["id"] == "fake-stt" for e in data["stt"])
+
+            result = await session.call_tool("studio_create_project", {"name": "Voice MCP Test"})
+            project_id = json.loads(result.content[0].text)["id"]
+
+            result = await session.call_tool("voice_speak", {"text": "hello there", "engine_id": "fake-tts",
+                                                              "project": project_id})
+            spoken = json.loads(result.content[0].text)
+            assert spoken["engine_id"] == "fake-tts"
+            assert spoken["kind"] == "audio"
+            asset_id = spoken["id"]
+
+            result = await session.call_tool("voice_transcribe", {"asset_id": asset_id})
+            transcript = json.loads(result.content[0].text)
+            assert transcript["text"] == "hello there"
+
+            result = await session.call_tool("voice_audiobook", {
+                "text": "Hello world. This is a narrated test.", "engine_id": "fake-tts", "wait_s": 30,
+            })
+            book = json.loads(result.content[0].text)
+            assert book["job"]["state"] == "done"
+
+            result = await session.call_tool("voice_job", {"job_id": book["job"]["id"]})
+            assert json.loads(result.content[0].text)["state"] == "done"
+
+            result = await session.call_tool("voice_create", {"name": "should fail", "engine_id": "fake-tts",
+                                                               "source_path": "/no/such/file.wav"})
+            assert result.isError is True
 
 
 @pytest.mark.asyncio
