@@ -264,6 +264,108 @@ export interface CuratedVoice {
   downloaded: boolean;
 }
 
+// ------------------------------------------------------------ voice studio
+
+export interface EngineCapabilities {
+  languages: string[];
+  cloning: boolean;
+  streaming: boolean;
+  needs_gpu: boolean;
+  multi_speaker: boolean;
+}
+
+export interface EngineStatus {
+  id: string;
+  label: string;
+  kind: "tts" | "stt";
+  installed: boolean;
+  capabilities: EngineCapabilities;
+  install_hint: string | null;
+  reason: string;
+}
+
+export interface VoiceSpec {
+  engine_id?: string | null;
+  voice_id?: string | null;
+  voice_ref?: string | null;
+  preset?: string | null;
+  speed?: number | null;
+  pitch?: number | null;
+  style?: string | null;
+  language?: string | null;
+}
+
+export interface VoiceQuality {
+  duration_s: number;
+  snr_db: number;
+  clipping_pct: number;
+  warnings: string[];
+  ok: boolean;
+}
+
+export interface StudioVoice {
+  id: string;
+  name: string;
+  engine_id: string;
+  language: string | null;
+  cloned: boolean;
+  has_sample: boolean;
+  quality: VoiceQuality;
+  presets: string[];
+  tags: string[];
+  project_id: string | null;
+  created_at: string;
+}
+
+export interface TranscriptSegment {
+  start_s: number;
+  end_s: number;
+  text: string;
+  words: { start_s: number; end_s: number; word: string }[];
+}
+
+export interface Transcript {
+  engine_id: string;
+  language: string | null;
+  text: string;
+  segments: TranscriptSegment[];
+  srt: string;
+  vtt: string;
+  txt: string;
+}
+
+export interface DubSegment {
+  index: number;
+  start_s: number;
+  end_s: number;
+  source_text: string;
+  translated_text: string;
+  engine_id?: string;
+  fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean };
+}
+
+export interface AudiobookOutputs {
+  title: string;
+  chapters: { index: number; title: string; start_s: number; end_s: number; duration_s: number }[];
+  sentence_count: number;
+  format: string;
+  duration_s: number;
+  final_file?: string;
+  srt_file?: string;
+  lrc_file?: string;
+  asset_ids?: string[];
+}
+
+export interface DubOutputs {
+  title: string;
+  final_video?: string;
+  subtitles?: string;
+  background_separated?: boolean;
+  work_dir?: string;
+  segments?: DubSegment[];
+  asset_ids?: string[];
+}
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -401,4 +503,61 @@ export const api = {
   setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/api/backend", patch),
   freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
   agentCalls: (limit = 100) => request<{ items: AgentCall[] }>("GET", `/api/agent-calls${q({ limit })}`),
+
+  // -------------------------------------------------------------- voice studio
+  voiceEngines: () => request<{ tts: EngineStatus[]; stt: EngineStatus[] }>("GET", "/api/voice/engines"),
+  installVoiceEngine: (engineId: string, kind: "tts" | "stt") =>
+    request<Job>("POST", `/api/voice/engines/${engineId}/install`, { kind }),
+
+  studioVoices: (project?: string, engineId?: string) =>
+    request<{ items: StudioVoice[] }>("GET", `/api/voice/voices${q({ project, engine_id: engineId })}`),
+  studioVoice: (id: string) => request<StudioVoice>("GET", `/api/voice/voices/${id}`),
+  createStudioVoice: (name: string, engineId: string, sourcePath: string, opts: { language?: string; project?: string; tags?: string[] } = {}) =>
+    request<StudioVoice>("POST", "/api/voice/voices", { name, engine_id: engineId, source_path: sourcePath, ...opts }),
+  uploadStudioVoice: (file: File, name: string, engineId: string, opts: { language?: string; project?: string } = {}) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<StudioVoice>("POST", `/api/voice/voices/upload${q({ name, engine_id: engineId, ...opts })}`, fd);
+  },
+  updateStudioVoice: (id: string, patch: { name?: string; tags?: string[]; notes?: string }) =>
+    request<StudioVoice>("PATCH", `/api/voice/voices/${id}`, patch),
+  deleteStudioVoice: (id: string) => request<{ ok: boolean }>("DELETE", `/api/voice/voices/${id}`),
+  addVoicePreset: (id: string, preset: { name: string; speed?: number; pitch?: number; style?: string }) =>
+    request<StudioVoice>("POST", `/api/voice/voices/${id}/presets`, preset),
+  voiceSampleUrl: (id: string) => `/api/voice/voices/${id}/sample`,
+  previewStudioVoice: (id: string, text: string, spec: VoiceSpec = {}) =>
+    request<Blob>("POST", `/api/voice/voices/${id}/preview`, { text, voice: spec }),
+
+  speak: (text: string, voice: VoiceSpec, project?: string) =>
+    request<Blob | Asset>("POST", "/api/voice/speak", { text, voice, project }),
+
+  transcribe: (body: { path?: string; asset_id?: string; language?: string; engine_id?: string; word_timestamps?: boolean }) =>
+    request<Transcript & { text: string; language: string | null }>("POST", "/api/voice/transcribe", body),
+  transcribeUpload: (file: File, opts: { language?: string; engineId?: string } = {}) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<Transcript & { text: string; language: string | null }>(
+      "POST", `/api/voice/transcribe/upload${q({ language: opts.language, engine_id: opts.engineId })}`, fd);
+  },
+  dictate: (file: File | Blob, language?: string) => {
+    const fd = new FormData();
+    fd.append("file", file, "clip.wav");
+    return request<{ text: string; language: string | null; engine_id: string }>(
+      "POST", `/api/voice/dictate${q({ language })}`, fd);
+  },
+
+  audiobook: (body: { text?: string; source_path?: string; title?: string; voice: VoiceSpec; format?: "mp3" | "m4b"; project?: string; wait_s?: number }) =>
+    request<{ job: Job }>("POST", "/api/voice/audiobook", body),
+  audiobookStatus: (jobId: string) => request<Job>("GET", `/api/voice/audiobook/${jobId}`),
+  audiobookDownloadUrl: (jobId: string, file: "final" | "srt" | "lrc" = "final") =>
+    `/api/voice/audiobook/${jobId}/download${q({ file })}`,
+
+  dub: (body: { source_path?: string; video_asset_id?: string; target_language: string; source_language?: string;
+                glossary?: Record<string, string>; voice: VoiceSpec; stt_engine_id?: string; title?: string;
+                project?: string; wait_s?: number }) =>
+    request<{ job: Job }>("POST", "/api/voice/dub", body),
+  dubStatus: (jobId: string) => request<Job>("GET", `/api/voice/dub/${jobId}`),
+  dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/api/voice/dub/${jobId}/download${q({ file })}`,
+  resynthesizeDubSegment: (jobId: string, index: number, opts: { text?: string; voice?: VoiceSpec; remix?: boolean } = {}) =>
+    request<{ segment: DubSegment }>("POST", `/api/voice/dub/${jobId}/segments/${index}/resynthesize`, opts),
 };

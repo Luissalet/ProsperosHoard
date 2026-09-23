@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity, AudioLines, Clapperboard, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Moon,
+  Activity, AudioLines, Clapperboard, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
   Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
@@ -23,6 +23,7 @@ import { JobsView } from "./views/Jobs";
 import { BackendsView } from "./views/Backends";
 import { ActivityView } from "./views/Activity";
 import { SettingsView } from "./views/Settings";
+import { VoiceView } from "./views/Voice";
 
 const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "overview", key: "navOverview", icon: LayoutDashboard },
@@ -36,6 +37,7 @@ const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = 
 ];
 const GLOBAL_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "projects", key: "navProjects", icon: FolderKanban },
+  { id: "voice", key: "navVoice", icon: Mic2 },
   { id: "jobs", key: "navJobs", icon: ListChecks },
   { id: "backends", key: "navBackends", icon: Server },
   { id: "activity", key: "navActivity", icon: Activity },
@@ -163,6 +165,7 @@ export default function App() {
   else if (section === "audio") view = <AudioView key={projectId} />;
   else if (section === "timeline") view = <TimelineView key={projectId} />;
   else if (section === "boards") view = <BoardsView key={projectId} />;
+  else if (section === "voice") view = <VoiceView />;
   else if (section === "jobs") view = <JobsView projects={projects} />;
   else if (section === "backends") view = <BackendsView />;
   else if (section === "activity") view = <ActivityView />;
