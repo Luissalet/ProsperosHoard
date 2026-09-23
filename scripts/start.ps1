@@ -30,9 +30,27 @@ function Find-Python {
     throw "Python 3.11+ was not found. Install Python 3.13 (C:\Python313) and run this again."
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+    # .NET SHA256 instead of Get-FileHash: Get-FileHash does not load when
+    # Windows PowerShell 5.1 is started from PowerShell 7 (pwsh).
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha256.Dispose()
+    }
+    return [System.BitConverter]::ToString($bytes).Replace("-", "")
+}
+
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 $Stamp = Join-Path $Root ".venv\.lock-hash"
-$LockHash = (Get-FileHash -LiteralPath (Join-Path $Root "requirements-lock.txt") -Algorithm SHA256).Hash
+$LockHash = Get-FileSha256 (Join-Path $Root "requirements-lock.txt")
 
 if (-not (Test-Path -LiteralPath $VenvPython)) {
     $py = Find-Python
@@ -60,13 +78,15 @@ if (-not $needBuild) {
     if ($newest -and $newest.LastWriteTimeUtc -gt $built) { $needBuild = $true }
 }
 if ($needBuild) {
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
+    if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
         Write-Host "Building the interface (npm ci && npm run build)..."
         Push-Location -LiteralPath (Join-Path $Root "frontend")
         try {
-            npm ci
+            # npm.cmd, not npm: Node 22's npm.ps1 shim misreads "& npm ci" as
+            # "pm ci" when invoked this way from Windows PowerShell.
+            & npm.cmd ci
             if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-            npm run build
+            & npm.cmd run build
             if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
         } finally { Pop-Location }
     } else {
