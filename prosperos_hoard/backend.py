@@ -19,10 +19,11 @@ from typing import Any, Optional
 from . import procutil
 from .hoard_link import Link, LinkConfig, Unavailable
 
-# SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step figures from the model notes; editable
-# at runtime via data/backend.json -> "vram_estimates_mb". Flux and Kontext
-# fp8: ~13 GB; Wan 5B at 1280x704 (lower at 960x544): ~12 GB; ACE-Step 1.5
-# turbo: ~8 GB.
+# SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
+# spec; editable at runtime via data/backend.json -> "vram_estimates_mb".
+# Flux and Kontext fp8: ~13 GB; Wan 5B at 1280x704 (lower at 960x544): ~12 GB;
+# ACE-Step 1.5 turbo: ~8 GB; Qwen-Image 2.1 int8: ~7.3 GB diffusion + 9.4 GB
+# text encoder loaded one after the other, peak ~10-12 GB at 1 MP (more at 2K).
 DEFAULT_VRAM_ESTIMATES_MB = {
     "sdxl": 7000,
     "sd15": 3500,
@@ -31,6 +32,7 @@ DEFAULT_VRAM_ESTIMATES_MB = {
     "kontext": 13000,
     "wan": 12000,
     "ace": 8000,
+    "qwen21": 12000,
 }
 
 

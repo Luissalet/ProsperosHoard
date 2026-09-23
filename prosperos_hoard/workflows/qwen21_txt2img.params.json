@@ -1,0 +1,35 @@
+{
+  "template": "qwen21_txt2img",
+  "kind": "image",
+  "vram_class": "qwen21",
+  "map": {
+    "positive_prompt": "459:452.prompt",
+    "negative_prompt": "459:452.negative_prompt",
+    "resolution": "459:452.resolution",
+    "width": "459:456.width",
+    "height": "459:456.height",
+    "batch_size": "459:456.batch_size",
+    "seed": "459:458.seed",
+    "steps": "459:458.steps",
+    "cfg": "459:458.cfg",
+    "sampler": "459:458.sampler_name",
+    "scheduler": "459:458.scheduler",
+    "denoise": "459:458.denoise",
+    "unet_name": "459:451.unet_name",
+    "clip_name": "459:453.clip_name",
+    "vae_name": "459:454.vae_name"
+  },
+  "output_node": "461",
+  "model_params": ["unet_name", "clip_name", "vae_name"],
+  "notes": "Qwen-Image 2.1 (int8), text-to-image. Converted from the official image_qwen_image_2_1_t2i.json template (its promoted-widget subgraph expanded - see docs/ARCHITECTURE.md): UNETLoader/CLIPLoader/VAELoader load the three real files (qwen_image_2.1_int8_convrot.safetensors, qwen3vl_8b_int8_convrot.safetensors, qwen_image_2.1_vae_bf16.safetensors), not a single checkpoint, so unet_name/clip_name/vae_name are ordinary editable parameters (like flux_kontext_edit's) rather than going through the single-checkpoint cross-check sdxl/flux_schnell/ace15_song get - a missing file is still caught before queueing (validate_against_object_info) and reported as 'download it', never a crash. The official template's ResolutionSelector (aspect-ratio preset + megapixel budget) is replaced by direct, editable width/height on EmptyLatentImage so callers can set an exact size (multiples of 16; presets: 1:1 1024x1024, 16:9 1344x768 or 1920x1088, 4:5 1024x1280, 9:16 768x1344, 2K 2048x2048 - native 2K is supported at higher VRAM/time cost). `resolution` is TextEncodeQwenImage21's own pixel-budget widget (unrelated to output size): kept at its default. `negative_prompt` defaults to empty like the official template; Qwen-Image 2.1 has strong prompt adherence and renders in-image typography well, so exact text belongs in the prompt when wanted.",
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 25,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "resolution": 1024,
+    "negative_prompt": ""
+  }
+}

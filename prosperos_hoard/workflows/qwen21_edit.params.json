@@ -1,0 +1,48 @@
+{
+  "template": "qwen21_edit",
+  "kind": "image",
+  "vram_class": "qwen21",
+  "map": {
+    "positive_prompt": "459:474.prompt",
+    "negative_prompt": "459:474.negative_prompt",
+    "resolution": "459:474.resolution",
+    "custom_size": "459:468.switch",
+    "width": "459:456.width",
+    "height": "459:456.height",
+    "seed": "459:458.seed",
+    "steps": "459:458.steps",
+    "cfg": "459:458.cfg",
+    "sampler": "459:458.sampler_name",
+    "scheduler": "459:458.scheduler",
+    "denoise": "459:458.denoise",
+    "unet_name": "459:451.unet_name",
+    "clip_name": "459:453.clip_name",
+    "vae_name": "459:454.vae_name",
+    "device": "459:469.device",
+    "dtype": "459:469.dtype"
+  },
+  "output_node": "461",
+  "model_params": ["unet_name", "clip_name", "vae_name"],
+  "requires_reference": true,
+  "reference_group": {
+    "encode_node": "459:474",
+    "prefix": "images.image_",
+    "nodes": ["470", "475"],
+    "min": 1,
+    "max": 10
+  },
+  "notes": "Qwen-Image 2.1 (int8), multi-reference edit: refer to each reference in the prompt as <image1>, <image2>, ... - image_1 is the edit target/main identity (required), up to 9 more optional references (a location plate, a prop, a garment) follow in the order given. `custom_size` false (default) sizes the canvas from image_1's own encode latent (ComfySwitchNode picks TextEncodeQwenImage21's latent output); true switches to the explicit, editable width/height on EmptyLatentImage instead (multiples of 16). `resolution` is the pixel budget references are resized to before encoding (0 = keep each reference's own size, rounded to 32; default 1024). Converted from the official image_qwen_image_2_1_image_edit.json template (its promoted-widget subgraph expanded, autogrow `images.*` sockets - see docs/ARCHITECTURE.md); the preview-only ImageCompare node is dropped (nothing downstream reads it). `comfy_driver.wire_reference_group()` adds/removes the extra LoadImage nodes (3-10) and their `images.image_N` links at run time to match how many reference images a call actually supplies. Character consistency (`consistent=true`) with this engine sends the canonical reference crop as image_1 and any extra refs (location, prop) after it - see engine.build_kontext_instruction's Qwen branch.",
+  "defaults": {
+    "steps": 25,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "resolution": 1024,
+    "custom_size": false,
+    "width": 1024,
+    "height": 1024,
+    "negative_prompt": "",
+    "device": "auto",
+    "dtype": "default"
+  }
+}

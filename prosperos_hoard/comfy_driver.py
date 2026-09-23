@@ -31,9 +31,9 @@ MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
 MAX_WORKFLOW_NODES = 400
 MAX_JSON_DEPTH = 12
 
-OUTPUT_CLASSES = {"SaveImage": "image", "SaveAnimatedWEBP": "video", "VHS_VideoCombine": "video", "SaveVideo": "video",
-                  "SaveAudioMP3": "audio", "SaveAudio": "audio"}
-VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace")
+OUTPUT_CLASSES = {"SaveImage": "image", "SaveImageAdvanced": "image", "SaveAnimatedWEBP": "video",
+                  "VHS_VideoCombine": "video", "SaveVideo": "video", "SaveAudioMP3": "audio", "SaveAudio": "audio"}
+VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace", "qwen21")
 
 # Inputs we know how to recognise when importing a custom workflow, and the
 # friendly parameter each maps to. CLIPTextEncode prompts are resolved to
@@ -386,6 +386,36 @@ def apply_params(workflow: dict[str, Any], spec: dict[str, Any], values: dict[st
             if node_id in wf:
                 wf[node_id].setdefault("inputs", {})[input_name] = values[friendly]
     return wf
+
+
+def wire_reference_group(workflow: dict[str, Any], spec: dict[str, Any], filenames: list[str]) -> dict[str, Any]:
+    """Mutate `workflow` in place for a multi-reference template's
+    `reference_group` (an autogrow socket like Qwen-Image 2.1's
+    `images.image_1..N`, see `workflows/convert.py`): add or reuse a
+    `LoadImage` node per filename, wired into the encoder's `images.image_i`
+    input in order, and drop any of the template's declared slots this call
+    does not use (both the node and its autogrow link) so the graph only
+    ever carries as many references as it was actually given. Returns
+    `workflow` for convenience."""
+    group = spec.get("reference_group")
+    if not group:
+        return workflow
+    encode_node, prefix, nodes = group["encode_node"], group["prefix"], list(group.get("nodes") or [])
+    max_count = int(group.get("max", len(nodes)))
+    while len(nodes) < max_count:
+        nodes.append(f"{encode_node}_ref{len(nodes) + 1}")
+    encode_inputs = workflow[encode_node]["inputs"]
+    for i, filename in enumerate(filenames[:max_count]):
+        node_id = nodes[i]
+        if node_id in workflow:
+            workflow[node_id]["inputs"]["image"] = filename
+        else:
+            workflow[node_id] = {"class_type": "LoadImage", "inputs": {"image": filename}}
+        encode_inputs[f"{prefix}{i + 1}"] = [node_id, 0]
+    for i in range(len(filenames), max_count):
+        workflow.pop(nodes[i], None)
+        encode_inputs.pop(f"{prefix}{i + 1}", None)
+    return workflow
 
 
 def default_value(workflow: dict[str, Any], spec: dict[str, Any], friendly: str) -> Any:
