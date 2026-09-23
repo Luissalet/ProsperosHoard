@@ -652,7 +652,8 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
               f"- Reference sheet seeds: {d2['reference_asset_ids']} (sheet used: `{d2.get('sheet_asset_id', '-')}`)",
               f"- Canonical reference: `{d2['canonical_asset_id']}` - the front view cropped out of the sheet "
               f"({d2.get('canonical_crop', 'full')})" +
-              (" **(provisional: first seed - confirm before the cards go out)**" if args.backend == "real" else ""), ""]
+              (f" - picked by eye: {d2['picked_by_eye']}" if d2.get("picked_by_eye") else
+               " **(provisional: first seed - confirm before the cards go out)**" if args.backend == "real" else ""), ""]
 
     lines += ["## Song", "", f"- Takes: {done['3']['song_asset_ids']}",
               f"- Used for the timeline: `{done['3']['song_asset_id']}` ({_mmss(done['3'].get('duration_s') or 0)})",
@@ -662,21 +663,23 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
 
     lines += ["## Stills (12 shots)", "", "| Shot | route | 16:9 variants | best | 4:5 post |", "| --- | --- | --- | --- | --- |"]
     for n, entry in sorted(done["4"]["stills"].items(), key=lambda kv: int(kv[0])):
-        lines.append(f"| {n} | {entry.get('route', 'kontext')} | {entry['aspect_16_9']} | `{entry['best']}` | "
+        best = f"`{entry['best']}`" + (" (picked by eye)" if entry.get("picked_by_eye") else "")
+        lines.append(f"| {n} | {entry.get('route', 'kontext')} | {entry['aspect_16_9']} | {best} | "
                      f"{entry.get('aspect_4_5', '-')} |")
-    lines += ["", "Shots 4, 9 and 12 do not show FAROL, so they are generated fresh (Flux schnell, same night look) "
-              "instead of edited from FAROL's reference - a Kontext edit keeps the character in frame.", ""]
+    lines += ["", "Shots 4, 9 and 12 do not show FAROL, so they are generated fresh by txt2img in the same night look "
+              "instead of edited from FAROL's reference - an edit from the reference keeps the character in frame.", ""]
 
     if "5" in done:
         lines += ["## Clips (Wan 2.2 TI2V, 5 s from the best still)", "", "| Shot | clip asset | motion |", "| --- | --- | --- |"]
         for n, cid in sorted(done["5"]["clips"].items(), key=lambda kv: int(kv[0])):
-            lines.append(f"| {n} | `{cid}` | {CLIP_MOTION.get(int(n), '')} |")
+            still = " (negative without the stock stillness terms, plus walking)" if int(n) in CLIP_STILL_FIGURE else ""
+            lines.append(f"| {n} | `{cid}` | {CLIP_MOTION.get(int(n), '')}{still} |")
         lines.append("")
 
     if "6" in done:
         d6 = done["6"]
         lines += ["## Photocards (solo set, one card per look)", "",
-                  f"- Photos (Kontext, 2:3): {d6.get('photo_ids', [])}",
+                  f"- Photos (edit from FAROL's reference, {args.engine} engine, 2:3): {d6.get('photo_ids', [])}",
                   f"- Fronts: {d6['front_ids']}", f"- Backs: {d6['back_ids']}",
                   f"- Contact sheet: `{d6.get('contact_sheet_id', '-')}`", ""]
 
@@ -692,7 +695,7 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
         lines += ["## Timeline", "", f"- Lyrics: `{t['lyrics_asset_id']}` - {t.get('lyrics_source', '')}",
                   f"- Finishing: {finishing_str}",
                   "- Cut: a new shot on every sung line and every section start; two-bar holds in the intro, "
-                  "bridge and outro, half-bar cuts with a white flash + RGB glitch on the chorus's strong downbeats; "
+                  "bridge and outro, half-bar cuts with a white flash + colour-split glitch on the chorus's strong downbeats; "
                   "shots follow the storyboard (`STORYBOARD` in this script) section by section", ""]
         if t.get("sections"):
             lines += ["| Section | energy | from | to |", "| --- | --- | --- | --- |"]
@@ -703,17 +706,25 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
             lines.append(f"- {aspect}: timeline `{info['timeline_id']}` ({info.get('clips') or '?'} clips), renders {info['renders']}")
         lines.append("")
 
+    picked = bool(done["2"].get("picked_by_eye")) and all(e.get("picked_by_eye") for e in done["4"]["stills"].values())
+    imported_lrc = str(done.get("8", {}).get("lyrics_source", "")).startswith("imported")
     lines += ["## What to review", "",
-              "- The canonical FAROL reference: first sheet seed, front third. If another seed or pose reads "
-              "better: `studio_cast` update with `canonical_asset_id` + `canonical_crop`, then `--only stills` "
-              "and the steps after it.",
-              "- The best variant of each still (the first one is used): swap `best` in state.json, then "
-              "`--only clips`, `--only album`, `--only timeline`.",
-              "- Karaoke timing: estimated from the lyrics' [Section] tags and the song's bars, not from the "
-              "vocals. Re-time by ear in Audio > Lyrics timing (tap Space per line, [Section] lines included), export "
-              "the LRC and run `--only timeline --lrc-path <file>`.",
-              "- VRAM per step (Flux/Kontext ~13 GB, Wan 5B ~12 GB at 1280x704, ACE-Step 1.5 turbo ~8 GB): run "
-              "ComfyUI on a card with 16 GB or more (`--cuda-device` picks it on a multi-GPU machine).",
+              ("- The canonical reference and the best still of each shot were picked by eye (`picked_by_eye` in "
+               "state.json). To change one: `studio_cast` update with `canonical_asset_id` + `canonical_crop` "
+               "(then `--only stills` and after), or swap `best` in state.json (then `--only clips`, `--only album`, "
+               "`--only timeline`)." if picked else
+               "- The canonical FAROL reference: first sheet seed, front third. If another seed or pose reads "
+               "better: `studio_cast` update with `canonical_asset_id` + `canonical_crop`, then `--only stills` "
+               "and the steps after it."),
+              *([] if picked else ["- The best variant of each still (the first one is used): swap `best` in state.json, then "
+                                   "`--only clips`, `--only album`, `--only timeline`."]),
+              ("- Karaoke timing: imported from an LRC aligned to the vocals; nudge any line by ear in Audio > "
+               "Lyrics timing, export the LRC and run `--only timeline --lrc-path <file>`." if imported_lrc else
+               "- Karaoke timing: estimated from the lyrics' [Section] tags and the song's bars, not from the "
+               "vocals. Re-time by ear in Audio > Lyrics timing (tap Space per line, [Section] lines included), export "
+               "the LRC and run `--only timeline --lrc-path <file>`."),
+              "- VRAM per step (Qwen-Image 2.1 or Flux/Kontext ~12-13 GB, Wan 5B ~12 GB at 1280x704, ACE-Step 1.5 "
+              "turbo ~8 GB): run ComfyUI on a card with 16 GB or more (`--cuda-device` picks it on a multi-GPU machine).",
               "- The `final` render (1080p) after approving the `preview`.", ""]
 
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
