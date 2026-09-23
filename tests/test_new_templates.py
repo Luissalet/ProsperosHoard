@@ -274,6 +274,25 @@ def test_compose_song_duration_reaches_both_ace_nodes(store, backend_with_comfy,
     assert _node(wf, "EmptyAceStep1.5LatentAudio")["seconds"] == 9
 
 
+def test_wan_negative_prompt_defaults_to_stock_and_explicit_one_replaces_it(store, backend_with_comfy,
+                                                                            fake_comfy, project):
+    """The stock Wan negative (which pushes away from static frames) is the
+    default; a caller who wants a still subject passes its own, and that one
+    reaches ComfyUI instead of being appended to the stock list."""
+    still_id = _still(store, backend_with_comfy, project, 1344, 768)
+    _, spec = comfy_driver.load_template("wan22_ti2v")
+    stock = spec["defaults"]["negative_prompt"]
+    base = {"prompt": "rain", "positive_prompt": "rain", "seed": 3, "count": 1,
+            "template": "wan22_ti2v", "reference_asset_id": still_id}
+    done = _run_job(store, backend_with_comfy, "generate_image", {**base, "negative_prompt": ""}, project["id"])
+    assert done["state"] == "done", done
+    assert _last_prompt(fake_comfy)["7"]["inputs"]["text"] == stock
+    done = _run_job(store, backend_with_comfy, "generate_image",
+                    {**base, "negative_prompt": "walking, stepping"}, project["id"])
+    assert done["state"] == "done", done
+    assert _last_prompt(fake_comfy)["7"]["inputs"]["text"] == "walking, stepping"
+
+
 def test_fake_comfy_rejects_what_the_real_server_rejects(fake_comfy):
     import httpx
 

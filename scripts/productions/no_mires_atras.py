@@ -158,14 +158,25 @@ SHOTS = [
                                         "the switch, the room slowly filling with a sodium-orange glow from the window"},
 ]
 CLIP_MOTION = {
-    1: "light rain falling, the far lamp flickering",
-    2: "light rain falling, a subtle slow push-in",
-    3: "the candle flame flickering gently inside the lantern",
-    5: "rain streaking down the glass, a slow push-in",
-    7: "a washing machine spinning, faint fluorescent flicker",
-    10: "rain on the window glass, the street lamp flickering",
+    1: "light rain falling, the far lamp flickering, fog drifting; the tall figure under the lamp stands "
+       "perfectly still and does not walk",
+    2: "light rain falling, a subtle slow push-in; the figure under the lamp stays perfectly still",
+    3: "the candle flame flickering gently inside the lantern, raindrops sliding down the paper",
+    5: "rain streaking down the glass, a slow push-in; the reflected figure stays perfectly still",
+    7: "a washing machine spinning, faint fluorescent flicker; the seated figure stays perfectly still",
+    10: "rain on the window glass, the street lamp flickering; the figure on the street stays perfectly "
+        "still, looking up",
     12: "the room slowly brightening into sodium orange, a very slow push-in",
 }
+# FAROL is "never shown mid-stride - always still, always a little closer".
+# Wan's stock negative prompt pushes *away* from stillness (it lists
+# "static" and "motionless frame"), so the shots where FAROL is visible
+# get the stock negative without those terms, plus walking.
+CLIP_STILL_FIGURE = {1, 2, 5, 7, 10}
+CLIP_NEGATIVE_STILL = ("色调艳丽，过曝，细节模糊不清，字幕，风格，作品，画作，画面，整体发灰，最差质量，低质量，"
+                       "JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
+                       "形态畸形的肢体，手指融合，杂乱的背景，三条腿，背景人很多，倒着走，走路，迈步，"
+                       "walking, stepping, striding, moving figure, turning around")
 
 SONG_TAGS = ("dark trap, horror rap, eerie music box melody, detuned piano, heavy 808, half-time 140 "
              "bpm, whispered ad-libs, male rap vocals, spanish, minor key, cinematic, tape hiss, rain ambience")
@@ -486,9 +497,11 @@ async def step_clips(session: Any, state: dict[str, Any], args: argparse.Namespa
         best = stills[str(n)]["best"]
         # template defaults: 1280x704 (follows the still's aspect), 121 frames
         # at 24 fps = 5 s, 20 steps, cfg 5, shift 8, uni_pc
-        ids = await _generate(session, {"project": pid, "template": "wan22_ti2v", "reference_asset_id": best,
-                                        "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "seed": 5000 + n},
-                              timeout_s=1800)
+        gen: dict[str, Any] = {"project": pid, "template": "wan22_ti2v", "reference_asset_id": best,
+                               "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "seed": 5000 + n}
+        if n in CLIP_STILL_FIGURE:
+            gen["negative"] = CLIP_NEGATIVE_STILL
+        ids = await _generate(session, gen, timeout_s=1800)
         clips[str(n)] = ids[0]
         save_partial(state, 5, str(n), ids[0])
         print(f"  shot {n} clip: {clips[str(n)]}")
