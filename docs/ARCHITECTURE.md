@@ -28,6 +28,14 @@ prosperos_hoard/
   audio.py         ffmpeg decode/probe, waveform, onset envelope, tempo, beat tracker,
                    downbeats, sections, LRC, lyric timing from [Section] tags + bars
   voices.py        Piper (curated voices, atomic download) and Faustus TTS via Hoard Link
+                   for character narration (studio_voice) - unrelated to the voice studio below
+  voice_engines.py registry of pluggable TTS/STT engines (optional-import, install hints,
+                   never downloads a model on its own); see VOICE.md
+  voice_lab.py     voice library: sample processing (trim, loudnorm), quality check, storage
+  voice_pipelines.py long-form narration: chapters/sentences, per-chapter synthesis job,
+                   ffmpeg assembly (mp3/m4b), SRT/LRC export
+  dubbing.py       dub pipeline: extract, transcribe, translate (Hoard Link), synthesize,
+                   time-fit, mix/mux; per-segment re-run
   timeline.py      auto-cut, edit validation, clip updates, compact view (pure Python)
   video.py         ffmpeg command builders, ASS subtitles and escaping, renderer,
                    animated WebP -> mp4
@@ -62,6 +70,9 @@ One SQLite file, `<data>/prosperos.sqlite3`, WAL mode:
 - `jobs` (type, lane gpu|cpu, params, state, progress, message, outputs, log
   excerpt, cancel flag, timestamps), `agent_calls` (tool, arguments summary,
   duration, ok, error)
+- `studio_voices` (schema v5): a saved voice-studio voice - engine, an
+  optional processed sample path, language, whether it was cloned from a
+  sample, a reference transcript, a quality report, named presets, tags
 
 A **recipe** for a ComfyUI asset holds `operation, backend, template,
 template_hash, checkpoint, params` (every friendly parameter written into the
@@ -71,9 +82,13 @@ same workflow graph, so the same backend returns the same image (the test uses
 the deterministic demo backend and compares pixel hashes).
 
 Files under `<data>/`: `assets/`, `thumbs/` (WebP 512), `voices/` (Piper),
-`workflows/` (imported workflows), `inbox/` (always-allowed import folder),
-`tmp/` (render and upload scratch), `logs/app.log` (rotating), `backend.json`
-(overrides and the Faustus token), `fake_comfy/` in demo mode.
+`voice_studio/voices/<voice>/sample.wav` (processed voice-library samples),
+`voice_studio/audiobooks/<job>/` and `voice_studio/dub/<job>/` (per-job
+work directories: chapter/segment files, the manifest a dub job's
+per-segment re-run reads back), `workflows/` (imported workflows), `inbox/`
+(always-allowed import folder), `tmp/` (render and upload scratch),
+`logs/app.log` (rotating), `backend.json` (overrides and the Faustus
+token), `fake_comfy/` in demo mode.
 
 ## Threads and processes
 
@@ -245,7 +260,16 @@ apart), segments that sound alike share a letter, energy relative to the song.
   kick-and-snare patterns (90, 100 with hats, 120, 140 BPM) and the demo song.
 - **Synchronous operations**: voice, import, analysis, design, photocard sets and
   timeline building return directly (each takes seconds at most); generation,
-  edits, animation, renders and voice downloads are jobs.
+  edits, animation, renders and voice downloads are jobs. So are the voice
+  studio's `audiobook` and `dub` pipelines and `install_voice_engine` (a
+  `pip install` in the app's own interpreter, never run without the user
+  asking); an audiobook or dub job re-run with the same inputs resumes from
+  whatever chapters/segments already rendered instead of redoing them.
+- **Voice engines are optional imports**: `voice_engines.py` checks
+  installability with `importlib.util.find_spec` (cheap, no import) and only
+  imports the real library inside a synthesis/transcription call, so a
+  machine with none of them installed still starts instantly and reports
+  clear install hints. See [VOICE.md](VOICE.md) for the pipelines themselves.
 - **Default auto-cut pool** is the project's generated and imported pictures and
   clips; rendered designs (cards, covers, contact sheets) are used only when
   passed explicitly or through a board.

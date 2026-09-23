@@ -41,6 +41,15 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_assets` | `?project&kind&query&tag&favourite&limit&offset` |
 | GET | `/api/agent/studio_show` | `?asset_ids=a,b,c&size=768` -> `{items:[{asset_id, kind, mime, base64, order?}]}` |
 | GET | `/api/agent/studio_lineage` | `?asset_id` |
+| GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
+| POST | `/api/agent/voice_create` | `{name, engine_id, source_path, language?, project?}` |
+| GET | `/api/agent/voice_list` | `?project` |
+| POST | `/api/agent/voice_speak` | `{text, voice: {engine_id?, voice_id?, voice_ref?, preset?, speed?, language?}, project?}` |
+| POST | `/api/agent/voice_transcribe` | `{path?, asset_id?, language?, engine_id?}` |
+| POST | `/api/agent/voice_audiobook` | `{text?, source_path?, title?, voice, format, project?, wait_s}` |
+| POST | `/api/agent/voice_dub` | `{source_path?, video_asset_id?, target_language, source_language?, glossary?, voice, stt_engine_id?, title?, project?, wait_s}` |
+| POST | `/api/agent/voice_resynthesize_segment?job_id=&index=` | `{text?, voice?, remix}` |
+| GET | `/api/agent/voice_job` | `?job_id&wait_s` |
 
 Shapes and limits: see [MCP.md](MCP.md).
 
@@ -110,6 +119,27 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET / POST | `/api/projects/{id}/boards` | create `{name, kind: moodboard|storyboard|shotlist}` |
 | PATCH / DELETE | `/api/boards/{id}` | rename / delete a board (assets are not touched) |
 | PUT | `/api/boards/{id}/items` | `{items: [{asset_id, note}]}` (same project only) |
+| GET | `/api/voice/engines` | full engine status (same shape `voice_engines` compacts) |
+| POST | `/api/voice/engines/{engine_id}/install` | `{kind: "tts"\|"stt"}` -> job `install_voice_engine` (a `pip install`, explicit and user-triggered) |
+| GET / POST | `/api/voice/voices` | list `?project&engine_id` / create `{name, engine_id, source_path, language?, project?, tags?}` |
+| POST | `/api/voice/voices/upload` | multipart `file` + query `name, engine_id, language?, project?` |
+| GET / PATCH / DELETE | `/api/voice/voices/{id}` | full voice / `{name?, tags?, notes?}` / delete |
+| POST | `/api/voice/voices/{id}/presets` | `{name, speed?, pitch?, style?}` |
+| GET | `/api/voice/voices/{id}/sample` | the processed sample, `audio/wav` |
+| POST | `/api/voice/voices/{id}/preview` | `{text, voice}` -> `audio/wav` (does not save an asset) |
+| POST | `/api/voice/speak` | `{text, voice, project?}` -> `audio/wav`, or the asset when `project` is given |
+| POST | `/api/voice/transcribe` | `{path?, asset_id?, language?, engine_id?, word_timestamps}` -> transcript + `srt, vtt, txt` |
+| POST | `/api/voice/transcribe/upload` | multipart `file` + query `language?, engine_id?` |
+| POST | `/api/voice/dictate` | multipart `file` (<=30 MB, for a short mic clip) + query `language?` -> `{text, language, engine_id}` fast, no timestamps |
+| POST | `/api/voice/audiobook` | `{text?, source_path?, title?, voice, format, project?, wait_s}` -> `{job}` |
+| GET | `/api/voice/audiobook/{job_id}` | the job |
+| GET | `/api/voice/audiobook/{job_id}/download?file=final\|srt\|lrc` | the file |
+| POST | `/api/voice/dub` | `{source_path?, video_asset_id?, target_language, source_language?, glossary?, voice, stt_engine_id?, title?, project?, wait_s}` -> `{job}` |
+| GET | `/api/voice/dub/{job_id}` | the job |
+| GET | `/api/voice/dub/{job_id}/download?file=video\|subtitles` | the file |
+| POST | `/api/voice/dub/{job_id}/segments/{index}/resynthesize` | `{text?, voice?, remix}` -> `{segment}` |
+
+Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 
 ## Timeline finishing
 
