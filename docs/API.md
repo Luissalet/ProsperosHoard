@@ -126,8 +126,8 @@ feature existed:
 
 `color_grade` is one of `teal_orange`, `sodium_night`, `bleach_bypass`
 (single-pass `eq`/`colorbalance`/`curves` approximations, not a 3D LUT).
-`grain` is 0-1 (ffmpeg `noise`). `glitch_on_downbeats` times an RGB-split
-flash (`rgbashift`) to the clips the auto-cut already marks as strong
+`grain` is 0-1 (ffmpeg `noise`). `glitch_on_downbeats` times a colour-split
+flash (`chromashift`) to the clips the auto-cut already marks as strong
 downbeats. `lyric_style: "horror"` swaps the caption font for a condensed
 uppercase face with a small per-line rotation/shear jitter, seeded from
 each line's own text so a re-render is byte-identical.

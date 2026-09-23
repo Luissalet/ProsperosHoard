@@ -123,7 +123,10 @@ def build_finishing_vf(finishing: Optional[dict[str, Any]], width: int, height: 
         for start, dur in glitch_points or []:
             end = start + max(0.08, min(dur, 0.22))
             enable = _escape_enable_arg(f"between(t,{start:.3f},{end:.3f})")
-            parts.append(f"rgbashift=rh=6:bv=-6:enable='{enable}'")
+            # chromashift, not rgbashift: ffmpeg 8's rgbashift blacks out the
+            # right-most columns of every frame even while `enable` is false,
+            # which a long chain of glitch windows turns into a solid stripe.
+            parts.append(f"chromashift=crh=4:cbv=-4:enable='{enable}'")
     return ",".join(parts)
 
 

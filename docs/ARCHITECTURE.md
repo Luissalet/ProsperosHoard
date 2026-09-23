@@ -208,7 +208,7 @@ addressing references as `<image1>`, `<image2>`..., or Flux Kontext's
    clips used to end the chain early, silently).
 3. If the timeline has a `finishing` config, its filters (colour grade
    `eq`/`colorbalance`/`curves`, `noise` grain, `vignette`, letterbox
-   `drawbox` bars, downbeat `rgbashift` glitches timed to the clips the
+   `drawbox` bars, downbeat `chromashift` glitches timed to the clips the
    auto-cut already marked as strong downbeats) are built into one `-vf`
    chain that runs on the whole joined cut, before the captions.
 4. Lyrics become an ASS file (escaped: braces, backslash codes and newlines
