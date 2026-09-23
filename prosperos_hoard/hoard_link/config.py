@@ -1,6 +1,6 @@
 """Explicit configuration: an app's ``backend.json`` plus environment overrides.
 
-This is resolution-order source #1: whatever is set here wins
+This is resolution-order source #1 in the README: whatever is set here wins
 outright, no probing needed (a real HTTP call will surface a
 :class:`~hoard_link.errors.BackendError` on its own if the address is
 stale).

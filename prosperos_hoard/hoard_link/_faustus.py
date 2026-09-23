@@ -1,6 +1,6 @@
 """Talking to a (possibly absent) Faustus instance.
 
-Faustus is the user's own workspace, reachable on loopback with an
+Faustus is the local AI workspace, reachable on loopback with an
 optional bearer token. Every helper here returns ``(status, json)`` with
 ``status is None`` meaning "could not connect at all" (refused, timed out,
 DNS) — that is distinct from a real 401/403, which the caller needs to
