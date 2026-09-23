@@ -112,7 +112,7 @@ IDOL_LOOKS = [
     {"role": "Main Rapper", "message": "abrígate, fuera hace frío", "accent": "#EADBC8",
      "prompt": "sitting on a wooden stool in a cream knit sweater for a glossy idol photocard, warm cream backdrop, "
                "the candle flame glowing softly inside the lantern head, soft beauty lighting, magazine retouching"},
-    {"role": "Center", "message": "¡clic!", "accent": "#B8D8F0",
+    {"role": "Center", "message": "¡clic!", "accent": "#B8D8F0", "strip": True,
      "prompt": "making a peace sign with one long paper finger, photo-booth strip style, four small frames, bright "
                "flash, baby blue curtain backdrop, glossy idol photocard"},
     {"role": "Lead Vocal", "message": "te veo desde aquí", "accent": "#F6D98B",
@@ -122,6 +122,10 @@ IDOL_LOOKS = [
      "prompt": "holding a small hand-written note that says \"sorry\" with both paper hands, lilac backdrop, glossy "
                "idol photocard, soft beauty lighting, magazine retouching"},
 ]
+
+# A tall subject fills a 2:3 frame to the edge, and the card crops the photo
+# a little more; without explicit headroom the lantern's top gets cut.
+IDOL_FRAMING = "full-length portrait, the whole figure in frame with clear empty space above the lantern head"
 
 # The night look every still shares (Kontext keeps the character, this keeps the world).
 NIGHT_LOOK = ("cinematic 35mm film still, night, sodium-vapour street lamps, wet asphalt, fog, light rain, shallow depth "
@@ -518,7 +522,8 @@ async def step_photocards(session: Any, state: dict[str, Any], args: argparse.Na
         if str(i) in done_photos:
             ids = [done_photos[str(i)]]
         else:
-            ids = await _generate(session, {"project": pid, "prompt": f"@{CHARACTER_NAME} {look['prompt']}",
+            framing = "" if look.get("strip") else f", {IDOL_FRAMING}"
+            ids = await _generate(session, {"project": pid, "prompt": f"@{CHARACTER_NAME} {look['prompt']}{framing}",
                                             "consistent": True, "aspect": "2:3", "count": 1, "seed": 4000 + i})
             save_partial(state, 6, str(i), ids[0])
         photos.append(ids[0])

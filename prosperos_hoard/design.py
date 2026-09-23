@@ -275,6 +275,57 @@ def _layer_gradient(canvas: Image.Image, box: tuple[int, int, int, int], colours
     canvas.alpha_composite(grad, (x, y))
 
 
+def subject_centering(src: Image.Image, target: tuple[int, int],
+                      default: tuple[float, float] = (0.5, 0.35)) -> tuple[float, float]:
+    """`ImageOps.fit` centering that keeps a studio subject in frame.
+
+    A photo shot on a plain backdrop (a photocard, a portrait) is cropped
+    to the card's aspect; a fixed focal point cuts the head off a tall
+    subject that fills the frame. The backdrop colour is read from the
+    left and right edges, the subject is every clearly different pixel,
+    and the crop keeps the subject's top (with a little headroom) or, for
+    a sideways crop, centres on it. Busy backgrounds with no clear subject
+    fall back to `default`."""
+    import numpy as np
+
+    tw, th = target
+    if src.width <= 0 or src.height <= 0 or tw <= 0 or th <= 0:
+        return default
+    sw = 64
+    sh = max(8, round(sw * src.height / src.width))
+    arr = np.asarray(src.convert("RGB").resize((sw, sh), Image.BILINEAR), dtype=np.float32)
+    edges = np.concatenate([arr[:, :2].reshape(-1, 3), arr[:, -2:].reshape(-1, 3)])
+    backdrop = np.median(edges, axis=0)
+    if float(np.mean(np.linalg.norm(edges - backdrop, axis=1))) > 30:  # the edges are not a plain backdrop
+        return default
+    mask = np.linalg.norm(arr - backdrop, axis=2) > 48
+    rows = np.where(mask.sum(axis=1) >= max(2, sw // 32))[0]
+    cols = np.where(mask.sum(axis=0) >= max(2, sh // 32))[0]
+    if rows.size == 0 or cols.size == 0:
+        return default
+    cx, cy = default
+    src_ratio, dst_ratio = src.width / src.height, tw / th
+    if src_ratio < dst_ratio:  # taller than the card: the crop removes rows
+        scaled_h = src.height * tw / src.width
+        excess = scaled_h - th
+        if excess > 1:
+            top = rows.min() / sh * scaled_h
+            bottom = (rows.max() + 1) / sh * scaled_h
+            headroom = 0.04 * th
+            if bottom - top + 2 * headroom <= th:  # the whole subject fits: centre on it
+                y0 = (top + bottom) / 2 - th / 2
+            else:  # a tall subject: keep its top (the head), lose the feet
+                y0 = top - headroom
+            cy = min(max(y0, 0.0), excess) / excess
+    elif src_ratio > dst_ratio:  # wider than the card: the crop removes columns
+        scaled_w = src.width * th / src.height
+        excess = scaled_w - tw
+        if excess > 1:
+            centre = (cols.min() + cols.max() + 1) / 2 / sw * scaled_w
+            cx = min(max(centre - tw / 2, 0.0), excess) / excess
+    return (min(1.0, max(0.0, cx)), min(1.0, max(0.0, cy)))
+
+
 def _layer_image(canvas: Image.Image, layer: dict, fields: dict[str, Any], asset_resolver) -> None:
     x, y, w, h = _box(layer, fields)
     asset_id = _resolve(layer.get("asset"), fields)
@@ -291,10 +342,14 @@ def _layer_image(canvas: Image.Image, layer: dict, fields: dict[str, Any], asset
     fit = layer.get("fit", "cover")
     if fit == "cover":
         focal = _resolve(layer.get("focal", [0.5, 0.4]), fields) or [0.5, 0.4]
-        try:
-            centering = (min(1.0, max(0.0, float(focal[0]))), min(1.0, max(0.0, float(focal[1]))))
-        except (TypeError, ValueError, IndexError):
-            centering = (0.5, 0.4)
+        if focal == "subject":
+            fallback = layer.get("focal_fallback", [0.5, 0.35])
+            centering = subject_centering(src, (w, h), (float(fallback[0]), float(fallback[1])))
+        else:
+            try:
+                centering = (min(1.0, max(0.0, float(focal[0]))), min(1.0, max(0.0, float(focal[1]))))
+            except (TypeError, ValueError, IndexError):
+                centering = (0.5, 0.4)
         src = ImageOps.fit(src, (w, h), method=Image.LANCZOS, centering=centering)
     else:
         src = ImageOps.contain(src, (w, h), method=Image.LANCZOS)
