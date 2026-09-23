@@ -167,7 +167,7 @@ class Store:
         return row_to_dict(row)
 
     def update_project(self, project_id: str, name: str | None = None, brief: str | None = None,
-                       cover_asset_id: str | None = None) -> dict[str, Any]:
+                       cover_asset_id: str | None = None, image_engine: str | None = None) -> dict[str, Any]:
         self.get_project(project_id)
         if name is not None:
             if not name.strip():
@@ -178,6 +178,12 @@ class Store:
         if cover_asset_id is not None:
             self.get_asset(cover_asset_id)
             self.conn.execute("UPDATE projects SET cover_asset_id=? WHERE id=?", (cover_asset_id, project_id))
+        if image_engine is not None:
+            from .engine import IMAGE_ENGINES  # local import: engine.py imports Store at module level
+
+            if image_engine not in IMAGE_ENGINES:
+                raise ValueError(f"image_engine must be one of {', '.join(IMAGE_ENGINES)}")
+            self.conn.execute("UPDATE projects SET image_engine=? WHERE id=?", (image_engine, project_id))
         self.conn.commit()
         self.touch_project(project_id)
         return self.get_project(project_id)

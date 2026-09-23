@@ -309,16 +309,23 @@ def apply_canonical_crop(store: Store, project_id: str, fields: dict[str, Any],
     return fields
 
 
-def build_kontext_instruction(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
+def build_kontext_instruction(store: Store, project_id: str, prompt: str, engine: str = "flux") -> dict[str, Any]:
     """For `consistent=true` generation ("Cast -> Reference sheet"): turn
-    "@Name doing X" into a Kontext edit instruction ("the same character
-    from the reference, now doing X") instead of inlining the character's
-    full look description the way `compose_prompt` does for a fresh
-    txt2img - the reference image already carries the look, so the
-    instruction should describe only the change. Mentions are still
-    resolved the same way (longest name, word boundaries, unknowns kept)
-    so the caller gets the same `matched_characters`/`unknown_mentions`
-    bookkeeping and the first mentioned character's canonical image."""
+    "@Name doing X" into an edit instruction ("the same character from the
+    reference, now doing X") instead of inlining the character's full look
+    description the way `compose_prompt` does for a fresh txt2img - the
+    reference image already carries the look, so the instruction should
+    describe only the change. Mentions are still resolved the same way
+    (longest name, word boundaries, unknowns kept) so the caller gets the
+    same `matched_characters`/`unknown_mentions` bookkeeping and the first
+    mentioned character's canonical image.
+
+    `engine="qwen21"` phrases it Qwen-Image 2.1's way (references addressed
+    as `<image1>`, `<image2>`...) instead of Flux Kontext's ("the reference
+    image"); the caller still only gets one `reference_asset_id` back here
+    (the canonical crop, always image_1) - extra references (a location
+    plate, a prop) are the caller's own `reference_asset_ids` to add after
+    it, in the order they should be numbered."""
     characters = store.list_characters(project_id)
     aliases = _mention_aliases(characters)
     reference_asset_id: Optional[str] = None
@@ -350,9 +357,12 @@ def build_kontext_instruction(store: Store, project_id: str, prompt: str) -> dic
         out.append(ch)
         i += 1
     scene = re.sub(r"\s+", " ", "".join(out)).strip(" ,")
-    # Kontext follows explicit preservation best ("keep X, change Y"): name
-    # what must not drift, then the new scene
-    keep = "the same character from the reference image, with exactly the same design, proportions and colours"
+    # both engines follow explicit preservation best ("keep X, change Y"):
+    # name what must not drift, then the new scene
+    if engine == "qwen21":
+        keep = "Keep the character from <image1> exactly the same (face, silhouette, colours, props)"
+    else:
+        keep = "the same character from the reference image, with exactly the same design, proportions and colours"
     instruction = f"{keep}, now {scene}" if scene else keep
     return {
         "instruction": instruction, "reference_asset_id": reference_asset_id,
@@ -483,7 +493,8 @@ def _svd_size(width: int, height: int) -> tuple[int, int]:
 
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
-                 reference_asset_id: Optional[str] = None, mask_asset_id: Optional[str] = None,
+                 reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
+                 mask_asset_id: Optional[str] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -504,7 +515,28 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
 
     uploads: list[tuple[bytes, str]] = []
     input_ids: list[str] = []
-    if spec.get("requires_reference"):
+    group_names: list[str] = []
+    reference_group = spec.get("reference_group")
+    if reference_group:
+        refs = list(reference_asset_ids or ([reference_asset_id] if reference_asset_id else []))
+        refs = [r for r in refs if r]
+        minimum = int(reference_group.get("min", 1))
+        maximum = int(reference_group.get("max", len(reference_group.get("nodes") or []) or 10))
+        if len(refs) < minimum:
+            raise EngineError("reference_required",
+                              f"template '{template_name}' needs at least {minimum} reference image(s) (reference_asset_ids)")
+        if len(refs) > maximum:
+            raise EngineError("too_many_references", f"template '{template_name}' accepts at most {maximum} reference images")
+        for ref_id in refs:
+            ref = store.get_asset(ref_id)
+            if ref["kind"] != "image":
+                raise EngineError("reference_not_image", f"reference {ref['id']} is {ref['kind']}, not an image")
+            ref_path = store.data_dir / ref["file_path"]
+            ref_name = f"prospero_{ref['id']}{ref_path.suffix}"
+            uploads.append((ref_path.read_bytes(), ref_name))
+            group_names.append(ref_name)
+            input_ids.append(ref["id"])
+    elif spec.get("requires_reference"):
         if not reference_asset_id:
             raise EngineError("reference_required", f"template '{template_name}' needs a reference image (reference_asset_id)")
         ref = store.get_asset(reference_asset_id)
@@ -532,7 +564,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         seed = base_seed + i
         run_values = {**values, "seed": seed}
         wf = comfy_driver.apply_params(workflow, spec, run_values)
-        if spec.get("requires_reference"):
+        if reference_group:
+            comfy_driver.wire_reference_group(wf, spec, group_names)
+        elif spec.get("requires_reference"):
             node, _, inp = spec["reference_node"].partition(".")
             wf[node]["inputs"][inp] = uploads[0][1]
         if spec.get("requires_mask"):
@@ -697,14 +731,77 @@ def _size_from_reference(mode: str, ref_w: int, ref_h: int) -> tuple[int, int]:
     return max(256, min(2048, width)), max(256, min(2048, height))
 
 
+# Friendly per-project/per-call image engine choice (spec item 3). "auto"
+# is the default everywhere a caller does not name one explicitly.
+IMAGE_ENGINES = ("auto", "qwen21", "flux", "sdxl")
+ENGINE_TEMPLATES = {
+    "qwen21": {"txt2img": "qwen21_txt2img", "edit": "qwen21_edit"},
+    "flux": {"txt2img": "flux_schnell_txt2img", "edit": "flux_kontext_edit"},
+    "sdxl": {"txt2img": "sdxl_txt2img", "edit": "sdxl_img2img"},
+}
+TEMPLATE_TO_ENGINE = {tmpl: engine for engine, ops in ENGINE_TEMPLATES.items() for tmpl in ops.values()}
+# Generic per-call overrides for template-specific knobs that are not part
+# of every template's shape (resolution/custom_size, QwenImage21Cache's
+# device/dtype, the separate UNet/CLIP/VAE loader filenames, Kontext's
+# guidance...): anything the template's own map exposes and the core
+# generation fields below do not already own.
+_CORE_GENERATION_KEYS = {"checkpoint", "positive_prompt", "negative_prompt", "width", "height", "batch_size",
+                         "seed", "steps", "cfg", "sampler", "scheduler", "denoise"}
+
+
+def _has_model_file(object_info: dict[str, Any], class_type: str, input_name: str, needle: str) -> bool:
+    try:
+        entry = object_info[class_type]["input"]["required"][input_name][0]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return isinstance(entry, list) and any(needle in str(f).lower() for f in entry)
+
+
+def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None) -> str:
+    """`auto|qwen21|flux|sdxl` (spec item 3) -> the engine this call
+    actually gets. `auto` picks Qwen-Image 2.1 when its node class
+    (`TextEncodeQwenImage21`) *and* a matching model file are installed,
+    else Flux schnell, else SDXL - the last two always work, since they
+    ship as built-in checkpoints/templates. An engine requested by name
+    that turns out not to be installed falls back the same way, so a
+    project already set to "qwen21" keeps rendering before the model
+    finishes downloading."""
+    requested = (requested or "auto").lower()
+    if requested not in IMAGE_ENGINES:
+        requested = "auto"
+    has_qwen = "TextEncodeQwenImage21" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "qwen")
+    has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
+    if requested == "sdxl":
+        return "sdxl"
+    if requested == "flux":
+        return "flux" if has_flux else "sdxl"
+    if requested in ("qwen21", "auto"):
+        if has_qwen:
+            return "qwen21"
+        if requested == "qwen21" and not has_flux:
+            return "sdxl"
+        return "flux" if has_flux else "sdxl"
+    return "sdxl"
+
+
 def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
-    template = params.get("template") or ("sdxl_img2img" if params.get("reference_asset_id") else "sdxl_txt2img")
+    template = params.get("template")
+    engine_name = TEMPLATE_TO_ENGINE.get(template)
+    if not template:
+        is_edit = bool(params.get("reference_asset_id") or params.get("reference_asset_ids"))
+        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"))
+        template = ENGINE_TEMPLATES[engine_name]["edit" if is_edit else "txt2img"]
     try:
         _, spec = comfy_driver.load_template(template, store.data_dir)
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
     values = _generation_values(params, spec.get("defaults"))
+    for key in spec.get("map", {}):
+        if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
+            values[key] = params[key]
+    if template == "qwen21_edit" and params.get("custom_size") is None and (params.get("width") or params.get("height")):
+        values["custom_size"] = True
     size_mode = spec.get("size_from_reference")
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])
@@ -712,8 +809,10 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     return run_template(
         store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
+        reference_asset_ids=params.get("reference_asset_ids"),
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
-                      "matched_characters": params.get("matched_characters") or []},
+                      "matched_characters": params.get("matched_characters") or [],
+                      "image_engine": engine_name or "custom"},
         name=params.get("prompt") or params["positive_prompt"],
     )
 

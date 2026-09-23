@@ -146,8 +146,10 @@ def _ro(**kw: Any) -> ToolAnnotations:
 def studio_status() -> dict[str, Any]:
     """What the studio can do right now: each model capability through Hoard Link (image = ComfyUI,
     tts, music...) with the reason, ComfyUI checkpoints and free VRAM, ffmpeg, Piper, music generation
-    (not installed unless a backend was added), the queue counts and the last 5 jobs. demo_backend=true
-    means images come from the procedural demo backend, not a real model. Call first when unsure.
+    (not installed unless a backend was added), image_engine (which engines exist and which one "auto"
+    currently resolves to - Qwen-Image 2.1 when it is installed, else Flux, else SDXL), the queue counts
+    and the last 5 jobs. demo_backend=true means images come from the procedural demo backend, not a
+    real model. Call first when unsure.
 
     Keywords: status, backend, is it running, gpu, comfyui, what can you do, estado, esta funcionando, gpu libre, que puedes hacer
     """
@@ -166,13 +168,16 @@ def studio_projects(query: Optional[str] = None, limit: int = 10) -> dict[str, A
 
 
 @tool(_ro(destructiveHint=False, idempotentHint=False))
-def studio_create_project(name: str, brief: Optional[str] = None) -> dict[str, Any]:
+def studio_create_project(name: str, brief: Optional[str] = None, image_engine: Optional[str] = None) -> dict[str, Any]:
     """Create a project (one production: a group, a single, a video). Returns its id, used as
-    `project` by every other tool. Next: add the cast with studio_cast.
+    `project` by every other tool. image_engine: "auto" (default) | "qwen21" | "flux" | "sdxl" - the
+    project's own default for studio_generate_image calls that do not pass their own engine/template
+    (see studio_status for which one "auto" currently resolves to). Next: add the cast with studio_cast.
 
-    Keywords: new project, start a production, create group, nuevo proyecto, empezar produccion, crear grupo
+    Keywords: new project, start a production, create group, image engine, nuevo proyecto, empezar produccion, crear grupo
     """
-    return _call("POST", "/api/agent/studio_create_project", json={"name": name, "brief": brief})
+    return _call("POST", "/api/agent/studio_create_project",
+                json={"name": name, "brief": brief, "image_engine": image_engine})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
@@ -204,37 +209,49 @@ def studio_generate_image(
     aspect: Optional[str] = None, width: Optional[int] = None, height: Optional[int] = None,
     steps: Optional[int] = None, cfg: Optional[float] = None, sampler: Optional[str] = None,
     scheduler: Optional[str] = None, seed: Optional[int] = None, count: int = 1,
-    reference_asset_id: Optional[str] = None, strength: Optional[float] = None,
-    template: Optional[str] = None, wait_s: float = 0, use_character_reference: bool = False,
+    reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
+    strength: Optional[float] = None, template: Optional[str] = None, engine: Optional[str] = None,
+    wait_s: float = 0, use_character_reference: bool = False,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
 ) -> Any:
-    """Queue image generation on ComfyUI (txt2img; img2img when reference_asset_id is given).
+    """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
     inlined, and use_character_reference=true also uses the first mentioned character's canonical image
     as the img2img reference. style: a preset name ("Studio portrait", "Film still 35mm", "Anime cel",
     "Pastel dream", "Neon night city", "Album art minimal"). aspect: 1:1, 9:16, 16:9, 2:3, 3:2, 4:5.
-    template: sdxl_txt2img (default), sdxl_img2img, sd15_txt2img (low VRAM), sdxl_hires, flux_schnell_txt2img,
-    flux_kontext_edit (needs reference_asset_id), wan22_ti2v, or an imported wf_ id.
-    consistent=true keeps a mentioned character's face/design exact: routes through flux_kontext_edit
-    with their canonical reference image and the prompt turned into "the same character from the
-    reference, now <scene>" (needs a @Character with a canonical_asset_id set - see studio_cast; fails
-    with code consistent_needs_reference otherwise). Prefer this over use_character_reference for a
-    character whose canonical shot came from a Flux/Kontext reference sheet.
+    engine: "auto" (default, and the project's own setting when neither is given) | "qwen21" | "flux" | "sdxl" -
+    which image model family to use; "auto" picks Qwen-Image 2.1 when it is installed (best prompt
+    adherence, multi-reference identity, and in-image typography), else Flux schnell (fastest drafts),
+    else SDXL. Ignored once template names an exact one.
+    template: an exact built-in name instead of letting engine choose one - qwen21_txt2img, qwen21_edit
+    (needs reference_asset_id/reference_asset_ids), sdxl_txt2img, sdxl_img2img, sd15_txt2img (low VRAM),
+    sdxl_hires, flux_schnell_txt2img, flux_kontext_edit (needs reference_asset_id), wan22_ti2v, or an
+    imported wf_ id.
+    reference_asset_ids: for qwen21_edit, up to 10 references in order (the first is the edit target/main
+    identity, referred to in the prompt as <image1>, further ones as <image2>, <image3>...); a single
+    reference_asset_id also works for the one-reference engines (Flux Kontext, SDXL img2img).
+    consistent=true keeps a mentioned character's face/design exact: routes through an edit template
+    (qwen21_edit or flux_kontext_edit, per engine) with their canonical reference image as the first
+    reference and the prompt turned into an instruction that keeps the character and only changes the
+    scene (needs a @Character with a canonical_asset_id set - see studio_cast; fails with code
+    consistent_needs_reference otherwise). Prefer this over use_character_reference for a character
+    whose canonical shot came from a reference sheet.
     seed: fix it to reproduce or keep a look consistent (random when omitted, always returned).
     checkpoint: a file name from studio_status (default: the template's; a wrong name fails listing the installed ones).
-    count 1-8 (seeds seed..seed+count-1). Returns the job (poll studio_job), the exact final prompt and
-    unknown_mentions; with wait_s > 0 and a finished job, also the asset ids and, only when
-    include_image=true, a picture of them (default false: a text-only model does not want an image
-    block on its turn - use studio_show once you need to look).
+    count 1-8 (seeds seed..seed+count-1). Returns the job (poll studio_job), which engine and template were
+    actually used, the exact final prompt and unknown_mentions; with wait_s > 0 and a finished job, also
+    the asset ids and, only when include_image=true, a picture of them (default false: a text-only model
+    does not want an image block on its turn - use studio_show once you need to look).
     A job in "waiting_gpu" is waiting for free VRAM - normal, not an error.
 
-    Keywords: generate image, txt2img, make a photo, draw, render a portrait, character consistency, same character, generar imagen, crear foto, dibujar, hacer una foto, personaje consistente
+    Keywords: generate image, txt2img, make a photo, draw, render a portrait, character consistency, same character, qwen, flux, image engine, generar imagen, crear foto, dibujar, hacer una foto, personaje consistente
     """
     body = {
         "prompt": prompt, "style": style, "negative": negative, "aspect": aspect, "width": width,
         "height": height, "steps": steps, "cfg": cfg, "sampler": sampler, "scheduler": scheduler,
-        "seed": seed, "count": count, "reference_asset_id": reference_asset_id, "strength": strength,
-        "template": template, "wait_s": wait_s, "use_character_reference": use_character_reference,
+        "seed": seed, "count": count, "reference_asset_id": reference_asset_id,
+        "reference_asset_ids": reference_asset_ids, "strength": strength,
+        "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
         "checkpoint": checkpoint, "consistent": consistent,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),

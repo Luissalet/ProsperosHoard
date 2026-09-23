@@ -102,12 +102,14 @@ class BackendOverrides(BaseModel):
 class CreateProjectBody(BaseModel):
     name: str
     brief: Optional[str] = None
+    image_engine: Optional[str] = None  # "auto" (default) | "qwen21" | "flux" | "sdxl"
 
 
 class UpdateProjectBody(BaseModel):
     name: Optional[str] = None
     brief: Optional[str] = None
     cover_asset_id: Optional[str] = None
+    image_engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - see engine.IMAGE_ENGINES
 
 
 class CastBody(BaseModel):
@@ -143,9 +145,11 @@ class GenerateImageBody(BaseModel):
     seed: Optional[int] = None
     count: int = 1
     reference_asset_id: Optional[str] = None
+    reference_asset_ids: Optional[list[str]] = None  # qwen21_edit: up to 10, image_1 first
     strength: Optional[float] = None
     template: Optional[str] = None
     checkpoint: Optional[str] = None
+    engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - defaults to the project's
     use_character_reference: bool = False
     consistent: bool = False
     wait_s: float = 0
@@ -361,28 +365,34 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # shared by the agent endpoints (compact) and the UI endpoints (full)
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
+        proj = store.get_project(project)
+        engine_name = engine.resolve_image_engine(engine._object_info(backend), body.engine or proj.get("image_engine"))
+        extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         if body.consistent:
-            # "Cast -> Reference sheet": route through the Kontext edit
-            # template with the canonical reference as input and the scene
-            # as the instruction, instead of a fresh txt2img.
-            kontext = engine.build_kontext_instruction(store, project, body.prompt)
-            reference = body.reference_asset_id or kontext["reference_asset_id"]
-            if not reference:
+            # "Cast -> Reference sheet": route through an edit template with
+            # the canonical reference as input (image_1, for Qwen) and the
+            # scene as the instruction, instead of a fresh txt2img.
+            kontext = engine.build_kontext_instruction(store, project, body.prompt, engine=engine_name)
+            primary = body.reference_asset_id or kontext["reference_asset_id"]
+            if not primary:
                 raise engine.EngineError(
                     "consistent_needs_reference",
                     "consistent=true needs a canonical reference: mention a cast member with a canonical "
                     "reference image (studio_cast update canonical_asset_id), or pass reference_asset_id",
                 )
+            all_refs = [primary] + [r for r in extra_refs if r != primary]
             composed = {"positive_prompt": kontext["instruction"], "negative_prompt": "", "style": None,
                        "style_defaults": {}, "matched_characters": kontext["matched_characters"],
-                       "unknown_mentions": kontext["unknown_mentions"], "reference_asset_id": reference}
-            template = body.template or "flux_kontext_edit"
+                       "unknown_mentions": kontext["unknown_mentions"], "reference_asset_id": primary}
+            template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit"]
         else:
             composed = engine.compose_prompt(store, project, body.prompt, body.negative, body.style)
             reference = body.reference_asset_id
             if not reference and body.use_character_reference:
                 reference = composed["reference_asset_id"]
-            template = body.template or ("sdxl_img2img" if reference else "sdxl_txt2img")
+            all_refs = extra_refs or ([reference] if reference else [])
+            template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit" if all_refs else "txt2img"]
+        reference = all_refs[0] if all_refs else None
         width, height = body.width, body.height
         if body.aspect and not (width and height):
             if body.aspect not in engine.ASPECT_SIZES:
@@ -396,10 +406,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise engine.EngineError("bad_parameter", "cfg must be between 0 and 30")
         if body.strength is not None and not 0 < body.strength <= 1:
             raise engine.EngineError("bad_parameter", "strength must be between 0 and 1")
-        if reference:
-            ref = store.get_asset(reference)
+        for ref_id in all_refs:
+            ref = store.get_asset(ref_id)
             if ref["kind"] != "image":
-                raise engine.EngineError("reference_not_image", f"reference {reference} is {ref['kind']}, not an image")
+                raise engine.EngineError("reference_not_image", f"reference {ref_id} is {ref['kind']}, not an image")
         try:
             comfy_driver.load_template(template, store.data_dir)
         except comfy_driver.WorkflowError as exc:
@@ -409,6 +419,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "prompt": body.prompt, "positive_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
             "width": width, "height": height, "steps": body.steps, "cfg": body.cfg, "sampler": body.sampler,
             "scheduler": body.scheduler, "seed": seed, "count": body.count, "reference_asset_id": reference,
+            "reference_asset_ids": all_refs or None,
             "strength": body.strength, "template": template, "checkpoint": body.checkpoint,
             "style": composed["style"], "style_defaults": composed["style_defaults"],
             "matched_characters": composed["matched_characters"],
@@ -417,7 +428,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = wait(job, body.wait_s)
         return {"job": job, "final_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
                 "matched_characters": composed["matched_characters"], "unknown_mentions": composed["unknown_mentions"],
-                "template": template, "seed": seed}
+                "template": template, "engine": engine_name, "seed": seed}
 
     def op_edit(body: EditImageBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)
@@ -555,8 +566,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # ------------------------------------------------------------ projects
     @app.post("/api/agent/studio_create_project")
     def agent_create_project(body: CreateProjectBody):
-        p = agent("studio_create_project", body.name[:80], lambda: store.create_project(body.name, body.brief))
-        return {"id": p["id"], "name": p["name"], "brief": p.get("brief")}
+        def run():
+            p = store.create_project(body.name, body.brief)
+            if body.image_engine:
+                p = store.update_project(p["id"], image_engine=body.image_engine)
+            return p
+        p = agent("studio_create_project", body.name[:80], run)
+        return {"id": p["id"], "name": p["name"], "brief": p.get("brief"), "image_engine": p.get("image_engine")}
 
     @app.get("/api/agent/studio_projects")
     def agent_projects(query: Optional[str] = None, limit: int = 10, offset: int = 0):
@@ -581,7 +597,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.patch("/api/projects/{project_id}")
     def update_project(project_id: str, body: UpdateProjectBody):
-        return store.update_project(project_id, body.name, body.brief, body.cover_asset_id)
+        return store.update_project(project_id, body.name, body.brief, body.cover_asset_id, body.image_engine)
 
     # ------------------------------------------------------------------ cast
     @app.post("/api/agent/studio_cast")
@@ -964,6 +980,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return store.update_board_items(board_id, body.items)
 
     # ------------------------------------------------------------- status --
+    def _auto_image_engine() -> str:
+        try:
+            return engine.resolve_image_engine(engine._object_info(backend), "auto")
+        except Exception:  # ComfyUI unreachable and nothing cached yet - status still renders
+            return "sdxl"
+
     @app.get("/api/agent/studio_status")
     def agent_status():
         def run():
@@ -976,6 +998,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                          "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
                                  for cap, r in link.items()},
                 "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
+                "image_engine": {"available": list(engine.IMAGE_ENGINES), "auto_resolves_to": _auto_image_engine()},
                 "ffmpeg": status["ffmpeg"]["found"],
                 "piper_tts": status["piper"]["installed"],
                 "music_generation": [{"name": m["name"], "available": m["available"], "reason": m["reason"]} for m in status["music"]],

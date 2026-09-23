@@ -317,5 +317,7 @@ def test_missing_unet_file_is_reported_before_queueing(store, backend_with_comfy
     finally:
         engine_mod._object_info = original
     assert failed["state"] == "failed"
-    assert "wan2.2_ti2v_5B_fp16.safetensors" in failed["message"] and "not available" in failed["message"]
+    # a model-file COMBO miss reads as "download it", not a generic bad-choice error
+    assert "wan2.2_ti2v_5B_fp16.safetensors" in failed["message"] and "model not installed" in failed["message"] \
+        and "download it" in failed["message"]
     assert len(server.prompts_seen) == seen + 1  # the failing one never reached ComfyUI

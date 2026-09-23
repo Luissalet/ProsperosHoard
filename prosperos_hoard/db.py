@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -22,6 +22,7 @@ _ADDED_COLUMNS = [
     ("assets", "analysis_json", "TEXT"),
     ("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0"),
     ("timelines", "finishing_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("projects", "image_engine", "TEXT NOT NULL DEFAULT 'auto'"),
 ]
 
 _SCHEMA = """
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     brief TEXT,
     cover_asset_id TEXT,
+    image_engine TEXT NOT NULL DEFAULT 'auto',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
