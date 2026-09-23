@@ -116,7 +116,12 @@ wants API format (`{id: {class_type, inputs}}`, every input a literal or a
   flattened names (`images.image_1`) when linked
 - `PrimitiveNode` and `Reroute` resolve to the value or link they carry;
   bypassed nodes pass a same-typed input through, muted ones drop out;
-  notes and socketless UI widgets are skipped
+  notes are skipped, and so are socketless UI widgets except the few the
+  frontend still sends (`ImageCompare.compare_view` as `["", ""]`)
+- a list-valued literal is sent as `{"__value__": [...]}` (the frontend's
+  wrapping, so it is never read as a link); a combo with no saved slot and
+  no schema default (the hidden legacy `SaveVideo.codec`) takes its first
+  option, as the frontend's widget does
 - **subgraph** instances are expanded in place (inner ids become
   `<instance>:<inner>`); a subgraph input is matched to the instance's socket
   by name, and an unlinked promoted widget takes its value from the
@@ -125,7 +130,10 @@ wants API format (`{id: {class_type, inputs}}`, every input a literal or a
 `tests/fixtures/comfy/` holds the official templates of a real ComfyUI install
 (comfyui-workflow-templates 0.11.68, ComfyUI 0.37) and, for each, the API
 prompt the real frontend produced (`graphToPrompt()` in a headless browser);
-`test_convert.py` requires the converter to match it input for input.
+`test_convert.py` requires the converter to match it input for input (only
+seed values, which the frontend randomises, are not compared). The pre-0.37
+ACE-Step export (`v0.34/`, saved with `SaveAudioMP3`) is kept as a
+regression fixture.
 `validate_values()` then runs what `/prompt` checks - required inputs
 (dynamic-combo children included), links to existing output slots, combo
 choices, number ranges - and `run_template` calls it on every workflow
