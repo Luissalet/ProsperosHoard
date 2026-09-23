@@ -40,10 +40,14 @@ CHECKPOINTS_SD15 = ["v1-5-pruned-emaonly-fp16.safetensors"]
 CHECKPOINTS_SVD = ["svd_xt.safetensors"]
 CHECKPOINTS_FLUX = ["flux1-schnell-fp8.safetensors"]
 CHECKPOINTS_ACE = ["ace_step_1.5_turbo_aio.safetensors"]
-UNET_FILES = ["flux1-dev-kontext_fp8_scaled.safetensors", "wan2.2_ti2v_5B_fp16.safetensors"]
-CLIP_FILES = ["umt5_xxl_fp8_e4m3fn_scaled.safetensors"]
+UNET_FILES = ["flux1-dev-kontext_fp8_scaled.safetensors", "wan2.2_ti2v_5B_fp16.safetensors",
+              "qwen_image_2.1_int8_convrot.safetensors"]
+CLIP_FILES = ["umt5_xxl_fp8_e4m3fn_scaled.safetensors", "qwen3vl_8b_int8_convrot.safetensors"]
 DUAL_CLIP_FILES = ["clip_l.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors"]
-VAE_FILES = ["ae.safetensors", "wan2.2_vae.safetensors"]
+VAE_FILES = ["ae.safetensors", "wan2.2_vae.safetensors", "qwen_image_2.1_vae_bf16.safetensors"]
+QWEN_UNET_NAME = UNET_FILES[-1]
+QWEN_CLIP_NAME = CLIP_FILES[-1]
+QWEN_VAE_NAME = VAE_FILES[-1]
 
 _REAL_OBJECT_INFO_PATH = Path(__file__).parent / "comfy_object_info.json"
 _real_object_info_cache: Optional[dict[str, Any]] = None
@@ -65,7 +69,9 @@ def _set_choices(object_info: dict[str, Any], class_type: str, input_name: str, 
 def real_object_info() -> dict[str, Any]:
     """A real ComfyUI 0.37.0 `/object_info` dump (962 node classes),
     with the checkpoint/model files of the production example
-    merged in (a no-op for this dump, which already lists them). Loaded and patched once (module-level cache, ~1.7 MB): every
+    merged in (a no-op for the Flux/Wan/ACE files this dump already lists;
+    the Qwen-Image 2.1 int8 files are added here since this particular dump
+    predates that download - see docs/ARCHITECTURE.md "Models"). Loaded and patched once (module-level cache, ~1.7 MB): every
     caller in this process only ever reads it, so it is returned by
     reference rather than re-parsed or deep-copied per request."""
     global _real_object_info_cache
@@ -351,8 +357,13 @@ class FakeComfyServer:
             node = workflow[pos[0]]
             if node.get("class_type") == "CLIPTextEncode":
                 return str(node.get("inputs", {}).get("text", ""))
+            if node.get("class_type") == "TextEncodeQwenImage21":
+                return str(node.get("inputs", {}).get("prompt", ""))
         texts = _all(workflow, "CLIPTextEncode")
-        return str(texts[0]["inputs"].get("text", "")) if texts else ""
+        if texts:
+            return str(texts[0]["inputs"].get("text", ""))
+        qwen = _all(workflow, "TextEncodeQwenImage21")
+        return str(qwen[0]["inputs"].get("prompt", "")) if qwen else ""
 
     def _process_prompt(self, prompt_id: str, workflow: dict[str, Any]) -> None:
         object_info = self._object_info()
@@ -371,7 +382,11 @@ class FakeComfyServer:
         audio_node = _first(workflow, "SaveAudioMP3") or _first(workflow, "SaveAudio")
         anim_node = _first(workflow, "SaveAnimatedWEBP")
         wan_save = _first(workflow, "SaveVideo")
-        save_node = _first(workflow, "SaveImage")
+        # SaveImageAdvanced (what the Qwen-Image 2.1 templates use) writes
+        # the same {"images": [{"filename", "subfolder", "type"}]} outputs
+        # shape as SaveImage - see docs/ARCHITECTURE.md "Models" - so it
+        # renders through the exact same path.
+        save_node = _first(workflow, "SaveImage") or _first(workflow, "SaveImageAdvanced")
 
         outputs: dict[str, Any] = {}
         if audio_node is not None:
@@ -384,7 +399,7 @@ class FakeComfyServer:
             node_id = self._render_image(prompt_id, workflow, save_node, outputs)
         else:
             raise HTTPException(status_code=400, detail={"error": "no recognised output node "
-                                "(SaveImage/SaveAnimatedWEBP/SaveVideo/SaveAudioMP3/SaveAudio)"})
+                                "(SaveImage/SaveImageAdvanced/SaveAnimatedWEBP/SaveVideo/SaveAudioMP3/SaveAudio)"})
         assert node_id in outputs
 
         self.history[prompt_id] = {"prompt": workflow, "outputs": outputs,
