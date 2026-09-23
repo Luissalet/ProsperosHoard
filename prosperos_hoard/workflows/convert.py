@@ -55,8 +55,15 @@ Handled, in order of how often real templates use them:
 - **Autogrow sockets** (``COMFY_AUTOGROW_V3``, a variable list of e.g.
   reference images): every linked ``"<name>.<slot>"`` socket on the node
   is emitted under that same flattened name.
-- **Socketless widgets** (an image comparer's view) are frontend-only and
-  never emitted.
+- **Socketless widgets** are frontend-only; most are never sent (a
+  resolution preview), but a few are serialised by the real frontend with
+  a fixed value (`ImageCompare.compare_view` -> ``["", ""]``, see
+  ``_SERIALISED_SOCKETLESS``) and are emitted exactly that way.
+- **List-valued widget literals** are wrapped as ``{"__value__": [...]}``,
+  as the frontend does, so the server never mistakes one for a link.
+- **A combo with no saved slot and no schema default** (a hidden legacy
+  widget such as ``SaveVideo.codec``) takes its first option, which is what
+  the frontend's combo widget starts at.
 """
 
 from __future__ import annotations
@@ -74,6 +81,9 @@ AUTOGROW = "COMFY_AUTOGROW_V3"
 SEED_NAMES = ("seed", "noise_seed")
 SUBGRAPH_INPUT_ORIGIN = -10
 SUBGRAPH_OUTPUT_TARGET = -20
+# Socketless widget types the real frontend still puts in the API prompt,
+# with the value it sends for a freshly loaded template.
+_SERIALISED_SOCKETLESS: dict[str, Any] = {"IMAGECOMPARE": ["", ""]}
 
 
 class ConversionError(ValueError):
@@ -194,11 +204,30 @@ def _resolve_subgraph_output(scope: _Scope, instance_node: dict, subgraph_id: st
     return None
 
 
+def _literal(value: Any) -> Any:
+    """A widget literal as the frontend sends it: a list value is wrapped as
+    ``{"__value__": value}`` so it cannot be read as a ``[node, slot]`` link
+    (the server unwraps it)."""
+    return {"__value__": value} if isinstance(value, list) else value
+
+
+def _first_option(type_: Any, cfg: dict) -> tuple[bool, Any]:
+    """(True, first choice) for a combo / dynamic combo, else (False, None)."""
+    if isinstance(type_, list) and type_:
+        return True, type_[0]
+    options = cfg.get("options")
+    if type_ == "COMBO" and isinstance(options, list) and options:
+        return True, options[0]
+    if type_ == DYNAMIC_COMBO and isinstance(options, list) and options and isinstance(options[0], dict):
+        return True, options[0].get("key")
+    return False, None
+
+
 def _assign(inputs: dict, name: str, resolved: Resolved) -> None:
     if resolved[0] == "link":
         inputs[name] = [resolved[1], resolved[2]]
     else:
-        inputs[name] = resolved[1]
+        inputs[name] = _literal(resolved[1])
 
 
 def _entry(raw: Any) -> tuple[Any, dict]:
@@ -247,6 +276,8 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
                             _assign(out, ui_name, resolved)
                 continue
             if cfg.get("socketless"):
+                if type_ in _SERIALISED_SOCKETLESS:
+                    out[name] = _literal(_SERIALISED_SOCKETLESS[type_])
                 continue
             if not _is_widget_type(type_):
                 if linked:
@@ -266,13 +297,17 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
                     # a promoted (subgraph or converted-to-input) socket with
                     # nothing actually feeding it falls back to the stale
                     # widget value ComfyUI kept for it, same as the live app.
-                    out[name] = value
+                    out[name] = _literal(value)
                 elif "default" in cfg:
-                    out[name] = cfg["default"]
+                    out[name] = _literal(cfg["default"])
             elif consumed:
-                out[name] = value
+                out[name] = _literal(value)
             elif "default" in cfg:
-                out[name] = cfg["default"]
+                out[name] = _literal(cfg["default"])
+            else:
+                has_first, first = _first_option(type_, cfg)
+                if has_first:
+                    out[name] = first
             if type_ == DYNAMIC_COMBO and name in out and not isinstance(out[name], list):
                 chosen = next((o for o in cfg.get("options") or [] if o.get("key") == out[name]), None)
                 if chosen is not None:
@@ -414,6 +449,10 @@ def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -
                 value = inputs[name]
                 if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
                     continue  # a link, checked structurally
+                if isinstance(value, dict) and "__value__" in value:
+                    value = value["__value__"]  # a wrapped list literal, unwrapped like the server does
+                    if isinstance(value, list):
+                        continue  # multi-value widgets are not single-choice combos
                 if type_ == DYNAMIC_COMBO:
                     keys = [o.get("key") for o in cfg.get("options") or []]
                     if value not in keys:

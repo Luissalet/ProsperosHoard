@@ -30,12 +30,14 @@ OFFICIAL_TEMPLATES = [
     "image_qwen_image_2_1_t2i.json",
     "image_qwen_image_2_1_image_edit.json",
 ]
-# Inputs the frontend sends that carry no information for the server:
-# seeds (randomised when the frontend loads a template), the hidden,
-# optional legacy SaveVideo "codec" (superseded by the required
-# "format.codec"), and the socketless ImageCompare view (a UI preview).
+# Seeds are the only inputs not compared: the frontend randomises them when
+# it loads a template. Everything else, including the hidden legacy
+# SaveVideo "codec" and ImageCompare's socketless view, must match exactly.
 IGNORED_INPUTS = {"seed", "noise_seed"}
-FRONTEND_ONLY = {("SaveVideo", "codec"), ("ImageCompare", "compare_view")}
+# The ACE-Step template as comfyui-workflow-templates shipped it before 0.37
+# (saved with SaveAudioMP3); 0.37 still has that node, so old exports of it
+# must keep converting.
+LEGACY_ACE = FIXTURES / "v0.34" / "audio_ace_step_1_5_checkpoint.json"
 
 
 @pytest.fixture(scope="module")
@@ -68,10 +70,32 @@ def test_matches_the_real_frontend_export(name: str, object_info: dict) -> None:
         ours = api[node_id]
         assert ours["class_type"] == expected["class_type"], node_id
         ctype = expected["class_type"]
-        want = {k: v for k, v in expected["inputs"].items()
-                if k not in IGNORED_INPUTS and (ctype, k) not in FRONTEND_ONLY}
+        want = {k: v for k, v in expected["inputs"].items() if k not in IGNORED_INPUTS}
         got = {k: v for k, v in ours["inputs"].items() if k not in IGNORED_INPUTS}
         assert got == want, f"{name} node {node_id} ({ctype})"
+        # a seed is still sent, as an integer literal (or the same link)
+        for key in IGNORED_INPUTS & set(expected["inputs"]):
+            assert type(ours["inputs"].get(key)) is type(expected["inputs"][key]), f"{name} node {node_id} {key}"
+
+
+def test_frontend_serialisation_quirks(object_info: dict) -> None:
+    edit = convert.ui_to_api(json.loads((FIXTURES / "image_qwen_image_2_1_image_edit.json").read_text(encoding="utf-8")),
+                             object_info)
+    # a socketless view the frontend still serialises, list wrapped as __value__
+    assert edit["472"]["inputs"]["compare_view"] == {"__value__": ["", ""]}
+    assert not [p for p in convert.validate_values(edit, object_info) if p.startswith("node 472 ")]
+    wan = convert.ui_to_api(json.loads((FIXTURES / "video_wan2_2_5B_ti2v.json").read_text(encoding="utf-8")), object_info)
+    # a hidden legacy combo with no saved slot and no default takes its first option
+    assert wan["58"]["inputs"]["codec"] == "auto"
+    # a socketless preview the frontend does not send stays out
+    t2i = convert.ui_to_api(json.loads((FIXTURES / "image_qwen_image_2_1_t2i.json").read_text(encoding="utf-8")), object_info)
+    assert "preview" not in t2i["13"]["inputs"]
+
+
+def test_legacy_ace_step_export_still_converts(object_info: dict) -> None:
+    api = convert.ui_to_api(json.loads(LEGACY_ACE.read_text(encoding="utf-8")), object_info)
+    assert {n["class_type"] for n in api.values()} >= {"SaveAudioMP3", "TextEncodeAceStepAudio1.5", "KSampler"}
+    assert convert.validate_values(api, object_info) == []
 
 
 def test_dynamic_combo_children_are_flattened_and_required(object_info: dict) -> None:
