@@ -137,7 +137,9 @@ Flags: `--port`, `--data-dir` (or `PROSPERO_DATA_DIR`), `--demo`,
 original five-member group with portraits, stage shots, a cover, a photocard
 set, a synthetic 30 s song with timed lyrics and an auto-cut timeline, and
 renders its preview video. To use your ComfyUI, leave it on
-127.0.0.1:8188 (Hoard Link finds it) or set its URL in Settings.
+127.0.0.1:8188 (Hoard Link finds it) or set its URL in Settings. On a GPU
+shared with a language model, renders slow down a lot; `PROSPERO_COMFY_TIMEOUT_S`
+raises how long a job may run (defaults: video 1 h, audio 30 min, image 20 min).
 
 ![Audio screen: the demo song at 120 BPM with its beat ticks and A/B/A sections, the lyrics timing tool and voice lines](docs/media/04-audio.png)
 *Actual application, synthetic demo data: the synthetic demo song analysed by the built-in beat tracker, with the section estimates and the LRC lyrics timed to it.*

@@ -142,7 +142,9 @@ crea un grupo original de cinco miembros con retratos, fotos en el
 escenario, una portada, un set de photocards, una canción sintética de 30 s
 con la letra sincronizada y un montaje automático, y renderiza su vista
 previa. Para usar tu ComfyUI, déjalo en 127.0.0.1:8188 (Hoard Link lo
-encuentra) o pon su URL en Ajustes.
+encuentra) o pon su URL en Ajustes. Si la GPU la comparte un modelo de
+lenguaje, los renders van mucho más lentos; `PROSPERO_COMFY_TIMEOUT_S` sube
+cuánto puede tardar un trabajo (por defecto: vídeo 1 h, audio 30 min, imagen 20 min).
 
 ![Pantalla de audio: la canción de demostración a 120 BPM con sus pulsos y secciones A/B/A, la herramienta para sincronizar la letra y las frases habladas](docs/media/04-audio.png)
 *Aplicación real, datos de demostración sintéticos: la canción sintética analizada con el detector de pulsos integrado, con la estimación de secciones y la letra LRC sincronizada.*

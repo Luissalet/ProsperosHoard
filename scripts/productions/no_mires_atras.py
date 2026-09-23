@@ -501,7 +501,7 @@ async def step_clips(session: Any, state: dict[str, Any], args: argparse.Namespa
                                "prompt": CLIP_MOTION.get(n, "subtle motion, rain, flicker"), "seed": 5000 + n}
         if n in CLIP_STILL_FIGURE:
             gen["negative"] = CLIP_NEGATIVE_STILL
-        ids = await _generate(session, gen, timeout_s=1800)
+        ids = await _generate(session, gen, timeout_s=3900)  # the app itself waits up to 3600 s for a video
         clips[str(n)] = ids[0]
         save_partial(state, 5, str(n), ids[0])
         print(f"  shot {n} clip: {clips[str(n)]}")
