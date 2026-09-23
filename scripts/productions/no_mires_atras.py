@@ -250,6 +250,103 @@ Una… dos… tres…
 (ya está.)
 """
 
+SONG_LYRICS_EN = """[Intro]
+(shh…)
+Count the streetlights… one… two…
+If the third one flickers… it wasn't me.
+
+[Verse 1]
+Two-fifteen and the street is wet,
+the asphalt shining like it hasn't blinked yet,
+headphones on but there's nothing playing,
+just a lighter clicking right behind me, waiting.
+Switch the sidewalk, switch my pace,
+my shadow's stretching way out of place,
+counting the lamps so my mind goes numb,
+and there's one still burning where there shouldn't be one.
+Orange glow on the paper skin,
+a crooked smile somebody painted in,
+it's never rushing, it's got no face,
+just a candle flame that nothing can erase.
+
+[Pre-Chorus]
+Turn around… nothing there.
+Look away… and it's one step nearer.
+
+[Chorus]
+Don't look back, don't look back,
+the light behind you ain't the city's, that's a fact,
+every streetlamp, one more step,
+when it cuts out… it's already at your back.
+Don't look back, don't look back,
+your shadow's got company walking its track,
+count to three and start to walk,
+'cause the lantern never sleeps… and tonight, neither do you.
+
+[Verse 2]
+At the bus stop, the glass all fogged,
+my reflection's got a friend I never brought,
+no bus coming and the app won't load,
+and a message on the screen: "why won't you stop?"
+Taking the stairs three at a time,
+wire fingers on the railing, one flight behind,
+the elevator mirror's staring through,
+and a candle's shaking just behind me too.
+Reach my door, there's a puddle on the mat,
+wet bare footprints, no shoe ever made that,
+lock it twice, then a third for luck,
+and down on the street there's a light looking up.
+
+[Bridge]
+Turn off the light… turn off the light…
+if you can't see it, it isn't there… right?
+Turn off the light…
+(click)
+…and the room turns orange.
+
+[Chorus]
+Don't look back, don't look back,
+the light behind you ain't the city's, that's a fact,
+every streetlamp, one more step,
+when it cuts out… it's already at your back.
+
+[Outro]
+One… two… three…
+(it's here.)
+"""
+
+# Everything language-bound: the song and every text the designs print.
+# The pictures and clips carry no language, so an English version reuses
+# the Spanish run's project, character, stills, clips and photos
+# (--reuse-from) and only redoes the song, the designs and the cut.
+TEXTS = {
+    "es": {"title": "NO MIRES ATRÁS", "tags": SONG_TAGS, "lyrics": SONG_LYRICS, "language": "es",
+           "credits": "Letra y música: FAROL\nHecho de noche, bajo farolas de sodio, con Prospero's Hoard.",
+           "tagline": "No mires atrás", "date": "Siempre un poco más cerca",
+           "quote": "No mires atrás,\nno mires atrás,\nla luz que te sigue\nno es de la ciudad",
+           "messages": ["gracias por venir", "abrígate, fuera hace frío", "¡clic!", "te veo desde aquí",
+                        "perdón por seguirte"],
+           "out_dir": "no_mires_atras"},
+    "en": {"title": "DON'T LOOK BACK", "tags": SONG_TAGS.replace("spanish", "english"), "lyrics": SONG_LYRICS_EN,
+           "language": "en",
+           "credits": "Words and music: FAROL\nMade at night, under sodium lamps, with Prospero's Hoard.",
+           "tagline": "Don't look back", "date": "Always a little closer",
+           "quote": "Don't look back,\ndon't look back,\nthe light behind you\nain't the city's",
+           "messages": ["thanks for coming", "wrap up, it's cold out", "click!", "I can see you from here",
+                        "sorry for following you"],
+           "out_dir": "dont_look_back"},
+}
+LANG = "es"
+
+
+def text(key: str) -> Any:
+    return TEXTS[LANG][key]
+
+
+def song_params() -> dict[str, Any]:
+    return {**SONG_PARAMS, "language": text("language")}
+
+
 # --quality knobs: (spec numbers under "final"; a fast, cheap subset under "draft")
 QUALITY = {
     "draft": {"ref_seeds": 2, "song_seeds": 1, "still_variants": 1, "posts": False,
@@ -447,8 +544,8 @@ async def step_song(session: Any, state: dict[str, Any], args: argparse.Namespac
     pid = state["done"]["1"]["project_id"]
     count = QUALITY[args.quality]["song_seeds"]
     res = await call(session, "studio_compose", {
-        "project": pid, "tags": SONG_TAGS, "lyrics": SONG_LYRICS, "count": count, "seed": 2001,
-        "wait_s": 240, **SONG_PARAMS,
+        "project": pid, "tags": text("tags"), "lyrics": text("lyrics"), "count": count, "seed": 2001,
+        "wait_s": 240, **song_params(),
     })
     job = await wait_job(session, res["job"], timeout_s=900)
     song_ids = job["asset_ids"]
@@ -527,10 +624,11 @@ async def step_photocards(session: Any, state: dict[str, Any], args: argparse.Na
                                             "consistent": True, "aspect": "2:3", "count": 1, "seed": 4000 + i})
             save_partial(state, 6, str(i), ids[0])
         photos.append(ids[0])
-        cards.append({"image_asset_id": ids[0], "role": look["role"], "message": look["message"], "accent": look["accent"]})
+        message = text("messages")[i - 1] if i - 1 < len(text("messages")) else look["message"]
+        cards.append({"image_asset_id": ids[0], "role": look["role"], "message": message, "accent": look["accent"]})
         print(f"  look {i} ({look['role']}): photo {ids[0]}")
     result = await call(session, "studio_photocard_set", {
-        "project": pid, "character_id": char_id, "cards": cards, "set_name": PROJECT_NAME,
+        "project": pid, "character_id": char_id, "cards": cards, "set_name": text("title"),
     })
     print(f"  set: fronts {result['front_ids']}, backs {result['back_ids']}, contact sheet {result['contact_sheet_id']}")
     mark_done(state, 6, {"photo_ids": photos, "front_ids": result["front_ids"], "back_ids": result["back_ids"],
@@ -552,23 +650,23 @@ async def step_album(session: Any, state: dict[str, Any], args: argparse.Namespa
 
     cover = await call(session, "studio_design", {
         "project": pid, "template": "album_cover", "image_asset_id": cover_image, "variant": "night",
-        "fields": {"title": PROJECT_NAME, "artist": CHARACTER_NAME, "subtitle": "single", "accent": ACCENT},
+        "fields": {"title": text("title"), "artist": CHARACTER_NAME, "subtitle": "single", "accent": ACCENT},
     })
     tracklist = await call(session, "studio_design", {
         "project": pid, "template": "tracklist_back", "image_asset_id": cover_image, "variant": "night",
-        "fields": {"group_name": CHARACTER_NAME, "title": PROJECT_NAME,
-                   "tracks": [f"01  {PROJECT_NAME}  {_mmss(duration)}"],
-                   "credits": "Letra y música: FAROL\nHecho de noche, bajo farolas de sodio, con Prospero's Hoard.",
+        "fields": {"group_name": CHARACTER_NAME, "title": text("title"),
+                   "tracks": [f"01  {text('title')}  {_mmss(duration)}"],
+                   "credits": text("credits"),
                    "accent": ACCENT},
     })
     poster = await call(session, "studio_design", {
         "project": pid, "template": "teaser_poster", "image_asset_id": poster_image, "variant": "night",
-        "fields": {"title": CHARACTER_NAME, "tagline": "No mires atrás", "date": "Siempre un poco más cerca", "accent": ACCENT},
+        "fields": {"title": CHARACTER_NAME, "tagline": text("tagline"), "date": text("date"), "accent": ACCENT},
     })
     lyric_card = await call(session, "studio_design", {
         "project": pid, "template": "lyric_card", "image_asset_id": lyric_image, "variant": "night",
-        "fields": {"quote": "No mires atrás,\nno mires atrás,\nla luz que te sigue\nno es de la ciudad",
-                   "attribution": f"{CHARACTER_NAME} — {PROJECT_NAME}", "accent": ACCENT},
+        "fields": {"quote": text("quote"),
+                   "attribution": f"{CHARACTER_NAME} — {text('title')}", "accent": ACCENT},
     })
     print(f"  cover {cover['id']}, tracklist back {tracklist['id']}, poster {poster['id']}, lyric card {lyric_card['id']}")
     mark_done(state, 7, {"cover_id": cover["id"], "tracklist_back_id": tracklist["id"],
@@ -588,7 +686,7 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
         imported = await call(session, "studio_import", {"project": pid, "path": args.lrc_path, "kind": "lyrics"})
         lyrics_asset_id, lyrics_source = imported["id"], f"imported from {Path(args.lrc_path).name}"
     else:
-        timed = await call(session, "studio_time_lyrics", {"project": pid, "song_asset_id": song_id, "lyrics": SONG_LYRICS})
+        timed = await call(session, "studio_time_lyrics", {"project": pid, "song_asset_id": song_id, "lyrics": text("lyrics")})
         lyrics_asset_id, sections = timed["id"], timed["sections"]
         lyrics_source = "studio_time_lyrics (section tags + the song's bars - an estimate, re-time by ear)"
         print(f"  timed {timed['lines']} lines in {len(sections)} sections -> lyrics {lyrics_asset_id}")
@@ -630,7 +728,7 @@ async def step_timeline(session: Any, state: dict[str, Any], args: argparse.Name
 async def step_report(session: Any, state: dict[str, Any], args: argparse.Namespace) -> None:
     done = state["done"]
     timings = state.get("timings", {})
-    lines = [f"# {PROJECT_NAME} - production report", "",
+    lines = [f"# {text('title')} - production report", "",
              f"Backend: **{args.backend}** - quality: **{args.quality}**",
              "", "Every id below is a Prospero asset id; `studio_lineage(asset_id)` gives its full recipe "
              "(template, every parameter, seed, inputs).", ""]
@@ -657,8 +755,8 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
 
     lines += ["## Song", "", f"- Takes: {done['3']['song_asset_ids']}",
               f"- Used for the timeline: `{done['3']['song_asset_id']}` ({_mmss(done['3'].get('duration_s') or 0)})",
-              f"- Tags: `{SONG_TAGS}`",
-              f"- bpm {SONG_PARAMS['bpm']}, key {SONG_PARAMS['key']}, language {SONG_PARAMS['language']}, "
+              f"- Tags: `{text('tags')}`",
+              f"- bpm {SONG_PARAMS['bpm']}, key {SONG_PARAMS['key']}, language {text('language')}, "
               f"time signature {SONG_PARAMS['time_signature']}, duration {SONG_PARAMS['duration']}s", ""]
 
     lines += ["## Stills (12 shots)", "", "| Shot | route | 16:9 variants | best | 4:5 post |", "| --- | --- | --- | --- | --- |"]
@@ -804,7 +902,9 @@ async def run(args: argparse.Namespace) -> int:
     fake_app: Optional[FakeAppHandle] = None
     try:
         if args.backend == "fake":
-            fake_app = FakeAppHandle(OUT_DIR / "appdata")
+            # a run seeded with --reuse-from shares the source run's demo app,
+            # the way two real runs share the one running Prospero
+            fake_app = FakeAppHandle(Path(state["_appdata"]) if state.get("_appdata") else OUT_DIR / "appdata")
             app_url = fake_app.url
             state["_appdata"] = str(fake_app.data_dir)
         else:
@@ -868,11 +968,42 @@ def main() -> int:
                              "a path the app may import (home folder or a folder allowed in Settings)")
     parser.add_argument("--only", default=None, help="run just one step (name or number 1-9)")
     parser.add_argument("--out-dir", default=None,
-                        help="where state.json, REPORT.md (and the fake backend's data) go; default data/productions/no_mires_atras")
+                        help="where state.json, REPORT.md (and the fake backend's data) go; default "
+                             "data/productions/no_mires_atras (dont_look_back with --lang en)")
+    parser.add_argument("--lang", choices=sorted(TEXTS), default="es",
+                        help="language of the song and of every printed text: es (NO MIRES ATRÁS, the default) "
+                             "or en (DON'T LOOK BACK)")
+    parser.add_argument("--reuse-from", default=None,
+                        help="another run's folder (its state.json): reuse its project, character, stills, clips and "
+                             "photocard photos, so only the song, the designs and the cut are made again")
     args = parser.parse_args()
+    global LANG
+    LANG = args.lang
     if args.out_dir:
         set_out_dir(Path(args.out_dir))
+    elif args.lang != "es":
+        set_out_dir(REPO_ROOT / "data" / "productions" / text("out_dir"))
+    if args.reuse_from:
+        seed_from(Path(args.reuse_from))
     return asyncio.run(run(args))
+
+
+def seed_from(folder: Path) -> None:
+    """Copy the language-free steps of another run into this run's state
+    (only the ones this run has not made yet)."""
+    source_path = (folder if folder.is_absolute() else REPO_ROOT / folder) / "state.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    state = load_state()
+    for step in ("1", "2", "4", "5"):
+        if step in source.get("done", {}) and step not in state["done"]:
+            state["done"][step] = source["done"][step]
+    photos = source.get("done", {}).get("6", {}).get("photo_ids") or []
+    if photos and "6" not in state["done"] and not state.get("partial", {}).get("6"):
+        state.setdefault("partial", {})["6"] = {str(i): pid for i, pid in enumerate(photos, start=1)}
+    if source.get("_appdata") and not state.get("_appdata"):
+        state["_appdata"] = source["_appdata"]
+    state.setdefault("reused_from", _shown(source_path.parent))
+    save_state(state)
 
 
 if __name__ == "__main__":
