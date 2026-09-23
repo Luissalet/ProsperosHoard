@@ -35,7 +35,7 @@ with ids and pictures.
 | Area | Available now | Boundary |
 | --- | --- | --- |
 | Projects and cast | Projects, characters (look prompt, negative, palette, canonical reference, voice), ordered groups, `@Name` mentions that match multi-word names and report unknown ones, 6 style presets | Single local user; names must be unique per project (they are the mention) |
-| Generation (ComfyUI) | SDXL txt2img, img2img, inpaint and a two-pass hires fix, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; each with its own sampler/size defaults; the whole prompt checked against `/object_info` before queueing (nodes, every model file, samplers, combo choices, ranges) with the installed options in the error; a UI-format **or** API-format workflow importer whose converter matches the real ComfyUI 0.37 frontend's export input for input on the official templates (subgraphs and promoted widgets, dynamic combos, `PrimitiveNode`/`Reroute`, bypass/mute), with an editable parameter map and a cached node list for when ComfyUI is off; `consistent=true` keeps a `@Character`'s exact design via Kontext and their canonical reference, cropped to one pose of a turnaround sheet | Prospero hosts no model; Kontext is single-reference, Wan is image-to-video only |
+| Generation (ComfyUI) | Qwen-Image 2.1 (int8) txt2img and a multi-reference edit (1-10 references, up to native 2K), SDXL txt2img, img2img, inpaint and a two-pass hires fix, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; each with its own sampler/size defaults; an `auto \| qwen21 \| flux \| sdxl` image engine choice per project and per call ("auto" reaches for Qwen-Image 2.1 when it is installed, else Flux, else SDXL, and always says which one it used); the whole prompt checked against `/object_info` before queueing (nodes, every model file, samplers, combo choices, ranges), a missing model file read as "download it" rather than a crash, with the installed options in the error; a UI-format **or** API-format workflow importer whose converter matches the real ComfyUI 0.37 frontend's export input for input on the official templates (subgraphs and promoted widgets, dynamic combos, autogrow sockets, `PrimitiveNode`/`Reroute`, bypass/mute), with an editable parameter map and a cached node list for when ComfyUI is off; `consistent=true` keeps a `@Character`'s exact design via an edit template (Qwen-Image 2.1 or Kontext, per engine) and their canonical reference, cropped to one pose of a turnaround sheet | Prospero hosts no model; Kontext is single-reference (Qwen-Image 2.1 takes up to 10), Wan is image-to-video only |
 | GPU etiquette | VRAM estimate per workflow family (editable) checked against nvidia-smi or ComfyUI's `system_stats`; a job that does not fit waits in `waiting_gpu` with the reason, every 15 s for up to 30 min; cancel at any time | Nothing is ever unloaded unless you press "Free ComfyUI memory" |
 | Lineage | Every generated asset records template, template hash, checkpoint, every parameter and seed, inputs and timing; "Reuse recipe" reproduces an image byte for byte on the same backend (tested), "Vary seed" re-runs it with new seeds | Reproduction is only guaranteed on the same backend, models and ComfyUI version |
 | Design | Pillow renderer, no browser: photocard front and back, album cover (4 layouts), teaser poster, lyric card, tracklist back, thumbnail, with a "night" horror/thriller variant for the cover, poster, lyric card and tracklist; gradients, holographic foil, blends, vignette, letter spacing, shadows, shrink-to-fit text, tracklist columns; photocard sets for a whole group or a solo artist in several looks, with a contact sheet; print mode with 3 mm bleed at 300 dpi; 6 bundled font families | The QR layer draws a placeholder box (no QR library is pinned) |
@@ -48,6 +48,27 @@ with ids and pictures.
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
+
+## Models
+
+| Family | Checkpoint / files | VRAM (approx.) | Best for |
+| --- | --- | --- | --- |
+| Qwen-Image 2.1 (int8) | `qwen_image_2.1_int8_convrot.safetensors` (diffusion), `qwen3vl_8b_int8_convrot.safetensors` (text encoder), `qwen_image_2.1_vae_bf16.safetensors` (VAE) | ~7.3 GB + 9.4 GB loaded one after the other; peak ~10-12 GB at 1 MP, more at native 2K | Best prompt adherence, in-image typography, multi-reference identity (1-10 images) |
+| FLUX.1 schnell | `flux1-schnell-fp8.safetensors` | ~13 GB | Fastest drafts (4 steps) |
+| FLUX.1 Kontext dev | `flux1-dev-kontext_fp8_scaled.safetensors` + CLIP/VAE | ~13 GB | Single-reference edits |
+| SDXL / SD 1.5 | `sd_xl_base_1.0.safetensors` / `v1-5-pruned-emaonly-fp16.safetensors` | ~7 GB / ~3.5 GB | Always available fallback, low-VRAM draft |
+| SVD | `svd_xt.safetensors` | ~10 GB | Image to short video |
+| Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Image to video, native 1280x704 |
+| ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Song composition with vocals |
+
+`studio_generate_image`'s `engine` parameter (and a project's own `image_engine`
+setting) picks between the image families: `auto` (default) resolves to
+Qwen-Image 2.1 when its node class and model files are installed, else Flux
+schnell, else SDXL - every result says which one it actually used. A
+`template` name always wins over `engine` when both are given. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the converter turns
+ComfyUI's own UI-format export of each template into the API-format
+workflow above, and how a missing model file is reported.
 
 ## Connect it to Faustus
 
@@ -63,7 +84,7 @@ loading anything of its own.
 | `studio_status` | Backends, checkpoints, free VRAM, queue | yes |
 | `studio_projects` / `studio_create_project` | List or create productions | yes / no |
 | `studio_cast` | List, create, update characters and groups | no (list is read-only) |
-| `studio_generate_image` | Queue txt2img/img2img with @mentions and presets | no |
+| `studio_generate_image` | Queue txt2img/edit with @mentions, presets and an image engine choice | no |
 | `studio_edit_image` | img2img, inpaint, upscale, reuse recipe, vary seed | no |
 | `studio_animate` | Image to short video (SVD) | no |
 | `studio_compose` | Compose a song with vocals (ACE-Step) | no |
@@ -122,10 +143,12 @@ produces a single, "NO MIRES ATRÁS" by FAROL (an original night creature:
 a paper-lantern head, always still, always a little closer), end to end
 **through the MCP adapter only** - it spawns `mcp_server.py` over stdio,
 the same path Faustus uses, and fails if any result carries a picture it
-did not ask for. Nine steps: the project; a Flux turnaround sheet cropped
-to its front view as FAROL's canonical reference; the song with ACE-Step;
-twelve stills (Kontext with that reference when FAROL is in frame, Flux in
-the same night look when not); Wan clips from the best stills; a solo
+did not ask for. Nine steps: the project (with an `--engine auto|qwen21|flux`
+choice, set as its own default); a turnaround sheet cropped to its front
+view as FAROL's canonical reference; the song with ACE-Step; twelve stills
+(an edit template with that reference when FAROL is in frame, a fresh
+txt2img in the same night look when not - Qwen-Image 2.1 when installed,
+else Flux); Wan clips from the best stills; a solo
 photocard set in five idol looks with its contact sheet; the "night" cover,
 tracklist back, teaser poster and lyric card; lyrics timed to the song's
 bars; 9:16 and 16:9 cuts that follow a storyboard per section and change
@@ -142,23 +165,28 @@ On Windows, with the app running and ComfyUI started on a 16 GB card:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend fake --quality draft
 # the real thing against the running app and ComfyUI
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
+# pin the image engine instead of "auto" reaching for Qwen-Image 2.1 first
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --engine flux
 # after re-timing the lyrics by ear in Audio > Lyrics timing and exporting the LRC
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<you>\Music\no_mires_atras.lrc
 ```
 
 What has run and what has not: the whole production ran in this
-repository's CPU-only test setup against `--backend fake`, the procedural
-stand-in `--demo` uses - so its pictures, clips and song are labelled
-placeholders, not Flux, Kontext, Wan or ACE-Step output. What that run does
-prove is everything Prospero itself decides: every step completes and every
-asset kind is produced; the design layouts, typography, grade, grain,
-glitch, cut rhythm, storyboard and karaoke timing render as intended (the
-review of those frames is what led to the night variants, the caption
-rework and a frame-accurate transition fix). The fake ComfyUI serves the
-real ComfyUI 0.37 install's node list and rejects any prompt the real server
-would, and the four templates were checked input for input against what
-the real frontend exports - but **no real GPU run has happened yet**; that
-is the next step, with the same script.
+repository's CPU-only test setup against `--backend fake --engine auto`, the
+procedural stand-in `--demo` uses - so its pictures, clips and song are
+labelled placeholders, not Qwen-Image 2.1, Flux, Kontext, Wan or ACE-Step
+output (the fake reports Qwen-Image 2.1 as installed, so `auto` routed the
+reference sheet through `qwen21_txt2img` and the FAROL stills through
+`qwen21_edit` - confirmed from each asset's `recipe.image_engine`). What
+that run does prove is everything Prospero itself decides: every step
+completes and every asset kind is produced; the design layouts, typography,
+grade, grain, glitch, cut rhythm, storyboard and karaoke timing render as
+intended (the review of those frames is what led to the night variants,
+the caption rework and a frame-accurate transition fix). The fake ComfyUI
+serves the real ComfyUI 0.37 install's node list and rejects any prompt the
+real server would, and the six templates were checked input for input
+against what the real frontend exports - but **no real GPU run has
+happened yet**; that is the next step, with the same script.
 
 ## Architecture
 
@@ -177,18 +205,25 @@ Every endpoint: [docs/API.md](docs/API.md).
 cd frontend; npm ci; npm run build
 ```
 
-The last full run: **174 tests passed** in about 90 s, offline, with
+The last full run: **187 tests passed** in about 95 s, offline, with
 the demo backend standing in for ComfyUI. They cover: the MCP protocol end
 to end (the adapter spawned over stdio against a live app: tool keywords and
 annotations, generation with a picture, lineage, design, readable errors,
 the app-not-running message); the UI-format-to-API workflow converter
-against seven official ComfyUI templates, compared input for input with
-what the real frontend exports (subgraphs and promoted widgets, dynamic
-combos, autogrow inputs, bypass/mute, `PrimitiveNode`/`Reroute`) and UI
-exports imported through the API with and without ComfyUI; the four new
-templates (Flux schnell, Kontext edit, Wan 2.2 TI2V, ACE-Step song)
-passing server-side validation with their own defaults and generating
-against the fake backend's real `/object_info`; lyric timing from section
+against seven official ComfyUI templates (ComfyUI 0.37, including the two
+Qwen-Image 2.1 ones, its promoted-widget subgraphs, dynamic combo and
+autogrow sockets), compared input for input with what the real frontend
+exports (subgraphs and promoted widgets, dynamic combos, autogrow inputs,
+bypass/mute, `PrimitiveNode`/`Reroute`) and UI exports imported through the
+API with and without ComfyUI; the six built-in templates that were converted
+this way (Flux schnell, Kontext edit, Wan 2.2 TI2V, ACE-Step song,
+Qwen-Image 2.1 txt2img and edit) passing server-side validation with their
+own defaults - including that a model file missing from `/object_info`
+reads as "download it", never a crash - and generating against the fake
+backend's real `/object_info`; the `auto|qwen21|flux|sdxl` image engine
+choice (installed-model detection, per-project default, per-call override,
+graceful fallback) and Qwen-Image 2.1's multi-reference edit (1-10 images,
+extra reference nodes wired or dropped to match); lyric timing from section
 tags, storyboard pools and cut-on-lyrics; a long transition render that
 must keep its full length; character-consistency routing and its
 `consistent_needs_reference` error; the finishing filter graphs (colour

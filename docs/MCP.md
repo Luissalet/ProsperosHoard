@@ -64,11 +64,11 @@ Faustus reads the same information from `faustus-plugin.json`
 
 | Tool | Read-only | Arguments (defaults) | Returns |
 | --- | --- | --- | --- |
-| `studio_status` | yes | - | `demo_backend`, `capabilities{cap: state, provider, model, reason}`, `comfyui{reachable, url, checkpoints, vram_free_mb}`, `ffmpeg`, `piper_tts`, `music_generation[]`, `vram_estimates_mb`, `queue{queued, waiting_gpu, running}`, `recent_jobs[5]` |
+| `studio_status` | yes | - | `demo_backend`, `capabilities{cap: state, provider, model, reason}`, `comfyui{reachable, url, checkpoints, vram_free_mb}`, `image_engine{available, auto_resolves_to}`, `ffmpeg`, `piper_tts`, `music_generation[]`, `vram_estimates_mb`, `queue{queued, waiting_gpu, running}`, `recent_jobs[5]` |
 | `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
-| `studio_create_project` | no | `name, brief=None` | `{id, name, brief}` |
+| `studio_create_project` | no | `name, brief=None, image_engine=None` | `{id, name, brief, image_engine}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |
-| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, strength, template, checkpoint, consistent=False, wait_s=0, use_character_reference=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, seed}` (+ picture only when `include_image=true`) |
+| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, reference_asset_ids, strength, template, engine, checkpoint, consistent=False, wait_s=0, use_character_reference=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, engine, seed}` (+ picture only when `include_image=true`) |
 | `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0, include_image=False` | `{job}`; the output is an mp4 video asset |
 | `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
@@ -103,40 +103,65 @@ whole is annotated as writing because create/update do.
 - **Edits:** `hires` re-runs an SDXL txt2img recipe with a second, larger
   sampling pass (so only for images generated here with that template);
   `reuse`/`vary` need a ComfyUI recipe; `img2img` and `inpaint` work on any image.
-- **Templates:** `sdxl_txt2img` (default), `sdxl_img2img` (default when a
-  reference is given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`,
-  `svd_img2vid`, and the four converted from the official ComfyUI templates
-  and checked input for input against what a real ComfyUI 0.37
-  frontend exports:
+- **Image engine:** `engine="auto" | "qwen21" | "flux" | "sdxl"` (default
+  `"auto"`, or the project's own `image_engine` set at
+  `studio_create_project` / `PATCH /api/projects/{id}`) picks which family
+  a call uses when `template` is not given explicitly: `"auto"` reaches for
+  Qwen-Image 2.1 when it is installed (best prompt adherence, in-image
+  typography, multi-reference identity), else Flux schnell (fastest
+  drafts), else SDXL, which - like Flux schnell - always works. The result
+  always reports which one ran (`recipe.image_engine` on the asset). An
+  explicit `template` skips engine resolution entirely.
+- **Templates:** `sdxl_txt2img` (default engine's txt2img fallback),
+  `sdxl_img2img` (default engine's edit fallback when a reference is
+  given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`, `svd_img2vid`, and
+  the six converted from the official ComfyUI templates and checked input
+  for input against what a real ComfyUI 0.37 frontend exports:
 
   | Template | Models | Defaults when not given | Notes |
   | --- | --- | --- | --- |
+  | `qwen21_txt2img` | `qwen_image_2.1_int8_convrot` (UNet) + `qwen3vl_8b_int8_convrot` (CLIP) + `qwen_image_2.1_vae_bf16` (VAE) | 1024x1024, 25 steps, cfg 1, euler/simple | `engine="qwen21"`'s (or auto's) default txt2img; native 2K supported at higher VRAM/time cost |
+  | `qwen21_edit` | same three files + `QwenImage21Cache` (device auto, dtype default) | 25 steps, cfg 1, euler/simple; canvas = image_1's own size unless `custom_size=true` | multi-reference edit: `reference_asset_ids` (1-10, image_1 first = edit target/main identity), prompt addresses them as `<image1>`, `<image2>`...; `resolution` is the pixel budget references are resized to before encoding (0 = keep original size, rounded to 32; default 1024) |
   | `flux_schnell_txt2img` | checkpoint `flux1-schnell-fp8` | 1024x1024, 4 steps, cfg 1, euler/simple | no real negative prompt (distilled model); SDXL style presets do not change its sampler |
   | `flux_kontext_edit` | `flux1-dev-kontext_fp8_scaled` + `clip_l` / `t5xxl_fp8_e4m3fn_scaled` + `ae` | 20 steps, guidance 2.5, cfg 1; size = the reference's aspect at ~1 MP | reference-guided edit (same character, new scene); `width`/`height`/`aspect` set the output size; single reference image |
   | `wan22_ti2v` | `wan2.2_ti2v_5B_fp16` + `umt5_xxl_fp8_e4m3fn_scaled` + `wan2.2_vae` | 1280x704 (704x1280 for a vertical still, 960x960 square), 121 frames at 24 fps = 5 s, 20 steps, cfg 5, shift 8, uni_pc/simple | image-to-video: `reference_asset_id` is the start frame |
   | `ace15_song` | checkpoint `ace_step_1.5_turbo_aio` | 8 steps, cfg 1, shift 3; the duration reaches both the encoder and the latent | used by `studio_compose`, not `studio_generate_image` |
 
-  VRAM estimates (editable in Settings): Flux ~13 GB, Kontext ~13 GB, Wan
-  5B ~12 GB at 1280x704, ACE-Step turbo ~8 GB. An imported `wf_...`
+  VRAM estimates (editable in Settings): Qwen-Image 2.1 ~7.3 GB + 9.4 GB
+  loaded one after the other (peak ~10-12 GB at 1 MP, more at 2K), Flux
+  ~13 GB, Kontext ~13 GB, Wan 5B ~12 GB at 1280x704, ACE-Step turbo ~8 GB.
+  A model file `/object_info` does not list yet (not installed) fails with
+  a `"model not installed: ... download it, or choose one of: ..."`
+  message, not a crash - built-in templates whose model is a single
+  checkpoint (SDXL, SD1.5, Flux schnell, ACE-Step) get this pre-flight,
+  before ComfyUI is even asked to queue anything; the rest (Kontext, Wan,
+  Qwen-Image 2.1, which load their UNet/CLIP/VAE separately) are still
+  caught, just as part of the same pre-queue check. An imported `wf_...`
   workflow can come from a UI **or** API format export -
   `workflows/convert.py` expands subgraphs (promoted widgets included),
   `PrimitiveNode`/`Reroute`, bypass/mute, dynamic combos and autogrow
   inputs.
 - **Character consistency:** `consistent=true` keeps a mentioned character's
-  exact design: it routes through `flux_kontext_edit` with their
-  `canonical_asset_id` as the reference and the prompt turned into "the
+  exact design: it routes through the resolved engine's edit template
+  (`qwen21_edit` or `flux_kontext_edit`) with their `canonical_asset_id` as
+  the first reference (`image_1` for Qwen) and the prompt turned into an
+  instruction that keeps the character and only changes the scene -
+  "Keep the character from &lt;image1&gt; exactly the same (face,
+  silhouette, colours, props), now &lt;scene&gt;" for Qwen-Image 2.1, "the
   same character from the reference image, with exactly the same design,
-  proportions and colours, now &lt;scene&gt;" instead of inlining the look
-  description. Needs a `@Character` with a canonical reference set
-  (`studio_cast` update) or an explicit `reference_asset_id`; otherwise
-  fails with `consistent_needs_reference`. Build the reference itself with
-  a plain `flux_schnell_txt2img` turnaround-sheet prompt (front / three-
-  quarter / back on a neutral backdrop), then set it as
-  `canonical_asset_id` together with `canonical_crop` (`left_third` |
-  `middle_third` | `right_third` or `[x, y, w, h]` fractions): the crop
-  becomes a new image asset with lineage and the canonical; the sheet is
-  kept in `reference_asset_ids`. Leave the character out of shots it must
-  not appear in (a Kontext edit keeps it in frame).
+  proportions and colours, now &lt;scene&gt;" for Kontext - instead of
+  inlining the look description. Needs a `@Character` with a canonical
+  reference set (`studio_cast` update) or an explicit `reference_asset_id`;
+  otherwise fails with `consistent_needs_reference`. Extra references (a
+  location plate, a prop) go in `reference_asset_ids` after the first slot
+  when the engine is Qwen-Image 2.1. Build the reference itself with a
+  plain txt2img turnaround-sheet prompt (front / three-quarter / back on a
+  neutral backdrop), then set it as `canonical_asset_id` together with
+  `canonical_crop` (`left_third` | `middle_third` | `right_third` or
+  `[x, y, w, h]` fractions): the crop becomes a new image asset with
+  lineage and the canonical; the sheet is kept in `reference_asset_ids`.
+  Leave the character out of shots it must not appear in (an edit template
+  keeps it in frame).
 - **Timeline finishing** (patch field, applied once at render): `{color_grade:
   "teal_orange"|"sodium_night"|"bleach_bypass", grain: 0-1, vignette: bool,
   letterbox: bool, glitch_on_downbeats: bool, lyric_style: "default"|"horror"}`.

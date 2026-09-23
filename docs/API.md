@@ -21,9 +21,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | --- | --- | --- |
 | GET | `/api/agent/studio_status` | - |
 | GET | `/api/agent/studio_projects` | `?query&limit&offset` |
-| POST | `/api/agent/studio_create_project` | `{name, brief?}` |
+| POST | `/api/agent/studio_create_project` | `{name, brief?, image_engine?}` |
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
-| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, strength?, template?, checkpoint?, use_character_reference, consistent, wait_s}` |
+| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, wait_s}` |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, wait_s}` |
 | POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
@@ -68,7 +68,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/backend/comfy/free` | ask ComfyUI to unload models (only on user request) |
 | GET | `/api/agent-calls?limit=` | the audit log |
 | GET / POST | `/api/projects` | list (with counts) / create `{name, brief?}` |
-| GET / PATCH | `/api/projects/{id}` | `{name?, brief?, cover_asset_id?}` |
+| GET / PATCH | `/api/projects/{id}` | `{name?, brief?, cover_asset_id?, image_engine?}` (`image_engine`: `auto` \| `qwen21` \| `flux` \| `sdxl`, default `auto`) |
 | GET / POST | `/api/projects/{id}/characters` | create `{name, fields}` |
 | PATCH | `/api/characters/{id}` | `{name?, fields}` |
 | GET / POST | `/api/projects/{id}/groups` | create `{name, fields: {concept, member_ids, colours, logo_asset_id}}` |
