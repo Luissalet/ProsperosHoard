@@ -695,7 +695,7 @@ async def step_report(session: Any, state: dict[str, Any], args: argparse.Namesp
               "vocals. Re-time by ear in Audio > Lyrics timing (tap Space per line, [Section] lines included), export "
               "the LRC and run `--only timeline --lrc-path <file>`.",
               "- VRAM per step (Flux/Kontext ~13 GB, Wan 5B ~12 GB at 1280x704, ACE-Step 1.5 turbo ~8 GB): run "
-              "ComfyUI on a 16 GB card (`--cuda-device`), not the 12 GB one.",
+              "ComfyUI on a card with 16 GB or more (`--cuda-device` picks it on a multi-GPU machine).",
               "- The `final` render (1080p) after approving the `preview`.", ""]
 
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
