@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -203,6 +205,12 @@ class Backend:
         self.config_path = self.data_dir / "backend.json"
         self.demo = demo
         self.link = self._build_link()
+        # render pool: which ComfyUI this worker thread talks to (None = the
+        # main one Hoard Link resolves), one cached client per extra server
+        self._bound = threading.local()
+        self._pool_clients: dict[str, Any] = {}
+        self._pool_health: dict[str, tuple[float, bool]] = {}
+        self._pool_lock = threading.Lock()
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:
@@ -235,8 +243,63 @@ class Backend:
         return self.link.sync._run(lambda _link: coro)
 
     def comfy(self):
-        """The ComfyUI client bound to Hoard Link's loop, or None."""
+        """The ComfyUI client bound to Hoard Link's loop, or None. On a
+        render-pool worker thread this is that worker's own server."""
+        url = getattr(self._bound, "url", None)
+        if url:
+            return self._pool_client(url)
         return self.run_async(lambda link: link.comfy())
+
+    # -- render pool -------------------------------------------------
+    # One ComfyUI per GPU, all sharing the GPU job queue: `render_pool` in
+    # data/backend.json lists the extra servers (the main one is the usual
+    # `comfy.url` or whatever Hoard Link finds). Each gets its own GPU
+    # worker thread, so on a machine with several cards a batch of clips
+    # renders in parallel. The servers are expected to be the same ComfyUI
+    # install started with a different `--cuda-device` and `--port` (same
+    # models, same node list); a restart applies a changed list.
+    def render_pool(self) -> list[str]:
+        urls = self._raw_config().get("render_pool") or []
+        out: list[str] = []
+        for u in urls:
+            if isinstance(u, str) and u.strip().startswith(("http://", "https://")):
+                clean = u.strip().rstrip("/")
+                if clean not in out:
+                    out.append(clean)
+        return out[:7]
+
+    def bind_comfy(self, url: Optional[str]) -> None:
+        """Pin the calling worker thread to one ComfyUI (None = the main one)."""
+        self._bound.url = url.rstrip("/") if url else None
+
+    def _pool_client(self, url: str):
+        with self._pool_lock:
+            client = self._pool_clients.get(url)
+        if client is None:
+            from .hoard_link._comfy import ComfyClient
+
+            async def make(_link):
+                return ComfyClient(url)  # created on Hoard Link's loop, reused by every job
+
+            client = self.run_async(make)
+            with self._pool_lock:
+                client = self._pool_clients.setdefault(url, client)
+        return client
+
+    def pool_server_ready(self, url: str, ttl_s: float = 10.0) -> bool:
+        """Cheap, cached reachability check a pool worker makes before it
+        takes a job, so a server that is off never swallows the queue."""
+        now = time.monotonic()
+        cached = self._pool_health.get(url)
+        if cached and now - cached[0] < ttl_s:
+            return cached[1]
+        try:
+            self.run_async(self._pool_client(url).system_stats())
+            ok = True
+        except Exception:
+            ok = False
+        self._pool_health[url] = (now, ok)
+        return ok
 
     def set_overrides(
         self,
@@ -245,8 +308,21 @@ class Backend:
         comfy_url: str | None = None,
         vram_estimates_mb: dict[str, int] | None = None,
         import_roots: list[str] | None = None,
+        render_pool: list[str] | None = None,
     ) -> None:
         raw = self._raw_config()
+        if render_pool is not None:
+            clean_pool = []
+            for u in render_pool:
+                u = str(u).strip().rstrip("/")
+                if not u:
+                    continue
+                if not u.startswith(("http://", "https://")):
+                    raise ValueError(f"render pool entries must be http(s) URLs of ComfyUI servers, got {u!r}")
+                clean_pool.append(u)
+            if len(clean_pool) > 7:
+                raise ValueError("the render pool takes at most 7 extra ComfyUI servers")
+            raw["render_pool"] = clean_pool
         if faustus_url is not None:
             if faustus_url.strip():
                 raw.setdefault("faustus", {})["url"] = faustus_url.strip()
@@ -400,6 +476,7 @@ class Backend:
             "demo": self.demo,
             "hoard_link": link_status,
             "comfy": comfy_info,
+            "render_pool": [{"url": u, "reachable": self.pool_server_ready(u, ttl_s=0.0)} for u in self.render_pool()],
             "ffmpeg": {"found": bool(exe), "path": exe, "version": ffmpeg_version(exe)},
             "piper": {"installed": _piper_installed()},
             "fonts_bundled": bundled_fonts,
@@ -410,6 +487,7 @@ class Backend:
             "overrides": {
                 "faustus_url": faustus.get("url"),
                 "comfy_url": (raw.get("comfy") or {}).get("url"),
+                "render_pool": self.render_pool(),
                 "import_roots": [str(p) for p in self.import_roots()],
             },
             "token_set": self.token_set(),

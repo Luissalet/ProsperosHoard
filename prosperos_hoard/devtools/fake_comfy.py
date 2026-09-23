@@ -323,6 +323,8 @@ class FakeComfyServer:
         self.prompts_seen: list[dict[str, Any]] = []
         self.vram_free_bytes = 20_000_000_000
         self.devices_override: Optional[list[dict]] = None  # tests: a custom /system_stats device list
+        self.history_delay_s = 0.0  # tests: how long a prompt "renders" before /history shows it
+        self._ready_at: dict[str, float] = {}
         self._server = None
         self._thread: Optional[threading.Thread] = None
         self.port: Optional[int] = None
@@ -531,11 +533,15 @@ class FakeComfyServer:
             workflow = body.get("prompt") or {}
             prompt_id = str(uuid.uuid4())
             self._process_prompt(prompt_id, workflow)
+            if self.history_delay_s:
+                self._ready_at[prompt_id] = time.monotonic() + self.history_delay_s
             return {"prompt_id": prompt_id, "number": len(self.history)}
 
         @app.get("/history/{prompt_id}")
         def history_one(prompt_id: str):
             entry = self.history.get(prompt_id)
+            if entry and time.monotonic() < self._ready_at.get(prompt_id, 0.0):
+                return {}
             return {prompt_id: entry} if entry else {}
 
         @app.get("/history")
