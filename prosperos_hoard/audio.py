@@ -530,7 +530,7 @@ def time_lyrics(lyrics: str, analysis: dict[str, Any], bpm: Optional[float] = No
     actually has; when the analysis found real section boundaries, each
     lyric section start snaps to the nearest one within two bars. Every
     line then starts on a bar. It is an estimate of where a line is sung,
-    not vocal detection: re-time by ear in Audio > Lyrics timing.
+    not vocal detection: re-time it by ear in Audio > Lyrics timing.
 
     Returns {"lrc", "lines": [{time_s, text, section}], "sections":
     [{label, kind, energy, start_s, end_s}]}."""

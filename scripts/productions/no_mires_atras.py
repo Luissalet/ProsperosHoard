@@ -410,7 +410,7 @@ async def step_character(session: Any, state: dict[str, Any], args: argparse.Nam
     # Scoring hook: the fake backend has no real image to judge, so the first
     # seed is the canonical pick; for a real run this is a provisional pick -
     # look with studio_show and, if another seed or pose reads
-    # better, calls studio_cast(action="update", fields={"canonical_asset_id":
+    # better, call studio_cast(action="update", fields={"canonical_asset_id":
     # <sheet>, "canonical_crop": "left_third"|"middle_third"|"right_third"})
     # and re-runs `--only stills` (then clips/photocards/album/timeline).
     sheet = ref_ids[0]

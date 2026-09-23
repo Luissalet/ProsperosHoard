@@ -1,11 +1,10 @@
 """Prospero's own thin wrapper around the vendored Hoard Link.
 
-This module is the "small adapter of your
-own" kept while hoard-link was still being finished. It
-never edits `hoard_link/*`; it only composes it and adds Prospero-specific
-pieces the shared library does not know about: ComfyUI VRAM estimates per
-workflow family, a settings-friendly `status()` that folds in ffmpeg/fonts,
-and the two `MusicBackend` adapters (neither installed by default).
+This module never edits `hoard_link/*`; it only composes it and adds
+Prospero-specific pieces the shared library does not know about: ComfyUI
+VRAM estimates per workflow family, a settings-friendly `status()` that
+folds in ffmpeg/fonts, and the two `MusicBackend` adapters (neither
+installed by default).
 """
 
 from __future__ import annotations
