@@ -90,6 +90,39 @@ Faustus reads the same information from `faustus-plugin.json`
 \* `studio_cast` with `action="list"` does not change anything; the tool as a
 whole is annotated as writing because create/update do.
 
+### Voice studio tools
+
+Everything below runs on local engines only, installed on request (see
+[VOICE.md](VOICE.md)); `voice_dub`'s translation step needs a local LLM
+behind Hoard Link and fails with a clear message without one.
+
+| Tool | Read-only | Arguments (defaults) | Returns |
+| --- | --- | --- | --- |
+| `voice_engines` | yes | - | `{tts[{id, label, installed, languages, cloning, install_hint, reason}], stt[...]}` |
+| `voice_create` | no | `name, engine_id, source_path, language=None, project=None` | the voice (id first) with its quality report (`duration_s, snr_db, clipping_pct, warnings, ok`) |
+| `voice_list` | yes | `project=None` | `items[{id, name, engine_id, language, cloned, has_sample, quality, presets, tags}]` |
+| `voice_speak` | no | `text, engine_id=None, voice_id=None, voice_ref=None, preset=None, speed=None, language=None, project=None` | with `project`: an audio asset summary; without: `{engine_id, bytes}` |
+| `voice_transcribe` | yes | `path=None, asset_id=None, language=None, engine_id=None` | `{engine_id, language, text, segment_count}` |
+| `voice_audiobook` | no | `text=None, source_path=None, title=None, engine_id=None, voice_id=None, voice_ref=None, speed=None, format="mp3"\|"m4b", project=None, wait_s=0` | `{job}`; done outputs: `{title, chapters[{index, title, start_s, end_s, duration_s}], format, duration_s, final_file, srt_file, lrc_file}` |
+| `voice_dub` | no | `target_language, source_path=None, video_asset_id=None, source_language=None, glossary=None, engine_id=None, voice_id=None, voice_ref=None, title=None, project=None, wait_s=0` | `{job}`; done outputs: `{title, final_video, subtitles, segments[{index, start_s, end_s, source_text, translated_text, fit}]}` |
+| `voice_resynthesize_segment` | no | `job_id, index, text=None, engine_id=None, voice_id=None, voice_ref=None, remix=True` | `{segment}` (the fixed row); with `remix=true` the mixed audio and final video are rebuilt |
+| `voice_job` | yes | `job_id, wait_s=0` | the job (state, progress, message, outputs) |
+
+- **Engines.** `piper` (curated voices, no cloning - the same engine
+  `studio_voice` uses) plus optional cloning-capable engines (`xtts`,
+  `f5-tts`, `kokoro`, `chatterbox`) and an optional ComfyUI TTS workflow for
+  synthesis; `faster-whisper` (primary) and optional `whisper` for
+  transcription. `voice_engines` reports which are installed with a copyable
+  `pip install ...` hint for the rest; nothing installs itself.
+- **Voice resolution.** A `voice_id` (from `voice_create`/`voice_list`)
+  supplies its own engine, sample and language unless `engine_id`/`voice_ref`
+  override them; a cloning engine without a `voice_id`'s sample or an
+  explicit `voice_ref` fails with `cloning_needs_sample`. `preset` picks a
+  named speed/pitch/style preset saved on that voice.
+- **Consent.** Only clone a voice from a sample the caller has the right to
+  use; a cloned voice is stored and reused deliberately, never inferred.
+
+
 ### Details the docstrings also carry
 
 - **Mentions.** `@Iris Volt`, `@IrisVolt`, `@Iris_Volt` and (if unique) `@Iris`

@@ -4,7 +4,7 @@
 ### Such stuff as dreams are made on: can an agent direct a whole production?
 **A local media studio that drives your ComfyUI, ffmpeg and a local TTS to make consistent characters, photocards, album art and music videos cut on the beat, by hand or entirely over MCP, and remembers exactly how every asset was made.**
 
-[Español](README.es.md) · [Quick start](#quick-start) · [Real production example](#the-real-run) · [Connect to Faustus](#connect-it-to-faustus) · [MCP reference](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
+[Español](README.es.md) · [Quick start](#quick-start) · [Real production example](#the-real-run) · [Connect to Faustus](#connect-it-to-faustus) · [MCP reference](docs/MCP.md) · [Voice studio](docs/VOICE.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
 
 ![Generate screen: two cast members mentioned with @, the final prompt with their look inlined, the parameter panel and earlier results](docs/media/01-generate.png)
 *Actual application, synthetic demo data. Every picture comes from the bundled demo backend, a procedural stand-in for ComfyUI that draws labelled placeholder scenes; with your ComfyUI connected the same screens show real model output.*
@@ -59,11 +59,12 @@ with ids and pictures.
 | Lineage | Every generated asset records template, template hash, checkpoint, every parameter and seed, inputs and timing; "Reuse recipe" reproduces an image byte for byte on the same backend (tested), "Vary seed" re-runs it with new seeds | Reproduction is only guaranteed on the same backend, models and ComfyUI version |
 | Design | Pillow renderer, no browser: photocard front and back, album cover (4 layouts), teaser poster, lyric card, tracklist back, thumbnail, with a "night" horror/thriller variant for the cover, poster, lyric card and tracklist; gradients, holographic foil, blends, vignette, letter spacing, shadows, shrink-to-fit text, tracklist columns; photocard sets for a whole group or a solo artist in several looks, with a contact sheet; print mode with 3 mm bleed at 300 dpi; 6 bundled font families | The QR layer draws a placeholder box (no QR library is pinned) |
 | Audio | Import (mp3, wav, flac, ogg, m4a), waveform, own beat tracker (band-balanced spectral flux, tempo prior, dynamic programming) tested within 1 BPM and 50 ms on click tracks and kick-and-snare patterns at 90-140 BPM, downbeat and section estimates, LRC lyrics with a tap-to-time tool and a first-pass auto-timing from the lyrics' `[Section]` tags and the song's bars | Auto-timing is an estimate from the structure, not vocal alignment; section labels are "section A/B" with low/mid/high energy, not verse/chorus; very fast songs (170 BPM) are reported at half time |
-| Voices | Piper TTS, six curated Spanish and English voices downloaded on first use; Faustus TTS through Hoard Link with Piper as fallback; per-character voice and speed | Generic synthetic voices only: no voice cloning of anyone |
+| Voices | Piper TTS, six curated Spanish and English voices downloaded on first use; Faustus TTS through Hoard Link with Piper as fallback; per-character voice and speed | Generic synthetic voices for character narration; see the voice studio below for cloning |
+| Voice studio | A pluggable TTS/STT engine registry (Piper plus optional local cloning engines - Coqui XTTS-v2, F5-TTS, Kokoro, Chatterbox - and an optional ComfyUI TTS workflow; faster-whisper and optional openai-whisper for speech-to-text), installed on request, never silently; a voice library from an uploaded sample (loudness normalisation, silence trim, an SNR/clipping quality check, an automatic reference transcript, named presets); transcription and short-clip dictation with word timestamps and SRT/VTT/TXT export; audiobook narration from text or a `.txt`/`.md`/`.epub` file as a resumable background job (per-chapter files, MP3 or M4B with chapter markers, an aligned SRT/LRC); video dubbing (extract audio, transcribe with timestamps, translate segment by segment through the local model with a glossary, re-synthesise in the chosen voice, time-fit to the original pacing, mux back in) with every stage's files kept so one segment can be fixed and re-run without repeating the rest | Cloning engines must be installed (a documented `pip install`, sometimes a GPU); dubbing needs a local LLM behind Hoard Link for translation and fails with a clear message without one; only use a voice you have the right to reproduce |
 | Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP API for another local server; composed songs get lineage and are analysed automatically | Needs the ACE-Step checkpoint in ComfyUI (the example single was composed with ACE-Step 1.5 turbo); imported songs work fully either way |
 | Video | Beat-synced auto-cut (density per energy - from the lyrics' verse/chorus markers when present - flashes on phrase downbeats, a new shot per section and optionally per sung line, per-section storyboards in story order, no immediate repeats, whole song covered) into an editable timeline; ffmpeg renderer with Ken Burns moves, cut/crossfade/dip/flash transitions that keep cuts on the beat, burned lyric captions with optional karaoke, the song muxed in; 540p preview or 1080p final; SVD/Wan clips converted to mp4; optional finishing pass (colour grade presets, film grain, vignette, letterbox, downbeat glitch flashes, a condensed-uppercase horror caption style) | Ken Burns is a zoom range plus pan direction, not free start/end rectangles; colour grades are `eq`/`colorbalance`/`curves` approximations, not a 3D LUT |
-| Agent control | 22 MCP tools mirroring `/api/agent/*`, compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job` can wait server-side); no push events |
-| Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
+| Agent control | 31 MCP tools mirroring `/api/agent/*` (22 production tools plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, synthetic demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
@@ -172,6 +173,10 @@ loading anything of its own.
 | `studio_timeline` / `studio_render` | Auto-cut, read, edit a timeline / render it | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Queue, one job (with wait), cancel | yes / yes / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Find assets, look at them, their recipe | yes |
+| `voice_engines` / `voice_create` / `voice_list` | Engine status and install hints / clone a voice from a sample / list saved voices | yes / no / yes |
+| `voice_speak` / `voice_transcribe` | Synthesise a line / transcribe audio with timestamps | no / yes |
+| `voice_audiobook` / `voice_dub` | Narrate text as chapters / dub a video into another language | no |
+| `voice_resynthesize_segment` / `voice_job` | Fix and re-run one dub segment / poll a voice-studio job | no / yes |
 
 It works with any MCP client over stdio too:
 
@@ -309,8 +314,11 @@ only from your home folder, `data/inbox` and folders you add in Settings,
 and only files whose content matches their type; files are always served by
 id, never by a path the client sends. Every call an assistant makes is
 written to the `agent_calls` audit table and shown under **Assistant
-activity** (tool, argument summary, duration, result). There is no voice
-cloning, and the demo uses invented people only. Data stays in `data/` (or
+activity** (tool, argument summary, duration, result). The demo uses
+invented people only. Voice cloning runs entirely on local engines that you
+install explicitly (nothing is downloaded silently); a cloned voice is only
+ever created from a sample you provide, and using someone else's voice
+without their consent is on you, not the tool. Data stays in `data/` (or
 your `--data-dir`); the Faustus token is stored in `data/backend.json` and
 never returned by the API.
 
@@ -321,9 +329,17 @@ never returned by the API.
 cd frontend; npm ci; npm run build
 ```
 
-On Linux/macOS the same with `.venv/bin/python`. **189 tests pass** in
+On Linux/macOS the same with `.venv/bin/python`. **296 tests pass** in
 about two minutes on a shared 2-CPU Linux machine, offline, with no GPU and no
-model downloads (the demo backend stands in for ComfyUI). The suite covers the MCP protocol end
+model downloads (the demo backend stands in for ComfyUI, and the voice
+studio's own suite adds fake TTS/STT engines plus real, optional tests
+against Piper and faster-whisper when they are installed). The suite covers
+the voice engine registry (install-hint status without ever importing a
+heavy dependency), the voice library's sample processing and quality check,
+the audiobook chunking/assembly and dubbing pipelines end to end (including
+the time-fitting maths, glossary-aware translation through a fake local
+model, and per-segment re-synthesis), the `/api/voice/*` HTTP surface, and
+the 9 voice MCP tools driven over the real MCP protocol; and the MCP protocol end
 to end (the adapter spawned over stdio against a live app: tool keywords and
 annotations, generation with a picture, lineage, design, readable errors,
 the app-not-running message); the UI-format-to-API workflow converter

@@ -4,7 +4,7 @@
 ### Estamos hechos de la misma materia que los sueños: ¿puede un agente dirigir una producción entera?
 **Un estudio multimedia local que maneja tu ComfyUI, ffmpeg y una voz sintética local para crear personajes coherentes, photocards, portadas y videoclips montados al ritmo, a mano o por completo desde MCP, y que recuerda exactamente cómo se hizo cada recurso.**
 
-[English](README.md) · [Inicio rápido](#inicio-rápido) · [Producción real de ejemplo](#la-ejecución-real) · [Conectar con Faustus](#conectarlo-a-faustus) · [Referencia MCP](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
+[English](README.md) · [Inicio rápido](#inicio-rápido) · [Producción real de ejemplo](#la-ejecución-real) · [Conectar con Faustus](#conectarlo-a-faustus) · [Referencia MCP](docs/MCP.md) · [Estudio de voz](docs/VOICE.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
 
 ![Pantalla Generar: dos miembros del reparto mencionados con @, el prompt final con su aspecto insertado, el panel de parámetros y resultados anteriores](docs/media/01-generate.png)
 *Aplicación real, datos de demostración sintéticos. Todas las imágenes salen del backend de demostración incluido, un sustituto procedural de ComfyUI que dibuja escenas de relleno rotuladas; con tu ComfyUI conectado, las mismas pantallas muestran resultados reales de los modelos.*
@@ -61,11 +61,12 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
 | Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (4 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura, con una variante «night» de terror/thriller para portada, cartel, tarjeta de letra y contraportada; degradados, lámina holográfica, modos de fusión, viñeta, espaciado de letras, sombras, texto que se encoge para caber y columnas para la lista de canciones; sets de photocards de un grupo entero o de un solista en varios looks, con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 6 familias tipográficas incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
 | Audio | Importación (mp3, wav, flac, ogg, m4a), forma de onda, detector de pulsos propio (flujo espectral equilibrado por bandas, preferencia de tempo y programación dinámica) probado a menos de 1 BPM y 50 ms con metrónomos y patrones de bombo y caja de 90 a 140 BPM, estimación de tiempos fuertes y secciones, letras LRC con herramienta para sincronizarlas pulsando una tecla y una primera sincronización automática a partir de las etiquetas `[Section]` de la letra y los compases | La sincronización automática es una estimación por estructura, no alineación con la voz; las secciones se llaman «section A/B» con energía baja/media/alta, no estrofa/estribillo; las canciones muy rápidas (170 BPM) se detectan a la mitad |
-| Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Solo voces sintéticas genéricas: no se clona la voz de nadie |
+| Voces | Piper TTS con seis voces seleccionadas en español e inglés que se descargan la primera vez que se usan; TTS de Faustus mediante Hoard Link con Piper como respaldo; voz y velocidad por personaje | Voces sintéticas genéricas para la narración de personajes; la clonación se hace en el estudio de voz de abajo |
+| Estudio de voz | Un registro de motores TTS/STT conectables (Piper más motores de clonación locales opcionales - Coqui XTTS-v2, F5-TTS, Kokoro, Chatterbox - y un flujo de trabajo de TTS por ComfyUI opcional; faster-whisper y opcionalmente openai-whisper para voz a texto), instalados solo cuando se piden, nunca en silencio; una biblioteca de voces a partir de una muestra subida (normalización de volumen, recorte de silencios, un control de calidad de SNR/recorte, una transcripción de referencia automática, preajustes con nombre); transcripción y dictado de clips cortos con marcas de tiempo por palabra y exportación a SRT/VTT/TXT; narración de audiolibros a partir de texto o un archivo `.txt`/`.md`/`.epub` como trabajo en segundo plano reanudable (archivos por capítulo, MP3 o M4B con marcadores de capítulo, un SRT/LRC alineado); doblaje de vídeo (extraer el audio, transcribir con marcas de tiempo, traducir segmento a segmento con el modelo local y un glosario, resintetizar con la voz elegida, ajustar el ritmo al original, volver a montarlo) guardando los archivos de cada etapa para poder corregir y rehacer un solo segmento sin repetir el resto | Los motores de clonación hay que instalarlos (un `pip install` documentado, a veces con GPU); el doblaje necesita un modelo local detrás de Hoard Link para traducir y falla con un mensaje claro si no lo hay; usa solo una voz que tengas derecho a reproducir |
 | Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o una API HTTP mínima documentada para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Necesita el checkpoint de ACE-Step en ComfyUI (el single del ejemplo se compuso con ACE-Step 1.5 turbo); las canciones importadas funcionan del todo igualmente |
 | Vídeo | Montaje automático al ritmo (densidad según la energía - según las marcas de estrofa/estribillo de la letra cuando las hay - destellos al inicio de cada frase musical, plano nuevo en cada sección y, si se pide, en cada verso cantado, guiones por sección en orden de historia, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
-| Control por agentes | 22 herramientas MCP equivalentes a `/api/agent/*`, resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job` puede esperar en el servidor); no hay eventos push |
-| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+| Control por agentes | 31 herramientas MCP equivalentes a `/api/agent/*` (22 de producción más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
+| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
 *Aplicación real, datos de demostración sintéticos: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
@@ -177,6 +178,10 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_timeline` / `studio_render` | Montaje automático, lectura y edición / renderizado | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Cola, un trabajo (con espera), cancelar | sí / sí / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Buscar recursos, verlos y su receta | sí |
+| `voice_engines` / `voice_create` / `voice_list` | Estado de los motores y cómo instalarlos / clonar una voz a partir de una muestra / listar voces guardadas | sí / no / sí |
+| `voice_speak` / `voice_transcribe` | Sintetizar una frase / transcribir audio con marcas de tiempo | no / sí |
+| `voice_audiobook` / `voice_dub` | Narrar un texto por capítulos / doblar un vídeo a otro idioma | no |
+| `voice_resynthesize_segment` / `voice_job` | Corregir y rehacer un segmento de doblaje / consultar un trabajo del estudio de voz | no / sí |
 
 También funciona con cualquier cliente MCP por stdio:
 
@@ -324,10 +329,14 @@ personal, de `data/inbox` y de las carpetas que añadas en Ajustes, y solo si
 el contenido coincide con su tipo; los archivos se sirven siempre por id,
 nunca por una ruta que mande el cliente. Cada llamada que hace un asistente
 se guarda en la tabla de auditoría `agent_calls` y se ve en **Actividad del
-asistente** (herramienta, resumen de argumentos, duración y resultado). No
-hay clonación de voz y la demostración usa únicamente personas inventadas.
-Los datos se quedan en `data/` (o en tu `--data-dir`); el token de Faustus
-se guarda en `data/backend.json` y la API nunca lo devuelve.
+asistente** (herramienta, resumen de argumentos, duración y resultado). La
+demostración usa únicamente personas inventadas. La clonación de voz se
+ejecuta por completo en motores locales que instalas explícitamente (nada
+se descarga en silencio); una voz clonada solo se crea a partir de una
+muestra que tú proporcionas, y usar la voz de otra persona sin su
+consentimiento es responsabilidad tuya, no de la herramienta. Los datos se
+quedan en `data/` (o en tu `--data-dir`); el token de Faustus se guarda en
+`data/backend.json` y la API nunca lo devuelve.
 
 ## Desarrollo
 
@@ -336,9 +345,18 @@ se guarda en `data/backend.json` y la API nunca lo devuelve.
 cd frontend; npm ci; npm run build
 ```
 
-En Linux/macOS, lo mismo con `.venv/bin/python`. **Pasan 189 pruebas**
+En Linux/macOS, lo mismo con `.venv/bin/python`. **Pasan 296 pruebas**
 en unos dos minutos en una máquina Linux compartida de 2 CPU, sin red, sin GPU
-y sin descargar modelos (el backend de demostración sustituye a ComfyUI). Cubren el
+y sin descargar modelos (el backend de demostración sustituye a ComfyUI, y la
+suite propia del estudio de voz añade motores TTS/STT falsos más pruebas
+reales opcionales contra Piper y faster-whisper cuando están instalados).
+Cubren el registro de motores de voz (estado e instrucciones de instalación
+sin importar nunca una dependencia pesada), el procesado de muestras y el
+control de calidad de la biblioteca de voces, los flujos de audiolibro y
+doblaje de principio a fin (incluidas las matemáticas de ajuste de ritmo, la
+traducción con glosario a través de un modelo local falso y la
+resíntesis de un solo segmento), la superficie HTTP `/api/voice/*` y las 9
+herramientas MCP de voz manejadas por el protocolo MCP real; y el
 protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
 aplicación en marcha: palabras clave y anotaciones de cada herramienta,
 generación con imagen, linaje, diseño, errores legibles y el mensaje de
