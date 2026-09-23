@@ -2,14 +2,15 @@
 
 [Español](no-mires-atras.es.md) · [Back to the README](../../README.md#production-example)
 
-A two-minute horror-rap single with an original character, made end to end
-on one local machine by
+A two-and-a-half-minute horror song with an original character, made end to
+end on one local machine by
 [`scripts/productions/no_mires_atras.py`](../../scripts/productions/no_mires_atras.py).
 It exists in two versions that share every picture and clip: **DON'T LOOK
-BACK** in English (`--lang en`, the one shown here) and the first take,
-**NO MIRES ATRÁS**, in Spanish (the default). The English version was made
-with `--reuse-from` the Spanish run, so only its song, designs and cut were
-made again.
+BACK**, a sung English horror anthem told by the creature (`--lang en
+--motion full`, the one shown here), and the first take, **NO MIRES ATRÁS**,
+a Spanish horror rap (the default). The English version was made with
+`--reuse-from` the Spanish run, so only its song, its extra clips, the
+designs and the cut were made again.
 The script drives Prospero **only through its MCP adapter**, the same path
 Faustus uses. This page holds everything needed to understand or reproduce
 it: the character bible, every prompt and negative, the seeds, the model and
@@ -20,13 +21,13 @@ fixed in the app).
 
 | | |
 | --- | --- |
-| Hardware | ComfyUI 0.37 on **one 16 GB card** (an RTX 5060 Ti); Prospero, ffmpeg and the designer on the CPU |
+| Hardware | ComfyUI 0.37 on 16 GB cards (RTX 5060 Ti): one for the Spanish run, three as a render pool for the English one; Prospero, ffmpeg and the designer on the CPU |
 | Image model | Qwen-Image 2.1 (int8): the reference sheet, the stills and the photocards; the edit template carries FAROL's reference |
-| Video model | Wan 2.2 TI2V 5B: seven 5 s clips at 1280×704, 24 fps |
-| Music model | ACE-Step 1.5 turbo: two 120 s takes per version |
+| Video model | Wan 2.2 TI2V 5B: 18 clips of 5 s at 1280×704, 24 fps (every shot, plus second clips for the busiest sections) |
+| Music model | ACE-Step 1.5 turbo: four 150 s takes for the English version, two 120 s takes for the Spanish one |
 | Lyric timing | word timestamps from faster-whisper (`small`, run outside Prospero), aligned to the written lyrics and imported as an LRC |
-| Wall-clock | reference sheet 4.7 min · song 41 s · 48 stills 57 min · 7 clips ≈ 70 min on an idle card · 5 photocards ≈ 10 min · album art 5 s · two timelines with preview and 1080p final renders 6.5 min |
-| Picked by eye | the canonical reference (sheet 4 of 4) and the best of three variants for each of the 12 shots |
+| Wall-clock | reference sheet 4.7 min · 48 stills 57 min · first 7 clips ≈ 70 min on one card · 11 more clips ≈ 40 min on three · four song takes 2 min · 5 photocards ≈ 10 min · album art 5 s · two timelines with preview and 1080p final renders ≈ 7 min |
+| Picked by eye (and ear) | the canonical reference (sheet 4 of 4), the best of three variants for each of the 12 shots, and the song take |
 
 ## 1. The bible
 
@@ -73,23 +74,28 @@ extra limbs, deformed hands`.
 
 ## 3. Song
 
-`studio_compose` with ACE-Step 1.5 turbo, seeds 2001 and 2002; the first take
-is the single in both languages.
+`studio_compose` with ACE-Step 1.5 turbo, four seeds (2001…2004); the take
+that sings the whole lyric, in order, is the single.
 
-- Tags: `dark trap, horror rap, eerie music box melody, detuned piano, heavy 808, half-time 140 bpm, whispered ad-libs, male rap vocals, english, minor key, cinematic, tape hiss, rain ambience` (`spanish` in place of `english` for NO MIRES ATRÁS).
-- bpm 140, key F# minor, 4/4, language `en` (or `es`), 120 s.
-- The lyrics are in the script (`SONG_LYRICS_EN`, `SONG_LYRICS`). Both tell the same story with the same sections (`[Intro]`, `[Verse 1]`, `[Pre-Chorus]`, `[Chorus]`, `[Verse 2]`, `[Bridge]`, `[Chorus]`, `[Outro]`), so one storyboard fits both. The hook: *Don't look back, don't look back, / the light behind you ain't the city's, that's a fact, / every streetlamp, one more step, / when it cuts out… it's already at your back.*
+- Tags: `electronic rock, horror anthem, catchy sung chorus, melodic male vocals, vocal harmonies, dark synth, distorted synth bass, driving drums, music box intro, eerie, dramatic, minor key, 130 bpm, english, storytelling, cinematic`.
+- 130 bpm, D minor, 4/4, language `en`, 150 s.
+- The lyric (`SONG_LYRICS_EN` in the script) is sung by FAROL itself, in the tradition of fan songs about horror-game villains: the walk home told from the thing that follows you. Hook: *So don't look back, don't look back, / I'm the glow on the glass, I'm the light through the crack, / every step that you take, I'm a little more near, / when the streetlight dies, you'll find me here.*
+- The Spanish take is a different song: `dark trap, horror rap, eerie music box melody, detuned piano, heavy 808, half-time 140 bpm, whispered ad-libs, male rap vocals, spanish…`, 140 bpm, F# minor, 120 s (`SONG_LYRICS`). The first English try was also a rap. It read as a street rap rather than a horror song, and was replaced by the anthem.
 
 Timing: Prospero's own `studio_time_lyrics` estimates each line from the
-section tags and the song's bars. For the final cut, the take was
+section tags and the song's bars. For the final cut, each take was
 transcribed with faster-whisper (`small`, word timestamps), each written
-line was matched to the words (difflib), and the result was saved as an LRC
-and imported (`--only timeline --lrc-path <file>`). 42 of the 48 English
-lines matched a sung word; the other six (whispers, ad-libs) were
-interpolated. The first chorus starts at 0:40.1, the bridge at 1:17.0 and
-the last line at 1:42.0. One lesson from the aligner: give whisper only the
-title as its prompt. Whisper treats the prompt as text it has already heard,
-so prompting it with the opening lines made it skip them.
+line was matched to the words (difflib) and saved as an LRC **with timed
+`[Section]` markers**, and the result was imported
+(`--only timeline --lrc-path <file>`). That also told the takes apart: the
+chosen one had 41 of its 42 lines recognised, while the other three skipped
+parts of the first verse or added ad-libs that are not in the lyric. The
+chorus lands at 0:46.7 and 1:44.6, the bridge at 1:33.7.
+
+Two lessons from the aligner:
+
+- **Give whisper only the title as its prompt.** Whisper treats the prompt as text it has already heard, so prompting it with the opening lines made it skip them.
+- **Keep the section markers.** Without them the auto-cut falls back to energy-based sections, the storyboard pools never match, and every section draws from one shuffled pool.
 
 ## 4. Stills: 12 shots
 
@@ -127,32 +133,41 @@ Qwen edit settings: 25 steps, cfg 1, euler / simple, denoise 1,
 `resolution` 1024, `custom_size` on with the explicit 1344×768 canvas.
 About 70 s per image.
 
-## 5. Clips: Wan 2.2 TI2V from the best stills
+## 5. Clips: Wan 2.2 TI2V, every shot moves
 
-Shots 1, 2, 3, 5, 7, 10 and 12, each 121 frames at 24 fps (5.04 s), 1280×704.
-Settings: 20 steps, cfg 5, shift 8, uni_pc / simple, seed `5000 + n`.
-Each clip took about 9.5 min on the idle card.
+Each clip is 121 frames at 24 fps (5.04 s), 1280×704. Settings: 20 steps,
+cfg 5, shift 8, uni_pc / simple, seed `5000 + n` (`+100` for a second clip).
+About 9.5 min per clip on one card.
 
-<p><img src="../media/farol/clip-over-shoulder.gif" width="49%" alt="Clip 2: over the shoulder, FAROL still under the closer lamp, slow push-in">
-<img src="../media/farol/clip-lantern.gif" width="49%" alt="Clip 3: the candle flame flickering inside the lantern, raindrops on the paper"></p>
+- **First pass (the Spanish run):** 7 clips, for shots 1, 2, 3, 5, 7, 10 and 12. With only seven, most of the ~130 cuts were stills with a slow zoom, and the video felt like a slideshow.
+- **Second pass (`--motion full`):** 11 more clips: the five shots that had none (4, 6, 8, 9, 11) and a second clip, made from the runner-up still, for the six shots the cut uses most (1, 2, 3, 5, 10, 11). The script queues all of them before waiting, and a render pool of three ComfyUI servers, one per 16 GB card, rendered them three at a time in about 40 min.
+
+<p><img src="../media/farol/clip-over-shoulder.gif" width="32%" alt="Clip 2: over the shoulder, FAROL still under the closer lamp, slow push-in">
+<img src="../media/farol/clip-lantern.gif" width="32%" alt="Clip 3: the candle flame flickering inside the lantern, raindrops on the paper">
+<img src="../media/farol/clip-fingers.gif" width="32%" alt="Clip 6: long paper fingers curling over the stairwell rail"></p>
 
 | # | Motion prompt |
 | --- | --- |
 | 1 | light rain falling, the far lamp flickering, fog drifting; the tall figure under the lamp stands perfectly still and does not walk |
 | 2 | light rain falling, a subtle slow push-in; the figure under the lamp stays perfectly still |
 | 3 | the candle flame flickering gently inside the lantern, raindrops sliding down the paper |
+| 4 | the phone screen's cold glow flickering on the frightened wet face, the hand trembling, rain falling behind |
 | 5 | rain streaking down the glass, a slow push-in; the reflected figure stays perfectly still |
+| 6 | the long paper fingers slowly curling tighter around the stairwell rail, the dim light flickering |
 | 7 | a washing machine spinning, faint fluorescent flicker; the seated figure stays perfectly still |
+| 8 | the amber glow in the elevator mirror slowly brightening, a faint flicker; the lantern head stays perfectly still |
+| 9 | rain dripping, the wet footprints glistening on the doormat, a slow push-in towards the door |
 | 10 | rain on the window glass, the street lamp flickering; the figure on the street stays perfectly still, looking up |
+| 11 | the candle flame flaring and flickering, sodium lamps strobing, the painted smile lit by the flicker; the figure stays perfectly still |
 | 12 | the room slowly brightening into sodium orange, a very slow push-in |
 
 **Stillness needs its own negative.** Wan's stock negative prompt lists
 "static" and "motionless frame" among the things to avoid, so on the first
 try FAROL walked towards the camera. For the shots where FAROL is visible
-(1, 2, 5, 7, 10), the negative is the stock one without its stillness terms,
-plus walking (`走路，迈步, walking, stepping, striding, moving figure, turning
-around`). Everything else keeps the stock negative. The walking take of
-shot 1 is still in the project if you want an "it moved" insert.
+(1, 2, 5, 7, 8, 10, 11), the negative is the stock one without its stillness
+terms, plus walking (`走路，迈步, walking, stepping, striding, moving figure,
+turning around`). Everything else keeps the stock negative. The walking take
+of shot 1 is still in the project if you want an "it moved" insert.
 
 ## 6. Photocards: the idol contrast
 
@@ -178,9 +193,9 @@ Prospero's own typographic layer (exact text, bundled fonts), in the night
 variants, with the accent `#F28C28`:
 
 - Cover (3000×3000): still 3, the lantern close-up. Title «DON'T LOOK BACK», artist «FAROL», «single».
-- Tracklist back: the same still blurred, with «01 DON'T LOOK BACK 2:00» and the credits.
+- Tracklist back: the same still blurred, with «01 DON'T LOOK BACK 2:30» and the credits.
 - Teaser poster: still 1, the establishing shot. «FAROL», tagline «Don't look back», line «Always a little closer».
-- Lyric card: still 11, the chorus insert, with the start of the hook.
+- Lyric card: still 11, the chorus insert, with the start of the hook («Don't look back, don't look back, I'm the glow on the glass, I'm the light through the crack»).
 
 The Spanish version prints the same designs in Spanish: «NO MIRES ATRÁS», «Siempre un poco más cerca» and the backs «gracias por venir», and so on.
 
@@ -191,13 +206,16 @@ The Spanish version prints the same designs in Spanish: «NO MIRES ATRÁS», «S
 ## 8. The cut
 
 `studio_timeline action=auto` for 9:16 and 16:9, fed with the 12 best stills
-and the 7 clips:
+and the 18 clips:
 
-- **Cutting:** a new shot on every sung line and at every section start. The intro, bridge and outro hold each shot for two bars, the verses change once a bar (or once a line, whichever comes first), and the chorus cuts every half bar. Each section draws from its own shot pool (`STORYBOARD` in the script); for example, the pre-chorus is the bus-shelter clip and then the over-the-shoulder still. That makes about 130 cuts in two minutes (131 in English, 132 in Spanish).
+- **Cutting:** a new shot on every sung line and at every section start. The intro, bridge and outro hold each shot for two bars, the verses change once a bar (or once a line, whichever comes first), and the chorus cuts every half bar. Each section draws from its own shot pool in story order (`STORYBOARD_EN` in the script); for example, the pre-chorus is the flaring flame and then the bus-shelter clip. Every entry is a clip.
+- **Video offsets:** Wan clips open on their source still, so each video cut starts a second in (`video_lead_in_s`), and each reuse of a clip starts further into it (`video_rotate_offsets`). A clip that plays four times in a chorus shows four different moments.
 - **Finishing:** `sodium_night` grade, grain 0.3, vignette, a white flash plus a colour-split glitch on the chorus's strong downbeats, and horror karaoke captions (a condensed uppercase face, per-line jitter and progressive highlighting).
-- **Renders:** a preview first, then the final: 1080×1920 and 1920×1080 H.264 with the song as AAC (CRF 18, about 150 MB per 2 min final).
+- **Renders:** a preview first, then the final: 1080×1920 and 1920×1080 H.264 with the song as AAC (CRF 18, about 75 MB per minute of final).
 
-![Frames of the 9:16 cut, from the intro whisper to the last line](../media/farol/cut-9x16.jpg)
+![Frames of the 9:16 cut, from the intro to the last line](../media/farol/cut-9x16.jpg)
+
+![Frames of the 16:9 cut](../media/farol/cut-16x9.jpg)
 
 ## 9. What the run found (fixed in the app)
 
@@ -225,6 +243,15 @@ and the 7 clips:
   the card cropped at a fixed point. Card fronts now use a subject-aware crop,
   and the idol prompts ask for headroom.
 - **FAROL walked.** See the clips section above.
+- **The video felt like a slideshow.** Seven clips for about 130 cuts means
+  most cuts were stills with a slow zoom, and every video cut started on the
+  clip's own still opening. `--motion full` makes a clip for every shot, the
+  cut skips each clip's opening and varies its repeats, and a render pool
+  spreads the clips over every card.
+- **The storyboard was ignored.** The whisper LRC had no `[Section]` markers,
+  so the cut used energy-based sections whose labels no storyboard pool
+  matched, and shots came from one shuffled pool. The aligner now writes the
+  markers.
 
 ## Reproduce it
 
@@ -235,11 +262,18 @@ root:
 ```powershell
 # the whole production, resumable (each still, clip, card and render is checkpointed)
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
-# the English version on top of it: reuses the pictures, makes the song, designs and cut again
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
-# after aligning or re-timing the lyrics: redo only the cut with your LRC
-.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --only timeline --lrc-path C:\Users\<you>\Music\dont_look_back.lrc
+# the English version on top of it: same pictures, a sung song (4 takes to choose from), a clip for every shot
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras --motion full --only song --song-takes 4
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --motion full --only clips --keep
+# after listening: cut with the take you chose and its aligned LRC
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --motion full --use-take 4 --lrc-path C:\Users\<you>\Music\dont_look_back.lrc
 ```
+
+For the render pool, start the same ComfyUI once per card
+(`main.py --cuda-device N --port P` with its own `--output-directory`,
+`--temp-directory`, `--user-directory` and `--database-url`), list the extra
+servers in Settings or `data/backend.json` (`"render_pool":
+["http://127.0.0.1:8189", "http://127.0.0.1:8190"]`), and restart Prospero.
 
 Seeds are fixed, but the same seeds only give the same pictures on the same
 models, ComfyUI version and card. Each asset's lineage (`studio_lineage`)
