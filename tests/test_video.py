@@ -128,10 +128,20 @@ def test_finishing_vf_builds_each_effect():
     assert combo.index("eq=") < combo.index("noise=") < combo.index("vignette=") < combo.index("drawbox=") < combo.index("chromashift=")
 
 
+def test_rgb_only_grade_filters_run_on_packed_rgb():
+    """colorbalance/curves must not be left to negotiate planar gbrp: ffmpeg
+    8's gbrp round trip blacks out the right edge of a 1080-wide frame."""
+    for name, chain in video.COLOR_GRADE_PRESETS.items():
+        filters = chain.split(",")
+        for i, f in enumerate(filters):
+            if f.startswith(("colorbalance=", "curves=")):
+                assert filters[i - 1] == "format=rgb24" and filters[i + 1] == "format=yuv420p", name
+
+
 def test_glitch_windows_leave_the_frame_edges_intact():
-    """A real render of the finishing chain with many glitch windows: outside
-    them every column keeps the source colour (an earlier filter blacked out
-    the right edge of every frame on ffmpeg 8)."""
+    """A real render of the whole finishing chain (grade, grain, vignette,
+    many glitch windows) on a 1080-wide frame: the edge columns keep the
+    same colour as the rest of the frame."""
     import subprocess
 
     import numpy as np
@@ -141,13 +151,17 @@ def test_glitch_windows_leave_the_frame_edges_intact():
     ffmpeg = ffmpeg_path()
     if not ffmpeg:
         pytest.skip("ffmpeg not available")
-    vf = video.build_finishing_vf({"glitch_on_downbeats": True}, 1080, 1920,
+    vf = video.build_finishing_vf({"color_grade": "sodium_night", "grain": 0.3, "vignette": True,
+                                   "glitch_on_downbeats": True}, 1080, 1920,
                                   glitch_points=[(5.0 + i, 0.15) for i in range(30)])
     raw = subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=gray:s=1080x1920:d=0.2",
                           "-vf", f"format=yuv420p,{vf}", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                          capture_output=True, check=True).stdout
-    frame = np.frombuffer(raw, np.uint8).reshape(1920, 1080, 3)
-    assert int(frame[:, -16:].min()) >= 120 and int(frame[:, :16].min()) >= 120
+    frame = np.frombuffer(raw, np.uint8).reshape(1920, 1080, 3).astype(int)
+    row = frame[960]  # the vignette darkens the edges symmetrically; compare the two sides
+    left, right = row[:8].mean(axis=0), row[-8:].mean(axis=0)
+    assert abs(left - right).max() < 12, (left, right)
+    assert row[-8:, 1].mean() > 20  # not a black (or red-only) stripe
 
 
 def test_build_ass_horror_style_uppercases_and_jitters():
