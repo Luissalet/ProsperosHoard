@@ -43,12 +43,18 @@ TRANSITION_MAP = {"crossfade": "fade", "dip_black": "fadeblack", "flash_white": 
 # not a real 3D LUT - good enough for a fast local render, not a colourist's
 # tool. `curves=preset=strong_contrast` is one of ffmpeg's built-in curve
 # presets (see the `curves` filter docs), used as-is for bleach bypass.
+# The RGB-only filters (`colorbalance`, `curves`) sit in an explicit packed
+# `rgb24` island: left to itself, ffmpeg negotiates planar `gbrp` for them
+# and the following `noise`/`vignette`, and ffmpeg 8's gbrp <-> yuv420p
+# conversion blacks out the right-most 8 columns of a frame whose width is
+# not a multiple of 16 (1080 is not) - a dark red stripe once the grade
+# tints it. Packed RGB and YUV keep every column.
 COLOR_GRADE_PRESETS = {
-    "teal_orange": "eq=contrast=1.12:saturation=1.12,"
-                   "colorbalance=rs=-0.12:gs=0.02:bs=0.16:rm=0.04:bm=-0.02:rh=0.18:gh=0.02:bh=-0.14",
-    "sodium_night": "eq=brightness=-0.04:contrast=1.08:saturation=0.55,"
-                    "colorbalance=rs=0.1:bs=-0.22:rm=0.18:gm=0.03:bm=-0.22:rh=0.1:bh=-0.12",
-    "bleach_bypass": "curves=preset=strong_contrast,eq=saturation=0.35:contrast=1.18",
+    "teal_orange": "eq=contrast=1.12:saturation=1.12,format=rgb24,"
+                   "colorbalance=rs=-0.12:gs=0.02:bs=0.16:rm=0.04:bm=-0.02:rh=0.18:gh=0.02:bh=-0.14,format=yuv420p",
+    "sodium_night": "eq=brightness=-0.04:contrast=1.08:saturation=0.55,format=rgb24,"
+                    "colorbalance=rs=0.1:bs=-0.22:rm=0.18:gm=0.03:bm=-0.22:rh=0.1:bh=-0.12,format=yuv420p",
+    "bleach_bypass": "format=rgb24,curves=preset=strong_contrast,format=yuv420p,eq=saturation=0.35:contrast=1.18",
 }
 FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style"}
 LYRIC_STYLES = ("default", "horror")
@@ -123,9 +129,9 @@ def build_finishing_vf(finishing: Optional[dict[str, Any]], width: int, height: 
         for start, dur in glitch_points or []:
             end = start + max(0.08, min(dur, 0.22))
             enable = _escape_enable_arg(f"between(t,{start:.3f},{end:.3f})")
-            # chromashift, not rgbashift: ffmpeg 8's rgbashift blacks out the
-            # right-most columns of every frame even while `enable` is false,
-            # which a long chain of glitch windows turns into a solid stripe.
+            # chromashift, not rgbashift: rgbashift only takes planar RGB, and
+            # the gbrp round trip blacks out the right edge on ffmpeg 8 (see
+            # COLOR_GRADE_PRESETS) on every frame, glitch window or not.
             parts.append(f"chromashift=crh=4:cbv=-4:enable='{enable}'")
     return ",".join(parts)
 
