@@ -311,10 +311,14 @@ class Backend:
     def vram_free_mb(self) -> Optional[int]:
         """Free VRAM on the best GPU: nvidia-smi through Hoard Link first,
         then ComfyUI's own `/system_stats` (covers non-NVIDIA or a ComfyUI
-        on another card). None when neither answers."""
+        on another card). None when neither answers.
+
+        In demo mode the jobs run on the procedural fake ComfyUI, so only its
+        `/system_stats` counts: the machine's real GPUs may be busy with other
+        models, and that must not stop the demo from seeding."""
         from .hoard_link.gpu import gpu_free_mb
 
-        gpus = gpu_free_mb()
+        gpus = None if self.demo else gpu_free_mb()
         if gpus:
             return max(g.free_mb for g in gpus)
         try:
