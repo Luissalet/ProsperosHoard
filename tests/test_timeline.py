@@ -175,3 +175,30 @@ def test_a_beat_a_hair_before_a_rounded_section_start_opens_that_section():
                                options={"section_pools": {"Verse": [pool[0], pool[2]], "Chorus": [pool[1], pool[2]]}})
     clip = next(c for c in result["tracks"][0]["clips"] if c["start_s"] == beat)
     assert clip["asset_id"] == "c"
+
+
+def test_video_cuts_skip_the_still_opening_and_rotate_through_the_clip():
+    beats = _synthetic_beats(140.0, 20.0)
+    sections = [{"label": "Chorus", "kind": "chorus", "start_s": 0, "end_s": 20.0, "energy": "high"}]
+    clip = {"id": "v1", "kind": "video", "duration_s": 5.04}
+    pool = [clip, {"id": "i1", "kind": "image"}]
+    plain = tl.build_auto_cut(20.0, beats, sections, pool, seed=1)
+    assert all(c["trim_start_s"] == 0.0 for c in plain["tracks"][0]["clips"])  # the default is unchanged
+    built = tl.build_auto_cut(20.0, beats, sections, pool, seed=1,
+                              options={"video_lead_in_s": 1.0, "video_rotate_offsets": True})
+    videos = [c for c in built["tracks"][0]["clips"] if c["asset_id"] == "v1"]
+    assert len(videos) >= 3
+    trims = [c["trim_start_s"] for c in videos]
+    assert all(t >= 1.0 - 1e-6 for t in trims)  # never the still-frame opening
+    assert all(t + c["duration_s"] <= 5.04 + 1e-6 for t, c in zip(trims, videos))  # always inside the clip
+    assert len(set(trims)) >= 2  # reuses show different moments
+    # the edited tracks still validate
+    lookup = {a["id"]: a for a in pool}
+    tl.normalise_tracks(built["tracks"], lambda i: lookup.get(i))
+
+
+def test_video_trim_falls_back_to_zero_when_the_clip_is_short_or_unknown():
+    uses: dict = {}
+    assert tl._video_trim({"id": "x", "duration_s": 1.0}, 1.5, uses, 1.0, True) == 0.0
+    assert tl._video_trim({"id": "y"}, 1.0, uses, 1.0, True) == 0.0
+    assert tl._video_trim({"id": "z", "duration_s": 2.0}, 1.5, uses, 1.0, False) == 0.5

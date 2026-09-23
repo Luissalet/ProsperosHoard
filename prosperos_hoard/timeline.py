@@ -209,6 +209,9 @@ def build_auto_cut(
     rng = random.Random(seed)
     visual_clips = []
     last_pan = None
+    lead_in = max(0.0, float(options.get("video_lead_in_s", 0.0) or 0.0))
+    rotate = bool(options.get("video_rotate_offsets", False))
+    video_uses: dict[str, int] = {}
     for i, cut in enumerate(cuts):
         duration_s = round(starts[i + 1] - starts[i], 3)
         asset = assets[i]
@@ -217,6 +220,8 @@ def build_auto_cut(
             "asset_id": asset["id"], "kind": asset.get("kind", "image"), "start_s": round(starts[i], 3),
             "duration_s": duration_s, "trim_start_s": 0.0, "transition_in": transition,
         }
+        if clip["kind"] == "video":
+            clip["trim_start_s"] = _video_trim(asset, duration_s, video_uses, lead_in, rotate)
         if clip["kind"] == "image":
             if ken_burns_variety:
                 choices = [p for p in PAN_DIRECTIONS[:-1] if p != last_pan]
@@ -234,6 +239,28 @@ def build_auto_cut(
         tracks.append({"type": "lyrics", "clips": lyrics_clips_from_lines(lyrics_lines, song_duration_s,
                                                                           bool(options.get("karaoke", False)))})
     return {"tracks": tracks}
+
+
+def _video_trim(asset: dict[str, Any], cut_s: float, uses: dict[str, int], lead_in: float, rotate: bool) -> float:
+    """Where a video cut starts inside its clip. An image-to-video clip opens
+    on its source still, so `video_lead_in_s` skips that first stretch; with
+    `video_rotate_offsets` each reuse of the same clip starts further in
+    (wrapping), so a clip that plays four times in a chorus shows four
+    different moments instead of the same opening second."""
+    total = float(asset.get("duration_s") or 0.0)
+    latest = total - cut_s
+    if total <= 0 or latest <= 0:
+        return 0.0
+    start = min(lead_in, latest)
+    if not rotate:
+        return round(start, 3)
+    n = uses.get(asset["id"], 0)
+    uses[asset["id"]] = n + 1
+    span = latest - start
+    if span <= 0.05:
+        return round(start, 3)
+    step = max(0.5, min(cut_s, span))
+    return round(start + (n * step) % span, 3)
 
 
 def lyrics_clips_from_lines(lines: list[dict[str, Any]], song_duration_s: float, karaoke: bool) -> list[dict[str, Any]]:

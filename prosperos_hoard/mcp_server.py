@@ -434,7 +434,8 @@ def studio_timeline(
     action="auto": cut `song_asset_id` on its beats using asset_ids, or board_id, or (default) the
     project's generated/imported images and videos. aspect 9:16 | 16:9 | 1:1. lyrics_asset_id adds
     timed lyric captions. options: beats_low/beats_mid/beats_high (beats per shot, default 4/4/2),
-    flash_on_strong_downbeats (true), ken_burns_variety (true), karaoke (false), seed, fps (24/25/30).
+    flash_on_strong_downbeats (true), ken_burns_variety (true), karaoke (false), seed, fps (24/25/30),
+    video_lead_in_s (0) and video_rotate_offsets (false) to skip a video's still opening and vary repeats.
     action="get": read timeline_id (options.clip_offset/clip_limit page through clips).
     action="update": patch timeline_id with {"clip_updates": [{"index": 3, "duration_s": 2.0,
     "transition_in": {"type": "crossfade", "duration_s": 0.3}}, {"index": 5, "asset_id": "a_..."},

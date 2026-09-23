@@ -194,7 +194,10 @@ whole is annotated as writing because create/update do.
   the beat of every sung line); `section_pools` (`{"Verse 1" | "verse" |
   "chorus": [asset ids in story order]}` - matched by exact label, then
   without its number, then by kind; a pool keeps its place across
-  repeats). Every section starts on a new shot. get: `clip_offset`,
+  repeats); `video_lead_in_s` (0: skip the first seconds of each video
+  clip, where an image-to-video clip still shows its source frame) and
+  `video_rotate_offsets` (false: each reuse of a clip starts further in, so
+  repeats show different moments). Every section starts on a new shot. get: `clip_offset`,
   `clip_limit`.
   **Patch** (update): `clip_updates[{index, duration_s | asset_id | kind |
   trim_start_s | ken_burns | transition_in}]`, `{index, delete: true}`,
