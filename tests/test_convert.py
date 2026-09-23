@@ -161,6 +161,19 @@ def test_ace_step_primitive_nodes_resolve_to_literal_values(object_info: dict) -
     assert ksampler["inputs"]["seed"] == 31  # same primitive feeds both
 
 
+def test_missing_model_file_is_reported_as_download_not_a_generic_choice_error(object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / "image_qwen_image_2_1_t2i.json").read_text())
+    api = convert.ui_to_api(ui_workflow, object_info)
+    api["459:451"]["inputs"]["unet_name"] = "not_downloaded_yet.safetensors"
+    problems = convert.validate_values(api, object_info)
+    assert any(p.startswith("model not installed:") and "not_downloaded_yet.safetensors" in p for p in problems)
+    # every other combo (sampler, scheduler, dynamic-combo keys) still uses
+    # the plain "is not available" wording, not the model-file one
+    api["459:458"]["inputs"]["sampler_name"] = "not_a_real_sampler"
+    problems = convert.validate_values(api, object_info)
+    assert any("'sampler_name' = 'not_a_real_sampler' is not available" in p for p in problems)
+
+
 def test_unknown_node_class_raises() -> None:
     ui_workflow = {"nodes": [{"id": 1, "type": "TotallyMadeUpNode", "mode": 0, "inputs": [], "outputs": [],
                               "widgets_values": []}], "links": []}
