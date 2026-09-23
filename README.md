@@ -4,7 +4,7 @@
 ### Such stuff as dreams are made on: can an agent direct a whole production?
 **A local media studio that drives your ComfyUI, ffmpeg and a local TTS to make consistent characters, photocards, album art and music videos cut on the beat, by hand or entirely over MCP, and remembers exactly how every asset was made.**
 
-[Español](README.es.md) · [Quick start](#quick-start) · [Connect to Faustus](#connect-it-to-faustus) · [MCP reference](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
+[Español](README.es.md) · [Quick start](#quick-start) · [Real production example](#the-real-run) · [Connect to Faustus](#connect-it-to-faustus) · [MCP reference](docs/MCP.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)
 
 ![Generate screen: two cast members mentioned with @, the final prompt with their look inlined, the parameter panel and earlier results](docs/media/01-generate.png)
 *Actual application, synthetic demo data. Every picture comes from the bundled demo backend, a procedural stand-in for ComfyUI that draws labelled placeholder scenes; with your ComfyUI connected the same screens show real model output.*
@@ -60,7 +60,7 @@ with ids and pictures.
 | Design | Pillow renderer, no browser: photocard front and back, album cover (4 layouts), teaser poster, lyric card, tracklist back, thumbnail, with a "night" horror/thriller variant for the cover, poster, lyric card and tracklist; gradients, holographic foil, blends, vignette, letter spacing, shadows, shrink-to-fit text, tracklist columns; photocard sets for a whole group or a solo artist in several looks, with a contact sheet; print mode with 3 mm bleed at 300 dpi; 6 bundled font families | The QR layer draws a placeholder box (no QR library is pinned) |
 | Audio | Import (mp3, wav, flac, ogg, m4a), waveform, own beat tracker (band-balanced spectral flux, tempo prior, dynamic programming) tested within 1 BPM and 50 ms on click tracks and kick-and-snare patterns at 90-140 BPM, downbeat and section estimates, LRC lyrics with a tap-to-time tool and a first-pass auto-timing from the lyrics' `[Section]` tags and the song's bars | Auto-timing is an estimate from the structure, not vocal alignment; section labels are "section A/B" with low/mid/high energy, not verse/chorus; very fast songs (170 BPM) are reported at half time |
 | Voices | Piper TTS, six curated Spanish and English voices downloaded on first use; Faustus TTS through Hoard Link with Piper as fallback; per-character voice and speed | Generic synthetic voices only: no voice cloning of anyone |
-| Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP API for another local server; composed songs get lineage and are analysed automatically | Needs the ACE-Step checkpoint in ComfyUI; no song has been composed on a real GPU yet; imported songs work fully either way |
+| Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP API for another local server; composed songs get lineage and are analysed automatically | Needs the ACE-Step checkpoint in ComfyUI (the example single was composed with ACE-Step 1.5 turbo); imported songs work fully either way |
 | Video | Beat-synced auto-cut (density per energy - from the lyrics' verse/chorus markers when present - flashes on phrase downbeats, a new shot per section and optionally per sung line, per-section storyboards in story order, no immediate repeats, whole song covered) into an editable timeline; ffmpeg renderer with Ken Burns moves, cut/crossfade/dip/flash transitions that keep cuts on the beat, burned lyric captions with optional karaoke, the song muxed in; 540p preview or 1080p final; SVD/Wan clips converted to mp4; optional finishing pass (colour grade presets, film grain, vignette, letterbox, downbeat glitch flashes, a condensed-uppercase horror caption style) | Ken Burns is a zoom range plus pan direction, not free start/end rectangles; colour grades are `eq`/`colorbalance`/`curves` approximations, not a 3D LUT |
 | Agent control | 22 MCP tools mirroring `/api/agent/*`, compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job` can wait server-side); no push events |
 | Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
@@ -203,7 +203,8 @@ say what was found and why; nothing is loaded or unloaded behind your back.
 ## Production example
 
 [`scripts/productions/no_mires_atras.py`](scripts/productions/no_mires_atras.py)
-produces a single, "NO MIRES ATRÁS" by FAROL (an original night creature:
+produces a single by FAROL, "NO MIRES ATRÁS" in Spanish or, with `--lang en`,
+"DON'T LOOK BACK" in English (an original night creature:
 a paper-lantern head, always still, always a little closer), end to end
 **through the MCP adapter only** - it spawns `mcp_server.py` over stdio,
 the same path Faustus uses, and fails if any result carries a picture it
@@ -217,7 +218,7 @@ photocard set in five idol looks with its contact sheet; the "night" cover,
 tracklist back, teaser poster and lyric card; lyrics timed to the song's
 bars; 9:16 and 16:9 cuts that follow a storyboard per section and change
 shot on every sung line, graded sodium-night with grain, vignette and a
-flash + RGB glitch on the chorus downbeats, horror karaoke captions; and a
+flash + colour-split glitch on the chorus downbeats, horror karaoke captions; and a
 `REPORT.md` with every asset id, timings and what to review. It checkpoints
 every still, clip, card and render, so an interrupted run resumes where it
 stopped; `--only <step>` redoes one step.
@@ -231,26 +232,39 @@ On Windows, with the app running and ComfyUI started on a 16 GB card:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final
 # pin the image engine instead of "auto" reaching for Qwen-Image 2.1 first
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --engine flux
+# the English version on top of a finished run: new song, designs and cut, same pictures
+.venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --lang en --reuse-from data\productions\no_mires_atras
 # after re-timing the lyrics by ear in Audio > Lyrics timing and exporting the LRC
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<you>\Music\no_mires_atras.lrc
 ```
 
-What has run and what has not: the whole production ran on a
-CPU-only Linux machine against `--backend fake --engine auto`, the
-procedural stand-in `--demo` uses - so its pictures, clips and song are
-labelled placeholders, not Qwen-Image 2.1, Flux, Kontext, Wan or ACE-Step
-output (the fake reports Qwen-Image 2.1 as installed, so `auto` routed the
-reference sheet through `qwen21_txt2img` and the FAROL stills through
-`qwen21_edit` - confirmed from each asset's `recipe.image_engine`). What
-that run does prove is everything Prospero itself decides: every step
-completes and every asset kind is produced; the design layouts, typography,
-grade, grain, glitch, cut rhythm, storyboard and karaoke timing render as
-intended (the review of those frames is what led to the night variants,
-the caption rework and a frame-accurate transition fix). The fake ComfyUI
-serves a real ComfyUI 0.37 install's node list and rejects any prompt the
-real server would, and the six templates were checked input for input
-against what the real frontend exports - but **no real GPU run has
-happened yet**; that is the next step, with the same script.
+### The real run
+
+The same script ran against a real ComfyUI 0.37 on **one 16 GB card**, in
+both languages (the English version reuses every picture and clip of the
+Spanish run with `--reuse-from`, so only its song, designs and cut were made
+again). Qwen-Image 2.1 made the reference sheet, the stills and the
+photocards, Wan 2.2 TI2V 5B the clips and ACE-Step 1.5 the song. The
+canonical reference and the best variant of each shot were picked by eye.
+The lyrics were aligned to the vocals with faster-whisper (outside Prospero)
+and imported as an LRC. Everything below comes straight out of the app,
+only downscaled for this page: nothing was retouched. The prompts, seeds,
+settings, timings and the seven problems the run found (all fixed) are in the
+[full example](docs/examples/no-mires-atras.md).
+
+![Album cover: the lantern head close-up with the title set in Prospero's typographic layer](docs/media/farol/cover.jpg)
+
+<p><img src="docs/media/farol/clip-over-shoulder.gif" width="49%" alt="Wan clip: over the shoulder, FAROL standing still under the closer lamp, slow push-in">
+<img src="docs/media/farol/clip-lantern.gif" width="49%" alt="Wan clip: the candle flame flickering inside the lantern, raindrops on the paper"></p>
+
+![The best still of each of the twelve shots: FAROL is the same creature in every one](docs/media/farol/stills.jpg)
+
+![The photocard set: five idol looks, fronts and backs](docs/media/farol/photocards.jpg)
+
+![Frames of the 9:16 cut with the horror karaoke captions](docs/media/farol/cut-9x16.jpg)
+
+On that card: 48 stills in 57 min, seven 5 s clips in about 70 min, the
+song in 41 s, and both cuts (preview and 1080p final) in 6.5 min.
 
 ## Architecture
 
@@ -341,15 +355,16 @@ Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
 
 ## Roadmap / known limits
 
-- **No real GPU run yet**: the templates are validated against a real
-  ComfyUI 0.37 node list and the converter matches the real frontend's
-  export, but no image, clip or song has been generated on a GPU from this
-  repository. The production example is the script for that first run.
+- Picking the best variant is manual (the production records the picks); an
+  automatic reviewer that scores outputs against the bible and re-rolls the
+  weak ones is planned, and so are production recipes you can re-run with
+  another cast.
 - `consistent=true` keeps a character's design from its canonical
   reference; Kontext takes a single reference (Qwen-Image 2.1 up to 10) and
   Wan is image-to-video only.
 - Lyric auto-timing is an estimate from the song's structure, not vocal
-  alignment; re-time by ear in **Audio > Lyrics timing** for a final cut.
+  alignment; re-time by ear in **Audio > Lyrics timing**, or import an LRC
+  aligned elsewhere (the example used faster-whisper), for a final cut.
 - Section labels are "section A/B" with an energy level, not verse/chorus;
   very fast songs (around 170 BPM) are reported at half time.
 - Jobs are polled (`studio_job` can wait server-side); there are no push
@@ -357,7 +372,6 @@ Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
 - Timeline editing is clip-level, Ken Burns is a zoom range plus a pan
   direction, and colour grades are filter approximations, not 3D LUTs.
 - The QR layer of the designer draws a placeholder box.
-- Not tried yet: a full run on Windows against a real ComfyUI and GPU.
 
 ## License
 
