@@ -768,6 +768,89 @@ class Store:
         ).fetchone()
         return self.get_job(row["id"]) if row else None
 
+    # ------------------------------------------------------- studio voices
+    def create_studio_voice(
+        self, name: str, engine_id: str, voice_ref: str | None = None, sample_path: str | None = None,
+        language: str | None = None, cloned: bool = False, reference_transcript: str | None = None,
+        quality: dict[str, Any] | None = None, tags: list[str] | None = None, notes: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("a voice needs a non-empty name")
+        if project_id:
+            self.get_project(project_id)
+        vid = new_id("voice")
+        now = now_iso()
+        self.conn.execute(
+            """INSERT INTO studio_voices
+               (id, project_id, name, engine_id, voice_ref, sample_path, language, cloned,
+                reference_transcript, quality_json, presets_json, tags_json, notes, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (vid, project_id, name.strip()[:120], engine_id, voice_ref, sample_path, language,
+             1 if cloned else 0, reference_transcript, dumps(quality or {}), dumps([]), dumps(tags or []),
+             notes, now, now),
+        )
+        self.conn.commit()
+        return self.get_studio_voice(vid)
+
+    def get_studio_voice(self, voice_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM studio_voices WHERE id=?", (voice_id,)).fetchone()
+        if not row:
+            raise NotFound("voice", voice_id)
+        d = row_to_dict(row)
+        d["cloned"] = bool(d["cloned"])
+        d["quality"] = loads(d.pop("quality_json"), {})
+        d["presets"] = loads(d.pop("presets_json"), [])
+        d["tags"] = loads(d.pop("tags_json"), [])
+        return d
+
+    def list_studio_voices(self, project_id: str | None = None, engine_id: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT id FROM studio_voices WHERE 1=1"
+        args: list[Any] = []
+        if project_id is not None:
+            sql += " AND (project_id=? OR project_id IS NULL)"
+            args.append(project_id)
+        if engine_id:
+            sql += " AND engine_id=?"
+            args.append(engine_id)
+        sql += " ORDER BY created_at DESC"
+        rows = self.conn.execute(sql, args).fetchall()
+        return [self.get_studio_voice(r["id"]) for r in rows]
+
+    def update_studio_voice(self, voice_id: str, **fields: Any) -> dict[str, Any]:
+        self.get_studio_voice(voice_id)
+        cols, args = [], []
+        json_fields = {"quality": "quality_json", "presets": "presets_json", "tags": "tags_json"}
+        for key, value in fields.items():
+            if key in json_fields:
+                cols.append(f"{json_fields[key]}=?")
+                args.append(dumps(value))
+            elif key in ("name", "engine_id", "voice_ref", "sample_path", "language", "reference_transcript", "notes"):
+                cols.append(f"{key}=?")
+                args.append(value)
+            elif key == "cloned":
+                cols.append("cloned=?")
+                args.append(1 if value else 0)
+        if not cols:
+            return self.get_studio_voice(voice_id)
+        cols.append("updated_at=?")
+        args.append(now_iso())
+        args.append(voice_id)
+        self.conn.execute(f"UPDATE studio_voices SET {', '.join(cols)} WHERE id=?", args)
+        self.conn.commit()
+        return self.get_studio_voice(voice_id)
+
+    def add_voice_preset(self, voice_id: str, preset: dict[str, Any]) -> dict[str, Any]:
+        voice = self.get_studio_voice(voice_id)
+        presets = [p for p in voice["presets"] if p.get("name") != preset.get("name")]
+        presets.append(preset)
+        return self.update_studio_voice(voice_id, presets=presets)
+
+    def delete_studio_voice(self, voice_id: str) -> None:
+        self.get_studio_voice(voice_id)
+        self.conn.execute("DELETE FROM studio_voices WHERE id=?", (voice_id,))
+        self.conn.commit()
+
     # --------------------------------------------------------- agent calls
     def record_agent_call(self, tool: str, args_summary: str, duration_ms: float, ok: bool, error: str | None = None) -> None:
         self.conn.execute(

@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -155,6 +155,25 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
 CREATE INDEX IF NOT EXISTS idx_jobs_lane ON jobs(lane);
+
+CREATE TABLE IF NOT EXISTS studio_voices (
+    id TEXT PRIMARY KEY,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    engine_id TEXT NOT NULL,
+    voice_ref TEXT,
+    sample_path TEXT,
+    language TEXT,
+    cloned INTEGER NOT NULL DEFAULT 0,
+    reference_transcript TEXT,
+    quality_json TEXT NOT NULL DEFAULT '{}',
+    presets_json TEXT NOT NULL DEFAULT '[]',
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_studio_voices_project ON studio_voices(project_id);
 
 CREATE TABLE IF NOT EXISTS agent_calls (
     id TEXT PRIMARY KEY,
