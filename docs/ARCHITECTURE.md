@@ -252,7 +252,7 @@ apart), segments that sound alike share a letter, energy relative to the song.
 - **QR layer** renders a placeholder (no QR library pinned).
 - **Polling, no SSE**: the UI polls `/api/jobs` (1.2 s while something runs, 5 s
   otherwise); agents use `studio_job(wait_s=...)`.
-- **Hoard Link** is vendored byte for byte at the commit in
+- **Hoard Link** is vendored byte for byte at the version in
   `hoard_link/VENDORED.txt`; only `backend.py` wraps it.
 - **Import folders**: agents may pass paths, so imports are limited to the home
   folder, `data/inbox` and folders added in Settings, with symlinks and `..`
@@ -260,7 +260,7 @@ apart), segments that sound alike share a letter, energy relative to the song.
 - **Lyric timing is an estimate** (`studio_time_lyrics`): it reads the
   structure from the lyrics' `[Section]` tags and the song's bars, not from
   the vocals (no source separation or alignment model is in the dependency
-  set); re-time by ear in Audio > Lyrics timing.
+  set); re-time it by ear in Audio > Lyrics timing.
 - **`flux_kontext_edit` is single-reference only**: the official template's
   multi-reference image-stitching path is not exposed; `wan22_ti2v` is
   image-to-video only (a still becomes the start frame) - its pure
