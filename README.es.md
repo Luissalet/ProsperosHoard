@@ -185,7 +185,7 @@ con la aplicación. Detalles, modelo de datos y decisiones:
 cd frontend; npm ci; npm run build
 ```
 
-La última ejecución completa: **173 pruebas superadas** en unos 90 s,
+La última ejecución completa: **174 pruebas superadas** en unos 90 s,
 sin red, con el backend de demostración en lugar de ComfyUI. Cubren: el
 protocolo MCP de principio a fin (el adaptador lanzado por stdio contra la
 aplicación en marcha: palabras clave y anotaciones de cada herramienta,

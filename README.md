@@ -177,7 +177,7 @@ Every endpoint: [docs/API.md](docs/API.md).
 cd frontend; npm ci; npm run build
 ```
 
-The last full run: **173 tests passed** in about 90 s, offline, with
+The last full run: **174 tests passed** in about 90 s, offline, with
 the demo backend standing in for ComfyUI. They cover: the MCP protocol end
 to end (the adapter spawned over stdio against a live app: tool keywords and
 annotations, generation with a picture, lineage, design, readable errors,
