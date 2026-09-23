@@ -9,6 +9,7 @@ import base64
 import logging
 import mimetypes
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -21,9 +22,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from . import audio as audio_mod
-from . import comfy_driver, engine
+from . import comfy_driver, engine, procutil
+from . import dubbing as dubbing_mod
 from . import templates as design_templates
 from . import timeline as timeline_mod
+from . import voice_engines as ve
+from . import voice_lab
+from . import voice_pipelines as vp
 from . import voices as voices_mod
 from .backend import Backend
 from .design import DesignError
@@ -31,6 +36,7 @@ from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .ids import new_id
 from .jobs import JobQueue
 from .store import NotFound, Store
+from .voice_lab import VoiceLabError
 
 logger = logging.getLogger("prosperos_hoard.api")
 
@@ -84,6 +90,9 @@ def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
         return 400, {"error": "bad_design", "message": str(exc)}
     if isinstance(exc, voices_mod.VoiceError):
         return 400, {"error": exc.code, "message": str(exc)}
+    if isinstance(exc, (VoiceLabError, vp.AudiobookError, dubbing_mod.DubbingError, ve.EngineNotInstalled)):
+        code = exc.code if hasattr(exc, "code") else "engine_not_installed"
+        return 400, {"error": code, "message": str(exc)}
     if isinstance(exc, ValueError):
         return 400, {"error": "bad_request", "message": str(exc)}
     return 500, {"error": "internal_error", "message": f"{type(exc).__name__}: {str(exc)[:300]}"}
@@ -295,6 +304,88 @@ class PreviewBody(BaseModel):
     variant: Optional[str] = None
 
 
+# -------------------------------------------------------------- voice studio
+
+class VoiceSpecBody(BaseModel):
+    engine_id: Optional[str] = None
+    voice_id: Optional[str] = None  # a saved library voice; supplies engine_id/sample when omitted
+    voice_ref: Optional[str] = None  # an engine-native voice/speaker id (e.g. a Piper voice id)
+    preset: Optional[str] = None  # a named preset on the library voice
+    speed: Optional[float] = None
+    pitch: Optional[float] = None
+    style: Optional[str] = None
+    language: Optional[str] = None
+
+
+class VoiceCreateBody(BaseModel):
+    name: str
+    engine_id: str
+    source_path: str  # an absolute path to a clean sample (see backend.import_roots)
+    language: Optional[str] = None
+    project: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
+class VoicePresetBody(BaseModel):
+    name: str
+    speed: Optional[float] = None
+    pitch: Optional[float] = None
+    style: Optional[str] = None
+
+
+class VoiceUpdateBody(BaseModel):
+    name: Optional[str] = None
+    tags: Optional[list[str]] = None
+    notes: Optional[str] = None
+
+
+class VoiceSpeakBody(BaseModel):
+    text: str
+    voice: VoiceSpecBody = Field(default_factory=VoiceSpecBody)
+    project: Optional[str] = None
+
+
+class VoiceInstallBody(BaseModel):
+    kind: str  # "tts" | "stt"
+
+
+class VoiceTranscribeBody(BaseModel):
+    path: Optional[str] = None  # an absolute path (see backend.import_roots)
+    asset_id: Optional[str] = None
+    language: Optional[str] = None
+    engine_id: Optional[str] = None
+    word_timestamps: bool = True
+
+
+class VoiceAudiobookBody(BaseModel):
+    text: Optional[str] = None
+    source_path: Optional[str] = None  # .txt/.md/.epub, an absolute path
+    title: Optional[str] = None
+    voice: VoiceSpecBody = Field(default_factory=VoiceSpecBody)
+    format: str = "mp3"  # "mp3" | "m4b"
+    project: Optional[str] = None
+    wait_s: float = 0
+
+
+class VoiceDubBody(BaseModel):
+    source_path: Optional[str] = None  # an absolute path to a video file
+    video_asset_id: Optional[str] = None
+    target_language: str
+    source_language: Optional[str] = None
+    glossary: Optional[dict[str, str]] = None
+    voice: VoiceSpecBody = Field(default_factory=VoiceSpecBody)
+    stt_engine_id: Optional[str] = None
+    title: Optional[str] = None
+    project: Optional[str] = None
+    wait_s: float = 0
+
+
+class VoiceResegmentBody(BaseModel):
+    text: Optional[str] = None
+    voice: Optional[VoiceSpecBody] = None
+    remix: bool = True
+
+
 # ------------------------------------------------------------------- app
 
 def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 8815, demo: bool = False) -> FastAPI:
@@ -310,6 +401,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("compose_song", lambda job, p: engine.compose_song(store, backend, job, p))
     queue.register("render_timeline", lambda job, p: engine.render_timeline_job(store, backend, job, p))
     queue.register("download_voice", lambda job, p: _download_voice_job(store, job, p))
+    queue.register("audiobook", lambda job, p: vp.audiobook_job(store, backend, job, p))
+    queue.register("dub", lambda job, p: dubbing_mod.dub_job(store, backend, job, p))
+    queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
     queue.start()
 
     app = FastAPI(title="Prospero's Hoard", version=__version__)
@@ -735,6 +829,354 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise engine.EngineError("unknown_voice", f"unknown voice '{voice_id}'")
         return queue.enqueue("download_voice", "cpu", {"voice_id": voice_id})
 
+    # ------------------------------------------------------------ voice studio
+    # Cloning-capable TTS/STT engines, a reusable voice library, speak/
+    # transcribe/dictate, and the audiobook and dubbing pipelines. Piper (the
+    # character-narration TTS above) is untouched; a library voice made here
+    # can also be used as a character's `voice` via {"backend": "studio",
+    # "voice_id": "..."} - see `engine.voice_line`.
+
+    def _tts_engines() -> list[Any]:
+        object_info = None
+        try:
+            object_info = engine._object_info(backend)
+        except Exception:  # ComfyUI unreachable - the ComfyTTS status entry just reports "not found"
+            object_info = None
+        return ve.default_tts_engines(voices_dir=store.data_dir / "voices", object_info=object_info)
+
+    def _stt_engines() -> list[Any]:
+        return ve.default_stt_engines()
+
+    def _resolve_source_path(raw_path: str) -> Path:
+        return engine.resolve_import_path(backend, store, raw_path)
+
+    def _voice_studio_path(rel: str) -> Path:
+        root = store.data_dir.resolve()
+        path = (root / rel).resolve()
+        if not _is_within(path, root) or not path.is_file():
+            raise NotFound("file", rel)
+        return path
+
+    @app.get("/api/agent/voice_engines")
+    def agent_voice_engines():
+        def run():
+            status = ve.list_engine_status(_tts_engines(), _stt_engines())
+            return {
+                "tts": [{k: v for k, v in e.items() if k != "capabilities"} | {"languages": e["capabilities"]["languages"],
+                        "cloning": e["capabilities"]["cloning"]} for e in status["tts"]],
+                "stt": [{k: v for k, v in e.items() if k != "capabilities"} for e in status["stt"]],
+            }
+        return agent("voice_engines", "", run)
+
+    @app.get("/api/voice/engines")
+    def voice_engines_full():
+        return ve.list_engine_status(_tts_engines(), _stt_engines())
+
+    def _engine_for_install(kind: str, engine_id: str) -> Any:
+        engines = _tts_engines() if kind == "tts" else _stt_engines() if kind == "stt" else None
+        if engines is None:
+            raise engine.EngineError("bad_kind", "kind must be 'tts' or 'stt'")
+        try:
+            return ve.get_engine(engines, engine_id)
+        except KeyError as exc:
+            raise engine.EngineError("unknown_engine", str(exc)) from None
+
+    @app.post("/api/voice/engines/{engine_id}/install")
+    def voice_engine_install(engine_id: str, body: VoiceInstallBody):
+        eng = _engine_for_install(body.kind, engine_id)
+        if not eng.pip_packages:
+            raise engine.EngineError("no_installer", f"'{engine_id}' has no known installer; see docs/VOICE.md")
+        return queue.enqueue("install_voice_engine", "cpu", {"kind": body.kind, "engine_id": engine_id,
+                                                              "pip_packages": eng.pip_packages})
+
+    # -------------------------------------------------------------- library
+    @app.get("/api/voice/voices")
+    def voice_voices_list(project: Optional[str] = None, engine_id: Optional[str] = None):
+        return {"items": [voice_lab.voice_view(v) for v in store.list_studio_voices(project, engine_id)]}
+
+    @app.get("/api/agent/voice_list")
+    def agent_voice_list(project: Optional[str] = None):
+        return agent("voice_list", project or "",
+                     lambda: {"items": [voice_lab.voice_view(v) for v in store.list_studio_voices(project)]})
+
+    def op_voice_create(body: VoiceCreateBody) -> dict[str, Any]:
+        src = _resolve_source_path(body.source_path)
+        return voice_lab.create_voice(store, body.name, src, body.engine_id, language=body.language,
+                                      project_id=body.project, stt_engine=ve.best_installed_stt(_stt_engines()),
+                                      tags=body.tags)
+
+    @app.post("/api/voice/voices")
+    def voice_voices_create(body: VoiceCreateBody):
+        return voice_lab.voice_view(op_voice_create(body))
+
+    @app.post("/api/agent/voice_create")
+    def agent_voice_create(body: VoiceCreateBody):
+        return agent("voice_create", body.name, lambda: voice_lab.voice_view(op_voice_create(body)))
+
+    @app.post("/api/voice/voices/upload")
+    async def voice_voices_upload(file: UploadFile, name: str, engine_id: str, language: Optional[str] = None,
+                                  project: Optional[str] = None):
+        tmp_dir = store.data_dir / "tmp" / "uploads"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path((file.filename or "sample.wav").replace("\\", "/")).suffix.lower() or ".wav"
+        tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
+        total = 0
+        try:
+            with tmp_path.open("wb") as fh:
+                while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > engine.MAX_MEDIA_BYTES:
+                        raise engine.EngineError("too_large", "sample exceeds the upload size limit")
+                    fh.write(chunk)
+            row = voice_lab.create_voice(store, name, tmp_path, engine_id, language=language, project_id=project,
+                                         stt_engine=ve.best_installed_stt(_stt_engines()))
+            return voice_lab.voice_view(row)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.get("/api/voice/voices/{voice_id}")
+    def voice_voice_get(voice_id: str):
+        return store.get_studio_voice(voice_id)
+
+    @app.patch("/api/voice/voices/{voice_id}")
+    def voice_voice_update(voice_id: str, body: VoiceUpdateBody):
+        return store.update_studio_voice(voice_id, **body.model_dump(exclude_none=True))
+
+    @app.delete("/api/voice/voices/{voice_id}")
+    def voice_voice_delete(voice_id: str):
+        store.delete_studio_voice(voice_id)
+        return {"ok": True, "deleted": voice_id}
+
+    @app.post("/api/voice/voices/{voice_id}/presets")
+    def voice_voice_add_preset(voice_id: str, body: VoicePresetBody):
+        return store.add_voice_preset(voice_id, body.model_dump(exclude_none=True))
+
+    @app.get("/api/voice/voices/{voice_id}/sample")
+    def voice_voice_sample(voice_id: str):
+        voice = store.get_studio_voice(voice_id)
+        path = voice_lab.sample_path(store, voice)
+        if not path:
+            raise NotFound("sample", voice_id)
+        return FileResponse(path, media_type="audio/wav")
+
+    @app.post("/api/voice/voices/{voice_id}/preview")
+    def voice_voice_preview(voice_id: str, body: VoiceSpeakBody):
+        spec = body.voice.model_dump(exclude_none=True)
+        spec["voice_id"] = voice_id
+        wav, engine_id = voice_lab.synthesize_with_spec(store, _tts_engines(), spec, body.text[:500])
+        return Response(wav, media_type="audio/wav", headers={"X-Engine": engine_id})
+
+    # ------------------------------------------------------------------ speak
+    def op_voice_speak(body: VoiceSpeakBody) -> dict[str, Any]:
+        if not body.text.strip():
+            raise engine.EngineError("empty_text", "give the text to speak")
+        spec = body.voice.model_dump(exclude_none=True)
+        wav, engine_id = voice_lab.synthesize_with_spec(store, _tts_engines(), spec, body.text.strip())
+        if body.project:
+            asset_id = new_id("a")
+            dest = store.path_for_asset_file(asset_id, ".wav")
+            dest.write_bytes(wav)
+            duration_s = audio_mod.probe_duration_s(dest)
+            asset = store.create_asset(
+                project_id=body.project, kind="audio", file_path=engine._rel(store, dest), mime="audio/wav",
+                duration_s=duration_s, source="generated",
+                recipe={"operation": "voice_speak", "engine": engine_id, "text": body.text, "voice": spec},
+                asset_id=asset_id, name=engine._clip(body.text.strip(), 80), tags=["voice-studio"],
+            )
+            return {"engine_id": engine_id, "asset": engine.asset_view(asset)}
+        return {"engine_id": engine_id, "wav": wav}
+
+    @app.post("/api/agent/voice_speak")
+    def agent_voice_speak(body: VoiceSpeakBody):
+        def run():
+            result = op_voice_speak(body)
+            if "asset" in result:
+                return {"engine_id": result["engine_id"], **result["asset"]}
+            return {"engine_id": result["engine_id"], "bytes": len(result["wav"]), "note": "pass project to save this as an audio asset"}
+        return agent("voice_speak", body.text[:80], run)
+
+    @app.post("/api/voice/speak")
+    def voice_speak(body: VoiceSpeakBody):
+        result = op_voice_speak(body)
+        if "asset" in result:
+            return result["asset"]
+        return Response(result["wav"], media_type="audio/wav", headers={"X-Engine": result["engine_id"]})
+
+    # ----------------------------------------------------- transcribe/dictate
+    def _run_transcribe(path: Path, language: Optional[str], engine_id: Optional[str], word_timestamps: bool) -> dict[str, Any]:
+        stt = ve.best_installed_stt(_stt_engines(), prefer=engine_id)
+        if stt is None:
+            raise engine.EngineError("stt_not_installed", "no speech-to-text engine is installed; "
+                                                          "install faster-whisper (pip install faster-whisper)")
+        return {"engine_id": stt.id, **stt.transcribe(path, language=language, word_timestamps=word_timestamps)}
+
+    def op_voice_transcribe(body: VoiceTranscribeBody) -> dict[str, Any]:
+        if body.asset_id:
+            asset = store.get_asset(body.asset_id)
+            path = _asset_path(store, asset["file_path"])
+        elif body.path:
+            path = _resolve_source_path(body.path)
+        else:
+            raise engine.EngineError("source_required", "give asset_id or path")
+        return _run_transcribe(path, body.language, body.engine_id, body.word_timestamps)
+
+    @app.post("/api/agent/voice_transcribe")
+    def agent_voice_transcribe(body: VoiceTranscribeBody):
+        def run():
+            result = op_voice_transcribe(body)
+            return {"engine_id": result["engine_id"], "language": result.get("language"),
+                    "text": engine._clip(result.get("text"), 4000), "segment_count": len(result.get("segments") or [])}
+        return agent("voice_transcribe", body.asset_id or body.path or "", run)
+
+    @app.post("/api/voice/transcribe")
+    def voice_transcribe(body: VoiceTranscribeBody):
+        result = op_voice_transcribe(body)
+        return {**result, "srt": ve.segments_to_srt(result["segments"]), "vtt": ve.segments_to_vtt(result["segments"]),
+                "txt": ve.segments_to_txt(result["segments"])}
+
+    @app.post("/api/voice/transcribe/upload")
+    async def voice_transcribe_upload(file: UploadFile, language: Optional[str] = None, engine_id: Optional[str] = None):
+        tmp_dir = store.data_dir / "tmp" / "uploads"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path((file.filename or "audio.wav").replace("\\", "/")).suffix.lower() or ".wav"
+        tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
+        try:
+            with tmp_path.open("wb") as fh:
+                while chunk := await file.read(1024 * 1024):
+                    fh.write(chunk)
+            result = _run_transcribe(tmp_path, language, engine_id, word_timestamps=True)
+            return {**result, "srt": ve.segments_to_srt(result["segments"]), "vtt": ve.segments_to_vtt(result["segments"]),
+                    "txt": ve.segments_to_txt(result["segments"])}
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.post("/api/voice/dictate")
+    async def voice_dictate(file: UploadFile, language: Optional[str] = None):
+        tmp_dir = store.data_dir / "tmp" / "uploads"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"{new_id('up')}.wav"
+        try:
+            total = 0
+            with tmp_path.open("wb") as fh:
+                while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > 30 * 1024 * 1024:
+                        raise engine.EngineError("too_large", "dictation clips are limited to 30 MB")
+                    fh.write(chunk)
+            result = _run_transcribe(tmp_path, language, None, word_timestamps=False)
+            return {"text": result.get("text", ""), "language": result.get("language"), "engine_id": result["engine_id"]}
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    # -------------------------------------------------------------- audiobook
+    def op_voice_audiobook(body: VoiceAudiobookBody) -> dict[str, Any]:
+        if body.text and body.text.strip():
+            text = body.text
+        elif body.source_path:
+            text = vp.extract_text_from_file(_resolve_source_path(body.source_path))
+        else:
+            raise engine.EngineError("text_required", "give text or source_path (.txt/.md/.epub)")
+        if not text.strip():
+            raise engine.EngineError("empty_text", "the source has no text to narrate")
+        if body.format not in ("mp3", "m4b"):
+            raise engine.EngineError("bad_format", "format must be 'mp3' or 'm4b'")
+        params = {"text": text, "title": body.title, "voice": body.voice.model_dump(exclude_none=True),
+                  "format": body.format, "project_id": body.project}
+        job = queue.enqueue("audiobook", "cpu", params, project_id=body.project)
+        return {"job": wait(job, body.wait_s)}
+
+    @app.post("/api/agent/voice_audiobook")
+    def agent_voice_audiobook(body: VoiceAudiobookBody):
+        return agent("voice_audiobook", body.title or "", lambda: {"job": job_result(op_voice_audiobook(body)["job"])})
+
+    @app.post("/api/voice/audiobook")
+    def voice_audiobook(body: VoiceAudiobookBody):
+        return op_voice_audiobook(body)
+
+    @app.get("/api/voice/audiobook/{job_id}")
+    def voice_audiobook_status(job_id: str):
+        return job_result(store.get_job(job_id))
+
+    @app.get("/api/voice/audiobook/{job_id}/download")
+    def voice_audiobook_download(job_id: str, file: str = "final"):
+        job = store.get_job(job_id)
+        outputs = job.get("outputs") or {}
+        key = {"final": "final_file", "srt": "srt_file", "lrc": "lrc_file"}.get(file)
+        if not key or not outputs.get(key):
+            raise NotFound("file", file)
+        path = _voice_studio_path(outputs[key])
+        return FileResponse(path, filename=path.name)
+
+    # ------------------------------------------------------------------- dub
+    def op_voice_dub(body: VoiceDubBody) -> dict[str, Any]:
+        if body.source_path:
+            video_path = _resolve_source_path(body.source_path)
+        elif body.video_asset_id:
+            asset = store.get_asset(body.video_asset_id)
+            if asset["kind"] != "video":
+                raise engine.EngineError("not_video", f"asset {body.video_asset_id} is {asset['kind']}, not video")
+            video_path = _asset_path(store, asset["file_path"])
+        else:
+            raise engine.EngineError("source_required", "give source_path or video_asset_id")
+        params = {
+            "video_path": str(video_path), "target_language": body.target_language,
+            "source_language": body.source_language, "glossary": body.glossary or {},
+            "voice": body.voice.model_dump(exclude_none=True), "stt_engine_id": body.stt_engine_id,
+            "title": body.title, "project_id": body.project,
+        }
+        job = queue.enqueue("dub", "cpu", params, project_id=body.project)
+        return {"job": wait(job, body.wait_s)}
+
+    @app.post("/api/agent/voice_dub")
+    def agent_voice_dub(body: VoiceDubBody):
+        return agent("voice_dub", f"{body.target_language}:{body.source_path or body.video_asset_id or ''}",
+                     lambda: {"job": job_result(op_voice_dub(body)["job"])})
+
+    @app.post("/api/voice/dub")
+    def voice_dub(body: VoiceDubBody):
+        return op_voice_dub(body)
+
+    @app.get("/api/voice/dub/{job_id}")
+    def voice_dub_status(job_id: str):
+        return job_result(store.get_job(job_id))
+
+    @app.get("/api/voice/dub/{job_id}/download")
+    def voice_dub_download(job_id: str, file: str = "video"):
+        job = store.get_job(job_id)
+        outputs = job.get("outputs") or {}
+        key = {"video": "final_video", "subtitles": "subtitles"}.get(file)
+        if not key or not outputs.get(key):
+            raise NotFound("file", file)
+        path = _voice_studio_path(outputs[key])
+        return FileResponse(path, filename=path.name)
+
+    def _dub_work_dir(job_id: str) -> Path:
+        job = store.get_job(job_id)
+        outputs = job.get("outputs") or {}
+        if not outputs.get("work_dir"):
+            raise engine.EngineError("job_not_done", "the dub job has not produced a work directory yet")
+        return _voice_studio_path(outputs["work_dir"] + "/manifest.json").parent
+
+    @app.post("/api/voice/dub/{job_id}/segments/{index}/resynthesize")
+    def voice_dub_resegment(job_id: str, index: int, body: VoiceResegmentBody):
+        work_dir = _dub_work_dir(job_id)
+        voice_spec = body.voice.model_dump(exclude_none=True) if body.voice else None
+        return dubbing_mod.resynthesize_segment(store, backend, work_dir, index, new_text=body.text,
+                                                voice_spec=voice_spec or None, remix=body.remix)
+
+    @app.post("/api/agent/voice_resynthesize_segment")
+    def agent_voice_resegment(job_id: str, index: int, body: VoiceResegmentBody):
+        return agent("voice_resynthesize_segment", f"{job_id}:{index}",
+                     lambda: voice_dub_resegment(job_id, index, body))
+
+    # ------------------------------------------------------------ voice jobs
+    @app.get("/api/agent/voice_job")
+    def agent_voice_job(job_id: str, wait_s: float = 0):
+        def run():
+            job = queue.wait_for(job_id, min(wait_s, MAX_WAIT_S)) if wait_s > 0 else store.get_job(job_id)
+            return job_result(job)
+        return agent("voice_job", job_id, run)
+
     # ------------------------------------------------------------------ import
     @app.post("/api/agent/studio_import")
     def agent_import(project: str, body: ImportBody):
@@ -1108,3 +1550,19 @@ def _download_voice_job(store: Store, job: dict[str, Any], progress) -> dict[str
     progress(0.1, f"downloading {voice_id} from Hugging Face")
     voices_mod.download_voice(store.data_dir / "voices", voice_id)
     return {"voice_id": voice_id}
+
+
+def _install_voice_engine_job(job: dict[str, Any], progress) -> dict[str, Any]:
+    """The one explicit, user-triggered install action for a voice engine
+    (`POST /api/voice/engines/{id}/install`): runs `pip install` for its
+    packages into this app's own venv. Never triggered on its own."""
+    params = job["params"]
+    packages = params["pip_packages"]
+    progress(0.05, f"installing {', '.join(packages)}")
+    exe = sys.executable
+    cmd = [exe, "-m", "pip", "install", *packages]
+    proc = procutil.run(cmd, text=True, timeout=1800)
+    if proc.returncode != 0:
+        raise engine.EngineError("install_failed", (proc.stderr or "")[-1500:] or "pip install failed")
+    return {"engine_id": params["engine_id"], "kind": params["kind"], "installed_packages": packages,
+            "log_tail": (proc.stdout or "")[-1500:]}
