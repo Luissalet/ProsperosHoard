@@ -19,7 +19,7 @@ optionally one "lyrics" track):
 rewritten by `normalise_tracks`, so an edit can never leave gaps.
 
 `ken_burns` is a zoom range plus a pan direction (a "start/end
-rect" simplified to what one ffmpeg `zoompan` filter expresses; see the
+rect" pan simplified to what one ffmpeg `zoompan` filter expresses; see the
 README boundaries).
 """
 

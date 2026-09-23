@@ -19,7 +19,7 @@ from . import procutil
 from .hoard_link import Link, LinkConfig, Unavailable
 
 # SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
-# spec; editable at runtime via data/backend.json -> "vram_estimates_mb".
+# model notes; editable at runtime via data/backend.json -> "vram_estimates_mb".
 # Flux and Kontext fp8: ~13 GB; Wan 5B at 1280x704 (lower at 960x544): ~12 GB;
 # ACE-Step 1.5 turbo: ~8 GB; Qwen-Image 2.1 int8: ~7.3 GB diffusion + 9.4 GB
 # text encoder loaded one after the other, peak ~10-12 GB at 1 MP (more at 2K).
@@ -110,9 +110,9 @@ class HttpMusic(MusicBackend):
     """A documented minimal HTTP contract for a local music server.
 
     POST {url}/generate {"prompt", "lyrics", "duration_s", "seed"} -> audio
-    bytes (wav/mp3). Nothing in this repository implements this contract
-    today; configure `HOARD_MUSIC_URL` (or data/backend.json ->
-    capabilities.music.url) once something does.
+    bytes (wav/mp3). Nothing in this repository implements it; configure
+    `HOARD_MUSIC_URL` (or data/backend.json -> capabilities.music.url)
+    once something does.
     """
 
     name = "http_music"

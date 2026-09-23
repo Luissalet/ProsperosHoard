@@ -35,7 +35,7 @@ def test_available_with_node_and_checkpoint():
     assert "ace_step_1.5_turbo_aio.safetensors" in m.reason()
 
 
-def test_matches_owners_real_object_info():
+def test_matches_a_real_object_info():
     from prosperos_hoard.devtools.fake_comfy import real_object_info
 
     m = ComfyMusic(real_object_info())

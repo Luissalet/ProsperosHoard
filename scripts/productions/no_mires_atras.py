@@ -37,7 +37,7 @@ preview then final), 9 REPORT.md.
 
 --quality draft trims the scope (fewer seeds/variants/clips/looks, preview renders only)
 so a full run finishes quickly; --quality final uses the full
-numbers. Both produce every asset kind, which is what "done" requires.
+numbers. Both produce every asset kind, so a draft run still exercises the whole pipeline.
 
 Idempotency: step 1 finds the project by name through a real MCP call
 (studio_projects). For everything else, this script keeps its own
