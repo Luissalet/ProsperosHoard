@@ -1,8 +1,7 @@
 Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.1.1
 
 This is a byte-for-byte copy of every hoard_link/*.py file from that
-release. License: MIT
-(same as this repository).
+release. License: MIT (same as this repository).
 
 Do not modify these files. Prospero's Hoard talks to Hoard Link only
 through prosperos_hoard/backend.py, which wraps it (VRAM estimates per

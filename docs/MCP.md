@@ -116,7 +116,7 @@ whole is annotated as writing because create/update do.
   `sdxl_img2img` (default engine's edit fallback when a reference is
   given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`, `svd_img2vid`, and
   the six converted from the official ComfyUI templates and checked input
-  for input against what a real ComfyUI 0.37 frontend exports:
+  for input against what the real ComfyUI 0.37 frontend exports:
 
   | Template | Models | Defaults when not given | Notes |
   | --- | --- | --- | --- |
