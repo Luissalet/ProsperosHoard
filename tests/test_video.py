@@ -118,14 +118,36 @@ def test_finishing_vf_builds_each_effect():
     assert "y=1728" in parts[1]  # 1920 - 192
 
     glitch_vf = video.build_finishing_vf({"glitch_on_downbeats": True}, 1080, 1920, glitch_points=[(4.0, 0.15)])
-    assert "rgbashift=rh=6:bv=-6:enable='between(t\\,4.000\\,4.150)'" in glitch_vf
+    assert "chromashift=crh=4:cbv=-4:enable='between(t\\,4.000\\,4.150)'" in glitch_vf
 
     # combined: order is grade, grain, vignette, letterbox, glitch
     combo = video.build_finishing_vf(
         {"color_grade": "teal_orange", "grain": 0.2, "vignette": True, "letterbox": True, "glitch_on_downbeats": True},
         200, 400, glitch_points=[(1.0, 0.1)],
     )
-    assert combo.index("eq=") < combo.index("noise=") < combo.index("vignette=") < combo.index("drawbox=") < combo.index("rgbashift=")
+    assert combo.index("eq=") < combo.index("noise=") < combo.index("vignette=") < combo.index("drawbox=") < combo.index("chromashift=")
+
+
+def test_glitch_windows_leave_the_frame_edges_intact():
+    """A real render of the finishing chain with many glitch windows: outside
+    them every column keeps the source colour (an earlier filter blacked out
+    the right edge of every frame on ffmpeg 8)."""
+    import subprocess
+
+    import numpy as np
+
+    from prosperos_hoard.backend import ffmpeg_path
+
+    ffmpeg = ffmpeg_path()
+    if not ffmpeg:
+        pytest.skip("ffmpeg not available")
+    vf = video.build_finishing_vf({"glitch_on_downbeats": True}, 1080, 1920,
+                                  glitch_points=[(5.0 + i, 0.15) for i in range(30)])
+    raw = subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=gray:s=1080x1920:d=0.2",
+                          "-vf", f"format=yuv420p,{vf}", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    frame = np.frombuffer(raw, np.uint8).reshape(1920, 1080, 3)
+    assert int(frame[:, -16:].min()) >= 120 and int(frame[:, :16].min()) >= 120
 
 
 def test_build_ass_horror_style_uppercases_and_jitters():
