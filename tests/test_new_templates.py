@@ -1,5 +1,5 @@
 """The four new built-in templates (flux_schnell_txt2img, flux_kontext_edit,
-wan22_ti2v, ace15_song) against the fake backend, which now serves the
+wan22_ti2v, ace15_song) against the fake backend, which now serves a
 real object_info (see devtools/fake_comfy.py): checkpoint/model
 validation, generation, the character-consistency route (`consistent=true`
 -> Kontext), and ACE-Step composing a real, analysable song.

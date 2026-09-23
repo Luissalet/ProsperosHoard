@@ -9,8 +9,8 @@ Playwright (1440x900, device scale 1, dark theme, English) and writes
 optimised PNGs to docs/media/. Everything shown comes from the procedural
 demo backend, which the READMEs say in every caption.
 
-Needs Playwright with Chromium for the Python running this script (in the
-usual setup; set PLAYWRIGHT_BROWSERS_PATH if the browsers live elsewhere). Never run
+Needs Playwright with Chromium for the Python running this script (set
+PLAYWRIGHT_BROWSERS_PATH if the browsers live elsewhere). Never run
 "playwright install" from here.
 """
 

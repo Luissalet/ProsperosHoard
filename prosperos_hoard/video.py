@@ -207,8 +207,8 @@ def build_concat_cmd(ffmpeg: str, list_file: Path, out_path: Path) -> list[str]:
 
 def concat_list_text(clip_paths: list[Path]) -> str:
     """Entries relative to the list file (all clips live next to it), so
-    the concat demuxer never has to parse the absolute path - which on the
-    typical Windows install contains an apostrophe ("Prospero's Hoard")."""
+    the concat demuxer never has to parse the absolute path - which in the
+    Windows install folder contains an apostrophe ("Prospero's Hoard")."""
     lines = []
     for p in clip_paths:
         name = p.name.replace("'", "'\\''")
