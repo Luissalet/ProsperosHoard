@@ -33,6 +33,7 @@
   },
   "notes": "Qwen-Image 2.1 (int8), multi-reference edit: refer to each reference in the prompt as <image1>, <image2>, ... - image_1 is the edit target/main identity (required), up to 9 more optional references (a location plate, a prop, a garment) follow in the order given. `custom_size` false (default) sizes the canvas from image_1's own encode latent (ComfySwitchNode picks TextEncodeQwenImage21's latent output); true switches to the explicit, editable width/height on EmptyLatentImage instead (multiples of 16). `resolution` is the pixel budget references are resized to before encoding (0 = keep each reference's own size, rounded to 32; default 1024). Converted from the official image_qwen_image_2_1_image_edit.json template (its promoted-widget subgraph expanded, autogrow `images.*` sockets - see docs/ARCHITECTURE.md); the preview-only ImageCompare node is dropped (nothing downstream reads it). `comfy_driver.wire_reference_group()` adds/removes the extra LoadImage nodes (3-10) and their `images.image_N` links at run time to match how many reference images a call actually supplies. Character consistency (`consistent=true`) with this engine sends the canonical reference crop as image_1 and any extra refs (location, prop) after it - see engine.build_kontext_instruction's Qwen branch.",
   "defaults": {
+    "denoise": 1,
     "steps": 25,
     "cfg": 1,
     "sampler": "euler",

@@ -167,3 +167,30 @@ def test_project_image_engine_rejects_unknown_value(client):
     project_id = c.post("/api/projects", json={"name": "Bad engine"}).json()["id"]
     r = c.patch(f"/api/projects/{project_id}", json={"image_engine": "not-an-engine"})
     assert r.status_code >= 400
+
+
+def test_qwen21_edit_samples_at_full_denoise_even_with_a_reference(store, backend_with_comfy, fake_comfy, project):
+    # The references reach Qwen-Image 2.1 through its text encoder and the
+    # sampler starts from a fresh latent; the SDXL img2img fallback of 0.6
+    # turned a real 1344x768 still into noise texture on the owner's GPU.
+    a = _still(store, backend_with_comfy, project, seed=5)
+    ref1 = a["outputs"]["asset_ids"][0]
+    params = {"prompt": "Keep the character from <image1> exactly the same, now at night", "positive_prompt": "x",
+              "negative_prompt": "", "seed": 24, "count": 1, "template": "qwen21_edit",
+              "reference_asset_id": ref1, "reference_asset_ids": [ref1], "width": 1344, "height": 768}
+    done = _run_job(store, backend_with_comfy, "generate_image", params, project["id"])
+    assert done["state"] == "done", done
+    server, _ = fake_comfy
+    assert server.prompts_seen[-1]["459:458"]["inputs"]["denoise"] == 1
+
+
+def test_an_explicit_strength_still_sets_the_qwen_edit_denoise(store, backend_with_comfy, fake_comfy, project):
+    a = _still(store, backend_with_comfy, project, seed=6)
+    ref1 = a["outputs"]["asset_ids"][0]
+    params = {"prompt": "Keep the character from <image1>", "positive_prompt": "x", "negative_prompt": "", "seed": 25,
+              "count": 1, "template": "qwen21_edit", "reference_asset_id": ref1, "reference_asset_ids": [ref1],
+              "strength": 0.7}
+    done = _run_job(store, backend_with_comfy, "generate_image", params, project["id"])
+    assert done["state"] == "done", done
+    server, _ = fake_comfy
+    assert server.prompts_seen[-1]["459:458"]["inputs"]["denoise"] == 0.7
