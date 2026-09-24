@@ -1083,9 +1083,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         tmp_dir.mkdir(parents=True, exist_ok=True)
         ext = Path((file.filename or "audio.wav").replace("\\", "/")).suffix.lower() or ".wav"
         tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
+        total = 0
         try:
             with tmp_path.open("wb") as fh:
                 while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > engine.MAX_MEDIA_BYTES:
+                        raise engine.EngineError("too_large", "file exceeds the upload size limit")
                     fh.write(chunk)
             result = _run_transcribe(tmp_path, language, engine_id, word_timestamps=True)
             return {**result, "srt": ve.segments_to_srt(result["segments"]), "vtt": ve.segments_to_vtt(result["segments"]),
