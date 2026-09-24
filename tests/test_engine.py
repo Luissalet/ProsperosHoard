@@ -294,6 +294,32 @@ def test_import_path_outside_the_roots_is_refused_before_any_stat(store, tmp_pat
     assert "network" in str(exc.value)
 
 
+def test_import_bakes_exif_orientation_and_cleans_up_on_failure(store, project, monkeypatch):
+    src = store.data_dir / "inbox" / "phone.jpg"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (40, 20), (200, 10, 10))
+    exif = img.getexif()
+    exif[0x0112] = 6  # "rotate 90 degrees clockwise to display"
+    img.save(src, format="JPEG", exif=exif.tobytes())
+    asset = engine.import_asset(store, project["id"], src)
+    assert (asset["width"], asset["height"]) == (20, 40)
+    with Image.open(store.data_dir / asset["file_path"]) as stored:
+        assert stored.size == (20, 40)
+        assert stored.getexif().get(0x0112, 1) == 1
+
+    before = sorted(p.name for p in store.assets_dir.iterdir())
+    thumbs_before = sorted(p.name for p in store.thumbs_dir.iterdir())
+
+    def broken(**_kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(store, "create_asset", broken)
+    with pytest.raises(RuntimeError):
+        engine.import_asset(store, project["id"], src)
+    assert sorted(p.name for p in store.assets_dir.iterdir()) == before
+    assert sorted(p.name for p in store.thumbs_dir.iterdir()) == thumbs_before
+
+
 def test_character_with_a_studio_voice_speaks_through_the_voice_library(store, project, monkeypatch):
     import numpy as np
 

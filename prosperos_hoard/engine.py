@@ -1267,6 +1267,35 @@ def _validate_content(path: Path, kind: str) -> dict[str, Any]:
 
 
 _MIME = {"image": None, "audio": None, "video": None, "lyrics": "text/plain; charset=utf-8", "font": None}
+_EXIF_ORIENTATION = 0x0112
+
+
+def _bake_exif_orientation(path: Path) -> None:
+    """A phone photo stored sideways with an EXIF "rotate me" flag is
+    rewritten upright (same format), so every consumer - designs, ffmpeg
+    clips, ComfyUI uploads - sees it the way the user does, not only the
+    thumbnails."""
+    with Image.open(path) as img:
+        orientation = img.getexif().get(_EXIF_ORIENTATION, 1)
+        if orientation in (None, 1):
+            return
+        fmt = (img.format or "PNG").upper()
+        upright = ImageOps.exif_transpose(img)
+        upright.load()
+    if fmt == "MPO":
+        fmt = "JPEG"
+    save_kwargs: dict[str, Any] = {}
+    if fmt == "JPEG":
+        save_kwargs = {"quality": 95, "subsampling": 0}
+        if upright.mode not in ("RGB", "L", "CMYK"):
+            upright = upright.convert("RGB")
+    exif = upright.getexif()
+    if exif:
+        exif[_EXIF_ORIENTATION] = 1
+        save_kwargs["exif"] = exif.tobytes()
+    tmp = path.with_name(path.name + ".tmp")
+    upright.save(tmp, format=fmt, **save_kwargs)
+    tmp.replace(path)
 
 
 def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
@@ -1283,29 +1312,37 @@ def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Op
     stored_ext = ".lrc" if kind == "lyrics" else ext
     dest = store.path_for_asset_file(asset_id, stored_ext)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if kind == "lyrics":
-        dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
-    else:
-        shutil.copyfile(source_path, dest)
+    thumb = store.path_for_thumb(asset_id)
+    try:
+        if kind == "lyrics":
+            dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
+        else:
+            shutil.copyfile(source_path, dest)
 
-    thumb_path = None
-    mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
-    if kind == "image":
-        thumb = store.path_for_thumb(asset_id)
-        make_thumbnail(dest, thumb)
-        thumb_path = _rel(store, thumb)
-        mime = Image.MIME.get((info.get("format") or "").upper(), mime)
-    elif kind == "video":
-        thumb_path = _video_thumbnail(dest, store.path_for_thumb(asset_id))
-        info["width"], info["height"] = _probe_video_size(dest)
-    elif kind == "audio":
-        mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
+        thumb_path = None
+        mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
+        if kind == "image":
+            _bake_exif_orientation(dest)
+            make_thumbnail(dest, thumb)
+            thumb_path = _rel(store, thumb)
+            mime = Image.MIME.get((info.get("format") or "").upper(), mime)
+        elif kind == "video":
+            thumb_path = _video_thumbnail(dest, thumb)
+            info["width"], info["height"] = _probe_video_size(dest)
+        elif kind == "audio":
+            mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
 
-    asset = store.create_asset(
-        project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
-        width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
-        source="import", asset_id=asset_id, name=name,
-    )
+        asset = store.create_asset(
+            project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
+            width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
+            source="import", asset_id=asset_id, name=name,
+        )
+    except BaseException:
+        # no orphaned assets/<id>.* (or its thumbnail) for an import that failed
+        dest.unlink(missing_ok=True)
+        thumb.unlink(missing_ok=True)
+        thumb.with_suffix(".jpg").unlink(missing_ok=True)
+        raise
     if kind == "audio":
         try:
             samples = audio_mod.decode_to_mono(dest)
