@@ -15,9 +15,11 @@ unified engine list next to the newer cloning-capable engines.
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import io
 import sys
+import threading
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +34,155 @@ class EngineNotInstalled(RuntimeError):
         super().__init__(f"'{engine_id}' is not installed: {install_hint}")
         self.engine_id = engine_id
         self.install_hint = install_hint
+
+
+class UnsupportedLanguage(ValueError):
+    """A language an engine cannot speak, or free text that is not a
+    language at all (see `normalize_language`)."""
+
+    def __init__(self, language: Any, detail: str = ""):
+        super().__init__(f"unsupported language '{language}'" + (f": {detail}" if detail else ""))
+        self.language = language
+
+
+# ------------------------------------------------------------ languages --
+# Canonical codes are ISO 639-1 (plus "zh" for Mandarin); requests may say
+# "es", "es-ES", "es_ES", "Spanish", "español" or "Castellano" and all mean
+# "es". Each engine maps the canonical code to its own convention below.
+
+LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English", "es": "Spanish", "fr": "French", "de": "German", "it": "Italian", "pt": "Portuguese",
+    "pl": "Polish", "tr": "Turkish", "ru": "Russian", "nl": "Dutch", "cs": "Czech", "ar": "Arabic",
+    "zh": "Chinese", "ja": "Japanese", "hu": "Hungarian", "ko": "Korean", "hi": "Hindi", "ca": "Catalan",
+    "gl": "Galician", "eu": "Basque", "sv": "Swedish", "da": "Danish", "no": "Norwegian", "fi": "Finnish",
+    "el": "Greek", "he": "Hebrew", "uk": "Ukrainian", "ro": "Romanian", "id": "Indonesian",
+    "vi": "Vietnamese", "th": "Thai",
+}
+
+_LANGUAGE_ALIASES: dict[str, str] = {
+    "english": "en", "ingles": "en", "inglés": "en", "anglais": "en", "englisch": "en",
+    "spanish": "es", "espanol": "es", "español": "es", "castellano": "es", "castilian": "es", "espagnol": "es",
+    "spanisch": "es",
+    "french": "fr", "frances": "fr", "francés": "fr", "francais": "fr", "français": "fr",
+    "german": "de", "aleman": "de", "alemán": "de", "deutsch": "de", "allemand": "de",
+    "italian": "it", "italiano": "it", "italien": "it",
+    "portuguese": "pt", "portugues": "pt", "português": "pt", "portugués": "pt",
+    "polish": "pl", "polaco": "pl", "polski": "pl",
+    "turkish": "tr", "turco": "tr", "türkçe": "tr",
+    "russian": "ru", "ruso": "ru", "русский": "ru",
+    "dutch": "nl", "neerlandes": "nl", "neerlandés": "nl", "holandes": "nl", "holandés": "nl", "nederlands": "nl",
+    "czech": "cs", "checo": "cs", "čeština": "cs",
+    "arabic": "ar", "arabe": "ar", "árabe": "ar", "العربية": "ar",
+    "chinese": "zh", "mandarin": "zh", "chino": "zh", "mandarín": "zh", "中文": "zh", "zh-cn": "zh", "zh-hans": "zh",
+    "zh-tw": "zh", "zh-hant": "zh", "cmn": "zh",
+    "japanese": "ja", "japones": "ja", "japonés": "ja", "日本語": "ja", "jp": "ja",
+    "hungarian": "hu", "hungaro": "hu", "húngaro": "hu", "magyar": "hu",
+    "korean": "ko", "coreano": "ko", "한국어": "ko", "kr": "ko",
+    "hindi": "hi", "हिन्दी": "hi",
+    "catalan": "ca", "catalán": "ca", "català": "ca",
+    "galician": "gl", "gallego": "gl", "galego": "gl",
+    "basque": "eu", "euskera": "eu", "vasco": "eu", "euskara": "eu",
+    "swedish": "sv", "sueco": "sv", "svenska": "sv",
+    "danish": "da", "danes": "da", "danés": "da", "dansk": "da",
+    "norwegian": "no", "noruego": "no", "norsk": "no", "nb": "no", "nn": "no",
+    "finnish": "fi", "finlandes": "fi", "finlandés": "fi", "suomi": "fi",
+    "greek": "el", "griego": "el", "ελληνικά": "el",
+    "hebrew": "he", "hebreo": "he", "עברית": "he", "iw": "he",
+    "ukrainian": "uk", "ucraniano": "uk", "українська": "uk",
+    "romanian": "ro", "rumano": "ro", "română": "ro",
+    "indonesian": "id", "indonesio": "id", "bahasa indonesia": "id",
+    "vietnamese": "vi", "vietnamita": "vi", "tiếng việt": "vi",
+    "thai": "th", "tailandes": "th", "tailandés": "th", "ไทย": "th",
+}
+
+
+def normalize_language(value: Any, allow_auto: bool = False) -> Optional[str]:
+    """Free text or a code -> a canonical ISO 639-1 code ("Spanish",
+    "español", "es-ES", "es_ES" -> "es"). None/"" (and "auto", when
+    `allow_auto`) -> None, meaning "let the engine decide/detect". Raises
+    `UnsupportedLanguage` for anything it does not recognise."""
+    if value is None:
+        return None
+    text = " ".join(str(value).strip().lower().replace("_", "-").split())
+    if not text or (allow_auto and text in ("auto", "detect", "automatic", "automatico", "automático")):
+        return None
+    if text in LANGUAGE_NAMES:
+        return text
+    if text in _LANGUAGE_ALIASES:
+        return _LANGUAGE_ALIASES[text]
+    base = text.split("-")[0]
+    if len(base) == 2 and base in LANGUAGE_NAMES:
+        return base
+    raise UnsupportedLanguage(value, "use an ISO code such as 'es' or a name such as 'Spanish'")
+
+
+def language_name(code: Optional[str]) -> Optional[str]:
+    """A canonical code's English name, for an LLM prompt ("es" -> "Spanish")."""
+    return LANGUAGE_NAMES.get(code or "", code)
+
+
+# ---------------------------------------------------------- model cache --
+# Loading a TTS/STT model takes seconds to minutes and hundreds of MB to
+# GBs of (V)RAM, and synthesis runs once per sentence (audiobooks) or per
+# segment (dubs); so every engine keeps its loaded model here, keyed by
+# what it was loaded with, and serializes load + inference behind one lock
+# per engine (these models are not thread-safe, and two CPU-lane jobs plus
+# an interactive "speak" could otherwise load the same model twice).
+
+_MODELS: dict[tuple[Any, ...], Any] = {}
+_MODELS_LOCK = threading.Lock()
+_ENGINE_LOCKS: dict[str, threading.RLock] = {}
+
+
+def engine_lock(engine_id: str) -> threading.RLock:
+    with _MODELS_LOCK:
+        lock = _ENGINE_LOCKS.get(engine_id)
+        if lock is None:
+            lock = _ENGINE_LOCKS[engine_id] = threading.RLock()
+        return lock
+
+
+def cached_model(engine_id: str, key: tuple[Any, ...], loader: Any) -> Any:
+    """The model for `(engine_id, *key)`, loaded with `loader()` the first
+    time. Call it with `engine_lock(engine_id)` held."""
+    full_key = (engine_id, *key)
+    with _MODELS_LOCK:
+        model = _MODELS.get(full_key)
+    if model is None:
+        model = loader()
+        with _MODELS_LOCK:
+            _MODELS[full_key] = model
+    return model
+
+
+def loaded_models() -> list[str]:
+    with _MODELS_LOCK:
+        return [":".join(str(k) for k in key) for key in _MODELS]
+
+
+def unload_models() -> dict[str, Any]:
+    """Drop every cached voice model (waiting for an in-flight synthesis on
+    that engine to finish first) and hand the memory back - the voice
+    studio's half of the app's "free memory" action."""
+    with _MODELS_LOCK:
+        engine_ids = sorted({key[0] for key in _MODELS})
+    count = 0
+    for engine_id in engine_ids:
+        with engine_lock(engine_id):
+            with _MODELS_LOCK:
+                keys = [k for k in _MODELS if k[0] == engine_id]
+                for k in keys:
+                    _MODELS.pop(k, None)
+            count += len(keys)
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001 - freeing memory is best effort
+            pass
+    return {"unloaded": count, "engines": engine_ids}
 
 
 @dataclass(frozen=True)
@@ -94,11 +245,19 @@ class TTSEngine:
             "reason": "installed and ready" if installed else f"not installed - {self.install_hint()}",
         }
 
+    def check_language(self, language: Optional[str]) -> None:
+        """Raise `UnsupportedLanguage` up front (before a job is queued)
+        when this engine cannot speak `language`; engines without a fixed
+        language convention accept anything."""
+        return None
+
     def synthesize(self, text: str, voice_ref: Optional[str] = None, speed: Optional[float] = None,
                    pitch: Optional[float] = None, style: Optional[str] = None,
                    sample_path: Optional[Path] = None, language: Optional[str] = None) -> bytes:
         """Returns a WAV file's bytes. `sample_path` is a clean reference
-        sample for engines that clone a voice (`capabilities.cloning`)."""
+        sample for engines that clone a voice (`capabilities.cloning`).
+        `pitch` is applied by the caller (`voice_lab.synthesize_with_spec`
+        post-processes it with ffmpeg), so engines receive None."""
         raise NotImplementedError
 
 
@@ -127,7 +286,7 @@ class PiperEngine(TTSEngine):
         if not self.is_installed():
             raise EngineNotInstalled(self.id, self.install_hint())
         voices_dir = self.voices_dir or Path("data/voices")
-        voice_id = voice_ref or voices_mod.CURATED_VOICES[0]["id"]
+        voice_id = voices_mod.validate_voice_id(voice_ref or voices_mod.CURATED_VOICES[0]["id"])
         try:
             return voices_mod.synthesize_piper(voices_dir, voice_id, text, speed)
         except voices_mod.VoiceError as exc:
@@ -147,10 +306,21 @@ class XTTSEngine(TTSEngine):
         cloning=True, streaming=False, needs_gpu=False, multi_speaker=False,
     )
     _model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
-    _cache: dict[str, Any] = {}
 
     def is_installed(self) -> bool:
         return _spec_installed("TTS")
+
+    @staticmethod
+    def engine_language(language: Optional[str]) -> str:
+        """XTTS's own codes: two letters, except Mandarin's "zh-cn"."""
+        code = normalize_language(language) or "en"
+        xtts = "zh-cn" if code == "zh" else code
+        if xtts not in XTTSEngine.capabilities.languages:
+            raise UnsupportedLanguage(language, f"XTTS speaks {', '.join(XTTSEngine.capabilities.languages)}")
+        return xtts
+
+    def check_language(self, language: Optional[str]) -> None:
+        self.engine_language(language)
 
     def synthesize(self, text: str, voice_ref: Optional[str] = None, speed: Optional[float] = None,
                    pitch: Optional[float] = None, style: Optional[str] = None,
@@ -159,16 +329,19 @@ class XTTSEngine(TTSEngine):
             raise EngineNotInstalled(self.id, self.install_hint())
         if not sample_path:
             raise EngineNotInstalled(self.id, "XTTS needs a reference sample (voice_ref/sample_path) to clone from")
+        xtts_language = self.engine_language(language)
         from TTS.api import TTS  # noqa: N811 - upstream package name
-
-        model = XTTSEngine._cache.get(self._model_name)
-        if model is None:
-            model = TTS(self._model_name, progress_bar=False)
-            XTTSEngine._cache[self._model_name] = model
         import numpy as np
 
-        wav = model.tts(text=text, speaker_wav=str(sample_path), language=(language or "en")[:2],
-                        speed=speed or 1.0)
+        device = "cuda" if _cuda_available() else "cpu"
+
+        def load() -> Any:
+            model = TTS(self._model_name, progress_bar=False)
+            return model.to(device) if hasattr(model, "to") else model
+
+        with engine_lock(self.id):
+            model = cached_model(self.id, (self._model_name, device), load)
+            wav = model.tts(text=text, speaker_wav=str(sample_path), language=xtts_language, speed=speed or 1.0)
         return wav_bytes_mono16(np.asarray(wav, dtype="float32"), 24000)
 
 
@@ -187,15 +360,21 @@ class F5TTSEngine(TTSEngine):
 
     def synthesize(self, text: str, voice_ref: Optional[str] = None, speed: Optional[float] = None,
                    pitch: Optional[float] = None, style: Optional[str] = None,
-                   sample_path: Optional[Path] = None, language: Optional[str] = None) -> bytes:
+                   sample_path: Optional[Path] = None, language: Optional[str] = None,
+                   ref_text: Optional[str] = None) -> bytes:
+        """`ref_text` is the reference sample's transcript (a library
+        voice's `reference_transcript`); left empty, F5-TTS transcribes the
+        sample itself, which is slower and less accurate."""
         if not self.is_installed():
             raise EngineNotInstalled(self.id, self.install_hint())
         if not sample_path:
             raise EngineNotInstalled(self.id, "F5-TTS needs a reference sample (and its transcript) to clone from")
         from f5_tts.api import F5TTS  # type: ignore[import-not-found]
 
-        model = F5TTS()
-        wav, sr, _ = model.infer(ref_file=str(sample_path), ref_text=style or "", gen_text=text, speed=speed or 1.0)
+        with engine_lock(self.id):
+            model = cached_model(self.id, ("default",), F5TTS)
+            wav, sr, _ = model.infer(ref_file=str(sample_path), ref_text=ref_text or "", gen_text=text,
+                                     speed=speed or 1.0)
         return wav_bytes_mono16(wav, sr)
 
 
@@ -209,19 +388,48 @@ class KokoroEngine(TTSEngine):
     capabilities = EngineCapabilities(languages=["en", "es", "fr", "it", "pt", "ja", "zh", "hi"], cloning=False,
                                       streaming=True, needs_gpu=False, multi_speaker=True)
 
+    # Kokoro's one-letter lang_code per language, and a default voice pack
+    # that actually speaks it (an English pack reading Spanish text sounds
+    # like an English speaker sounding it out).
+    LANG_CODES = {"en": "a", "en-us": "a", "en-gb": "b", "es": "e", "fr": "f", "hi": "h", "it": "i", "ja": "j",
+                  "pt": "p", "pt-br": "p", "zh": "z"}
+    DEFAULT_VOICES = {"a": "af_heart", "b": "bf_emma", "e": "ef_dora", "f": "ff_siwis", "h": "hf_alpha",
+                      "i": "if_sara", "j": "jf_alpha", "p": "pf_dora", "z": "zf_xiaobei"}
+
     def is_installed(self) -> bool:
         return _spec_installed("kokoro")
+
+    @classmethod
+    def lang_code(cls, language: Optional[str]) -> str:
+        raw = " ".join(str(language or "").strip().lower().replace("_", "-").split())
+        if not raw:
+            return "a"
+        if raw in cls.DEFAULT_VOICES:  # already one of Kokoro's own one-letter codes
+            return raw
+        if raw in cls.LANG_CODES:
+            return cls.LANG_CODES[raw]
+        code = normalize_language(language)
+        if code not in cls.LANG_CODES:
+            raise UnsupportedLanguage(language, f"Kokoro speaks {', '.join(cls.capabilities.languages)}")
+        return cls.LANG_CODES[code]
+
+    def check_language(self, language: Optional[str]) -> None:
+        self.lang_code(language)
 
     def synthesize(self, text: str, voice_ref: Optional[str] = None, speed: Optional[float] = None,
                    pitch: Optional[float] = None, style: Optional[str] = None,
                    sample_path: Optional[Path] = None, language: Optional[str] = None) -> bytes:
         if not self.is_installed():
             raise EngineNotInstalled(self.id, self.install_hint())
+        lang_code = self.lang_code(language)
         from kokoro import KPipeline  # type: ignore[import-not-found]
         import numpy as np
 
-        pipeline = KPipeline(lang_code=(language or "a"))
-        chunks = [audio for _, _, audio in pipeline(text, voice=voice_ref or "af_heart", speed=speed or 1.0)]
+        voice = voice_ref or self.DEFAULT_VOICES[lang_code]
+        with engine_lock(self.id):
+            pipeline = cached_model(self.id, (lang_code,), lambda: KPipeline(lang_code=lang_code))
+            chunks = [np.asarray(audio, dtype="float32")
+                      for _, _, audio in pipeline(text, voice=voice, speed=speed or 1.0)]
         wav = np.concatenate(chunks) if chunks else np.zeros(0, dtype="float32")
         return wav_bytes_mono16(wav, 24000)
 
@@ -246,15 +454,18 @@ class ChatterboxEngine(TTSEngine):
             raise EngineNotInstalled(self.id, self.install_hint())
         from chatterbox.tts import ChatterboxTTS  # type: ignore[import-not-found]
 
-        model = ChatterboxTTS.from_pretrained(device="cuda" if _cuda_available() else "cpu")
+        device = "cuda" if _cuda_available() else "cpu"
         exaggeration = 0.5
         try:
             exaggeration = float(style) if style else 0.5
         except ValueError:
             pass
-        wav = model.generate(text, audio_prompt_path=str(sample_path) if sample_path else None,
-                             exaggeration=exaggeration)
-        return wav_bytes_mono16(wav.squeeze().cpu().numpy(), model.sr)
+        with engine_lock(self.id):
+            model = cached_model(self.id, (device,), lambda: ChatterboxTTS.from_pretrained(device=device))
+            wav = model.generate(text, audio_prompt_path=str(sample_path) if sample_path else None,
+                                 exaggeration=exaggeration)
+            sr = model.sr
+        return wav_bytes_mono16(wav.squeeze().cpu().numpy(), sr)
 
 
 def _cuda_available() -> bool:
@@ -354,8 +565,6 @@ class FasterWhisperEngine(STTEngine):
         languages=["auto", "en", "es", "fr", "de", "it", "pt", "ja", "zh", "ru", "ko", "ar", "hi"],
         streaming=False, needs_gpu=False,
     )
-    _cache: dict[str, Any] = {}
-
     def __init__(self, model_size: str = "small"):
         self.model_size = model_size
 
@@ -367,18 +576,20 @@ class FasterWhisperEngine(STTEngine):
             raise EngineNotInstalled(self.id, self.install_hint())
         from faster_whisper import WhisperModel  # type: ignore[import-not-found]
 
-        model = FasterWhisperEngine._cache.get(self.model_size)
-        if model is None:
-            model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-            FasterWhisperEngine._cache[self.model_size] = model
-        segments, info = model.transcribe(str(path), language=language, word_timestamps=word_timestamps)
-        out = []
-        text_parts = []
-        for seg in segments:
-            words = [{"start_s": round(w.start, 3), "end_s": round(w.end, 3), "word": w.word}
-                     for w in (seg.words or [])] if word_timestamps and seg.words else []
-            out.append(TranscriptSegment(seg.start, seg.end, seg.text.strip(), words).to_dict())
-            text_parts.append(seg.text.strip())
+        language = normalize_language(language, allow_auto=True)
+        with engine_lock(self.id):
+            model = cached_model(self.id, (self.model_size, "cpu", "int8"),
+                                 lambda: WhisperModel(self.model_size, device="cpu", compute_type="int8"))
+            segments, info = model.transcribe(str(path), language=language, word_timestamps=word_timestamps)
+            out = []
+            text_parts = []
+            # `segments` is a lazy generator: the decoding happens while it
+            # is iterated, so the loop stays inside the lock
+            for seg in segments:
+                words = [{"start_s": round(w.start, 3), "end_s": round(w.end, 3), "word": w.word}
+                         for w in (seg.words or [])] if word_timestamps and seg.words else []
+                out.append(TranscriptSegment(seg.start, seg.end, seg.text.strip(), words).to_dict())
+                text_parts.append(seg.text.strip())
         return {"language": info.language, "text": " ".join(text_parts).strip(), "segments": out}
 
 
@@ -393,8 +604,6 @@ class OpenAIWhisperEngine(STTEngine):
         languages=["auto", "en", "es", "fr", "de", "it", "pt", "ja", "zh", "ru", "ko", "ar", "hi"],
         streaming=False, needs_gpu=False,
     )
-    _cache: dict[str, Any] = {}
-
     def __init__(self, model_size: str = "small"):
         self.model_size = model_size
 
@@ -406,11 +615,10 @@ class OpenAIWhisperEngine(STTEngine):
             raise EngineNotInstalled(self.id, self.install_hint())
         import whisper  # type: ignore[import-not-found]
 
-        model = OpenAIWhisperEngine._cache.get(self.model_size)
-        if model is None:
-            model = whisper.load_model(self.model_size)
-            OpenAIWhisperEngine._cache[self.model_size] = model
-        result = model.transcribe(str(path), language=language, word_timestamps=word_timestamps)
+        language = normalize_language(language, allow_auto=True)
+        with engine_lock(self.id):
+            model = cached_model(self.id, (self.model_size,), lambda: whisper.load_model(self.model_size))
+            result = model.transcribe(str(path), language=language, word_timestamps=word_timestamps)
         out = []
         for seg in result.get("segments", []):
             words = [{"start_s": round(w["start"], 3), "end_s": round(w["end"], 3), "word": w["word"]}
