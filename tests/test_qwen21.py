@@ -126,6 +126,16 @@ def test_qwen21_edit_custom_size_switches_the_canvas(store, backend_with_comfy, 
 
 # ---------------------------------------------------- engine resolution
 
+def test_edits_need_the_kontext_model_for_flux():
+    flux_only = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["flux1-schnell-fp8.safetensors"]]}}}}
+    assert engine.resolve_image_engine(flux_only, "auto", "txt2img") == "flux"
+    assert engine.resolve_image_engine(flux_only, "auto", "edit") == "sdxl"
+    assert engine.resolve_image_engine(flux_only, "flux", "edit") == "sdxl"
+    kontext = dict(flux_only, UNETLoader={"input": {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"]]}}})
+    assert engine.resolve_image_engine(kontext, "flux", "edit") == "flux"
+    assert engine.resolve_image_engine(kontext, "auto", "edit") == "flux"
+
+
 def test_resolve_image_engine_auto_prefers_qwen_then_flux_then_sdxl():
     assert engine.resolve_image_engine({}, "auto") == "sdxl"
     flux_only = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["flux1-schnell-fp8.safetensors"]]}}}}

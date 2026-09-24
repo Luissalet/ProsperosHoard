@@ -860,7 +860,7 @@ def _has_model_file(object_info: dict[str, Any], class_type: str, input_name: st
     return isinstance(entry, list) and any(needle in str(f).lower() for f in entry)
 
 
-def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None) -> str:
+def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None, op: str = "txt2img") -> str:
     """`auto|qwen21|flux|sdxl` (spec item 3) -> the engine this call
     actually gets. `auto` picks Qwen-Image 2.1 when its node class
     (`TextEncodeQwenImage21`) *and* a matching model file are installed,
@@ -868,12 +868,17 @@ def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] =
     ship as built-in checkpoints/templates. An engine requested by name
     that turns out not to be installed falls back the same way, so a
     project already set to "qwen21" keeps rendering before the model
-    finishes downloading."""
+    finishes downloading. `op` is "txt2img" or "edit": Flux's edit template
+    is Kontext, a separate UNet, so a Flux checkpoint alone does not make
+    Flux an edit engine."""
     requested = (requested or "auto").lower()
     if requested not in IMAGE_ENGINES:
         requested = "auto"
     has_qwen = "TextEncodeQwenImage21" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "qwen")
-    has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
+    if op == "edit":
+        has_flux = _has_model_file(object_info, "UNETLoader", "unet_name", "kontext")
+    else:
+        has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
     if requested == "sdxl":
         return "sdxl"
     if requested == "flux":
@@ -901,7 +906,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     engine_name = TEMPLATE_TO_ENGINE.get(template)
     if not template:
         is_edit = bool(params.get("reference_asset_id") or params.get("reference_asset_ids"))
-        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"))
+        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"), "edit" if is_edit else "txt2img")
         template = ENGINE_TEMPLATES[engine_name]["edit" if is_edit else "txt2img"]
     try:
         _, spec = comfy_driver.load_template(template, store.data_dir)
