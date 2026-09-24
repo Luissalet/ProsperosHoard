@@ -440,7 +440,9 @@ def studio_timeline(
     action="update": patch timeline_id with {"clip_updates": [{"index": 3, "duration_s": 2.0,
     "transition_in": {"type": "crossfade", "duration_s": 0.3}}, {"index": 5, "asset_id": "a_..."},
     {"index": 7, "delete": true}, {"index": 2, "move_to": 0}], "name", "aspect", "fps",
-    "lyrics_asset_id", "karaoke", "finishing"}. Transitions: cut, crossfade, dip_black, flash_white.
+    "lyrics_asset_id", "karaoke", "finishing"}. Every index in one clip_updates batch means the clip list
+    as it was before the batch (edits, then deletes, then moves; move_to is a position in the result).
+    Transitions: cut, crossfade, dip_black, flash_white.
     finishing (applied once at render, all optional): {"color_grade": "teal_orange"|"sodium_night"|
     "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
     "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)}.

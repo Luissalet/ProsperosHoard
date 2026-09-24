@@ -25,6 +25,7 @@ README boundaries).
 
 from __future__ import annotations
 
+import math
 import random
 from typing import Any, Callable, Optional
 
@@ -76,12 +77,24 @@ def _cut_points(beat_times: list[float], downbeats: list[float], sections: list[
     beats = [b for b in beat_times if 0.0 <= b < duration_s]
     if not beats:
         # no beat grid (silence, speech): even cuts of `fallback_clip_s`
-        step = float(options.get("fallback_clip_s", 2.0))
+        try:
+            step = float(options.get("fallback_clip_s", 2.0))
+        except (TypeError, ValueError):
+            step = float("nan")
+        # NaN fails the comparison too; 0 or a negative step never advanced
+        if not MIN_CLIP_S <= step <= MAX_CLIP_S:
+            raise TimelineError(f"fallback_clip_s must be between {MIN_CLIP_S} and {MAX_CLIP_S} seconds")
         points, t = [], 0.0
         while t < duration_s - MIN_CLIP_S:
             points.append({"start_s": round(t, 3), "flash": False})
             t += step
-        return points or [{"start_s": 0.0, "flash": False}]
+        points = points or [{"start_s": 0.0, "flash": False}]
+        # the last clip takes the remainder (up to step + MIN_CLIP_S): split
+        # it in two when that would pass the longest allowed clip
+        if duration_s - points[-1]["start_s"] > MAX_CLIP_S:
+            mid = (points[-1]["start_s"] + duration_s) / 2
+            points.append({"start_s": round(mid, 3), "flash": False})
+        return points
 
     # a new section always starts on a new shot (the first beat at or after
     # its start), so the edit breathes with the song's structure
@@ -190,7 +203,15 @@ def build_auto_cut(
     seed: int = 0,
     downbeats: Optional[list[float]] = None,
 ) -> dict[str, Any]:
-    """Returns `{"tracks": [...]}` ready to store on a Timeline row."""
+    """Returns `{"tracks": [...]}` ready to store on a Timeline row. Raises
+    TimelineError for a song shorter than one clip (`MIN_CLIP_S`) or a bad
+    option."""
+    try:
+        song_duration_s = float(song_duration_s)
+    except (TypeError, ValueError):
+        raise TimelineError("the song has no duration") from None
+    if not math.isfinite(song_duration_s) or song_duration_s < MIN_CLIP_S - 1e-6:
+        raise TimelineError(f"the song is too short to cut: a clip needs at least {MIN_CLIP_S} s")
     options = dict(options or {})
     seed = int(options.get("seed", seed))
     ken_burns_variety = bool(options.get("ken_burns_variety", True))
@@ -280,6 +301,19 @@ def lyrics_clips_from_lines(lines: list[dict[str, Any]], song_duration_s: float,
 
 # ------------------------------------------------------------ validation
 
+def _finite(value: Any, message: str) -> float:
+    """`float(value)`, or TimelineError(message) for anything that is not a
+    finite number (JSON bodies may carry NaN/Infinity, which slip through
+    every range comparison)."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        raise TimelineError(message) from None
+    if not math.isfinite(out):
+        raise TimelineError(message)
+    return out
+
+
 def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Validate an edited `tracks` value and return a clean copy (derived
     `start_s`, defaults filled). `asset_lookup(id)` returns the asset or
@@ -309,11 +343,8 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                     raise TimelineError(f"visual clip {i}: asset '{clip.get('asset_id')}' does not exist")
                 if asset["kind"] not in ("image", "video"):
                     raise TimelineError(f"visual clip {i}: asset {asset['id']} is {asset['kind']}, not an image or video")
-                try:
-                    duration = float(clip.get("duration_s"))
-                    trim = float(clip.get("trim_start_s") or 0.0)
-                except (TypeError, ValueError):
-                    raise TimelineError(f"visual clip {i}: duration_s must be a number") from None
+                duration = _finite(clip.get("duration_s"), f"visual clip {i}: duration_s must be a number")
+                trim = _finite(clip.get("trim_start_s") or 0.0, f"visual clip {i}: trim_start_s must be a number")
                 if not MIN_CLIP_S - 1e-6 <= duration <= MAX_CLIP_S:
                     raise TimelineError(f"visual clip {i}: duration_s must be between {MIN_CLIP_S} and {MAX_CLIP_S} seconds")
                 if trim < 0 or (asset.get("duration_s") and trim >= float(asset["duration_s"])):
@@ -321,7 +352,7 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                 transition = clip.get("transition_in") or {"type": "cut", "duration_s": 0.0}
                 if not isinstance(transition, dict) or transition.get("type", "cut") not in TRANSITIONS:
                     raise TimelineError(f"visual clip {i}: transition type must be one of {', '.join(TRANSITIONS)}")
-                t_dur = float(transition.get("duration_s") or 0.0)
+                t_dur = _finite(transition.get("duration_s") or 0.0, f"visual clip {i}: transition duration_s must be a number")
                 if transition.get("type", "cut") != "cut" and not 0.05 <= t_dur <= min(2.0, duration / 2 + 1e-6):
                     raise TimelineError(f"visual clip {i}: transition duration must be 0.05-2 s and at most half the clip")
                 c: dict[str, Any] = {
@@ -331,10 +362,10 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                 }
                 if asset["kind"] == "image":
                     kb = clip.get("ken_burns") or {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"}
-                    try:
-                        zs, ze = float(kb.get("zoom_start", 1.0)), float(kb.get("zoom_end", 1.0))
-                    except (TypeError, ValueError, AttributeError):
-                        raise TimelineError(f"visual clip {i}: ken_burns zoom values must be numbers") from None
+                    if not isinstance(kb, dict):
+                        raise TimelineError(f"visual clip {i}: ken_burns must be an object")
+                    zs = _finite(kb.get("zoom_start", 1.0), f"visual clip {i}: ken_burns zoom values must be numbers")
+                    ze = _finite(kb.get("zoom_end", 1.0), f"visual clip {i}: ken_burns zoom values must be numbers")
                     if not (1.0 <= zs <= 2.0 and 1.0 <= ze <= 2.0):
                         raise TimelineError(f"visual clip {i}: ken_burns zoom must be between 1.0 and 2.0")
                     if kb.get("pan", "none") not in PAN_DIRECTIONS:
@@ -348,10 +379,8 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
             for i, clip in enumerate(clips):
                 if not isinstance(clip, dict) or not isinstance(clip.get("text"), str):
                     raise TimelineError(f"lyrics clip {i} needs a 'text' string")
-                try:
-                    start, end = float(clip["start_s"]), float(clip["end_s"])
-                except (KeyError, TypeError, ValueError):
-                    raise TimelineError(f"lyrics clip {i} needs numeric start_s and end_s") from None
+                start = _finite(clip.get("start_s"), f"lyrics clip {i} needs numeric start_s and end_s")
+                end = _finite(clip.get("end_s"), f"lyrics clip {i} needs numeric start_s and end_s")
                 if start < 0 or end <= start:
                     raise TimelineError(f"lyrics clip {i}: end_s must be after start_s")
                 clean.append({"text": clip["text"][:300], "start_s": round(start, 3), "end_s": round(end, 3),
@@ -365,34 +394,51 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
 def apply_clip_updates(tracks: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """`updates`: [{"index": 3, "duration_s": 2.0, ...}] merged into visual
     clip `index`; {"index": 3, "delete": true} removes it;
-    {"index": 3, "move_to": 0} reorders."""
+    {"index": 3, "move_to": 0} reorders (field edits may ride along).
+
+    Every `index` names a clip of the timeline as it was BEFORE this batch,
+    so a batch reads like the clip list the caller is looking at:
+    [{"index": 1, "delete": true}, {"index": 3, "delete": true}] deletes the
+    original clips 1 and 3 (applying them one by one used to shift clip 3
+    to index 2 and delete the wrong one). Field edits apply first, then the
+    deletions, then the moves in the order given; `move_to` is a position in
+    the resulting list (clamped to its end). A deleted clip is not moved."""
     if not isinstance(updates, list) or len(updates) > 500:
         raise TimelineError("clip_updates must be a list of at most 500 {index, ...} objects")
     tracks = [dict(t, clips=[dict(c) for c in t["clips"]]) for t in tracks]
     visual = next(t for t in tracks if t["type"] == "visual")
-    clips = visual["clips"]
+    original = visual["clips"]
+    n = len(original)
     allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind"}
+    deleted: set[int] = set()
+    moves: list[tuple[int, int]] = []
     for upd in updates:
-        if not isinstance(upd, dict) or not isinstance(upd.get("index"), int):
+        if not isinstance(upd, dict) or not isinstance(upd.get("index"), int) or isinstance(upd.get("index"), bool):
             raise TimelineError("each clip update needs an integer 'index'")
         i = upd["index"]
-        if not 0 <= i < len(clips):
-            raise TimelineError(f"clip index {i} is out of range (0-{len(clips) - 1})")
+        if not 0 <= i < n:
+            raise TimelineError(f"clip index {i} is out of range (0-{n - 1})")
         if upd.get("delete"):
-            clips.pop(i)
+            deleted.add(i)
             continue
-        if "move_to" in upd:
-            j = int(upd["move_to"])
-            if not 0 <= j < len(clips):
-                raise TimelineError(f"move_to {j} is out of range")
-            clips.insert(j, clips.pop(i))
-            continue
-        unknown = set(upd) - allowed - {"index"}
+        unknown = set(upd) - allowed - {"index", "move_to", "delete"}
         if unknown:
             raise TimelineError(f"unknown clip field(s): {', '.join(sorted(unknown))}")
+        if "move_to" in upd:
+            j = upd["move_to"]
+            if not isinstance(j, int) or isinstance(j, bool) or not 0 <= j < n:
+                raise TimelineError(f"move_to {j} is out of range (0-{n - 1})")
+            moves.append((i, j))
         for k, v in upd.items():
-            if k != "index":
-                clips[i][k] = v
+            if k in allowed:
+                original[i][k] = v
+    order = [i for i in range(n) if i not in deleted]
+    for i, j in moves:
+        if i in deleted:
+            continue
+        order.remove(i)
+        order.insert(min(j, len(order)), i)
+    visual["clips"] = [original[i] for i in order]
     return tracks
 
 
