@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -8,12 +7,13 @@ from typing import Any
 import numpy as np
 import pytest
 
+from prosperos_hoard.backend import ffmpeg_path
 from prosperos_hoard import voice_engines as ve
 from prosperos_hoard import voice_pipelines as vp
 from prosperos_hoard.jobs import Progress
 from prosperos_hoard.store import Store
 
-HAS_FFMPEG = shutil.which("ffmpeg") is not None
+HAS_FFMPEG = ffmpeg_path() is not None
 
 
 class FakeTTS(ve.TTSEngine):
@@ -168,12 +168,15 @@ def test_audiobook_job_with_fake_engine(tmp_path, monkeypatch):
 
 
 def _probe_sample_rate(path: Path) -> int:
-    from prosperos_hoard import procutil
-    from prosperos_hoard.backend import ffprobe_path
+    # `ffmpeg -i` rather than ffprobe: the bundled imageio-ffmpeg build ships no ffprobe
+    import re
 
-    proc = procutil.run([ffprobe_path(), "-v", "error", "-select_streams", "a:0", "-show_entries",
-                        "stream=sample_rate", "-of", "csv=p=0", str(path)], text=True, timeout=30)
-    return int(proc.stdout.strip())
+    from prosperos_hoard import procutil
+
+    proc = procutil.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-i", str(path)], text=True, timeout=30)
+    m = re.search(r"Audio: [^\n]*?(\d+) Hz", proc.stderr or "")
+    assert m, proc.stderr
+    return int(m.group(1))
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
@@ -283,3 +286,169 @@ def test_audiobook_job_rejects_oversized_text(tmp_path, monkeypatch):
     job = store.create_job("audiobook", "cpu", {"text": "x" * 20, "voice": {"engine_id": "fake"}})
     with pytest.raises(vp.AudiobookError):
         vp.audiobook_job(store, None, job, Progress(store, job["id"]))
+
+
+# ------------------------------------------------------------ regressions
+
+@pytest.mark.parametrize("line", [
+    "part I think he lied about the money, and everyone knew it.",
+    "Part I think he lied",
+    "chapter 3 was the one where everything went wrong for the whole family that summer.",
+    "Parte 2 del plan fue un desastre.",
+    "part i",
+])
+def test_narration_starting_like_a_heading_is_not_a_chapter(line):
+    text = f"Chapter 1\nIt began.\n{line}\nThe end."
+    chapters = vp.split_into_chapters(text)
+    assert [c["title"] for c in chapters] == ["Chapter 1"]
+    assert line in chapters[0]["text"]
+
+
+@pytest.mark.parametrize("line", ["Chapter 3", "CHAPTER IV", "Chapter 3: The Sea", "Part II", "Capítulo 12. El mar",
+                                  "Chapter One", "Chapter 7 The Return", "Libro Primero"])
+def test_short_standalone_chapter_lines_are_headings(line):
+    chapters = vp.split_into_chapters(f"Intro text.\n{line}\nBody text.")
+    assert [c["title"] for c in chapters] == ["Chapter 1", line]
+    assert chapters[1]["text"] == "Body text."
+
+
+def test_heading_only_chapter_is_kept_and_narrates_its_title():
+    chapters = vp.split_into_chapters("# Part One\n\n# Chapter 1\nIt began.")
+    assert [c["title"] for c in chapters] == ["Part One", "Chapter 1"]
+    assert vp.chapter_sentences(chapters[0]) == ["Part One"]
+
+
+def test_overlong_markdown_heading_stays_text():
+    long_line = "# " + "word " * 60
+    chapters = vp.split_into_chapters(f"{long_line}\nMore.")
+    assert len(chapters) == 1 and "word word" in chapters[0]["text"]
+
+
+def test_html_to_text_keeps_first_paragraph_out_of_the_title():
+    html = ("<html><head><title>Book title</title></head><body><h1>Chapter 1</h1><p>First paragraph.</p>"
+            "<div>Second block</div><h2>The <em>Storm</em></h2><p>Rain.</p></body></html>")
+    text = vp._html_to_text(html)
+    assert "Book title" not in text
+    chapters = vp.split_into_chapters(text)
+    assert [c["title"] for c in chapters] == ["Chapter 1", "The Storm"]
+    assert "First paragraph." in chapters[0]["text"] and "Second block" in chapters[0]["text"]
+    assert vp.split_into_sentences(chapters[0]["text"]) == ["First paragraph.", "Second block"]
+
+
+def test_epub_member_path_normalises_hrefs():
+    assert vp.epub_member_path("OEBPS/content.opf", "Text/ch%201.xhtml#start") == "OEBPS/Text/ch 1.xhtml"
+    assert vp.epub_member_path("OEBPS/content.opf", "../Text/ch1.xhtml") == "Text/ch1.xhtml"
+    assert vp.epub_member_path("content.opf", "./ch1.xhtml") == "ch1.xhtml"
+
+
+def test_extract_epub_with_encoded_href_and_headings(tmp_path):
+    path = tmp_path / "book.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr("META-INF/container.xml", (
+            '<?xml version="1.0"?>'
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            '</rootfiles></container>'))
+        zf.writestr("OEBPS/content.opf", (
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0">'
+            '<manifest><item id="c1" href="Text/chapter%20one.xhtml#top" media-type="application/xhtml+xml"/></manifest>'
+            '<spine><itemref idref="c1"/></spine></package>'))
+        zf.writestr("OEBPS/Text/chapter one.xhtml",
+                    "<html><body><h1>Chapter 1</h1><p>The first paragraph.</p></body></html>")
+    text = vp.extract_text_from_file(path)
+    chapters = vp.split_into_chapters(text)
+    assert chapters[0]["title"] == "Chapter 1"
+    assert chapters[0]["text"] == "The first paragraph."
+
+
+class _CancelAfter:
+    """A progress stand-in whose check_cancel raises after `n` checks."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.checks = 0
+        self.calls = []
+
+    def __call__(self, fraction, message=None):
+        self.calls.append((fraction, message))
+
+    def check_cancel(self):
+        self.checks += 1
+        if self.checks > self.n:
+            raise RuntimeError("cancelled")
+
+
+def test_audiobook_without_chapters_cancels_between_sentences(tmp_path, monkeypatch):
+    store = Store(tmp_path / "data")
+    calls = {"n": 0}
+
+    class CountingTTS(FakeTTS):
+        def synthesize(self, text, **kw):
+            calls["n"] += 1
+            return super().synthesize(text, **kw)
+
+    monkeypatch.setattr(ve, "default_tts_engines", lambda **kw: [CountingTTS()])
+    text = " ".join(f"Sentence number {i}." for i in range(20))
+    job = store.create_job("audiobook", "cpu", {"text": text, "voice": {"engine_id": "fake"}})
+    progress = _CancelAfter(4)  # one chapter-level check, then three sentences
+    with pytest.raises(RuntimeError, match="cancelled"):
+        vp.audiobook_job(store, None, job, progress)
+    assert calls["n"] == 3
+    # an interrupted chapter never leaves a finished-looking file behind
+    work = next((tmp_path / "data" / "voice_studio" / "audiobooks").iterdir())
+    assert not (work / "ch000.wav").exists()
+    assert not list(work.glob("*.part"))
+
+
+def test_render_chapter_is_atomic_on_failure(tmp_path):
+    store = Store(tmp_path / "data")
+
+    class Failing(FakeTTS):
+        def synthesize(self, text, **kw):
+            if "boom" in text:
+                raise RuntimeError("engine crashed")
+            return super().synthesize(text, **kw)
+
+    dest = tmp_path / "ch000.wav"
+    with pytest.raises(RuntimeError):
+        vp.render_chapter(store, [Failing()], {"engine_id": "fake"}, ["One.", "boom"], dest)
+    assert not dest.exists() and not list(tmp_path.glob("*.part"))
+    duration = vp.render_chapter(store, [Failing()], {"engine_id": "fake"}, ["One.", "Two."], dest)
+    assert dest.is_file() and vp._wav_duration_s(dest) == pytest.approx(duration, abs=1e-3)
+
+
+def test_render_chapter_refuses_to_overflow_the_wav_size_field(tmp_path, monkeypatch):
+    store = Store(tmp_path / "data")
+    monkeypatch.setattr(vp, "MAX_CHAPTER_SAMPLES", 1000)
+    with pytest.raises(vp.AudiobookError) as err:
+        vp.render_chapter(store, [FakeTTS()], {"engine_id": "fake"}, ["A long enough sentence.", "Another."],
+                          tmp_path / "ch.wav")
+    assert err.value.code == "chapter_too_long"
+
+
+def test_audiobook_outputs_view_is_compact():
+    outputs = {"title": "B", "format": "mp3", "duration_s": 10.0, "sentence_count": 4,
+               "chapters": [{"index": i, "title": f"C{i}", "start_s": i, "end_s": i + 1, "duration_s": 1.0}
+                            for i in range(60)],
+               "final_file": "voice_studio/audiobooks/x/final.mp3", "work_dir": "voice_studio/audiobooks/x",
+               "asset_ids": ["a_1"]}
+    view = vp.audiobook_outputs_view(outputs)
+    assert "final_file" not in view and "work_dir" not in view
+    assert view["chapter_count"] == 60 and len(view["chapters"]) == 50 and view["chapters_truncated"]
+    assert set(view["chapters"][0]) == {"index", "title", "start_s", "duration_s"}
+    assert view["asset_ids"] == ["a_1"]
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_audiobook_final_file_has_all_chapters(tmp_path, monkeypatch):
+    from prosperos_hoard import audio as audio_mod
+
+    store = Store(tmp_path / "data")
+    monkeypatch.setattr(ve, "default_tts_engines", lambda **kw: [FakeTTS()])
+    text = "Chapter 1\nOne two three.\n\nChapter 2\nFour five six.\n\nChapter 3\nSeven."
+    job = store.create_job("audiobook", "cpu", {"text": text, "voice": {"engine_id": "fake"}, "format": "mp3"})
+    outputs = vp.audiobook_job(store, None, job, Progress(store, job["id"]))
+    final = tmp_path / "data" / outputs["final_file"]
+    assert audio_mod.probe_duration_s(final) == pytest.approx(outputs["duration_s"], abs=0.15)
+    assert not (final.parent / "final.wav").exists()  # no single joined WAV is written any more
