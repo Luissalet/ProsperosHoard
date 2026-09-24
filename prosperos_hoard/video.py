@@ -430,11 +430,13 @@ KARAOKE_MAX_FILL_S = 3.6
 
 
 def _ass_time(seconds: float) -> str:
-    seconds = max(0.0, seconds)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h}:{m:02d}:{s:05.2f}"
+    """`h:mm:ss.cc`, rounded to the centisecond before splitting so 59.996 s
+    carries into the next minute instead of printing `0:00:60.00`."""
+    total_cs = int(round(max(0.0, seconds) * 100))
+    total_s, cs = divmod(total_cs, 100)
+    h, rest = divmod(total_s, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
 def ass_escape(text: str) -> str:

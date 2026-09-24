@@ -82,11 +82,10 @@ def waveform_peaks(samples: np.ndarray, buckets: int = 800) -> list[float]:
         return [0.0] * buckets
     edges = np.linspace(0, len(samples), buckets + 1).astype(int)
     peaks = []
-    absval = np.abs(samples)
     for i in range(buckets):
         a, b = edges[i], max(edges[i] + 1, edges[i + 1])
-        window = absval[a:b]
-        peaks.append(round(float(window.max()) if window.size else 0.0, 4))
+        window = samples[a:b]  # no whole-song abs() copy: peak = max(max, -min)
+        peaks.append(round(float(max(window.max(), -window.min())) if window.size else 0.0, 4))
     top = max(peaks) or 1.0
     return [round(min(1.0, p / top), 4) for p in peaks]
 
@@ -95,21 +94,55 @@ def waveform_peaks(samples: np.ndarray, buckets: int = 800) -> list[float]:
 # Onset envelope + tempo + beats
 # ----------------------------------------------------------------------
 
-def _stft_mags(samples: np.ndarray, frame_size: int = FRAME_SIZE, hop: int = HOP) -> np.ndarray:
-    """Centred frames (frame i is centred on sample i*hop), so an onset at
-    t=0 is visible and frame times need no latency correction."""
-    padded = np.pad(samples.astype(np.float64), (frame_size // 2, frame_size // 2))
-    if len(padded) < frame_size:
-        padded = np.pad(padded, (0, frame_size - len(padded)))
-    n_frames = 1 + (len(padded) - frame_size) // hop
-    window = np.hanning(frame_size)
-    mags = np.empty((n_frames, frame_size // 2 + 1), dtype=np.float32)
-    block = 256
+def _padded_slice(samples: np.ndarray, a: int, z: int) -> np.ndarray:
+    """`samples[a:z]` where an index before the start or past the end reads
+    silence."""
+    n = len(samples)
+    parts = []
+    if a < 0:
+        parts.append(np.zeros(-a, dtype=np.float32))
+        a = 0
+    parts.append(samples[a:min(n, z)])
+    if z > max(n, a):
+        parts.append(np.zeros(z - max(n, a), dtype=np.float32))
+    return np.concatenate(parts).astype(np.float32, copy=False)
+
+
+def _frame_blocks(samples: np.ndarray, frame_size: int = FRAME_SIZE, hop: int = HOP, block: int = 256):
+    """Yields (first frame index, float32 |rfft| of up to `block` frames).
+    Centred frames (frame i is centred on sample i*hop), so an onset at t=0
+    is visible and frame times need no latency correction. Built block by
+    block from the samples themselves: a 20-minute song never needs a padded
+    float64 copy or the whole magnitude spectrogram in memory."""
+    samples = np.asarray(samples, dtype=np.float32)
+    half = frame_size // 2
+    n_frames = 1 + max(0, len(samples) + 2 * half - frame_size) // hop
+    window = np.hanning(frame_size).astype(np.float32)
     for b0 in range(0, n_frames, block):
-        idx = np.arange(b0, min(n_frames, b0 + block))
-        frames = np.stack([padded[i * hop: i * hop + frame_size] for i in idx]) * window
-        mags[b0:b0 + len(idx)] = np.abs(np.fft.rfft(frames, axis=1))
-    return mags
+        b1 = min(n_frames, b0 + block)
+        chunk = _padded_slice(samples, b0 * hop - half, (b1 - 1) * hop - half + frame_size)
+        frames = np.lib.stride_tricks.sliding_window_view(chunk, frame_size)[::hop]
+        yield b0, np.abs(np.fft.rfft(frames * window, axis=1)).astype(np.float32)
+
+
+def _stft_mags(samples: np.ndarray, frame_size: int = FRAME_SIZE, hop: int = HOP) -> np.ndarray:
+    """The whole magnitude spectrogram (frames x bins, float32)."""
+    return np.concatenate([m for _, m in _frame_blocks(samples, frame_size, hop)])
+
+
+def _frame_features(samples: np.ndarray, sr: int = SAMPLE_RATE) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """What the analysis needs per frame, without keeping the spectrogram:
+    (40 log-spaced band magnitudes, the magnitudes below 200 Hz, and the
+    power below 250 Hz / 250-2000 Hz / above 2000 Hz)."""
+    low_hi = _band_bins(sr, FRAME_SIZE, 200.0)
+    lo_b, mid_b = _band_bins(sr, FRAME_SIZE, 250.0), _band_bins(sr, FRAME_SIZE, 2000.0)
+    bands, low, power = [], [], []
+    for _, m in _frame_blocks(samples):
+        bands.append(m @ _band_matrix(m.shape[1]).T)
+        low.append(m[:, :low_hi].copy())
+        pw = m.astype(np.float64) ** 2  # one block at a time
+        power.append(np.stack([pw[:, :lo_b].sum(axis=1), pw[:, lo_b:mid_b].sum(axis=1), pw[:, mid_b:].sum(axis=1)], axis=1))
+    return np.concatenate(bands), np.concatenate(low), np.concatenate(power)
 
 
 _BAND_CACHE: dict[tuple[int, int], np.ndarray] = {}
@@ -137,13 +170,29 @@ def _band_matrix(n_bins: int, n_bands: int = 40, sr: int = SAMPLE_RATE, fmin: fl
     return fb
 
 
+_ONSET_HEAD_FRAMES = 8  # ~93 ms at 44.1 kHz / hop 512
+
+
 def _flux(mags: np.ndarray, lo_bin: int = 0, hi_bin: Optional[int] = None) -> np.ndarray:
     if lo_bin == 0 and hi_bin is None:
-        bands = mags @ _band_matrix(mags.shape[1]).T
-    else:
-        bands = mags[:, lo_bin:hi_bin]
+        return _band_flux(mags @ _band_matrix(mags.shape[1]).T)
+    return _band_flux(mags[:, lo_bin:hi_bin])
+
+
+def _band_flux(bands: np.ndarray) -> np.ndarray:
+    """Positive log-magnitude change per frame, summed over the columns of
+    `bands` (frames x bands), detrended and scaled to 0..1."""
     band = np.log1p(100.0 * bands)
-    prev = np.vstack([np.zeros((1, band.shape[1]), dtype=band.dtype), band[:-1]])
+    # Frame 0 has no real predecessor. Comparing it with silence made any
+    # sound already playing at t=0 (a noise bed, a held chord) a huge fake
+    # onset there, which could pull the whole beat grid onto t=0; comparing
+    # it with itself hid a real downbeat at 0. So it is compared with the
+    # quietest of the next ~90 ms per band: a transient (kick, click) decays
+    # and still counts, a held sound does not. (A tone that starts at full
+    # level is a real click in the file and still reads as one.)
+    head = band[1:1 + _ONSET_HEAD_FRAMES]
+    first_prev = head.min(axis=0, keepdims=True) if len(head) else np.zeros_like(band[:1])
+    prev = np.vstack([first_prev, band[:-1]])
     flux = np.clip(band - prev, 0, None).sum(axis=1)
     # remove the slowly varying part so sustained pads do not look like onsets
     k = 16
@@ -186,9 +235,13 @@ def estimate_tempo(env: np.ndarray, sr: int = SAMPLE_RATE, hop: int = HOP,
     if 0 < best_i < len(lags) - 1:
         y0, y1, y2 = autocorr[lags[best_i] - 1], autocorr[lags[best_i]], autocorr[lags[best_i] + 1]
         denom = y0 - 2 * y1 + y2
-        if denom != 0:
-            best += 0.5 * (y0 - y2) / denom
-    return float(60.0 * fps / best), best
+        # only a real local maximum of the autocorrelation is refined (the
+        # prior can pick a lag on a slope, where the parabola extrapolates
+        # to a negative or huge period), and never by more than half a lag
+        if y1 >= y0 and y1 >= y2 and denom < 0:
+            best += float(np.clip(0.5 * (y0 - y2) / denom, -0.5, 0.5))
+    bpm = min(max(60.0 * fps / best, bpm_range[0]), bpm_range[1])
+    return float(bpm), float(60.0 * fps / bpm)
 
 
 def track_beats(env: np.ndarray, period_frames: float, sr: int = SAMPLE_RATE, hop: int = HOP,
@@ -273,11 +326,12 @@ def _band_bins(sr: int, frame_size: int, hz: float) -> int:
 def analyze_samples(samples: np.ndarray, sr: int = SAMPLE_RATE) -> dict[str, Any]:
     samples = np.asarray(samples, dtype=np.float32)
     duration_s = round(len(samples) / sr, 3)
-    mags = _stft_mags(samples)
-    env = _flux(mags)
-    low_env = _flux(mags, 0, _band_bins(sr, FRAME_SIZE, 200.0))
+    bands, low_bands, frame_power = _frame_features(samples, sr)
+    env = _band_flux(bands)
+    low_env = _band_flux(low_bands)
     fps = sr / HOP
-    if float(np.abs(samples).max(initial=0.0)) < 1e-4 or env.max() == 0:
+    peak = max(float(samples.max()), -float(samples.min())) if samples.size else 0.0
+    if peak < 1e-4 or env.max() == 0:
         return {"duration_s": duration_s, "tempo_bpm": None, "beat_times": [], "downbeats": [],
                 "sections": [{"label": "section A", "start_s": 0.0, "end_s": duration_s, "energy": "low"}],
                 "notes": "silent audio: no beats found"}
@@ -286,7 +340,7 @@ def analyze_samples(samples: np.ndarray, sr: int = SAMPLE_RATE) -> dict[str, Any
     beat_frames = [int(round(t * fps)) for t in beat_times]
     phase = _downbeat_phase(low_env, beat_frames)
     downbeats = beat_times[phase::4]
-    sections = _detect_sections(samples, mags, sr, duration_s, downbeats)
+    sections = _detect_sections(samples, frame_power, sr, duration_s, downbeats)
     if len(beat_times) > 3:
         # least-squares slope over the whole beat grid: sub-frame precise
         slope = float(np.polyfit(np.arange(len(beat_times)), np.array(beat_times), 1)[0])
@@ -307,25 +361,25 @@ def analyze_file(path: Path) -> dict[str, Any]:
     return analyze_samples(samples)
 
 
-def _detect_sections(samples: np.ndarray, mags: np.ndarray, sr: int, duration_s: float,
+def _detect_sections(samples: np.ndarray, frame_power: np.ndarray, sr: int, duration_s: float,
                      downbeats: list[float], min_bars: int = 2, novelty_db: float = 4.0) -> list[dict[str, Any]]:
     """Bars (from downbeats) -> per-bar loudness + three band levels in dB ->
     boundaries where the two bars before and after differ by more than
     `novelty_db` -> segments; segments that sound alike share a letter
-    (A/B/A...). Energy is relative to the song's own loudness range."""
+    (A/B/A...). Energy is relative to the song's own loudness range.
+    `frame_power`: per frame, the power of the three bands (see
+    `_frame_features`)."""
     bounds = [0.0] + [t for t in downbeats if 0.25 < t < duration_s - 0.25] + [duration_s]
     if len(bounds) < 4:
         return [{"label": "section A", "start_s": 0.0, "end_s": duration_s, "energy": "mid"}]
     fps = sr / HOP
-    lo_b, mid_b = _band_bins(sr, FRAME_SIZE, 250.0), _band_bins(sr, FRAME_SIZE, 2000.0)
-    power = mags.astype(np.float64) ** 2
     feats = []
     for a, b in zip(bounds[:-1], bounds[1:]):
         fa, fb = int(a * fps), max(int(a * fps) + 1, int(b * fps))
-        seg = power[fa:fb]
+        seg = frame_power[fa:fb]
         sa, sb = int(a * sr), max(int(a * sr) + 1, int(b * sr))
         rms = float(np.sqrt(np.mean(samples[sa:sb].astype(np.float64) ** 2))) if sb > sa else 0.0
-        bands = [seg[:, :lo_b].sum(axis=1).mean(), seg[:, lo_b:mid_b].sum(axis=1).mean(), seg[:, mid_b:].sum(axis=1).mean()]
+        bands = [float(v) for v in seg.mean(axis=0)]
         feats.append([20 * np.log10(rms + 1e-6)] + [10 * np.log10(x + 1e-9) for x in bands])
     f = np.array(feats)
     n_bars = len(f)
@@ -406,14 +460,17 @@ def parse_lrc(text: str) -> list[dict[str, Any]]:
     return lines
 
 
+def lrc_time(t: float) -> str:
+    """`[mm:ss.xx]` for `t` seconds, rounded to the centisecond *before*
+    splitting, so 59.996 s carries into the next minute (`[01:00.00]`)
+    instead of printing an invalid `[00:60.00]`. Negative times clamp to 0."""
+    total_cs = int(round(max(0.0, float(t)) * 100))
+    minutes, cs = divmod(total_cs, 6000)
+    return f"[{minutes:02d}:{cs // 100:02d}.{cs % 100:02d}]"
+
+
 def to_lrc(lines: list[dict[str, Any]]) -> str:
-    out = []
-    for line in lines:
-        t = line["time_s"]
-        minutes = int(t // 60)
-        seconds = t - minutes * 60
-        out.append(f"[{minutes:02d}:{seconds:05.2f}]{line['text']}")
-    return "\n".join(out)
+    return "\n".join(f"{lrc_time(line['time_s'])}{line['text']}" for line in lines)
 
 
 # ----------------------------------------------------------------------

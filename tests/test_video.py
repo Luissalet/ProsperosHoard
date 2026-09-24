@@ -470,6 +470,13 @@ def test_ken_burns_zoom_runs_from_start_to_end(tmp_path, zs, ze):
     assert all(step * (b - a) >= -0.03 for a, b in zip(widths, widths[1:]))  # monotonic, no jump
 
 
+def test_ass_time_carries_instead_of_printing_sixty_seconds():
+    assert video._ass_time(59.996) == "0:01:00.00"
+    assert video._ass_time(3599.999) == "1:00:00.00"
+    assert video._ass_time(61.25) == "0:01:01.25"
+    assert video._ass_time(-2) == "0:00:00.00"
+
+
 def test_zoompan_expr_is_a_closed_form_and_clamps_the_pan():
     z, x, y = video._zoompan_expr(1.2, 1.0, "right", 31)
     assert z == "1.200000+(-0.200000)*(on/30)"
