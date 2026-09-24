@@ -52,3 +52,19 @@ def test_real_mode_falls_back_to_nvidia_smi_without_comfy_devices(data_dir, fake
     server.devices_override = [{"name": "cpu", "type": "cpu", "vram_total": 64_000 * MB, "vram_free": 60_000 * MB}]
     monkeypatch.setattr(gpu_mod, "gpu_free_mb", _busy_gpus)
     assert Backend(data_dir).vram_free_mb() == 2900
+
+
+def test_a_failed_demo_generation_does_not_leave_a_running_job(store, project):
+    import pytest
+
+    from prosperos_hoard.devtools import demo_seed
+
+    class NoComfy:
+        def runner(self, *_a):
+            raise RuntimeError("no backend here")
+
+    with pytest.raises(RuntimeError):
+        demo_seed._run_generation(store, NoComfy(), project["id"], "a portrait", "", 1)
+    jobs = store.list_jobs(limit=50)
+    items = jobs["items"] if isinstance(jobs, dict) else jobs
+    assert items and all(j["state"] == "failed" for j in items)
