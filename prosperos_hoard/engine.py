@@ -1142,6 +1142,14 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_unc(path: str) -> bool:
+    r"""A UNC path (`\\host\share\x`, or `//host/share/x` on Windows) or an
+    extended-length one (`\\?\C:\x`, `\\.\x`)."""
+    if path.startswith("\\\\"):
+        return True
+    return os.name == "nt" and path.replace("\\", "/").startswith("//")
+
+
 def resolve_import_path(backend: Backend, store: Store, raw_path: str) -> Path:
     """The only way a client-supplied path reaches the filesystem. The path
     is made absolute (relative paths are taken from `data/inbox/`),
@@ -1150,18 +1158,37 @@ def resolve_import_path(backend: Backend, store: Store, raw_path: str) -> Path:
     database/asset folders."""
     if not isinstance(raw_path, str) or not raw_path.strip() or "\x00" in raw_path:
         raise EngineError("bad_path", "give the absolute path of a local file")
-    candidate = Path(raw_path.strip().strip('"')).expanduser()
+    raw = raw_path.strip().strip('"')
+    roots = backend.import_roots()
+    lexical_roots = backend.import_roots(lexical=True)
+    # A network (UNC) or extended-length path is refused before anything
+    # touches it: on Windows even a stat() of a UNC path opens an SMB
+    # connection that offers the user's credentials. Allowed only when an
+    # import folder is itself on a network share.
+    if _is_unc(raw) and not any(_is_unc(str(r)) for r in lexical_roots):
+        raise EngineError("network_path", "network (UNC) and extended-length paths cannot be imported; copy the "
+                                          "file to a local folder first, or add the share in Settings > Import folders")
+    candidate = Path(raw).expanduser()
     inbox = (store.data_dir / "inbox")
     if not candidate.is_absolute():
         inbox.mkdir(parents=True, exist_ok=True)
         candidate = inbox / candidate
+    # lexical check first, with no filesystem access: the path with `..`
+    # collapsed must already sit inside an import folder
+    lexical = Path(os.path.abspath(candidate))
+    if not any(_inside(lexical, r) for r in (*lexical_roots, *roots)):
+        raise EngineError(
+            "outside_import_folders",
+            f"{lexical} is outside the folders Prospero may import from ({', '.join(str(r) for r in roots)}). "
+            "Move the file into one of them or add its folder in Settings > Import folders.",
+        )
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError):
         raise EngineError("file_not_found", f"no such file: {raw_path[:200]}") from None
     if not resolved.is_file():
         raise EngineError("not_a_file", f"{raw_path[:200]} is not a regular file")
-    roots = backend.import_roots()
+    # and again after symlinks are resolved
     if not any(_inside(resolved, r) for r in roots):
         raise EngineError(
             "outside_import_folders",

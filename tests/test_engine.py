@@ -262,6 +262,38 @@ def test_inpaint_and_hires_run_on_the_backend(store, backend_with_comfy, project
 
 # ------------------------------------------------------------- finishing
 
+class _Roots:
+    def __init__(self, *roots):
+        self.roots = list(roots)
+
+    def import_roots(self, lexical=False):
+        return self.roots
+
+
+def test_import_path_outside_the_roots_is_refused_before_any_stat(store, tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    from pathlib import Path
+
+    touched = []
+    real_resolve = Path.resolve
+
+    def spy(self, *a, **k):
+        touched.append(str(self))
+        return real_resolve(self, *a, **k)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, str(tmp_path / "elsewhere" / "x.png"))
+    assert "outside" in str(exc.value) and touched == []
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, "\\\\fileserver\\share\\x.png")
+    assert "network" in str(exc.value) and touched == []
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, "\\\\?\\C:\\x.png")
+    assert "network" in str(exc.value)
+
+
 def test_update_timeline_finishing_persists_and_validates(store, project):
     img = engine.render_design(store, project["id"], "thumbnail", {"title": "cover"})
     tl = store.create_timeline(project["id"], "Test cut", tracks=[
