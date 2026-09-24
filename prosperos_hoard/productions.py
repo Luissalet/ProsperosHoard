@@ -208,6 +208,9 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         raise ProductionError("bad_spec", "spec.lead.palette must be a list of #hex colours")
     spec.setdefault("title", lead.get("name") or "Production")
     spec.setdefault("engine", "auto")
+    spec.setdefault("lead_route", "auto")
+    if spec["lead_route"] not in ("auto", "reference"):
+        raise ProductionError("bad_spec", "spec.lead_route is 'auto' (adapter when the lead has one) or 'reference'")
     if spec["engine"] not in engine.IMAGE_ENGINES:
         raise ProductionError("bad_spec", f"spec.engine must be one of {', '.join(engine.IMAGE_ENGINES)}")
     world = spec.setdefault("world", {})
@@ -703,6 +706,15 @@ class Run:
         char = self.store.create_character(pid, src["name"], role=src.get("role"), bio=src.get("bio"), prompt=src.get("prompt"),
                                            negative=src.get("negative"), palette=src.get("palette") or [],
                                            canonical_asset_id=canonical, voice=src.get("voice"))
+        src_kit = src.get("kit") or {}
+        if src_kit:
+            # adapters are files in ComfyUI's loras folder, shared by every
+            # project: the copy keeps them (and the trigger), not the
+            # dataset/sheet, whose images belong to the other project
+            kit = {k: src_kit[k] for k in ("trigger", "use_adapters", "identity", "good_seeds", "library") if k in src_kit}
+            kit["adapters"] = [dict(a) for a in src_kit.get("adapters") or []]
+            kit["history"] = [{"at": now_iso(), "event": "copied", "detail": f"from {src['id']}"}]
+            char = self.store.set_character_kit(char["id"], kit)
         self.log("copied_character", character_id=char["id"], from_character_id=src["id"], canonical_asset_id=canonical)
         return char
 
@@ -752,7 +764,11 @@ class Run:
             body["aspect"] = shot.get("aspect") or "16:9"
         text = shot["prompt"] + (f", {look}" if look else "")
         if shot.get("lead"):
-            body.update({"prompt": f"@{lead['name']} {text}", "consistent": True})
+            body.update({"prompt": f"@{lead['name']} {text}", "consistent": True,
+                         # a lead with an adapter for this engine renders
+                         # txt2img + LoRA (free poses); without one, the
+                         # canonical edit as before - see spec.lead_route
+                         "prefer_adapter": self.spec.get("lead_route", "auto") != "reference"})
         else:
             body.update({"prompt": text, "negative": shot.get("negative") or world.get("negative") or None})
         for key in ("strength", "sampler", "scheduler", "steps", "cfg"):
@@ -842,6 +858,9 @@ class Run:
         body: dict[str, Any] = {"template": settings.get("template") or "wan22_ti2v", "reference_asset_id": self.still_for(key),
                                 "prompt": shot.get("motion_prompt") or "subtle motion",
                                 "seed": shot["clip_seed"] + (100 * variant)}
+        char_id = ((self.state.get("done") or {}).get("character") or {}).get("character_id")
+        if shot.get("lead") and char_id:
+            body["characters"] = [char_id]  # a video adapter of the lead, if it has one
         negative = shot.get("clip_negative") or (settings.get("still_negative") if shot.get("motion") == "still" else None)
         if negative:
             body["negative"] = negative

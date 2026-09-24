@@ -23,12 +23,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import __version__
 from . import animatic as animatic_mod
 from . import audio as audio_mod
+from . import charkit
+from . import charpack
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import productions as productions_mod
 from . import qa as qa_mod
 from . import recipes as recipes_mod
 from . import templates as design_templates
+from . import trainers as trainers_mod
 from . import timeline as timeline_mod
 from . import voice_engines as ve
 from . import voice_lab
@@ -97,6 +100,8 @@ def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
     if isinstance(exc, (VoiceLabError, vp.AudiobookError, dubbing_mod.DubbingError, ve.EngineNotInstalled)):
         code = exc.code if hasattr(exc, "code") else "engine_not_installed"
         return 400, {"error": code, "message": str(exc)}
+    if isinstance(exc, (charkit.KitError, charpack.PackError, trainers_mod.TrainingError)):
+        return 400, {"error": exc.code, "message": exc.message}
     if isinstance(exc, ValueError):
         return 400, {"error": "bad_request", "message": str(exc)}
     return 500, {"error": "internal_error", "message": f"{type(exc).__name__}: {str(exc)[:300]}"}
@@ -166,6 +171,93 @@ class GenerateImageBody(BaseModel):
     engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - defaults to the project's
     use_character_reference: bool = False
     consistent: bool = False
+    # character adapters (LoRAs): injected for every @mentioned character
+    # (and every id in `characters`) that has one for the render's
+    # architecture, unless use_adapters=false
+    characters: Optional[list[str]] = None
+    use_adapters: bool = True
+    # consistent=true + every mentioned character has an adapter: render
+    # txt2img with the adapter instead of an edit of the canonical image
+    # (free poses and framing, no drift toward the reference's pose)
+    prefer_adapter: bool = False
+    wait_s: float = 0
+
+
+class CharPackBody(BaseModel):
+    action: str = "export"  # export | import | inspect
+    character_id: Optional[str] = None
+    path: Optional[str] = None  # import/inspect: a .hoardchar on disk (inside the import roots)
+    rename: Optional[str] = None
+    include_dataset: bool = True
+    include_adapters: bool = True
+
+
+class CharLibraryBody(BaseModel):
+    action: str = "list"  # list | save | use | history | delete
+    character_id: Optional[str] = None
+    id: Optional[str] = None
+    version: Optional[int] = None
+    note: Optional[str] = None
+    query: Optional[str] = None
+    rename: Optional[str] = None
+    include_adapters: bool = True
+
+
+class CharSheetBody(BaseModel):
+    character_id: str = ""  # the UI routes take it from the path
+    views: Optional[list[str]] = None
+    engine: Optional[str] = None
+    seed: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    wait_s: float = 0
+
+
+class CharDatasetBody(BaseModel):
+    character_id: str = ""  # the UI routes take it from the path
+    action: str = "get"  # get | build | update | caption | report
+    sources: Optional[list[str]] = None
+    min_identity: Optional[float] = None
+    replace: bool = False
+    items: Optional[list[dict[str, Any]]] = None
+    only_missing: bool = False
+    wait_s: float = 0
+
+
+class CharTrainBody(BaseModel):
+    character_id: Optional[str] = None
+    action: str = "plan"  # plan | start | status | log | trainers | settings
+    arch: Optional[str] = None
+    trainer: Optional[str] = None
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    run_id: Optional[str] = None
+    job_id: Optional[str] = None
+    training: Optional[dict[str, Any]] = None
+    wait_s: float = 0
+
+
+class CharAdaptersBody(BaseModel):
+    character_id: str = ""  # the UI routes take it from the path
+    action: str = "list"  # list | attach | update | remove | settings | available
+    adapter_id: Optional[str] = None
+    lora_name: Optional[str] = None
+    arch: Optional[str] = None
+    strength: Optional[float] = None
+    trigger: Optional[str] = None
+    enabled: Optional[bool] = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class CharTakesBody(BaseModel):
+    character_id: str = ""  # the UI routes take it from the path
+    action: str = "list"  # list | score | act
+    sort: str = "recent"
+    kind: Optional[str] = None
+    limit: int = 40
+    asset_ids: Optional[list[str]] = None
+    asset_id: Optional[str] = None
+    take_action: Optional[str] = None
+    force: bool = False
     wait_s: float = 0
 
 
@@ -506,9 +598,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
         proj = store.get_project(project)
-        engine_name = engine.resolve_image_engine(engine._object_info(backend), body.engine or proj.get("image_engine"))
+        object_info = engine._object_info(backend)
+        engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
-        if body.consistent:
+        available_loras = comfy_driver.lora_choices(object_info) if object_info else None
+        adapter_route = False
+        if body.consistent and body.prefer_adapter and body.use_adapters and not body.template:
+            txt_template = engine.ENGINE_TEMPLATES[engine_name]["txt2img"]
+            names = engine.build_kontext_instruction(store, project, body.prompt, engine=engine_name)["matched_characters"]
+            if names:
+                probe = charkit.resolve_adapters(store, project, names, [], comfy_driver.template_arch(txt_template),
+                                                 available_loras)
+                adapter_route = len(probe["used"]) == len(names)
+        if body.consistent and not adapter_route:
             # "Cast -> Reference sheet": route through an edit template with
             # the canonical reference as input (image_1, for Qwen) and the
             # scene as the instruction, instead of a fresh txt2img.
@@ -554,6 +656,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             comfy_driver.load_template(template, store.data_dir)
         except comfy_driver.WorkflowError as exc:
             raise engine.EngineError("unknown_template", str(exc)) from None
+        adapters = {"loras": [], "triggers": [], "used": [], "notes": []}
+        if body.use_adapters:
+            try:
+                _, tspec = comfy_driver.load_template(template, store.data_dir)
+            except comfy_driver.WorkflowError:
+                tspec = {}
+            adapters = charkit.resolve_adapters(store, project, composed["matched_characters"], body.characters or [],
+                                                comfy_driver.template_arch(template, tspec), available_loras)
+            if adapters["triggers"]:
+                composed["positive_prompt"] = charkit.with_triggers(composed["positive_prompt"], adapters["triggers"])
         seed = body.seed if body.seed is not None else engine.random_seed()
         params = {
             "prompt": body.prompt, "positive_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
@@ -563,12 +675,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "strength": body.strength, "template": template, "checkpoint": body.checkpoint,
             "style": composed["style"], "style_defaults": composed["style_defaults"],
             "matched_characters": composed["matched_characters"],
+            **({"loras": adapters["loras"]} if adapters["loras"] else {}),
         }
         job = queue.enqueue("generate_image", "gpu", params, project_id=project)
         job = wait(job, body.wait_s)
         return {"job": job, "final_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
                 "matched_characters": composed["matched_characters"], "unknown_mentions": composed["unknown_mentions"],
-                "template": template, "engine": engine_name, "seed": seed}
+                "template": template, "engine": engine_name, "seed": seed,
+                **({"adapters": adapters["used"]} if adapters["used"] else {}),
+                **({"adapter_notes": adapters["notes"]} if adapters["notes"] else {}),
+                **({"route": "adapter"} if adapter_route else {})}
 
     def op_edit(body: EditImageBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)
@@ -756,7 +872,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/projects/{project_id}/characters")
     def list_characters(project_id: str):
-        return {"items": store.list_characters(project_id)}
+        return {"items": [{**c, "kit": charkit.kit_of(c)} for c in store.list_characters(project_id)]}
+
+    @app.get("/api/characters/{character_id}")
+    def get_character(character_id: str):
+        c = store.get_character(character_id)
+        return {**c, "kit": charkit.kit_of(c)}
 
     @app.post("/api/projects/{project_id}/characters")
     def create_character(project_id: str, body: CharacterBody):
@@ -767,6 +888,345 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         character = store.get_character(character_id)
         return op_cast(character["project_id"], CastBody(action="update", kind="character", id=character_id,
                                                          name=body.name, fields=body.fields))
+
+    # ------------------------------------------------------- character kit
+    # The character kit (charkit.py / charpack.py / trainers.py): model
+    # sheet, dataset, local LoRA training, adapters, takes, portable
+    # .hoardchar packs and the global casting library.
+
+    def _char(character_id: Optional[str]) -> dict[str, Any]:
+        if not character_id:
+            raise engine.EngineError("character_required", "pass character_id (studio_cast list shows them)")
+        return store.get_character(character_id)
+
+    def _kit_view(char: dict[str, Any]) -> dict[str, Any]:
+        return {"character_id": char["id"], "name": char["name"], **charkit.summary(store, char)}
+
+    def op_char_pack(project: Optional[str], body: CharPackBody) -> dict[str, Any]:
+        if body.action == "export":
+            char = _char(body.character_id)
+            built = charpack.export_to(store, backend, char["id"], include_dataset=body.include_dataset,
+                                       include_adapters=body.include_adapters)
+            return {**built, "download": f"/api/character-packs/{built['file']}"}
+        if body.action in ("import", "inspect"):
+            if not body.path:
+                raise engine.EngineError("path_required", "import/inspect need path (a .hoardchar file); the UI uploads instead")
+            path = engine.resolve_import_path(backend, store, body.path)
+            if body.action == "inspect":
+                return charpack.inspect_pack(path)
+            if not project:
+                raise engine.EngineError("project_required", "import needs the project to cast the character into")
+            return charpack.import_pack(store, backend, project, path, body.rename)
+        raise engine.EngineError("bad_action", "pack actions: export, import, inspect")
+
+    def _casting_project() -> str:
+        for p in store.list_projects("Casting", 50)["items"]:
+            if p["name"] == "Casting":
+                return p["id"]
+        return store.create_project("Casting", "Characters cast from the library for recipes and productions")["id"]
+
+    def op_char_library(project: Optional[str], body: CharLibraryBody) -> dict[str, Any]:
+        if body.action == "list":
+            return {"items": charpack.library_list(store.data_dir, body.query)}
+        if body.action == "save":
+            char = _char(body.character_id)
+            return charpack.library_save(store, backend, char["id"], body.note, body.include_adapters)
+        if not body.id:
+            raise engine.EngineError("id_required", f"library action '{body.action}' needs id (a lib_... id from list)")
+        if body.action == "use":
+            return charpack.library_use(store, backend, project or _casting_project(), body.id, body.version, body.rename)
+        if body.action == "history":
+            return charpack.library_history(store.data_dir, body.id)
+        if body.action == "delete":
+            return charpack.library_delete(store.data_dir, body.id)
+        raise engine.EngineError("bad_action", "library actions: list, save, use, history, delete")
+
+    def op_char_sheet(body: CharSheetBody) -> dict[str, Any]:
+        char = _char(body.character_id)
+        if not char.get("canonical_asset_id"):
+            raise engine.EngineError("no_canonical", f"{char['name']} needs a canonical image first (Cast -> edit -> reference)")
+        views = charkit.check_views(body.views)
+        for name, value in (("width", body.width), ("height", body.height)):
+            if value is not None and not 256 <= value <= 2048:
+                raise engine.EngineError("bad_parameter", f"{name} must be between 256 and 2048")
+        job = queue.enqueue("character_sheet", "gpu", {**body.model_dump(exclude={"wait_s"}), "views": views},
+                            project_id=char["project_id"])
+        return {"job": wait(job, body.wait_s), "views": views}
+
+    def op_char_dataset(body: CharDatasetBody) -> dict[str, Any]:
+        char = _char(body.character_id)
+        if body.action == "get":
+            return charkit.dataset_view(store, char)
+        if body.action == "report":
+            return charkit.dataset_report(store, char)
+        if body.action == "build":
+            return charkit.dataset_build(store, char["id"], body.sources, body.min_identity, body.replace)
+        if body.action == "update":
+            return charkit.dataset_update(store, char["id"], body.items or [])
+        if body.action == "caption":
+            job = queue.enqueue("character_caption", "cpu", {"character_id": char["id"], "only_missing": body.only_missing},
+                                project_id=char["project_id"])
+            return {"job": wait(job, body.wait_s)}
+        raise engine.EngineError("bad_action", "dataset actions: get, report, build, update, caption")
+
+    def op_char_train(body: CharTrainBody) -> dict[str, Any]:
+        if body.action == "trainers":
+            cfg = backend.training()
+            return {"trainers": trainers_mod.trainer_status(cfg), "lora_dir": cfg.get("lora_dir"),
+                    "lora_dir_ok": charkit.lora_dir(backend) is not None, "gpu": cfg.get("gpu", "auto"),
+                    "base_models": cfg.get("base_models") or {},
+                    "archs": {a: {k: p.get(k) for k in ("label", "est_vram_mb", "sec_per_step", "base_hint", "trainers")}
+                              for a, p in trainers_mod.ARCH_PRESETS.items()}}
+        if body.action == "settings":
+            if body.training is None:
+                return backend.training()
+            return backend.set_training(body.training)
+        if body.action == "log":
+            if not body.run_id:
+                raise engine.EngineError("run_required", "log needs run_id")
+            return {"run_id": body.run_id, "lines": charkit.training_log_tail(store, body.run_id)}
+        if body.action == "status":
+            char = _char(body.character_id)
+            jobs = [j for j in store.list_jobs(limit=50, project_id=char["project_id"])["items"]
+                    if j["type"] == "train_lora" and (j.get("params") or {}).get("character_id") == char["id"]]
+            return {"character_id": char["id"],
+                    "runs": [{**engine.job_view(j), "run_id": (j.get("params") or {}).get("run_id"),
+                              "arch": (j.get("params") or {}).get("arch")} for j in jobs[:10]],
+                    "adapters": [charkit.adapter_view(a) for a in charkit.kit_of(char)["adapters"]]}
+        char = _char(body.character_id)
+        arch = body.arch or _default_arch(char["project_id"])
+        if arch not in trainers_mod.ARCH_PRESETS:
+            raise engine.EngineError("bad_arch", f"arch must be one of {', '.join(trainers_mod.ARCHS)}")
+        plan = charkit.plan_for(store, backend, char["id"], arch, body.overrides, body.trainer)
+        if body.action == "plan":
+            return plan
+        if body.action == "start":
+            if plan["trainer_problem"]:
+                raise engine.EngineError("trainer_unavailable", plan["trainer_problem"])
+            if not plan["dataset"]["ready"]:
+                raise engine.EngineError("dataset_not_ready", "; ".join(plan["dataset"]["warnings"]) or "the dataset is not ready")
+            run_id = new_id("tr")  # known up front so the log can be tailed while it runs
+            job = queue.enqueue("train_lora", "gpu", {"character_id": char["id"], "arch": arch, "trainer": body.trainer,
+                                                      "overrides": body.overrides, "run_id": run_id},
+                                project_id=char["project_id"])
+            return {"job": wait(job, body.wait_s), "plan": plan["plan"], "trainer": plan["trainer"], "run_id": run_id}
+        raise engine.EngineError("bad_action", "train actions: trainers, settings, plan, start, status, log")
+
+    def _default_arch(project_id: str) -> str:
+        proj = store.get_project(project_id)
+        name = engine.resolve_image_engine(engine._object_info(backend), proj.get("image_engine"))
+        return charkit.ENGINE_ARCH.get(name, "qwen_image")
+
+    def op_char_adapters(body: CharAdaptersBody) -> dict[str, Any]:
+        char = _char(body.character_id)
+        if body.action == "list":
+            return _kit_view(char)
+        if body.action == "available":
+            info = engine._object_info(backend)
+            return {"loras": comfy_driver.lora_choices(info) if info else [], "comfy": bool(info)}
+        if body.action == "settings":
+            return _kit_view(charkit.update_settings(store, char["id"], body.settings))
+        if body.action == "attach":
+            if not body.lora_name or not body.arch:
+                raise engine.EngineError("bad_adapter", "attach needs lora_name (as ComfyUI lists it) and arch")
+            info = engine._object_info(backend)
+            available = comfy_driver.lora_choices(info) if info else None
+            a = charkit.attach_adapter(store, char["id"], lora_name=body.lora_name, arch=body.arch,
+                                       strength=body.strength or 1.0, trigger=body.trigger,
+                                       installed=available is None or body.lora_name in available)
+            return {"adapter": charkit.adapter_view(a),
+                    **({"note": "ComfyUI does not list this file yet"} if not a["installed"] else {})}
+        if not body.adapter_id:
+            raise engine.EngineError("adapter_required", f"'{body.action}' needs adapter_id")
+        if body.action == "update":
+            patch = {k: v for k, v in {"strength": body.strength, "trigger": body.trigger, "enabled": body.enabled}.items()
+                     if v is not None}
+            return {"adapter": charkit.adapter_view(charkit.update_adapter(store, char["id"], body.adapter_id, patch))}
+        if body.action == "remove":
+            return charkit.remove_adapter(store, char["id"], body.adapter_id)
+        raise engine.EngineError("bad_action", "adapter actions: list, available, attach, update, remove, settings")
+
+    def op_char_takes(body: CharTakesBody) -> dict[str, Any]:
+        char = _char(body.character_id)
+        if body.action == "list":
+            if body.sort not in ("recent", "identity"):
+                raise engine.EngineError("bad_sort", "sort is recent or identity")
+            return charkit.list_takes(store, char["id"], body.limit, body.sort, body.kind)
+        if body.action == "score":
+            job = queue.enqueue("character_identity", "cpu", {"character_id": char["id"], "asset_ids": body.asset_ids,
+                                                              "force": body.force, "limit": min(max(body.limit, 1), 60)},
+                                project_id=char["project_id"])
+            return {"job": wait(job, body.wait_s)}
+        if body.action == "act":
+            if not body.asset_id or not body.take_action:
+                raise engine.EngineError("bad_take", "act needs asset_id and take_action")
+            return charkit.take_action(store, char["id"], body.asset_id, body.take_action)
+        raise engine.EngineError("bad_action", "take actions: list, score, act")
+
+    def _caption_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        fn, name = vision_for_qa()
+        out = charkit.auto_caption(store, job["params"]["character_id"], fn, bool(job["params"].get("only_missing")),
+                                   progress)
+        return {"captioned": out["captioned"], "method": out["method"] if fn else "recipes (no vision model)",
+                "model": name}
+
+    def _identity_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        fn, name = vision_for_qa()
+        p = job["params"]
+        progress(0.05, "scoring identity")
+        out = charkit.score_takes(store, p["character_id"], p.get("asset_ids"), fn, name, bool(p.get("force")),
+                                  int(p.get("limit") or 24))
+        return {**out, "model": name}
+
+    queue.register("character_sheet", lambda job, p: charkit.sheet_job(store, backend, job, p))
+    queue.register("train_lora", lambda job, p: charkit.train_job(store, backend, job, p))
+    queue.register("character_caption", _caption_job)
+    queue.register("character_identity", _identity_job)
+
+    @app.post("/api/agent/studio_character_pack")
+    def agent_char_pack(body: CharPackBody, project: Optional[str] = None):
+        def run():
+            out = op_char_pack(project, body)
+            return {k: v for k, v in out.items() if k != "notes" or v}
+        return agent("studio_character_pack", f"{body.action}:{body.character_id or body.path or ''}"[:120], run)
+
+    @app.post("/api/agent/studio_character_library")
+    def agent_char_library(body: CharLibraryBody, project: Optional[str] = None):
+        return agent("studio_character_library", f"{body.action}:{body.id or body.character_id or body.query or ''}",
+                     lambda: op_char_library(project, body))
+
+    @app.post("/api/agent/studio_character_sheet")
+    def agent_char_sheet(body: CharSheetBody):
+        def run():
+            res = op_char_sheet(body)
+            return {"job": job_result(res["job"]), "views": res["views"]}
+        return agent("studio_character_sheet", body.character_id, run)
+
+    @app.post("/api/agent/studio_character_dataset")
+    def agent_char_dataset(body: CharDatasetBody):
+        def run():
+            out = op_char_dataset(body)
+            if "items" in out and isinstance(out["items"], list):
+                out = {**out, "items": [{k: v for k, v in i.items() if k != "thumb"} for i in out["items"][:60]]}
+            if "job" in out:
+                out["job"] = job_result(out["job"])
+            return out
+        return agent("studio_character_dataset", f"{body.action}:{body.character_id}", run)
+
+    @app.post("/api/agent/studio_character_train")
+    def agent_char_train(body: CharTrainBody):
+        def run():
+            out = op_char_train(body)
+            if "job" in out:
+                out["job"] = job_result(out["job"])
+            return out
+        return agent("studio_character_train", f"{body.action}:{body.character_id or ''}:{body.arch or ''}", run)
+
+    @app.post("/api/agent/studio_character_adapters")
+    def agent_char_adapters(body: CharAdaptersBody):
+        return agent("studio_character_adapters", f"{body.action}:{body.character_id}", lambda: op_char_adapters(body))
+
+    @app.post("/api/agent/studio_character_takes")
+    def agent_char_takes(body: CharTakesBody):
+        def run():
+            out = op_char_takes(body)
+            if "job" in out:
+                out["job"] = job_result(out["job"])
+            return out
+        return agent("studio_character_takes", f"{body.action}:{body.character_id}", run)
+
+    # UI routes (same operations, full payloads)
+    @app.get("/api/characters/{character_id}/kit")
+    def ui_char_kit(character_id: str):
+        char = store.get_character(character_id)
+        kit = charkit.kit_of(char)
+        return {**_kit_view(char), "history": kit["history"][-30:], "sheet_asset_ids": kit["sheet"].get("asset_ids") or [],
+                "views": list(charkit.SHEET_VIEWS), "default_views": charkit.DEFAULT_SHEET}
+
+    @app.post("/api/characters/{character_id}/sheet")
+    def ui_char_sheet(character_id: str, body: CharSheetBody):
+        body.character_id = character_id
+        return op_char_sheet(body)
+
+    @app.post("/api/characters/{character_id}/dataset")
+    def ui_char_dataset(character_id: str, body: CharDatasetBody):
+        body.character_id = character_id
+        return op_char_dataset(body)
+
+    @app.post("/api/characters/{character_id}/train")
+    def ui_char_train(character_id: str, body: CharTrainBody):
+        body.character_id = character_id
+        return op_char_train(body)
+
+    @app.post("/api/training")
+    def ui_training(body: CharTrainBody):
+        if body.action not in ("trainers", "settings", "log"):
+            raise engine.EngineError("bad_action", "this route takes trainers, settings or log")
+        return op_char_train(body)
+
+    @app.post("/api/characters/{character_id}/adapters")
+    def ui_char_adapters(character_id: str, body: CharAdaptersBody):
+        body.character_id = character_id
+        return op_char_adapters(body)
+
+    @app.post("/api/characters/{character_id}/takes")
+    def ui_char_takes(character_id: str, body: CharTakesBody):
+        body.character_id = character_id
+        return op_char_takes(body)
+
+    @app.post("/api/characters/{character_id}/pack")
+    def ui_char_pack_export(character_id: str, body: CharPackBody):
+        body.character_id, body.action = character_id, "export"
+        return op_char_pack(None, body)
+
+    @app.get("/api/character-packs/{file_name}")
+    def ui_char_pack_download(file_name: str):
+        path = charpack.export_path(store.data_dir, file_name)
+        return FileResponse(path, media_type="application/zip", filename=path.name)
+
+    async def _read_pack_upload(file: UploadFile) -> Path:
+        tmp_dir = store.data_dir / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"{new_id('up')}.hoardchar"
+        total = 0
+        with tmp_path.open("wb") as fh:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > charpack.MAX_PACK_BYTES:
+                    fh.close()
+                    tmp_path.unlink(missing_ok=True)
+                    raise engine.EngineError("too_large", "the pack is larger than 2 GB")
+                fh.write(chunk)
+        return tmp_path
+
+    @app.post("/api/projects/{project_id}/character-packs")
+    async def ui_char_pack_import(project_id: str, file: UploadFile, rename: Optional[str] = None):
+        store.get_project(project_id)
+        tmp_path = await _read_pack_upload(file)
+        try:
+            return charpack.import_pack(store, backend, project_id, tmp_path, rename)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.post("/api/character-packs/inspect")
+    async def ui_char_pack_inspect(file: UploadFile):
+        tmp_path = await _read_pack_upload(file)
+        try:
+            return charpack.inspect_pack(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.post("/api/library/characters")
+    def ui_library(body: CharLibraryBody, project: Optional[str] = None):
+        return op_char_library(project, body)
+
+    @app.get("/api/library/characters/{lib_id}/preview")
+    def ui_library_preview(lib_id: str):
+        charpack.library_history(store.data_dir, lib_id)  # validates the id
+        path = charpack.library_root(store.data_dir) / lib_id / "preview.png"
+        if not path.is_file():
+            raise NotFound("preview", lib_id)
+        return FileResponse(path, media_type="image/png")
 
     @app.get("/api/projects/{project_id}/groups")
     def list_groups(project_id: str):
@@ -1576,7 +2036,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return {**result, "production": production_view(slug)}
 
     def op_recipe_run(name: str, body: RecipeRunBody) -> dict[str, Any]:
-        state = recipes_mod.run_recipe(store, name, body.cast, body.name, body.options)
+        cast = dict(body.cast)
+        lead = cast.get("lead")
+        lib_id = lead if isinstance(lead, str) and lead.startswith("lib_") else \
+            (lead.get("library") if isinstance(lead, dict) else None)
+        if lib_id:
+            # a library character: cast it (with its adapters) into the
+            # Casting project, then the production copies it as usual
+            version = lead.get("version") if isinstance(lead, dict) else None
+            cast["lead"] = charpack.library_use(store, backend, _casting_project(), lib_id, version)["character_id"]
+        state = recipes_mod.run_recipe(store, name, cast, body.name, body.options)
         job = queue_production(state["slug"])
         return {"production": production_view(state["slug"]), "job": engine.job_view(job),
                 "notes": (state.get("recipe") or {}).get("notes") or []}
@@ -1881,6 +2350,9 @@ def _character_view(c: dict[str, Any]) -> dict[str, Any]:
         "id": c["id"], "name": c["name"], "role": c.get("role"), "prompt": engine._clip(c.get("prompt"), 240),
         "negative": engine._clip(c.get("negative"), 160), "palette": c.get("palette") or None,
         "canonical_asset_id": c.get("canonical_asset_id"), "voice": c.get("voice"), "bio": engine._clip(c.get("bio"), 200),
+        "adapters": [f"{a['arch']}{'' if a.get('enabled') else ' (off)'}" for a in (c.get("kit") or {}).get("adapters") or []]
+        or None,
+        "library": (c.get("kit") or {}).get("library"),
     }.items() if v is not None}
 
 

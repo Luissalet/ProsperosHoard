@@ -353,6 +353,53 @@ class Backend:
         self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
         self.reload()
 
+    def training(self) -> dict[str, Any]:
+        """`backend.json -> training`: LoRA folder, trainers, base models
+        (see trainers.py / docs/CHARACTERS.md)."""
+        raw = self._raw_config().get("training") or {}
+        return raw if isinstance(raw, dict) else {}
+
+    def set_training(self, training: dict[str, Any]) -> dict[str, Any]:
+        """Validate and store the training section (replaces it)."""
+        if not isinstance(training, dict):
+            raise ValueError("training must be an object")
+        allowed = {"lora_dir", "trainers", "base_models", "gpu"}
+        unknown = set(training) - allowed
+        if unknown:
+            raise ValueError(f"unknown training key(s): {', '.join(sorted(unknown))}; allowed: {', '.join(sorted(allowed))}")
+        clean: dict[str, Any] = {}
+        if training.get("lora_dir"):
+            clean["lora_dir"] = str(Path(str(training["lora_dir"])).expanduser())
+        gpu = training.get("gpu")
+        if gpu not in (None, "", "auto"):
+            if not isinstance(gpu, int) or not 0 <= gpu <= 15:
+                raise ValueError("training.gpu is 'auto' or a GPU index (0-15)")
+            clean["gpu"] = gpu
+        trainers = training.get("trainers") or []
+        if not isinstance(trainers, list) or len(trainers) > 8:
+            raise ValueError("training.trainers is a list of at most 8 trainers")
+        out = []
+        for t in trainers:
+            if not isinstance(t, dict) or t.get("kind") not in ("ai_toolkit", "musubi", "custom", "fake"):
+                raise ValueError("each trainer needs kind: ai_toolkit | musubi | custom | fake")
+            entry = {k: t[k] for k in ("kind", "name", "dir", "python", "command", "delay") if t.get(k) not in (None, "")}
+            entry.setdefault("name", entry["kind"])
+            if "command" in entry and (not isinstance(entry["command"], list) or not all(isinstance(c, str) for c in entry["command"])):
+                raise ValueError("a custom trainer's command is a list of strings")
+            out.append(entry)
+        if out:
+            clean["trainers"] = out
+        bases = training.get("base_models") or {}
+        if not isinstance(bases, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in bases.items()):
+            raise ValueError("training.base_models maps an architecture to a path or hub id")
+        if bases:
+            clean["base_models"] = {k: v.strip() for k, v in bases.items() if v.strip()}
+        raw = self._raw_config()
+        raw["training"] = clean
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        return clean
+
     def vram_estimates_mb(self) -> dict[str, int]:
         raw = self._raw_config()
         return {**DEFAULT_VRAM_ESTIMATES_MB, **(raw.get("vram_estimates_mb") or {})}

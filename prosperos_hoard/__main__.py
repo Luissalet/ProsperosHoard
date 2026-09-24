@@ -62,6 +62,10 @@ def main() -> None:
             except (OSError, ValueError):
                 raw = {}
         raw["comfy"] = {"url": f"http://127.0.0.1:{fake_port}"}
+        # demo LoRA training: a fake trainer, installing into the fake ComfyUI's loras folder
+        raw.setdefault("training", {"lora_dir": str(fake.lora_dir),
+                                    "trainers": [{"kind": "fake", "name": "demo trainer", "delay": 0.01}]})
+        fake.lora_dir.mkdir(parents=True, exist_ok=True)
         backend_json.write_text(json.dumps(raw, indent=2), encoding="utf-8")
         print(f"[prosperos-hoard] demo mode: fake ComfyUI (procedural placeholder images) on 127.0.0.1:{fake_port}")
 
