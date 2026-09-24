@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import logging.handlers
+import socket
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -24,6 +26,38 @@ def _setup_logging(data_dir: Path) -> None:
     root = logging.getLogger("prosperos_hoard")
     root.setLevel(logging.INFO)
     root.addHandler(handler)
+
+
+def _acquire_instance_lock(data_dir: Path):
+    """An exclusive lock on data/.instance.lock for the life of the process.
+    A second instance on the same data folder would otherwise requeue the
+    first one's running jobs and claim queued ones before its port bind
+    failed, leaving them 'running' forever. Returns the open handle (keep a
+    reference) or None when another instance holds the lock."""
+    fh = (data_dir / ".instance.lock").open("a+b")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
+def _port_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
 
 
 def main() -> None:
@@ -46,6 +80,15 @@ def main() -> None:
     data_dir = data_dir.expanduser().resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     _setup_logging(data_dir)
+
+    instance_lock = _acquire_instance_lock(data_dir)
+    if instance_lock is None:
+        print(f"[prosperos-hoard] another Prospero's Hoard is already running on {data_dir}; "
+              f"open http://127.0.0.1:{args.port} or stop it first.", file=sys.stderr)
+        raise SystemExit(1)
+    if not _port_free(args.port):
+        print(f"[prosperos-hoard] port {args.port} is already in use; pick another with --port.", file=sys.stderr)
+        raise SystemExit(1)
 
     if args.demo:
         import json
@@ -89,6 +132,7 @@ def main() -> None:
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
     finally:
         app.state.queue.stop()
+        instance_lock.close()
 
 
 if __name__ == "__main__":

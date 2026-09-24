@@ -393,3 +393,79 @@ def test_prompt_preview_and_song_compose_have_their_own_bodies(client):
     assert "platinum bob" in r.json()["positive_prompt"]
     song = c.post(f"/api/projects/{pid}/compose", json={"tags": "dark trap", "lyrics": "[Verse]\nuna", "duration": 5})
     assert song.status_code == 200, song.text
+
+
+def test_oversized_request_bodies_are_refused_before_reading(client):
+    c, _, _ = client
+    r = c.post("/api/agent/studio_create_project", content=b"{}",
+               headers={"Content-Type": "application/json", "Content-Length": str(200 * 1024 * 1024)})
+    assert r.status_code == 413 and r.json()["error"] == "too_large"
+
+
+def test_curation_tools_rate_tag_board_and_update_project(client):
+    c, _, _ = client
+    project_id = _project(c, "Curate")
+    r = c.post(f"/api/agent/studio_generate_image?project={project_id}", json={"prompt": "a lantern", "count": 2, "wait_s": 20})
+    ids = r.json()["job"]["asset_ids"]
+    r = c.post(f"/api/agent/studio_asset_update?asset_id={ids[1]}", json={"rating": 5, "favourite": True, "tags": ["Best"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["favourite"] is True and r.json()["rating"] == 5
+    favs = c.get(f"/api/agent/studio_assets?project={project_id}&favourite=true").json()["items"]
+    assert [a["id"] for a in favs] == [ids[1]]
+    assert c.post(f"/api/agent/studio_asset_update?asset_id={ids[1]}", json={}).json()["error"] == "nothing_to_update"
+
+    board = c.post(f"/api/agent/studio_board?project={project_id}",
+                   json={"action": "create", "name": "Mood", "asset_ids": [ids[1]], "notes": {ids[1]: "the one"}}).json()
+    assert board["count"] == 1 and board["items"][0]["note"] == "the one"
+    board = c.post(f"/api/agent/studio_board?project={project_id}",
+                   json={"action": "add", "board_id": board["id"], "asset_ids": [ids[0]]}).json()
+    assert [i["asset_id"] for i in board["items"]] == [ids[1], ids[0]]
+    listed = c.post(f"/api/agent/studio_board?project={project_id}", json={"action": "list"}).json()["items"]
+    assert listed[0]["count"] == 2
+
+    r = c.post(f"/api/agent/studio_project_update?project={project_id}",
+               json={"cover_asset_id": ids[1], "image_engine": "sdxl"})
+    assert r.status_code == 200 and r.json()["image_engine"] == "sdxl" and r.json()["cover_asset_id"] == ids[1]
+    # a bad cover id changes nothing (validated before any write)
+    r = c.post(f"/api/agent/studio_project_update?project={project_id}", json={"name": "Renamed", "cover_asset_id": "a_nope"})
+    assert r.status_code == 404
+    assert c.get(f"/api/projects/{project_id}").json()["name"] == "Curate"
+
+
+def test_retry_a_cancelled_job(client):
+    c, app, _ = client
+    project_id = _project(c, "Retry")
+    job = app.state.store.create_job("generate_image", "gpu", {"positive_prompt": "x", "seed": 7}, project_id=project_id)
+    app.state.store.update_job(job["id"], state="waiting_gpu")
+    r = c.post(f"/api/agent/studio_retry_job?job_id={job['id']}")
+    assert r.status_code == 400 and r.json()["error"] == "not_retryable"
+    c.post(f"/api/agent/studio_cancel_job?job_id={job['id']}")
+    app.state.queue.stop()  # keep the copy queued so its params can be read back
+    r = c.post(f"/api/agent/studio_retry_job?job_id={job['id']}&new_seed=true")
+    assert r.status_code == 200, r.text
+    again = app.state.store.get_job(r.json()["id"])
+    assert again["params"]["retry_of"] == job["id"] and again["project_id"] == project_id
+    assert again["params"]["positive_prompt"] == "x"
+
+
+def test_housekeeping_sweeps_old_scratch_files(tmp_path):
+    import os
+    import time
+
+    from prosperos_hoard.api import _housekeeping
+    from prosperos_hoard.store import Store
+
+    store = Store(tmp_path)
+    old_dir = tmp_path / "tmp" / "render_old"
+    old_dir.mkdir(parents=True)
+    fresh = tmp_path / "tmp" / "render_live"
+    fresh.mkdir()
+    upload = tmp_path / "tmp" / "uploads" / "up_1.png"
+    upload.parent.mkdir()
+    upload.write_bytes(b"x")
+    past = time.time() - 3 * 24 * 3600
+    for p in (old_dir, upload):
+        os.utime(p, (past, past))
+    _housekeeping(store)
+    assert not old_dir.exists() and not upload.exists()
+    assert fresh.exists() and (tmp_path / "tmp" / "uploads").is_dir()

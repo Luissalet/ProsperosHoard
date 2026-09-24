@@ -9,6 +9,8 @@ import base64
 import logging
 import mimetypes
 import re
+import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,6 +20,7 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
@@ -47,6 +50,10 @@ logger = logging.getLogger("prosperos_hoard.api")
 MAX_UPLOAD_MEDIA = engine.MAX_MEDIA_BYTES
 MAX_UPLOAD_IMAGE = engine.MAX_IMAGE_BYTES
 MAX_WAIT_S = 300.0
+# request bodies: file uploads get the media cap, everything else (JSON) far less
+MAX_JSON_BODY = 64 * 1024 * 1024
+_UPLOAD_PATH_RE = re.compile(r"^/api/(projects/[^/]+/import-upload|workflows/import-file|voice/voices/upload|"
+                             r"voice/transcribe/upload|voice/dictate)$")
 
 
 # ------------------------------------------------------------------ guard
@@ -72,6 +79,18 @@ class GuardMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"error": "bad_origin", "message": "cross-origin write rejected"}, status_code=403)
             if request.headers.get("sec-fetch-site") == "cross-site":
                 return JSONResponse({"error": "cross_site", "message": "cross-site write rejected"}, status_code=403)
+            # refused before the body is read: a multipart body is spooled to
+            # the system temp folder before a route could check its size
+            cap = MAX_UPLOAD_MEDIA + 16 * 1024 * 1024 if _UPLOAD_PATH_RE.match(request.url.path) else MAX_JSON_BODY
+            length = request.headers.get("content-length")
+            if length is not None:
+                try:
+                    too_big = int(length) > cap
+                except ValueError:
+                    return JSONResponse({"error": "bad_request", "message": "invalid Content-Length"}, status_code=400)
+                if too_big:
+                    return JSONResponse({"error": "too_large", "message": f"request body exceeds {cap // (1024 * 1024)} MB"},
+                                        status_code=413)
         return await call_next(request)
 
 
@@ -94,6 +113,10 @@ def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
         return 400, {"error": "bad_design", "message": str(exc)}
     if isinstance(exc, voices_mod.VoiceError):
         return 400, {"error": exc.code, "message": str(exc)}
+    if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc):
+        return 503, {"error": "database_busy", "message": "the database is busy; retry in a moment"}
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return 504, {"error": "subprocess_timeout", "message": f"{Path(str(exc.cmd[0] if isinstance(exc.cmd, (list, tuple)) else exc.cmd)).name} timed out"}
     if isinstance(exc, (VoiceLabError, vp.AudiobookError, dubbing_mod.DubbingError, ve.EngineNotInstalled)):
         code = exc.code if hasattr(exc, "code") else "engine_not_installed"
         return 400, {"error": code, "message": str(exc)}
@@ -326,6 +349,15 @@ class BoardItemsBody(BaseModel):
     items: list[dict[str, Any]]
 
 
+class AgentBoardBody(BaseModel):
+    action: str = "list"  # list | get | create | add | set
+    board_id: Optional[str] = None
+    name: Optional[str] = None
+    kind: Optional[str] = None  # moodboard | storyboard | shotlist
+    asset_ids: Optional[list[str]] = None
+    notes: Optional[dict[str, str]] = None  # asset_id -> note
+
+
 class WorkflowImportBody(BaseModel):
     name: str = "Imported workflow"
     workflow: dict[str, Any]
@@ -465,7 +497,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # its server-error middleware and re-raises): every failure a handler can
     # hit becomes {"error", "message"} JSON.
     for exc_type in (HoardLinkError, ValueError, LookupError, RuntimeError, OSError, TypeError, AttributeError,
-                     ArithmeticError, AssertionError):
+                     ArithmeticError, AssertionError, sqlite3.Error, subprocess.SubprocessError):
         app.add_exception_handler(exc_type, _any_error)
 
     @app.exception_handler(RequestValidationError)
@@ -675,11 +707,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # ---------------------------------------------------------------- health
     @app.get("/api/health")
     def health():
-        active = store.list_jobs(state="active", limit=50)["items"]
         return {
             "service": "prosperos-hoard", "name": "Prospero's Hoard", "version": __version__, "status": "ok",
-            "demo": demo, "projects": len(store.list_projects(limit=50)["items"]),
-            "active_jobs": len(active),
+            "demo": demo, "projects": store.count_projects(),
+            "active_jobs": sum(store.count_jobs(("queued", "waiting_gpu", "running")).values()),
         }
 
     @app.get("/api/backend")
@@ -730,7 +761,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/projects")
     def create_project(body: CreateProjectBody):
-        return store.create_project(body.name, body.brief)
+        p = store.create_project(body.name, body.brief)
+        return store.update_project(p["id"], image_engine=body.image_engine) if body.image_engine else p
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str):
@@ -843,8 +875,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/workflows/import-file")
     async def import_workflow_file(file: UploadFile, name: Optional[str] = None):
         raw = await file.read(comfy_driver.MAX_WORKFLOW_BYTES + 1)
-        return comfy_driver.import_custom_workflow(store.data_dir, name or Path(file.filename or "workflow").stem, raw,
-                                                   object_info=lambda: engine.object_info_live_or_cached(backend))
+        return await run_in_threadpool(comfy_driver.import_custom_workflow, store.data_dir,
+                                       name or Path(file.filename or "workflow").stem, raw,
+                                       object_info=lambda: engine.object_info_live_or_cached(backend))
 
     @app.patch("/api/workflows/{wf_id}")
     def update_workflow(wf_id: str, body: WorkflowUpdateBody):
@@ -1254,7 +1287,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     if total > cap:
                         raise engine.EngineError("too_large", f"file exceeds {cap // (1024 * 1024)} MB")
                     fh.write(chunk)
-            return engine.import_asset(store, project_id, tmp_path, kind, original_name=original)
+            # ffprobe, thumbnails and audio decoding off the event loop
+            return await run_in_threadpool(engine.import_asset, store, project_id, tmp_path, kind, original_name=original)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -1471,6 +1505,84 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.put("/api/boards/{board_id}/items")
     def update_board_items(board_id: str, body: BoardItemsBody):
         return store.update_board_items(board_id, body.items)
+
+    # ------------------------------------------------------ agent curation
+    @app.post("/api/agent/studio_asset_update")
+    def agent_asset_update(asset_id: str, body: UpdateAssetBody):
+        def run():
+            fields = body.model_dump(exclude_none=True)
+            if not fields:
+                raise engine.EngineError("nothing_to_update", "pass at least one of tags, rating, favourite, notes, name")
+            asset = store.update_asset(asset_id, **fields)
+            return {**engine.asset_view(asset), "tags": asset.get("tags"), "rating": asset.get("rating"),
+                    "favourite": bool(asset.get("favourite"))}
+        return agent("studio_asset_update", asset_id, run)
+
+    @app.post("/api/agent/studio_project_update")
+    def agent_project_update(project: str, body: UpdateProjectBody):
+        def run():
+            p = store.update_project(project, body.name, body.brief, body.cover_asset_id, body.image_engine)
+            return {"id": p["id"], "name": p["name"], "brief": engine._clip(p.get("brief"), 160),
+                    "cover_asset_id": p.get("cover_asset_id"), "image_engine": p.get("image_engine")}
+        return agent("studio_project_update", project, run)
+
+    def board_view(board: dict[str, Any]) -> dict[str, Any]:
+        items = board.get("items") or []
+        return {"id": board["id"], "name": board["name"], "kind": board["kind"], "count": len(items),
+                "items": [{k: v for k, v in {"asset_id": i.get("asset_id"), "note": engine._clip(i.get("note"), 80)}.items() if v}
+                          for i in items[:60]], "has_more": len(items) > 60}
+
+    @app.post("/api/agent/studio_board")
+    def agent_board(project: str, body: AgentBoardBody):
+        def run():
+            if body.action == "list":
+                return {"items": [{"id": b["id"], "name": b["name"], "kind": b["kind"], "count": len(b.get("items") or [])}
+                                  for b in store.list_boards(project)]}
+            if body.action == "create":
+                board = store.create_board(project, body.name or "", body.kind or "moodboard")
+            elif body.action in ("add", "set"):
+                if not body.board_id:
+                    raise engine.EngineError("board_required", f"action '{body.action}' needs board_id")
+                board = store.get_board(body.board_id)
+            elif body.action == "get":
+                return board_view(store.get_board(body.board_id or ""))
+            else:
+                raise engine.EngineError("bad_action", f"unknown board action '{body.action}'; use list, get, create, add or set")
+            if board["project_id"] != project:
+                raise engine.EngineError("wrong_project", "that board belongs to another project")
+            if body.asset_ids is not None or body.action == "set":
+                notes = body.notes or {}
+                new_items = []
+                for aid in body.asset_ids or []:
+                    store.get_asset(aid)
+                    new_items.append({"asset_id": aid, **({"note": notes[aid]} if notes.get(aid) else {})})
+                items = new_items if body.action in ("set", "create") else [*(board.get("items") or []), *new_items]
+                board = store.update_board_items(board["id"], items)
+            return board_view(board)
+        return agent("studio_board", f"{body.action} {body.board_id or body.name or ''}".strip(), run)
+
+    def op_retry_job(job_id: str, new_seed: bool) -> dict[str, Any]:
+        """Queue a copy of a failed or cancelled job (same type, parameters
+        and inputs; optionally a new seed), linked by `params.retry_of`."""
+        old = store.get_job(job_id)
+        if old["state"] not in ("failed", "cancelled"):
+            raise engine.EngineError("not_retryable", f"job is {old['state']}; only failed or cancelled jobs can be retried")
+        if old["type"] in ("production", "production_qa"):
+            raise engine.EngineError("use_production_continue",
+                                     "a production resumes with studio_production_continue, which keeps what is done")
+        params = dict(old["params"] or {})
+        if new_seed and "seed" in params:
+            params["seed"] = engine.random_seed()
+        params["retry_of"] = job_id
+        return queue.enqueue(old["type"], old["lane"], params, old.get("inputs"), old.get("project_id"))
+
+    @app.post("/api/agent/studio_retry_job")
+    def agent_retry_job(job_id: str, new_seed: bool = False):
+        return agent("studio_retry_job", job_id, lambda: engine.job_view(op_retry_job(job_id, new_seed)))
+
+    @app.post("/api/jobs/{job_id}/retry")
+    def ui_retry_job(job_id: str, new_seed: bool = False):
+        return op_retry_job(job_id, new_seed)
 
     # ------------------------------------------------------------ productions
     # A production runs as one orchestrator job that queues ordinary
@@ -1783,7 +1895,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def run():
             status = backend.status()
             link = status["hoard_link"]
-            counts = {s: len(store.list_jobs(state=s, limit=50)["items"]) for s in ("queued", "waiting_gpu", "running")}
+            counts = store.count_jobs(("queued", "waiting_gpu", "running"))
             return {
                 "demo_backend": status["demo"],
                 "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
@@ -1831,11 +1943,37 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "</body></html>"
             )
 
+    _housekeeping(store)
     queue.start()
     return app
 
 
 # ---------------------------------------------------------------- helpers
+
+def _housekeeping(store: Store, tmp_max_age_s: float = 24 * 3600) -> None:
+    """On start-up: trim the assistant-activity log and remove scratch files
+    a crash left in data/tmp (render work folders, partial uploads). Only
+    entries older than a day go, so nothing a live job is using is touched."""
+    import shutil
+
+    try:
+        store.prune_agent_calls()
+    except sqlite3.Error:
+        logger.warning("could not prune the agent call log", exc_info=True)
+    tmp = store.data_dir / "tmp"
+    if not tmp.is_dir():
+        return
+    cutoff = time.time() - tmp_max_age_s
+    for entry in list(tmp.iterdir()) + (list((tmp / "uploads").iterdir()) if (tmp / "uploads").is_dir() else []):
+        try:
+            if entry.name == "uploads" or entry.stat().st_mtime > cutoff:
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 def _is_within(path: Path, root: Path) -> bool:
     try:

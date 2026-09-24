@@ -22,6 +22,11 @@ from .util import now_iso
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
 
 
+def _like_escape(text: str) -> str:
+    """`text` as a literal inside a LIKE pattern (used with ESCAPE '\\')."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class NotFound(KeyError):
     def __init__(self, kind: str, id_: str):
         super().__init__(f"{kind} not found: {id_}")
@@ -197,8 +202,8 @@ class Store:
         sql = "SELECT * FROM projects"
         params: list[Any] = []
         if query:
-            sql += " WHERE name LIKE ? OR brief LIKE ?"
-            like = f"%{query}%"
+            sql += " WHERE name LIKE ? ESCAPE '\\' OR brief LIKE ? ESCAPE '\\'"
+            like = f"%{_like_escape(query)}%"
             params += [like, like]
         sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
         params += [limit + 1, offset]
@@ -342,11 +347,11 @@ class Store:
             params.append(src)
         if query:
             sql += " AND (name LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\' OR tags_json LIKE ? ESCAPE '\\' OR recipe_json LIKE ? ESCAPE '\\')"
-            like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            like = "%" + _like_escape(query) + "%"
             params += [like, like, like, like]
         if tag:
-            sql += " AND tags_json LIKE ?"
-            params.append(f'%"{tag.strip().lower()}"%')
+            sql += " AND tags_json LIKE ? ESCAPE '\\'"
+            params.append(f'%"{_like_escape(tag.strip().lower())}"%')
         if favourite:
             sql += " AND favourite=1"
         if min_rating:
@@ -724,6 +729,20 @@ class Store:
         has_more = len(rows) > limit
         return {"items": items, "has_more": has_more, "next_offset": offset + limit if has_more else None}
 
+    def count_jobs(self, states: Iterable[str]) -> dict[str, int]:
+        """How many jobs are in each of `states` (no page limit)."""
+        states = list(states)
+        counts = {st: 0 for st in states}
+        if states:
+            rows = self.conn.execute(
+                f"SELECT state, COUNT(*) AS n FROM jobs WHERE state IN ({','.join('?' * len(states))}) GROUP BY state",
+                states).fetchall()
+            counts.update({r["state"]: r["n"] for r in rows})
+        return counts
+
+    def count_projects(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+
     def update_job(self, job_id: str, **fields: Any) -> dict[str, Any]:
         self.get_job(job_id)
         cols, params = [], []
@@ -899,6 +918,15 @@ class Store:
              (error or None) and error[:500], now_iso()),
         )
         self.conn.commit()
+
+    def prune_agent_calls(self, keep: int = 5000) -> int:
+        """Keep the newest `keep` rows of the assistant-activity log (it
+        otherwise grows by one row per tool call, forever)."""
+        cur = self.conn.execute(
+            "DELETE FROM agent_calls WHERE id NOT IN (SELECT id FROM agent_calls ORDER BY created_at DESC LIMIT ?)",
+            (max(1, int(keep)),))
+        self.conn.commit()
+        return cur.rowcount
 
     def list_agent_calls(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 100))
