@@ -350,14 +350,14 @@ def _build_ai_toolkit(trainer: dict[str, Any], plan: dict[str, Any], *, dataset_
             "process": [
                 {
                     "type": "sd_trainer",
-                    "training_folder": str(output_dir),
+                    "training_folder": output_dir.as_posix(),
                     "device": "cuda:0",
                     "trigger_word": trigger,
                     "network": {"type": "lora", "linear": plan["rank"], "linear_alpha": plan["rank"]},
                     "save": {"dtype": "float16", "save_every": plan["save_every"], "max_step_saves_to_keep": 4},
                     "datasets": [
                         {
-                            "folder_path": str(dataset_dir),
+                            "folder_path": dataset_dir.as_posix(),
                             "caption_ext": "txt",
                             "caption_dropout_rate": 0.05,
                             "cache_latents_to_disk": True,
@@ -377,7 +377,7 @@ def _build_ai_toolkit(trainer: dict[str, Any], plan: dict[str, Any], *, dataset_
                         "dtype": "bf16",
                     },
                     "model": {
-                        "name_or_path": base_model,
+                        "name_or_path": base_model.replace("\\", "/"),
                         "quantize": True,
                         "low_vram": True,
                         **_ai_toolkit_model_flags(arch),
