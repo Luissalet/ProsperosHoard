@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -195,27 +196,73 @@ def render(store: Store, state: dict[str, Any], cut: dict[str, Any], aspect: str
     return asset
 
 
+def shot_sheet(store: Store, state: dict[str, Any]) -> Optional[str]:
+    """A contact sheet of every shot's best still, labelled with its key
+    ("clip" on the shots that become Wan clips), as an image asset: one
+    look shows the whole shot list at the review pause. None when there is
+    no still to show."""
+    spec = state.get("spec") or {}
+    frames = (state.get("done", {}).get("frames") or {}).get("items") or {}
+    paths: list[Path] = []
+    labels: list[str] = []
+    order: list[str] = []
+    for shot in spec.get("shots") or []:
+        still = (frames.get(shot["key"]) or {}).get("best")
+        if not still:
+            continue
+        try:
+            path = store.data_dir / store.get_asset(still)["file_path"]
+        except NotFound:
+            continue
+        if not path.is_file():
+            continue
+        paths.append(path)
+        order.append(still)
+        labels.append(f"{shot['key']}{' - clip' if shot.get('clips') else ''}{' - lead' if shot.get('lead') else ''}")
+    if not paths:
+        return None
+    cell = 320 if len(paths) <= 24 else 240
+    try:
+        sheet = engine.contact_sheet(paths, cols=min(4, len(paths)), cell=cell, labels=labels)
+    except OSError:
+        return None  # an unreadable still never fails the animatic
+    recipe = {"operation": "animatic_shot_sheet", "production": state.get("slug"), "input_asset_ids": order[:80],
+              "labels": labels[:80], "created_at": now_iso()}
+    asset = engine._save_sheet(store, _project_id(state), sheet, recipe,
+                               f"Shots - {state.get('name') or state.get('slug')}"[:100])
+    return asset["id"]
+
+
+def _made_at() -> str:
+    # to the microsecond: an approval names the animatic it approves, and
+    # two animatics made within one second must not share a name
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
 def make(store: Store, state: dict[str, Any], aspects: Optional[list[str]] = None,
          progress: Optional[Callable[..., None]] = None, should_cancel: Optional[Callable[[], bool]] = None) -> dict[str, Any]:
-    """Build, render every aspect and write `plan.json`; returns the
-    `done["animatic"]` entry."""
+    """Build, render every aspect, make the shot contact sheet and write
+    `plan.json`; returns the `done["animatic"]` entry."""
     report = progress or (lambda *_a, **_k: None)
     aspects = aspects or ((state.get("spec") or {}).get("timeline") or {}).get("aspects") or ["9:16"]
     report(0.02, "cutting the animatic")
     cut = build(store, state)
     the_plan = plan(state, cut)
+    the_plan["made_at"] = _made_at()
     renders: dict[str, str] = {}
     for i, aspect in enumerate(aspects):
         def sub(frac: float, msg: Optional[str] = None, i: int = i) -> None:
             report(0.05 + 0.9 * (i + frac) / len(aspects), f"animatic {aspect}: {msg or ''}".strip())
         renders[aspect] = render(store, state, cut, aspect, sub, should_cancel)["id"]
     the_plan["renders"] = renders
+    sheet_id = shot_sheet(store, state)
+    the_plan["contact_sheet_id"] = sheet_id
     folder = prod.production_dir(store.data_dir, state["slug"]) / "animatic"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.json").write_text(json.dumps(the_plan, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"renders": renders, "plan": {k: the_plan[k] for k in ("cuts_total", "clips_planned", "gpu_minutes",
                                                                    "cpu_minutes_renders", "unused_shots", "duration_s")},
-            "plan_path": "animatic/plan.json", "made_at": the_plan["made_at"]}
+            "plan_path": "animatic/plan.json", "made_at": the_plan["made_at"], "contact_sheet_id": sheet_id}
 
 
 def read_plan(data_dir: Path, slug: str) -> dict[str, Any]:
@@ -229,7 +276,13 @@ def make_for_production(store: Store, slug: str, aspects: Optional[list[str]] = 
                         progress: Optional[Callable[..., None]] = None) -> dict[str, Any]:
     """`studio_animatic`: (re)make the animatic of a production - one made
     in the app (its stills so far) or by the production script (read
-    through `state_from_legacy`) - and record it in its state."""
+    through `state_from_legacy`) - and record it in its state.
+
+    It becomes the production's animatic (`done["animatic"]`, which the
+    run's review gate then holds at until it is approved) only when every
+    shot has its still and the production is not running; otherwise it is
+    kept as `animatic_preview`, and the production makes its own animatic
+    (and pauses at it) once the frames are done."""
     raw = prod.load_state(store.data_dir, slug)
     legacy = prod.is_legacy(raw)
     view = prod.state_from_legacy(store, raw) if legacy else raw
@@ -238,11 +291,27 @@ def make_for_production(store: Store, slug: str, aspects: Optional[list[str]] = 
     cancelled = getattr(progress, "cancelled", None)
     entry = make(store, view, aspects, progress, cancelled)
     with prod.lock_for(slug):
+        # this job runs on the cpu lane and can overlap a production run
+        # that started meanwhile: that run owns `done` (its save keeps only
+        # `review`, `animatic_preview` and `qa` from the file)
         current = prod.load_state(store.data_dir, slug)
         if legacy:
             current["animatic"] = entry
+        elif current.get("status") == "running" or not frames_complete(current):
+            current["animatic_preview"] = entry
+            entry = {**entry, "preview": True}
+            prod.log(current, "animatic", "animatic_preview", renders=entry["renders"])
         else:
             current.setdefault("done", {})["animatic"] = entry
+            current.pop("animatic_preview", None)
             prod.log(current, "animatic", "animatic", renders=entry["renders"], gpu_minutes=entry["plan"]["gpu_minutes"])
         prod.save_state(store.data_dir, current)
     return entry
+
+
+def frames_complete(state: dict[str, Any]) -> bool:
+    """Every shot of the spec has its still (the frames stage is done)."""
+    if prod.stage_status(state, "frames") != "done":
+        return False
+    items = ((state.get("done") or {}).get("frames") or {}).get("items") or {}
+    return all((items.get(s["key"]) or {}).get("best") for s in (state.get("spec") or {}).get("shots") or [])

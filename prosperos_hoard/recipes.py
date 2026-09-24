@@ -84,6 +84,8 @@ def abstract_spec(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str], dict
     palette = [str(c) for c in lead.get("palette") or []]
     title = str(spec.get("title") or "").strip()
     name_re = _name_pattern(name) if name else None
+    # whole words only: a title "Rain" must not turn "Rainbow" into "{title}bow"
+    title_re = _name_pattern(title) if title and len(title) >= 4 else None
 
     def replace(text: str, key: Optional[str]) -> str:
         if _is_id_key(key):
@@ -97,10 +99,10 @@ def abstract_spec(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str], dict
             text = "{lead.negative}"
         if bio and len(bio) > 12 and bio in text:
             text = text.replace(bio, "{lead.bio}")
-        if title and len(title) >= 4 and title in text:
-            text = text.replace(title, "{title}")
+        if title_re is not None:
+            text = title_re.sub(lambda _m: "{title}", text)
         if name_re is not None:
-            text = name_re.sub("{lead}", text)
+            text = name_re.sub(lambda _m: "{lead}", text)
         return text
 
     body = {k: v for k, v in spec.items() if k not in ("lead", "world")}
@@ -171,9 +173,17 @@ def _spec_of(store: Store, state: dict[str, Any]) -> tuple[dict[str, Any], list[
     """(concrete spec, notes, source ids of reusable assets)."""
     if prod.is_legacy(state):
         spec, notes = prod.spec_from_legacy(store, state)
+
+        def best_first(shot: dict[str, Any]) -> list[str]:
+            # the script kept its variants in the order made; a reuse takes
+            # the first as the best (plan_run sets best=0), so it goes first
+            variants = list(shot.get("source_asset_ids") or [])
+            best = min(int(shot.get("best") or 0), len(variants) - 1) if variants else 0
+            return ([variants[best]] + [v for i, v in enumerate(variants) if i != best]) if variants else []
+
         source = {"song": (spec.get("song") or {}).get("asset_id"),
                   "lrc": (spec.get("song") or {}).get("lrc_asset_id"),
-                  "frames": {s["key"]: s.get("source_asset_ids") or [] for s in spec.get("shots") or []},
+                  "frames": {s["key"]: best_first(s) for s in spec.get("shots") or []},
                   "clips": {k: v for s in spec.get("shots") or [] for k, v in (s.get("source_clips") or {}).items()},
                   "project_id": (state.get("done", {}).get("1") or {}).get("project_id")}
         return spec, notes, source
@@ -209,11 +219,22 @@ def _spec_of(store: Store, state: dict[str, Any]) -> tuple[dict[str, Any], list[
     return spec, [], source
 
 
-def export_recipe(store: Store, slug: str, name: Optional[str] = None) -> dict[str, Any]:
+def export_recipe(store: Store, slug: str, name: Optional[str] = None, overwrite: bool = False) -> dict[str, Any]:
+    """Write `data/recipes/<name>.json` from a production. A recipe of that
+    name made from another production is kept (error `recipe_exists`)
+    unless `overwrite`; one made from this same production is refreshed."""
     state = prod.load_state(store.data_dir, slug)
     spec, notes, source = _spec_of(store, state)
     name = name or (spec.get("title") or slug)
     path = _recipe_path(store.data_dir, name)
+    if path.exists() and not overwrite:
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if (existing.get("source") or {}).get("production") != slug:
+            raise RecipeError("recipe_exists", f"a recipe called '{path.stem}' (from another production) already exists; "
+                                               "pick another name, or pass overwrite=true to replace it")
     lead = spec.get("lead") or {}
     abstract, warnings, legend = abstract_spec(spec)
     for shot in abstract.get("shots") or []:
@@ -224,8 +245,12 @@ def export_recipe(store: Store, slug: str, name: Optional[str] = None) -> dict[s
     lead_keys = {s["key"] for s in spec.get("shots") or [] if s.get("lead")}
     lyrics = str((spec.get("song") or {}).get("lyrics") or "")
     mentions = bool(lead.get("name")) and bool(_name_pattern(str(lead["name"])).search(lyrics))
+    song = spec.get("song") or {}
     reusable = {
-        "song": {"asset_id": source.get("song"), "lrc_asset_id": source.get("lrc"), "mentions_lead": mentions}
+        # the words and tags as sung: a reused song keeps them (the spec's
+        # copy may carry a {title} placeholder filled with a new title)
+        "song": {"asset_id": source.get("song"), "lrc_asset_id": source.get("lrc"), "mentions_lead": mentions,
+                 **({} if mentions else {"lyrics": song.get("lyrics"), "tags": song.get("tags")})}
         if source.get("song") else None,
         "frames": {k: [a for a in v if a] for k, v in (source.get("frames") or {}).items() if k not in lead_keys and v},
         "clips": {k: v for k, v in (source.get("clips") or {}).items() if prod.split_key(k)[0] not in lead_keys and v},
@@ -363,6 +388,16 @@ def plan_run(store: Store, recipe: dict[str, Any], cast: Any, options: Optional[
             spec["song"]["asset_id"] = song_src["asset_id"]
             if song_src.get("lrc_asset_id") and _exists(store, song_src["lrc_asset_id"]):
                 spec["song"]["lrc_asset_id"] = song_src["lrc_asset_id"]
+            # the audio is the old one: the lyric timing and karaoke must
+            # show the words it sings, not the recipe's text with a new title
+            source_song = (recipe.get("spec") or {}).get("song") or {}
+            for field in ("lyrics", "tags"):
+                if song_src.get(field) is not None:
+                    spec["song"][field] = song_src[field]
+                elif isinstance(source_song.get(field), str):  # a recipe written before the words were kept
+                    spec["song"][field] = fill(source_song[field], lead, str(recipe.get("title") or title))
+            if "{title}" in json.dumps((recipe.get("spec") or {}).get("song") or {}):
+                notes.append("the reused song keeps its own words; the new title is not sung in it")
         else:
             notes.append("the original song is no longer in the library, so a new one is composed")
     reused_frames = []
@@ -399,6 +434,63 @@ def _exists(store: Store, asset_id: Optional[str]) -> bool:
         return True
     except NotFound:
         return False
+
+
+def preview_run(store: Store, recipe_name: str, cast: Any, options: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """`studio_recipe_run` with options.dry_run: what a run of the recipe
+    with this cast would do - which shots are reused and which are made
+    again, whether the song is reused, the recipe's warnings - and the GPU
+    minutes it would take, without creating a production."""
+    from .animatic import DEFAULT_GPU_MINUTES
+
+    recipe = get_recipe(store.data_dir, recipe_name)
+    spec, settings, meta = plan_run(store, recipe, cast, options)
+    options = options or {}
+    if options.get("project"):
+        store.get_project(options["project"])
+    minutes = {**DEFAULT_GPU_MINUTES, **(settings.get("gpu_minutes") or {})}
+    shots, stills, clips = [], 0, 0
+    for shot in spec.get("shots") or []:
+        reused_still = bool(shot.get("reuse_asset_ids"))
+        clip_keys = [prod.shot_key(shot["key"], v) for v in shot.get("clips") or []]
+        reused_clips = [k for k in clip_keys if (shot.get("reuse_clips") or {}).get(k)]
+        to_render = [k for k in clip_keys if k not in reused_clips]
+        if not reused_still:
+            stills += int(shot.get("variants") or 1)
+        clips += len(to_render)
+        row: dict[str, Any] = {"key": shot["key"], "lead": bool(shot.get("lead")),
+                               "still": "reused" if reused_still else f"generate x{shot.get('variants') or 1}"}
+        if reused_clips:
+            row["clips_reused"] = reused_clips
+        if to_render:
+            row["clips_to_render"] = to_render
+        shots.append(row)
+    reference = 0
+    lead = spec.get("lead") or {}
+    if spec.get("reference"):
+        canonical = None
+        if lead.get("character_id"):
+            try:
+                canonical = store.get_character(lead["character_id"]).get("canonical_asset_id")
+            except NotFound:
+                canonical = None
+        reference = 0 if canonical else int(spec["reference"].get("count") or 1)
+    cards = len((spec.get("photocards") or {}).get("looks") or [])
+    generated = stills + reference + cards
+    song = spec.get("song") or {}
+    return {
+        "dry_run": True, "recipe": recipe.get("name"), "title": spec.get("title"), "lead": lead.get("name"),
+        "character_id": lead.get("character_id"),
+        "song": "reused" if song.get("asset_id") else ("composed" if song else "none"),
+        "reused_frames": meta["reused_frames"], "shots": shots,
+        "stills_to_generate": generated, "reference_sheet_images": reference, "photocard_photos": cards,
+        "clips_to_render": clips,
+        "gpu_minutes_estimate": round(generated * minutes["still"] + clips * minutes["clip"], 1),
+        "gpu_minutes_note": "stills and Wan clips only (the song's composition is not included)" if song and not song.get("asset_id")
+        else "stills and Wan clips",
+        "animatic_review": bool(settings.get("animatic")) and not settings.get("animatic_autocontinue"),
+        "warnings": (recipe.get("warnings") or [])[:12], "notes": meta["notes"],
+    }
 
 
 def run_recipe(store: Store, recipe_name: str, cast: Any, name: Optional[str] = None,

@@ -295,3 +295,81 @@ def test_scripted_production_is_checked_read_only(store, project):
     assert saved["qa"]["last"]["items"][0]["codes"] == ["flat"] and "4" in saved["done"]  # the script's steps are kept
     with pytest.raises(qa.QAError):
         qa.run_qa(store, None, "farol", "frames", dry_run=False)
+
+
+# ------------------------------------------------------ fixes and features
+
+def test_the_retry_cap_is_per_item_across_qa_passes(store, project):
+    pid = project["id"]
+    state = _production(store, project, [{"key": "1", "prompt": "a doorway", "seed": 200}])
+    state["done"] = {"frames": {"complete": True, "items": {"1": {"variants": [a := _save(store, pid, flat())], "best": a}}}}
+    prod.save_state(store.data_dir, state)
+    studio = FakeStudio(store, lambda body: [flat()])
+    run = prod.Run(store, studio, state["slug"], lambda *a, **k: None)
+    first = qa.run_stage_with_policy(run, "frames", qa.QA(store, run.state, None))
+    assert len(studio.calls) == 2 and first["items"][0]["retries"] == 2
+    # another pass (a second studio_qa_run, the inline hook when the stage runs again) retries no more
+    second = qa.run_stage_with_policy(run, "frames", qa.QA(store, run.state, None))
+    assert len(studio.calls) == 2 and second["items"][0]["verdict"] == "fail" and second["items"][0]["retries"] == 2
+    assert [e["event"] for e in run.state["lineage"]].count("qa_gave_up") == 2
+    assert qa.prior_retries(run.state, "frames", "1") == 2
+    # the user changing the shot starts the count again
+    prod.log(run.state, "review", "changed_shot", key="1", change={"regenerate": True})
+    assert qa.prior_retries(run.state, "frames", "1") == 0
+    qa.run_stage_with_policy(run, "frames", qa.QA(store, run.state, None))
+    assert len(studio.calls) == 4
+
+
+def test_inline_qa_checks_only_what_the_stage_made(store, project):
+    pid = project["id"]
+    state = _production(store, project, [{"key": "1", "prompt": "a street", "seed": 1}, {"key": "2", "prompt": "a door", "seed": 2}])
+    # shot 2's still was picked by the user (and fails the flat check); shot 1 is made now
+    state["done"] = {"frames": {"complete": False, "items": {"2": {"variants": [b := _save(store, pid, flat())], "best": b}}}}
+    prod.save_state(store.data_dir, state)
+    studio = FakeStudio(store, lambda body: [scene(seed=body["seed"])])
+    run = prod.Run(store, studio, state["slug"], lambda *a, **k: None)
+    run.stage = "frames"
+    run.stage_frames()
+    assert run.made["frames"] == {"1"}
+    qa.inline_hook(run, "frames", None)
+    assert [c["prompt"] for c in studio.calls] == ["a street, night lamps"]  # shot 2 untouched
+    assert run.state["done"]["frames"]["items"]["2"]["best"] == b
+    assert [i["key"] for i in run.state["qa"]["last"]["items"]] == ["1"]
+    run.made["frames"] = set()
+    qa.inline_hook(run, "frames", None)  # nothing new: nothing checked
+    assert len(run.state["qa"]["history"]) == 1
+
+
+def test_a_qa_retry_regenerates_a_shot_reused_from_a_recipe(store, project):
+    pid = project["id"]
+    src = _save(store, pid, flat())
+    state = _production(store, project, [{"key": "1", "prompt": "a street", "seed": 5, "clips": [0],
+                                          "reuse_asset_ids": [src], "reuse_clips": {"1": "a_old"}}])
+    prod.save_state(store.data_dir, state)
+    studio = FakeStudio(store, lambda body: [scene(seed=body["seed"])])
+    run = prod.Run(store, studio, state["slug"], lambda *a, **k: None)
+    run.stage = "frames"
+    run.stage_frames()
+    assert studio.calls == [] and run.state["done"]["frames"]["items"]["1"]["reused"] is True
+    card = qa.run_stage_with_policy(run, "frames", qa.QA(store, run.state, None))
+    assert len(studio.calls) == 1 and card["items"][0]["verdict"] == "pass"
+    shot = run.spec["shots"][0]
+    assert "reuse_asset_ids" not in shot and "reuse_clips" not in shot
+
+
+def test_a_read_only_check_while_the_production_runs_is_kept(store, project):
+    pid = project["id"]
+    state = _production(store, project, [{"key": "1", "prompt": "a street"}])
+    state["status"] = "running"
+    state["done"] = {"frames": {"complete": True, "items": {"1": {"variants": [a := _save(store, pid, flat())], "best": a}}}}
+    prod.save_state(store.data_dir, state)
+    run = prod.Run(store, FakeStudio(store, lambda body: []), state["slug"], lambda *a, **k: None)
+    qa.record(run.state, qa.scorecard(state["slug"], "character", [], "no vision model", False))  # the run's own pass
+    out = qa.check_production(store, state["slug"], "frames")  # meanwhile, on the cpu lane
+    assert out["scorecard"]["failed"] == 1 and out["requeue"] is False
+    run.state["done"]["frames"]["items"]["1"]["note"] = "the run goes on"
+    run.save()
+    saved = prod.load_state(store.data_dir, state["slug"])
+    assert saved["qa"]["last"]["stage"] == "frames" and saved["qa"]["last"]["dry_run"] is True
+    assert {h["stage"] for h in saved["qa"]["history"]} == {"character", "frames"}
+    assert saved["done"]["frames"]["items"]["1"]["note"] == "the run goes on"
