@@ -159,6 +159,23 @@ def test_voice_transcribe_upload(client):
     assert "srt" in body and "vtt" in body and "txt" in body
 
 
+def test_voice_transcribe_upload_rejects_oversized_file(client, data_dir, monkeypatch):
+    # unlike voice_voices_upload and voice_dictate, this endpoint had no
+    # size cap at all: an unbounded client could write an arbitrarily large
+    # file to disk before transcription even started.
+    from prosperos_hoard import engine
+
+    monkeypatch.setattr(engine, "MAX_MEDIA_BYTES", 1024)
+    c, app, _allowed = client
+    files = {"file": ("clip.wav", _wav_bytes(seconds=5.0), "audio/wav")}  # well over 1024 bytes
+    resp = c.post("/api/voice/transcribe/upload", files=files)
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "too_large"
+    # the partial upload must not be left behind in tmp/uploads
+    leftovers = list((data_dir / "tmp" / "uploads").glob("*"))
+    assert leftovers == []
+
+
 def test_voice_dictate(client):
     c, app, _allowed = client
     files = {"file": ("clip.wav", _wav_bytes(), "audio/wav")}
