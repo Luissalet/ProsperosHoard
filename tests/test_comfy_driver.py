@@ -137,6 +137,19 @@ def test_template_hash_changes_with_the_graph():
     assert comfy_driver.template_hash(workflow, spec) != h1
 
 
+def test_style_checkpoint_is_a_preference_an_explicit_one_a_requirement():
+    workflow, spec = comfy_driver.load_template("sdxl_txt2img")
+    info = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["juggernautXL_v9.safetensors"]]}}}}
+    out = comfy_driver.validate_against_object_info(spec, {"checkpoint": None, "checkpoint_preferred": "sd_xl_base_1.0.safetensors"},
+                                                    info, None)
+    assert out["checkpoint"] == "juggernautXL_v9.safetensors" and "checkpoint_preferred" not in out
+    info2 = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["a.safetensors", "sd_xl_base_1.0.safetensors"]]}}}}
+    out = comfy_driver.validate_against_object_info(spec, {"checkpoint_preferred": "sd_xl_base_1.0"}, info2, None)
+    assert out["checkpoint"] == "sd_xl_base_1.0.safetensors"
+    with pytest.raises(comfy_driver.ValidationError):
+        comfy_driver.validate_against_object_info(spec, {"checkpoint": "sd_xl_base_1.0.safetensors"}, info, None)
+
+
 # ---------------------------------------------- param map for custom imports
 
 def test_propose_map_walks_through_guidance_nodes_and_infers_vram():

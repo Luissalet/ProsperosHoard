@@ -574,10 +574,17 @@ def validate_against_object_info(spec: dict[str, Any], values: dict[str, Any], o
     """Raise ValidationError with an actionable message when the workflow
     would fail on the live ComfyUI: a node class that is not installed, a
     checkpoint, sampler or scheduler it does not know. Returns `values` with
-    the checkpoint resolved to the exact installed file name."""
-    if not object_info:
-        return values
+    the checkpoint resolved to the exact installed file name.
+
+    `values["checkpoint_preferred"]` (a style preset's checkpoint) is only
+    a preference: used when installed, else the template's default or a
+    same-family checkpoint is used instead. It is never returned."""
     values = dict(values)
+    preferred = values.pop("checkpoint_preferred", None)
+    if not object_info:
+        if preferred and not values.get("checkpoint"):
+            values["checkpoint"] = preferred
+        return values
     if workflow:
         missing = sorted({n["class_type"] for n in workflow.values() if n["class_type"] not in object_info})
         if missing:
@@ -592,7 +599,11 @@ def validate_against_object_info(spec: dict[str, Any], values: dict[str, Any], o
         available = _choices(object_info, checkpoint_node, "ckpt_name")
         requested = values.get("checkpoint")
         default = default_value(workflow or {}, spec, "checkpoint")
-        resolved = resolve_checkpoint(requested, available, default, spec.get("vram_class", "sdxl"))
+        resolved = None
+        if not requested and preferred:
+            resolved = resolve_checkpoint(preferred, available, None, spec.get("vram_class", "sdxl"))
+        if resolved is None:
+            resolved = resolve_checkpoint(requested, available, default, spec.get("vram_class", "sdxl"))
         if resolved is None:
             raise ValidationError(
                 f"checkpoint '{requested or default}' not in ComfyUI; you have: {', '.join(available) or 'none'}",

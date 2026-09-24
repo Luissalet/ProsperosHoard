@@ -794,7 +794,10 @@ def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[
     t = dict(template_defaults or {})
     d = {} if t else (params.get("style_defaults") or {})
     values = {
-        "checkpoint": _first(params.get("checkpoint"), d.get("checkpoint")),
+        # only an explicit checkpoint is a requirement; a style preset's is
+        # a preference (see comfy_driver.validate_against_object_info)
+        "checkpoint": params.get("checkpoint"),
+        "checkpoint_preferred": None if params.get("checkpoint") else d.get("checkpoint"),
         "positive_prompt": params["positive_prompt"],
         "negative_prompt": params.get("negative_prompt") or t.get("negative_prompt") or "",
         "width": _first(params.get("width"), (params.get("style_defaults") or {}).get("width"), t.get("width"), 1024),
