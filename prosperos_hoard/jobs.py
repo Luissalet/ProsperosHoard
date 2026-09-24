@@ -154,7 +154,16 @@ class JobQueue:
                 self._wake[lane].wait(timeout=1.0)
                 self._wake[lane].clear()  # a GPU worker that misses a wake-up finds the job on its next 1 s poll
                 continue
-            self._run_job(job)
+            try:
+                self._run_job(job)
+            except Exception:  # a db error while recording the outcome must not kill the lane's worker
+                logger.exception("job %s: could not record its outcome", job["id"])
+                try:
+                    self.store.update_job(job["id"], state="failed", message="internal error while recording the result",
+                                          finished_at=now_iso())
+                except Exception:  # noqa: BLE001
+                    pass
+                self._stop.wait(1.0)
 
     def _claim(self, lane: str) -> Optional[dict[str, Any]]:
         """Take the oldest queued job of a lane; with several GPU workers the
@@ -167,8 +176,8 @@ class JobQueue:
                 job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES)
             else:
                 job = self.store.next_queued_job(lane)
-            if job is not None:
-                self.store.update_job(job["id"], state="running", started_at=now_iso(), message="starting")
+            if job is not None and not self.store.transition_job(job["id"], "running", ("queued",), "starting"):
+                return None  # cancelled between the read and the claim
             return job
 
     def _run_job(self, job: dict[str, Any]) -> None:
@@ -179,7 +188,6 @@ class JobQueue:
                                    finished_at=now_iso())
             return
         progress = Progress(self.store, job_id)
-        self.store.update_job(job_id, state="running", started_at=now_iso(), message="starting")
         first_wait: Optional[float] = None
         while True:
             try:
@@ -198,7 +206,8 @@ class JobQueue:
                     return
                 if self._stop.is_set():
                     return  # stays waiting_gpu; requeued on next boot
-                self.store.update_job(job_id, state="running", message="retrying")
+                if not self.store.transition_job(job_id, "running", ("waiting_gpu",), "retrying"):
+                    return  # cancelled between the last check and now
                 continue
             except JobCancelled:
                 self.store.update_job(job_id, state="cancelled", message="cancelled", finished_at=now_iso())

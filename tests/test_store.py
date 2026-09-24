@@ -115,3 +115,54 @@ def test_ids_sort_in_creation_order_within_a_millisecond():
 
     ids = [new_id("job") for _ in range(5000)]
     assert ids == sorted(ids) and len(set(ids)) == len(ids)
+
+
+def test_a_failed_update_is_rolled_back_and_releases_the_write_lock(tmp_path):
+    """A NotFound half-way through an update used to leave the thread's
+    transaction open: the name change stayed pending and every other
+    thread's write waited on SQLite's lock."""
+    import threading
+
+    from prosperos_hoard.store import NotFound, Store
+
+    store = Store(tmp_path)
+    project = store.create_project("A")
+    with pytest.raises(NotFound):
+        store.update_project(project["id"], name="B", cover_asset_id="a_missing")
+    assert not store.conn.in_transaction
+    assert store.get_project(project["id"])["name"] == "A"
+
+    errors: list[BaseException] = []
+
+    def other_thread():
+        try:
+            store.create_project("C")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t = threading.Thread(target=other_thread)
+    t.start()
+    t.join(timeout=10)
+    assert not errors
+
+
+def test_cancel_wins_over_a_late_claim(tmp_path):
+    from prosperos_hoard.store import Store
+
+    store = Store(tmp_path)
+    job = store.create_job("generate_image", "gpu", {}, None, None)
+    store.request_cancel(job["id"])
+    # a worker that read the job before the cancel must not revive it
+    assert not store.transition_job(job["id"], "running", ("queued",), "starting")
+    assert store.get_job(job["id"])["state"] == "cancelled"
+
+
+def test_restart_does_not_requeue_a_job_the_user_cancelled(tmp_path):
+    from prosperos_hoard.store import Store
+
+    store = Store(tmp_path)
+    job = store.create_job("generate_image", "gpu", {}, None, None)
+    store.update_job(job["id"], state="running")
+    store.request_cancel(job["id"])
+    store.requeue_running_jobs()
+    assert store.get_job(job["id"])["state"] == "cancelled"

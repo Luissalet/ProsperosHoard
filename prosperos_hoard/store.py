@@ -8,6 +8,7 @@ contract's "compact tool outputs" rule.
 
 from __future__ import annotations
 
+import functools
 import re
 import sqlite3
 from pathlib import Path
@@ -168,21 +169,24 @@ class Store:
 
     def update_project(self, project_id: str, name: str | None = None, brief: str | None = None,
                        cover_asset_id: str | None = None, image_engine: str | None = None) -> dict[str, Any]:
+        # every check before the first write: a half-applied update is never committed
         self.get_project(project_id)
-        if name is not None:
-            if not name.strip():
-                raise ValueError("project name cannot be empty")
-            self.conn.execute("UPDATE projects SET name=? WHERE id=?", (name.strip()[:120], project_id))
-        if brief is not None:
-            self.conn.execute("UPDATE projects SET brief=? WHERE id=?", (brief[:4000], project_id))
+        if name is not None and not name.strip():
+            raise ValueError("project name cannot be empty")
         if cover_asset_id is not None:
             self.get_asset(cover_asset_id)
-            self.conn.execute("UPDATE projects SET cover_asset_id=? WHERE id=?", (cover_asset_id, project_id))
         if image_engine is not None:
             from .engine import IMAGE_ENGINES  # local import: engine.py imports Store at module level
 
             if image_engine not in IMAGE_ENGINES:
                 raise ValueError(f"image_engine must be one of {', '.join(IMAGE_ENGINES)}")
+        if name is not None:
+            self.conn.execute("UPDATE projects SET name=? WHERE id=?", (name.strip()[:120], project_id))
+        if brief is not None:
+            self.conn.execute("UPDATE projects SET brief=? WHERE id=?", (brief[:4000], project_id))
+        if cover_asset_id is not None:
+            self.conn.execute("UPDATE projects SET cover_asset_id=? WHERE id=?", (cover_asset_id, project_id))
+        if image_engine is not None:
             self.conn.execute("UPDATE projects SET image_engine=? WHERE id=?", (image_engine, project_id))
         self.conn.commit()
         self.touch_project(project_id)
@@ -574,13 +578,13 @@ class Store:
 
     def update_board(self, board_id: str, name: str | None = None, kind: str | None = None) -> dict[str, Any]:
         self.get_board(board_id)
+        if name is not None and not name.strip():
+            raise ValueError("a board needs a name")
+        if kind is not None and kind not in ("moodboard", "storyboard", "shotlist"):
+            raise ValueError("board kind must be moodboard, storyboard or shotlist")
         if name is not None:
-            if not name.strip():
-                raise ValueError("a board needs a name")
             self.conn.execute("UPDATE boards SET name=?, updated_at=? WHERE id=?", (name.strip()[:80], now_iso(), board_id))
         if kind is not None:
-            if kind not in ("moodboard", "storyboard", "shotlist"):
-                raise ValueError("board kind must be moodboard, storyboard or shotlist")
             self.conn.execute("UPDATE boards SET kind=?, updated_at=? WHERE id=?", (kind, now_iso(), board_id))
         self.conn.commit()
         return self.get_board(board_id)
@@ -738,7 +742,13 @@ class Store:
         return self.get_job(job_id)
 
     def requeue_running_jobs(self) -> int:
-        """On boot: any job left 'running' or 'waiting_gpu' after a restart goes back to queued."""
+        """On boot: any job left 'running' or 'waiting_gpu' after a restart goes back to queued,
+        except one the user had asked to cancel, which is cancelled."""
+        self.conn.execute(
+            "UPDATE jobs SET state='cancelled', message='cancelled', finished_at=?, updated_at=? "
+            "WHERE state IN ('running','waiting_gpu') AND cancel_requested=1",
+            (now_iso(), now_iso()),
+        )
         cur = self.conn.execute(
             "UPDATE jobs SET state='queued', progress=0.0, message='requeued after restart', cancel_requested=0, updated_at=? "
             "WHERE state IN ('running','waiting_gpu')",
@@ -750,12 +760,32 @@ class Store:
     def request_cancel(self, job_id: str) -> dict[str, Any]:
         """Queued/waiting jobs are cancelled at once; a running job is
         flagged and its handler stops at the next checkpoint."""
-        job = self.get_job(job_id)
-        if job["state"] in ("queued", "waiting_gpu"):
-            return self.update_job(job_id, state="cancelled", message="cancelled before it started", finished_at=now_iso())
-        if job["state"] == "running":
-            return self.update_job(job_id, cancel_requested=1, message="cancelling...")
-        return job
+        self.get_job(job_id)
+        now = now_iso()
+        # conditional updates: a worker claiming the job at the same moment
+        # either sees it cancelled or the running job sees the flag
+        cur = self.conn.execute(
+            "UPDATE jobs SET state='cancelled', message='cancelled before it started', finished_at=?, updated_at=? "
+            "WHERE id=? AND state IN ('queued','waiting_gpu')", (now, now, job_id))
+        if not cur.rowcount:
+            self.conn.execute(
+                "UPDATE jobs SET cancel_requested=1, message='cancelling...', updated_at=? WHERE id=? AND state='running'",
+                (now, job_id))
+        self.conn.commit()
+        return self.get_job(job_id)
+
+    def transition_job(self, job_id: str, to_state: str, from_states: tuple[str, ...], message: str) -> bool:
+        """Move a job to `to_state` only if it is still in one of `from_states`
+        (a queue claim or a retry must not undo a cancel). True if it moved."""
+        now = now_iso()
+        extra = ", started_at=?" if to_state == "running" and "queued" in from_states else ""
+        params: list[Any] = [to_state, message, now] + ([now] if extra else [])
+        cur = self.conn.execute(
+            f"UPDATE jobs SET state=?, message=?, updated_at=?{extra} "
+            f"WHERE id=? AND state IN ({','.join('?' * len(from_states))})",
+            [*params, job_id, *from_states])
+        self.conn.commit()
+        return cur.rowcount == 1
 
     def is_cancel_requested(self, job_id: str) -> bool:
         row = self.conn.execute("SELECT cancel_requested, state FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -881,3 +911,26 @@ class Store:
             d["ok"] = bool(d["ok"])
             out.append(d)
         return out
+
+
+def _rollback_on_error(fn):
+    """A method that fails half-way (a NotFound after an UPDATE, a constraint
+    error) must not leave its thread's implicit transaction open: the
+    connection would hold SQLite's write lock until that pool thread happens
+    to commit something else - every other writer times out meanwhile - and
+    that later commit would save the half-applied change."""
+    @functools.wraps(fn)
+    def wrapper(self: "Store", *args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(self, *args, **kwargs)
+        except BaseException:
+            conn = self.conn
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+    return wrapper
+
+
+for _name, _value in list(vars(Store).items()):
+    if callable(_value) and not isinstance(_value, (staticmethod, classmethod, type)) and _name != "__init__":
+        setattr(Store, _name, _rollback_on_error(_value))
