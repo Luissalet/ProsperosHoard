@@ -216,6 +216,27 @@ def test_translate_segments_falls_back_to_source_on_empty_reply():
     assert out == ["keep me"]
 
 
+@pytest.mark.parametrize("reply,expected", [
+    ('"Hola mundo"', "Hola mundo"),
+    ("'Hola mundo'", "Hola mundo"),
+    ("“Hola mundo”", "Hola mundo"),  # curly double quotes
+    ('Dijo "hola" ayer', 'Dijo "hola" ayer'),  # an inner quote is not a wrapping pair - kept as-is
+])
+def test_translate_segments_strips_wrapping_quotes_despite_prompt(reply, expected):
+    # the system prompt asks for "no quotes" but a real model sometimes
+    # wraps its reply anyway; a quote that is only part of the dialogue
+    # itself (not wrapping the whole line) must be left alone.
+    out = db.translate_segments(lambda m: reply, [{"text": "source"}], "Spanish")
+    assert out == [expected]
+
+
+def test_translate_segments_collapses_embedded_newlines():
+    # a garbled multi-line reply must not leave a blank line embedded in
+    # the translated text, which would break the SRT block format.
+    out = db.translate_segments(lambda m: "Hola\n\nmundo", [{"text": "source"}], "Spanish")
+    assert out == ["Hola mundo"]
+
+
 def test_translate_segments_propagates_unavailable():
     def chat_fn(messages):
         raise Unavailable("llm", ["no local LLM reachable"])
