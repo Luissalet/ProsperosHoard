@@ -533,18 +533,25 @@ class Run:
         the production (after the others finish or are cancelled); a
         cancelled production cancels what it queued."""
         pending = self.pending(stage)
+        try:
+            self._wait_loop(stage, pending, on_done, label)
+        except JobCancelled:
+            for job_id in list(pending.values()):
+                try:
+                    self.studio.cancel(job_id)
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+            pending.clear()  # cancelled: a resume queues them again
+            self.save()
+            raise
+
+    def _wait_loop(self, stage: str, pending: dict[str, str], on_done: Callable[[str, dict[str, Any]], None],
+                   label: str) -> None:
         total = max(1, len(pending))
         failures: list[str] = []
         while pending:
-            try:
-                self.progress.check_cancel() if hasattr(self.progress, "check_cancel") else None
-            except JobCancelled:
-                for job_id in list(pending.values()):
-                    try:
-                        self.studio.cancel(job_id)
-                    except Exception:  # noqa: BLE001 - best effort
-                        pass
-                raise
+            if hasattr(self.progress, "check_cancel"):
+                self.progress.check_cancel()
             for key, job_id in list(pending.items()):
                 try:
                     job = self.studio.job(job_id)
