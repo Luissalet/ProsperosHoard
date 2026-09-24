@@ -1693,6 +1693,20 @@ def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> di
     return store.update_timeline(timeline_id, **fields)
 
 
+def render_range(tl: dict[str, Any], value: Any) -> Optional[list[float]]:
+    """A render's optional [start_s, end_s], checked against the timeline's
+    length before the job is queued (None = the whole edit)."""
+    if value is None:
+        return None
+    visual = next((t for t in tl["tracks"] if t["type"] == "visual"), {"clips": []})
+    total = sum(float(c["duration_s"]) for c in visual["clips"])
+    try:
+        window = video_mod.range_window(value, total)
+    except video_mod.RenderError as exc:
+        raise EngineError("bad_range", str(exc)) from None
+    return [round(window[0], 3), round(window[1], 3)] if window else None
+
+
 def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
     timeline_id = params["timeline_id"]
@@ -1709,23 +1723,31 @@ def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], pro
     started = time.monotonic()
     try:
         result = video_mod.render_timeline(tl, asset_path_for, work_dir, out_path, quality=quality, progress=progress,
-                                           should_cancel=getattr(progress, "cancelled", None))
+                                           should_cancel=getattr(progress, "cancelled", None),
+                                           time_range=params.get("range"))
     except video_mod.RenderCancelled:
         out_path.unlink(missing_ok=True)
         raise JobCancelled("cancelled") from None
     except video_mod.RenderError as exc:
         out_path.unlink(missing_ok=True)
         raise EngineError("render_failed", str(exc)) from None
+    except BaseException:
+        out_path.unlink(missing_ok=True)  # a cancel through progress, a database error: no half-written mp4
+        raise
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
     thumb = _video_thumbnail(out_path, store.path_for_thumb(out_id))
     recipe = {"operation": "render", "timeline_id": timeline_id, "quality": quality, "timeline_updated_at": tl["updated_at"],
               "elapsed_s": round(time.monotonic() - started, 2), "created_at": now_iso()}
+    label = quality
+    if result.get("range"):
+        recipe["range"] = result["range"]
+        label = f"{quality}, {result['range'][0]:g}-{result['range'][1]:g} s"
     asset = store.create_asset(
         project_id=tl["project_id"], kind="video", file_path=_rel(store, out_path),
         mime="video/mp4", width=result["width"], height=result["height"], duration_s=result["duration_s"],
         thumb_path=thumb, source="rendered", recipe=recipe, asset_id=out_id,
-        name=_clip(f"{tl['name']} ({quality})", 100), tags=["render", quality],
+        name=_clip(f"{tl['name']} ({label})", 100), tags=["render", quality],
     )
     return {"asset_id": asset["id"], "asset_ids": [asset["id"]], "duration_s": result["duration_s"]}
 

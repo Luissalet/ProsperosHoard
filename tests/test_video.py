@@ -470,6 +470,241 @@ def test_ken_burns_zoom_runs_from_start_to_end(tmp_path, zs, ze):
     assert all(step * (b - a) >= -0.03 for a, b in zip(widths, widths[1:]))  # monotonic, no jump
 
 
+def _solid_stills(tmp_path, colours):
+    from PIL import Image
+
+    paths = {}
+    for k, rgb in enumerate(colours):
+        paths[f"i{k}"] = tmp_path / f"still{k}.png"
+        Image.new("RGB", (64, 64), rgb).save(paths[f"i{k}"])
+    return paths
+
+
+def _still_clip(asset_id, duration_s, transition=None):
+    return {"asset_id": asset_id, "kind": "image", "duration_s": duration_s, "trim_start_s": 0.0,
+            "ken_burns": {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"},
+            "transition_in": transition or {"type": "cut", "duration_s": 0.0}}
+
+
+def _rgb_frames(path, width, height):
+    import subprocess
+
+    import numpy as np
+
+    raw = subprocess.run([FFMPEG, "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, height, width, 3).astype(int)
+
+
+def _no_blending_join(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("a blending join was used where the concat demuxer should do")
+
+    monkeypatch.setattr(video, "build_xfade_cmd", boom)
+    monkeypatch.setattr(video, "build_overlay_fade_cmd", boom)
+
+
+@needs_ffmpeg
+def test_dips_and_flashes_are_clip_fades_joined_by_concat(tmp_path, monkeypatch):
+    """Cuts, dips and flashes stay on the concat (-c copy) path: the dip is
+    a fade out at the end of the outgoing clip and a fade in at the start
+    of the incoming one, the darkest/brightest frames on the cut itself."""
+    _no_blending_join(monkeypatch)
+    paths = _solid_stills(tmp_path, [(200, 40, 40), (40, 200, 40), (40, 40, 200)])
+    timeline = {"width": 64, "height": 64, "fps": 10, "tracks": [{"type": "visual", "clips": [
+        _still_clip("i0", 1.0),
+        _still_clip("i1", 1.0, {"type": "dip_black", "duration_s": 0.4}),
+        _still_clip("i2", 1.0, {"type": "flash_white", "duration_s": 0.4}),
+    ]}], "finishing": {"glitch_on_downbeats": True}}
+    out = tmp_path / "out.mp4"
+    glitches = []
+    real_finishing_vf = video.build_finishing_vf
+
+    def spy(finishing, w, h, glitch_points=None):
+        glitches.extend(glitch_points or [])
+        return real_finishing_vf(finishing, w, h, glitch_points)
+
+    monkeypatch.setattr(video, "build_finishing_vf", spy)
+    result = video.render_timeline(timeline, lambda a: paths[a], tmp_path / "work", out, quality="final")
+    frames = _rgb_frames(out, 64, 64)
+    assert len(frames) == 30 and result["duration_s"] == pytest.approx(3.0)
+    luma = frames.mean(axis=(1, 2, 3))
+    steady = luma[5]
+    # a dip to black centred on the cut at frame 10: darkest on the cut itself
+    assert luma[9] < steady * 0.7 and luma[10] < 10 and luma[11] < steady * 0.7 and luma[8] > steady * 0.9
+    assert frames[5, 32, 32, 0] > 150 and frames[15, 32, 32, 1] > 150  # clips keep their colour mid-way
+    assert luma[19] > steady * 1.5 and luma[20] > 245 and luma[21] > steady * 1.5  # the flash, on the cut at 20
+    assert frames[25, 32, 32, 2] > 150
+    assert glitches == [(2.0, 1.0)]  # the flash still gets its glitch
+
+
+@needs_ffmpeg
+def test_crossfade_with_a_dip_keeps_length_and_dips_on_the_cut(tmp_path):
+    """With a crossfade the clips go through the blending join; a dip in the
+    same timeline is still the clip fades (a one-frame blend at its cut)."""
+    paths = _solid_stills(tmp_path, [(200, 40, 40), (40, 200, 40), (40, 40, 200)])
+    timeline = {"width": 64, "height": 64, "fps": 10, "tracks": [{"type": "visual", "clips": [
+        _still_clip("i0", 1.0),
+        _still_clip("i1", 1.0, {"type": "crossfade", "duration_s": 0.3}),
+        _still_clip("i2", 1.0, {"type": "dip_black", "duration_s": 0.4}),
+    ]}]}
+    out = tmp_path / "out.mp4"
+    video.render_timeline(timeline, lambda a: paths[a], tmp_path / "work", out, quality="final")
+    frames = _rgb_frames(out, 64, 64)
+    luma = frames.mean(axis=(1, 2, 3))
+    assert len(frames) == 30
+    assert frames[5, 32, 32, 0] > 150 and frames[15, 32, 32, 1] > 150 and frames[25, 32, 32, 2] > 150
+    assert luma[20] < 15 and luma[17] > luma[5] * 0.9  # black on the cut, not before
+
+
+@needs_ffmpeg
+def test_first_clip_transition_does_not_force_a_blending_join(tmp_path, monkeypatch):
+    """transition_in of clip 0 is never rendered, so it must not push an
+    all-cut timeline onto the slow blending join."""
+    _no_blending_join(monkeypatch)
+    paths = _solid_stills(tmp_path, [(200, 40, 40), (40, 200, 40)])
+    timeline = {"width": 64, "height": 64, "fps": 10, "tracks": [{"type": "visual", "clips": [
+        _still_clip("i0", 1.0, {"type": "crossfade", "duration_s": 0.3}), _still_clip("i1", 1.0)]}]}
+    video.render_timeline(timeline, lambda a: paths[a], tmp_path / "work", tmp_path / "o.mp4")
+    assert (tmp_path / "o.mp4").is_file()
+
+
+def _write_tone(path, seconds, sr=22050):
+    import wave
+
+    import numpy as np
+
+    sig = (0.1 * np.sin(2 * np.pi * 220 * np.arange(int(sr * seconds)) / sr) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(sig.tobytes())
+
+
+@needs_ffmpeg
+def test_edit_longer_than_the_song_keeps_its_last_shots(tmp_path):
+    """-shortest cut the video at the song's end while duration_s reported
+    the edit's length; the song is now padded with silence instead."""
+    from prosperos_hoard import audio as audio_mod
+
+    paths = _solid_stills(tmp_path, [(200, 40, 40), (40, 200, 40)])
+    paths["song"] = tmp_path / "song.wav"
+    _write_tone(paths["song"], 1.2)
+    timeline = {"width": 64, "height": 64, "fps": 10, "audio_asset_id": "song", "tracks": [{"type": "visual", "clips": [
+        _still_clip("i0", 1.0), _still_clip("i1", 1.5)]}]}
+    out = tmp_path / "o.mp4"
+    result = video.render_timeline(timeline, lambda a: paths[a], tmp_path / "work", out, quality="final")
+    assert result["duration_s"] == pytest.approx(2.5)
+    assert audio_mod.probe_duration_s(out) == pytest.approx(2.5, abs=0.1)
+    assert len(_rgb_frames(out, 64, 64)) == 25
+
+
+def test_mux_cmd_pads_the_song_and_seeks_it_for_a_range():
+    cmd = video.build_mux_cmd("ffmpeg", Path("v.mp4"), Path("song.wav"), None, Path("o.mp4"), "ultrafast", 28, "128k",
+                              duration_s=12.5, audio_start_s=30.0)
+    assert "-shortest" not in cmd
+    assert cmd[cmd.index("-af") + 1] == "apad" and cmd[cmd.index("-t") + 1] == "12.500"
+    ss = cmd.index("-ss")
+    assert cmd[ss + 1] == "30.000" and cmd[ss + 2:ss + 4] == ["-i", "song.wav"]  # an input option on the song only
+    assert cmd.index("-i") < ss  # the video input is not seeked
+
+
+@needs_ffmpeg
+def test_range_render_trims_clips_shifts_lyrics_and_seeks_the_song(tmp_path):
+    paths = _solid_stills(tmp_path, [(200, 40, 40), (40, 200, 40), (40, 40, 200)])
+    paths["song"] = tmp_path / "song.wav"
+    _write_tone(paths["song"], 3.0)
+    timeline = {"width": 64, "height": 64, "fps": 10, "audio_asset_id": "song", "tracks": [
+        {"type": "visual", "clips": [_still_clip("i0", 1.0), _still_clip("i1", 1.0), _still_clip("i2", 1.0)]},
+        {"type": "lyrics", "clips": [{"text": "before", "start_s": 0.0, "end_s": 0.4},
+                                     {"text": "chorus", "start_s": 1.2, "end_s": 2.8}]}]}
+    out = tmp_path / "o.mp4"
+    work = tmp_path / "work"
+    result = video.render_timeline(timeline, lambda a: paths[a], work, out, quality="final", time_range=[0.5, 2.3])
+    assert result["duration_s"] == pytest.approx(1.8) and result["range"] == [0.5, 2.3]
+    frames = _rgb_frames(out, 64, 64)
+    assert len(frames) == 18
+    colour = [int(f[32, 32].argmax()) for f in frames]
+    assert colour == [0] * 5 + [1] * 10 + [2] * 3
+    ass = (work / "lyrics.ass").read_text(encoding="utf-8")
+    assert "before" not in ass and "Dialogue: 0,0:00:00.70,0:00:01.80,Lyrics,,0,0,0,,chorus" in ass
+
+
+def test_range_is_validated():
+    with pytest.raises(video.RenderError):
+        video.range_window([2.0, 1.0], 10.0)
+    with pytest.raises(video.RenderError):
+        video.range_window([float("nan"), 1.0], 10.0)
+    with pytest.raises(video.RenderError):
+        video.range_window([9.95, 20.0], 10.0)  # less than MIN_RANGE_S left
+    with pytest.raises(video.RenderError):
+        video.range_window("chorus", 10.0)
+    assert video.range_window([0, 99], 10.0) is None  # the whole edit
+    assert video.range_window([2, 99], 10.0) == (2.0, 10.0)
+
+
+def test_zoompan_progress_window_continues_the_move():
+    z, _x, _y = video._zoompan_expr(1.0, 1.2, "none", 11, progress_range=(0.5, 1.0))
+    assert z == "1.000000+(0.200000)*(0.500000+0.500000*on/10)"
+
+
+@needs_ffmpeg
+def test_progress_callback_error_kills_ffmpeg(tmp_path, monkeypatch):
+    """on_progress raising (a job cancelled through its progress callback)
+    used to leave ffmpeg running and writing the output."""
+    procs = []
+    real_popen = video.procutil.popen
+
+    def spy(*a, **k):
+        procs.append(real_popen(*a, **k))
+        return procs[-1]
+
+    monkeypatch.setattr(video.procutil, "popen", spy)
+    out = tmp_path / "long.mp4"
+    cmd = [FFMPEG, "-y", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=600",
+           "-c:v", "libx264", "-preset", "ultrafast", "-progress", "pipe:1", "-nostats", str(out)]
+
+    def explode(_frac):
+        raise RuntimeError("job cancelled")
+
+    with pytest.raises(RuntimeError, match="job cancelled"):
+        video.run_ffmpeg_with_progress(cmd, 600.0, explode)
+    assert procs and procs[0].poll() is not None
+
+
+@needs_ffmpeg
+def test_failed_render_leaves_no_partial_output(tmp_path):
+    paths = _solid_stills(tmp_path, [(200, 40, 40)])
+    timeline = {"width": 64, "height": 64, "fps": 10, "tracks": [{"type": "visual", "clips": [_still_clip("i0", 2.0)]}]}
+    out = tmp_path / "o.mp4"
+
+    def progress(_frac, msg=None):
+        if msg == "encoding with audio and lyrics":
+            out.write_bytes(b"partial")  # whatever ffmpeg had written so far
+            raise RuntimeError("database is locked")
+
+    with pytest.raises(RuntimeError):
+        video.render_timeline(timeline, lambda a: paths[a], tmp_path / "work", out, progress=progress)
+    assert not out.exists()
+
+
+def test_upright_still_bakes_the_exif_orientation(tmp_path):
+    from PIL import Image
+
+    img = Image.new("RGB", (80, 40), (200, 0, 0))
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    rotated = tmp_path / "phone.jpg"
+    img.save(rotated, exif=exif)
+    plain = tmp_path / "plain.png"
+    img.save(plain)
+    out = video.upright_still(rotated, tmp_path, "still_000")
+    assert out != rotated and Image.open(out).size == (40, 80)
+    assert video.upright_still(plain, tmp_path, "still_001") == plain
+    assert video.upright_still(tmp_path / "missing.png", tmp_path, "x") == tmp_path / "missing.png"
+
+
 def test_ass_time_carries_instead_of_printing_sixty_seconds():
     assert video._ass_time(59.996) == "0:01:00.00"
     assert video._ass_time(3599.999) == "1:00:00.00"
@@ -482,3 +717,16 @@ def test_zoompan_expr_is_a_closed_form_and_clamps_the_pan():
     assert z == "1.200000+(-0.200000)*(on/30)"
     assert x.startswith("max(0,min(iw-iw/zoom,") and "(on/30)*48" in x
     assert y == "max(0,min(ih-ih/zoom,ih/2-(ih/zoom/2)))"
+
+
+def test_render_range_is_checked_before_the_job_is_queued():
+    from prosperos_hoard import engine
+
+    tl = {"tracks": [{"type": "visual", "clips": [{"duration_s": 2.0}, {"duration_s": 3.0}]}]}
+    assert engine.render_range(tl, None) is None
+    assert engine.render_range(tl, [0, 5]) is None  # the whole edit
+    assert engine.render_range(tl, [1.25, 9]) == [1.25, 5.0]
+    for bad in ([3, 1], [6, 8], [1], ["a", 2]):
+        with pytest.raises(engine.EngineError) as exc:
+            engine.render_range(tl, bad)
+        assert exc.value.code == "bad_range"

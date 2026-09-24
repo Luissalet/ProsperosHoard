@@ -353,6 +353,9 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                 if not isinstance(transition, dict) or transition.get("type", "cut") not in TRANSITIONS:
                     raise TimelineError(f"visual clip {i}: transition type must be one of {', '.join(TRANSITIONS)}")
                 t_dur = _finite(transition.get("duration_s") or 0.0, f"visual clip {i}: transition duration_s must be a number")
+                if i == 0:
+                    # nothing comes before the first clip: its transition is never rendered
+                    transition, t_dur = {"type": "cut"}, 0.0
                 if transition.get("type", "cut") != "cut" and not 0.05 <= t_dur <= min(2.0, duration / 2 + 1e-6):
                     raise TimelineError(f"visual clip {i}: transition duration must be 0.05-2 s and at most half the clip")
                 c: dict[str, Any] = {

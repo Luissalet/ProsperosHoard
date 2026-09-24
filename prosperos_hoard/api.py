@@ -302,6 +302,7 @@ class RenderBody(BaseModel):
     timeline_id: str
     quality: str = "preview"
     wait_s: float = 0
+    range: Optional[list[float]] = None  # [start_s, end_s]: render only that part of the edit
 
 
 class UpdateAssetBody(BaseModel):
@@ -615,8 +616,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         tl = store.get_timeline(body.timeline_id)
         if body.quality not in ("preview", "final"):
             raise engine.EngineError("bad_quality", "quality must be 'preview' or 'final'")
-        job = queue.enqueue("render_timeline", "cpu", {"timeline_id": body.timeline_id, "quality": body.quality},
-                            project_id=tl["project_id"])
+        params: dict[str, Any] = {"timeline_id": body.timeline_id, "quality": body.quality}
+        window = engine.render_range(tl, body.range)
+        if window:
+            params["range"] = window
+        job = queue.enqueue("render_timeline", "cpu", params, project_id=tl["project_id"])
         return {"job": wait(job, body.wait_s)}
 
     def op_timeline(project: str, body: TimelineBody) -> dict[str, Any]:
@@ -1351,7 +1355,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/agent/studio_render")
     def agent_render(body: RenderBody):
-        return agent("studio_render", f"{body.timeline_id}:{body.quality}", lambda: {"job": job_result(op_render(body)["job"])})
+        summary = f"{body.timeline_id}:{body.quality}" + (f":{body.range[0]:g}-{body.range[1]:g}" if body.range and len(body.range) == 2 else "")
+        return agent("studio_render", summary, lambda: {"job": job_result(op_render(body)["job"])})
 
     @app.post("/api/timelines/{timeline_id}/render")
     def ui_render(timeline_id: str, body: RenderBody):
