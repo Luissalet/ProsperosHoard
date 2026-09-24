@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from prosperos_hoard.ids import new_id
 from prosperos_hoard import productions as prod
 from prosperos_hoard import recipes
 
@@ -222,7 +223,7 @@ def _png(store, name: str) -> str:
 
 
 def _asset(store, pid, kind="image", **recipe):
-    return store.create_asset(project_id=pid, kind=kind, file_path=_png(store, f"x{time.monotonic_ns()}"), source="generated",
+    return store.create_asset(project_id=pid, kind=kind, file_path=_png(store, new_id("x")), source="generated",
                               recipe=recipe)["id"]
 
 
