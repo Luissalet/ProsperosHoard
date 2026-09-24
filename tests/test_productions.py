@@ -313,3 +313,43 @@ def test_recipe_from_a_scripted_production_state(store, project):
     assert "reuse_clips" not in next(s for s in spec3["shots"] if s["key"] == "4")
     with pytest.raises(recipes.RecipeError):
         recipes.plan_run(store, recipe, {"lead": {"name": "x"}})
+
+
+def test_cancelling_a_production_cancels_its_sub_jobs(store, project):
+    from prosperos_hoard.jobs import JobCancelled
+
+    class SlowStudio:
+        def __init__(self):
+            self.cancelled, self.n = [], 0
+
+        def generate(self, project_id, body):
+            self.n += 1
+            return {"id": f"job_slow_{self.n}", "state": "queued"}
+
+        def job(self, job_id):
+            return {"id": job_id, "state": "running"}
+
+        def cancel(self, job_id):
+            self.cancelled.append(job_id)
+
+    class Progress:
+        calls = 0
+
+        def __call__(self, *_a, **_k):
+            pass
+
+        def check_cancel(self):
+            Progress.calls += 1
+            if Progress.calls > 1:
+                raise JobCancelled("cancelled")
+
+    spec = prod.normalise_spec(tiny_spec())
+    state = prod.create_production(store.data_dir, "Cancel Me", spec, {"animatic": False}, project_id=project["id"])
+    state["done"] = {"character": {"character_id": None}, "song": {"song_asset_id": "a_x"}}
+    prod.save_state(store.data_dir, state)
+    studio = SlowStudio()
+    with pytest.raises(JobCancelled):
+        prod.run_production(store, studio, state["slug"], Progress())
+    after = prod.load_state(store.data_dir, state["slug"])
+    assert sorted(studio.cancelled) == ["job_slow_1", "job_slow_2"]  # both frame jobs it had queued
+    assert after["status"] == "cancelled" and after["partial"]["frames"]["pending"] == {}
