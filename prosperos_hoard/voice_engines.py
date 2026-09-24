@@ -462,18 +462,30 @@ def best_installed_stt(engines: list[STTEngine], prefer: Optional[str] = None) -
 
 # ---------------------------------------------------------- subtitle export
 
+def _split_ms(t: float) -> tuple[int, int, int, int]:
+    """`t` seconds -> (hours, minutes, seconds, milliseconds), rounded to the
+    nearest millisecond *before* splitting into fields so a value like
+    59.9996s carries into the next second (and, at a minute/hour boundary,
+    into the next minute/hour) instead of producing an out-of-range field
+    such as "59,1000" or "01:60.000" (both invalid in SRT/VTT)."""
+    total_ms = int(round(max(0.0, t) * 1000))
+    ms = total_ms % 1000
+    total_s = total_ms // 1000
+    s = total_s % 60
+    total_m = total_s // 60
+    m = total_m % 60
+    h = total_m // 60
+    return h, m, s, ms
+
+
 def _srt_time(t: float) -> str:
-    t = max(0.0, t)
-    h, rem = divmod(t, 3600)
-    m, s = divmod(rem, 60)
-    return f"{int(h):02d}:{int(m):02d}:{int(s):02d},{int(round((s - int(s)) * 1000)):03d}"
+    h, m, s, ms = _split_ms(t)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _vtt_time(t: float) -> str:
-    t = max(0.0, t)
-    h, rem = divmod(t, 3600)
-    m, s = divmod(rem, 60)
-    return f"{int(h):02d}:{int(m):02d}:{s:06.3f}"
+    h, m, s, ms = _split_ms(t)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 
 def segments_to_srt(segments: list[dict[str, Any]]) -> str:

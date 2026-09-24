@@ -157,6 +157,29 @@ def test_segments_to_srt_vtt_txt():
     assert txt == "Hello there.\nGeneral Kenobi."
 
 
+def test_srt_time_carries_milliseconds_into_seconds():
+    # 59.9996s must round to the next second (60,000ms), not to an invalid
+    # "59,1000" (1000 is not a valid millisecond field).
+    srt = ve.segments_to_srt([{"start_s": 59.9996, "end_s": 60.9996, "text": "x"}])
+    header = srt.splitlines()[1]
+    assert header == "00:01:00,000 --> 00:01:01,000"
+    assert ",1000" not in srt
+
+
+def test_vtt_time_carries_seconds_into_minutes():
+    # 119.9997s must round to 02:00.000, not to an invalid "01:60.000"
+    # (60 is not a valid seconds field).
+    vtt = ve.segments_to_vtt([{"start_s": 119.9997, "end_s": 120.9997, "text": "x"}])
+    header = vtt.splitlines()[2]
+    assert header == "00:02:00.000 --> 00:02:01.000"
+    assert ":60." not in vtt
+
+
+def test_srt_time_carries_seconds_into_minutes_at_hour_boundary():
+    # 3599.9996s must round to 01:00:00,000, not "00:59:60,000" or "00:59:59,1000".
+    assert ve._srt_time(3599.9996) == "01:00:00,000"
+
+
 def test_transcript_segment_to_dict():
     seg = ve.TranscriptSegment(0.111, 1.999, "hi", words=[{"start_s": 0.1, "end_s": 0.2, "word": "hi"}])
     d = seg.to_dict()
