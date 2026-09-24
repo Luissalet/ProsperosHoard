@@ -68,8 +68,9 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Producciones y recetas | Un videoclip entero como un solo trabajo reanudable y con puntos de control (protagonista y su hoja de referencia, canción, fotogramas, sincronización de la letra, clips de Wan, photocards, arte del single, el montaje y sus renders, un `REPORT.md`) que encola sus fotogramas y clips como trabajos normales, así que un pool de render los reparte entre todas las tarjetas; «cambiar planos» (otra variante, clip sí o no, otro prompt u otra semilla) rehace solo lo que depende de ellos. Una producción terminada - hecha en la app o con el script de producción - se convierte en una **receta** con el protagonista abstraído en un hueco de reparto `{lead}`; «Recrea esto con…» la ejecuta con otro personaje del estudio o con una descripción nueva, reutilizando la canción y los fotogramas y clips en los que no sale el protagonista | El script de producción no guarda el ritmo del montaje (pulsos por plano), así que una receta exportada de una ejecución del script usa los valores por defecto; los prompts que describen objetos del protagonista anterior se señalan, no se reescriben |
 | Animático | Antes de los clips caros (cada clip de Wan de 5 s tardó unos 9,5 min en la ejecución real), la producción corta sus fotogramas justo donde cortará el montaje final - el mismo montaje automático sobre la misma toma de la canción, las mismas marcas de letra y sección y las mismas opciones - con un movimiento Ken Burns y un fundido por plano, subtítulos y acabado, renderizado a 720p en cada formato previsto, más un `plan.json` (cada corte, el tiempo en pantalla y el fotograma de cada plano, qué planos serán clips de Wan, los minutos de GPU estimados); la producción se detiene en `awaiting_review` hasta **Continuar** (o sigue sola con `animatic_autocontinue`), y **Cambiar planos** cambia fotogramas, activa o quita clips o reescribe un plano antes | El animático funde todos los cortes (el final conserva sus destellos y glitches); los minutos de GPU son estimaciones con los tiempos de la ejecución real (configurables) |
 | Director de calidad | Una revisión de las salidas de una producción, por etapa o de todas, durante la producción tras cada etapa (`settings.qa.enabled`) o cuando se pida: fotogramas planos o con ruido, bandas negras o rojas en un borde (la franja de ffmpeg 8), saltos de exposición dentro de un clip, movimiento donde se pidió quietud (o un clip congelado), una cabeza de photocard que toca el borde superior, cobertura de la letra de un LRC alineado, duraciones frente a lo previsto; con un modelo de visión detrás de Hoard Link cada salida recibe además una nota de 0 a 10 contra la biblia, el prompt del plano y la referencia, con una línea de motivo. Los fotogramas, clips y photocards que fallan se regeneran con otra semilla y un arreglo concreto (ruido -> denoise 1, salto de exposición -> otro sampler, caminar -> el negativo de quietud, cabeza cortada -> aire arriba), hasta un límite de reintentos, y cada reintento queda en el historial y en REPORT.md | Las comprobaciones son heurísticas con umbrales editables, no un crítico entrenado; sin modelo de visión solo corren las comprobaciones sin modelo (nunca bloquea); una producción hecha con el script se revisa en solo lectura |
-| Control por agentes | 43 herramientas MCP equivalentes a `/api/agent/*` (34 de producción más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
-| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas), Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+| Kit de personaje | Cada personaje lleva un kit: **hoja de modelo** (la canónica redibujada por el motor de edición desde hasta 12 vistas fijas - frente, tres cuartos, perfil, espalda, primer plano, expresiones, acción, sentado, noche - etiquetadas por vista y con hoja de contacto rotulada); **dataset** formado por la canónica, las referencias, la hoja y las buenas tomas, con descripciones que nombran una palabra disparadora y solo describen lo que cambia, un informe de preparación (pocas imágenes, borrosas, casi duplicadas, descripciones sin la palabra, vistas que faltan) y descripciones automáticas con el modelo de visión; **entrenamiento LoRA local** con un entrenador configurable (`ai_toolkit`, `musubi`, un comando propio o el entrenador de demostración), un plan ajustado al dataset (pasos, rango, lr, 512 px por defecto, VRAM y minutos estimados), la GPU más libre, registro en vivo y el resultado instalado en la carpeta de loras de ComfyUI; **adaptadores** por arquitectura (Qwen-Image, Flux, SDXL, SD 1.5, Wan 2.2 5B, Z-Image) que se cargan solos - con la palabra disparadora - cada vez que se menciona al personaje con un motor compatible, guardados en la receta para que reutilizar y variar los reproduzcan, y `prefer_adapter` para posturas libres en vez de editar la canónica; **tomas**: cada render del personaje agrupado por plano (toma N de M), con una nota de parecido 0-10 contra las referencias (modelo de visión o, si no hay, una comprobación aproximada por color que lo dice), que se puede ascender a canónica, referencia o dataset, o descartar; un paquete portátil **`.hoardchar`** (aspecto, voz, paleta, imágenes, hoja, dataset con descripciones, pesos LoRA) y una **biblioteca de reparto** global con versiones, que sirve como protagonista de una receta | Entrenar requiere un entrenador instalado y el modelo base de la arquitectura; VRAM y tiempo son estimaciones; la comprobación aproximada solo detecta derivas de color o vestuario |
+| Control por agentes | 50 herramientas MCP equivalentes a `/api/agent/*` (41 del estudio, 7 de ellas para el kit de personaje, más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
+| Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas), Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
 *Aplicación real, datos de demostración sintéticos: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
@@ -187,6 +188,12 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_recipe_run` | «Recrea esto con X»: una producción nueva a partir de una receta con otro protagonista | no |
 | `studio_animatic` | Los fotogramas cortados como el final, a 720p, con plan y estimación de GPU, antes de renderizar ningún clip | no |
 | `studio_qa_run` / `studio_qa_report` | Revisión de calidad de una producción (revisar, o revisar y regenerar lo que falla) / su última hoja de resultados y reintentos | no / sí |
+| `studio_character_sheet` | Hoja de modelo: la canónica redibujada desde vistas fijas, añadida al dataset | no |
+| `studio_character_dataset` | Imágenes y descripciones de entrenamiento: crear, editar, describir automáticamente, informe | no (get/report solo lectura) |
+| `studio_character_train` | Entrenadores y ajustes, plan de entrenamiento, lanzar un LoRA local, estado y registro | no (plan/status solo lectura) |
+| `studio_character_adapters` | Adaptadores LoRA (adjuntar, fuerza, activar) y ajustes del kit (palabra, uso automático, umbral de parecido) | no |
+| `studio_character_takes` | Renders del personaje como tomas, notas de parecido, ascender/descartar | no (list solo lectura) |
+| `studio_character_pack` / `studio_character_library` | Exportar/inspeccionar/importar `.hoardchar` / biblioteca de reparto con versiones | no |
 | `voice_engines` / `voice_create` / `voice_list` | Estado de los motores y cómo instalarlos / clonar una voz a partir de una muestra / listar voces guardadas | sí / no / sí |
 | `voice_speak` / `voice_transcribe` | Sintetizar una frase / transcribir audio con marcas de tiempo | no / sí |
 | `voice_audiobook` / `voice_dub` | Narrar un texto por capítulos / doblar un vídeo a otro idioma | no |
@@ -437,6 +444,43 @@ del almacén desde varios hilos y la comprobación del manifiesto de Faustus.
 `npm run build` en `frontend/` termina sin errores de TypeScript. La
 [CI](.github/workflows/ci.yml) ejecuta las pruebas en Ubuntu y Windows con
 Python 3.11, 3.12 y 3.13 y compila la interfaz con Node.js 22.
+
+## Personajes que no cambian
+
+El kit es lo que mantiene a un personaje igual en muchos planos, motores y
+proyectos ([docs/CHARACTERS.md](docs/CHARACTERS.md), en inglés, tiene el detalle):
+
+1. **Canónica**: una buena imagen del personaje (Reparto -> Editar).
+2. **Hoja de modelo**: Kit -> Hoja de modelo redibuja la canónica desde
+   vistas fijas con el motor de edición; cada vista entra en el dataset con
+   su descripción.
+3. **Dataset**: añade las mejores tomas, corrige descripciones (la palabra
+   disparadora representa el aspecto permanente; las descripciones cuentan
+   pose, encuadre y luz) y mira el informe de preparación.
+4. **Entrenamiento**: elige la arquitectura del motor con el que renderizas
+   y lánzalo; el adaptador se instala en ComfyUI y se asocia al personaje.
+   Desde ahí, cada render con `@Nombre` y ese motor lo carga, y las
+   producciones hacen los planos del protagonista txt2img + adaptador
+   (posturas libres) en vez de editar la canónica.
+5. **Tomas**: puntúa el parecido, quédate con las buenas, descarta las que
+   derivan y asciende una canónica mejor.
+6. **Paquete / biblioteca**: exporta un `.hoardchar` o guarda una versión en
+   la biblioteca; llévalo a cualquier proyecto o úsalo como protagonista de
+   una receta (`cast={"lead": "lib_..."}`).
+
+El entrenamiento lo hace un programa entrenador aparte. Se configura en
+Kit -> Entrenamiento -> Configurar (o `training` en `data/backend.json`):
+
+```json
+"training": {
+  "lora_dir": "D:/LocalAI/ComfyUI/models/loras",
+  "gpu": "auto",
+  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "D:/LocalAI/ai-toolkit"}],
+  "base_models": {"qwen_image": "Qwen/Qwen-Image", "flux1": "black-forest-labs/FLUX.1-dev"}
+}
+```
+
+Con `--demo` se configura un entrenador falso para probar el flujo entero sin GPU.
 
 ## Hoja de ruta y límites conocidos
 
