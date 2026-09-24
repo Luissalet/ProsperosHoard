@@ -276,6 +276,66 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
     ]
 
 
+_FADE_COLOR = {"fadeblack": "black", "fadewhite": "white"}
+
+
+def build_overlay_fade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float], transitions: list[dict[str, Any]],
+                           out_path: Path, fps: int = 30) -> list[str]:
+    """The same join as `build_xfade_cmd` for an ffmpeg without `xfade`
+    (added in 4.3; the imageio-ffmpeg fallback binary is 4.2): each incoming
+    clip is padded to its offset with `tpad` and the chain so far is laid
+    over it, fading its alpha out across the overlap. Every transition is a
+    crossfade; a dip to black/white also fades both sides through that
+    colour. Same offsets, so the output has the same length."""
+    inputs: list[str] = []
+    for p in clip_paths:
+        inputs += ["-i", str(p)]
+    filters = [f"[{i}:v]fps={fps},setpts=PTS-STARTPTS[s{i}]" for i in range(len(clip_paths))]
+    label = "s0"
+    start = 0.0
+    for i in range(1, len(clip_paths)):
+        start += durations[i - 1]
+        t = transitions[i] or {}
+        kind = TRANSITION_MAP.get(t.get("type", "cut"), "fade")
+        dur = transition_duration(t, fps)
+        color = _FADE_COLOR.get(kind)
+        incoming = f"[s{i}]"
+        outgoing = f"[{label}]"
+        if color:
+            incoming += f"fade=t=in:st=0:d={dur:.3f}:color={color},"
+            outgoing += f"fade=t=out:st={start:.3f}:d={dur:.3f}:color={color},"
+        else:
+            incoming += "null,"
+            outgoing += "null,"
+        filters.append(f"{incoming}tpad=start_duration={start:.3f}[p{i}]")
+        filters.append(f"{outgoing}format=yuva420p,fade=t=out:st={start:.3f}:d={dur:.3f}:alpha=1[a{i}]")
+        out_label = f"v{i}"
+        filters.append(f"[p{i}][a{i}]overlay=eof_action=pass:format=yuv420,format=yuv420p[{out_label}]")
+        label = out_label
+    filter_complex = ";".join(filters)
+    return [
+        ffmpeg, "-y", "-nostdin", "-loglevel", "error", *inputs, "-filter_complex", filter_complex, "-map", f"[{label}]",
+        "-r", str(fps), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
+    ]
+
+
+_FILTER_CACHE: dict[tuple[str, str], bool] = {}
+
+
+def ffmpeg_has_filter(ffmpeg: str, name: str) -> bool:
+    """Whether this ffmpeg build ships the filter `name` (cached per binary).
+    If the listing itself fails, assume yes and let the real command say why."""
+    key = (ffmpeg, name)
+    if key not in _FILTER_CACHE:
+        try:
+            proc = procutil.run([ffmpeg, "-hide_banner", "-filters"], text=True, timeout=30)
+            listing = proc.stdout or ""
+            _FILTER_CACHE[key] = proc.returncode != 0 or re.search(rf"^\s*\S+\s+{re.escape(name)}\s", listing, re.M) is not None
+        except (OSError, procutil.subprocess.SubprocessError):
+            _FILTER_CACHE[key] = True
+    return _FILTER_CACHE[key]
+
+
 def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass_name: Optional[str],
                    out_path: Path, preset: str, crf: int, audio_bitrate: str, finishing_vf: str = "") -> list[str]:
     """`ass_name` is a bare file name inside the ffmpeg working directory
@@ -571,7 +631,8 @@ def render_timeline(
         list_file.write_text(concat_list_text(clip_paths), encoding="utf-8")
         _run(build_concat_cmd(ffmpeg, list_file, concatenated))
     else:
-        _run(build_xfade_cmd(ffmpeg, clip_paths, grid_durations, grid_transitions, concatenated, fps=fps))
+        join = build_xfade_cmd if ffmpeg_has_filter(ffmpeg, "xfade") else build_overlay_fade_cmd
+        _run(join(ffmpeg, clip_paths, grid_durations, grid_transitions, concatenated, fps=fps))
     report(0.65, "joined clips")
 
     lyrics_track = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), None)
