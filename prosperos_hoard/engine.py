@@ -1663,6 +1663,40 @@ def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) 
     }
 
 
+def _studio_tts_engines(store: Store, backend: Backend, engine_id: Optional[str]) -> list[Any]:
+    """The voice studio's TTS engines (the same list `voice_speak` uses).
+    ComfyUI's node list is only fetched for a ComfyUI-hosted engine."""
+    from . import voice_engines as ve
+
+    object_info = None
+    if engine_id and "comfy" in engine_id.lower():
+        try:
+            object_info = _object_info(backend)
+        except Exception:  # noqa: BLE001 - unreachable ComfyUI: that engine reports not installed
+            object_info = None
+    return ve.default_tts_engines(voices_dir=store.data_dir / "voices", object_info=object_info)
+
+
+def _studio_voice_line(store: Store, backend: Backend, voice_cfg: dict[str, Any], text: str) -> tuple[bytes, str]:
+    """A character voice {"backend": "studio", "voice_id": "<library voice>",
+    "preset"?, "speed"?}: synthesized with that saved voice's own engine
+    and sample, like `voice_speak`. Provider reads "studio:<engine>"."""
+    from . import voice_lab
+
+    voice_id = voice_cfg.get("voice_id")
+    if not voice_id:
+        raise EngineError("voice_required", "a studio voice needs voice_id (a saved library voice, see voice_list)")
+    library_voice = store.get_studio_voice(voice_id)
+    spec = {k: voice_cfg[k] for k in ("voice_id", "engine_id", "preset", "speed", "pitch", "style", "language")
+            if voice_cfg.get(k) is not None}
+    engines = _studio_tts_engines(store, backend, spec.get("engine_id") or library_voice.get("engine_id"))
+    try:
+        wav, engine_id = voice_lab.synthesize_with_spec(store, engines, spec, text)
+    except voice_lab.VoiceLabError as exc:
+        raise EngineError(exc.code, str(exc)) from None
+    return wav, f"studio:{engine_id}"
+
+
 def voice_line(store: Store, backend: Backend, project_id: str, text: str, character_id: Optional[str] = None,
                voice_override: Optional[str] = None, speed: Optional[float] = None) -> dict[str, Any]:
     store.get_project(project_id)
@@ -1678,16 +1712,25 @@ def voice_line(store: Store, backend: Backend, project_id: str, text: str, chara
         voice_cfg = dict(char.get("voice") or {})
     if voice_override:
         voice_cfg["voice_id"] = voice_override
+        # a library voice id ("voice_...") speaks through the voice studio;
+        # anything else is a curated Piper voice id
+        if voice_override.startswith("voice_"):
+            voice_cfg["backend"] = "studio"
+        elif voice_cfg.get("backend") == "studio":
+            voice_cfg["backend"] = "piper"
         voice_cfg.setdefault("backend", "piper")
     if speed:
         if not 0.5 <= float(speed) <= 2.0:
             raise EngineError("bad_speed", "speed must be between 0.5 and 2.0")
         voice_cfg["speed"] = float(speed)
     voices_dir = store.data_dir / "voices"
-    try:
-        wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text.strip(), voice_cfg)
-    except voices_mod.VoiceError as exc:
-        raise EngineError(exc.code, str(exc)) from None
+    if voice_cfg.get("backend") == "studio":
+        wav_bytes, provider = _studio_voice_line(store, backend, voice_cfg, text.strip())
+    else:
+        try:
+            wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text.strip(), voice_cfg)
+        except voices_mod.VoiceError as exc:
+            raise EngineError(exc.code, str(exc)) from None
     asset_id = new_id("a")
     dest = store.path_for_asset_file(asset_id, ".wav")
     dest.write_bytes(wav_bytes)

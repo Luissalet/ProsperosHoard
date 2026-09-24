@@ -294,6 +294,35 @@ def test_import_path_outside_the_roots_is_refused_before_any_stat(store, tmp_pat
     assert "network" in str(exc.value)
 
 
+def test_character_with_a_studio_voice_speaks_through_the_voice_library(store, project, monkeypatch):
+    import numpy as np
+
+    from prosperos_hoard import voice_engines as ve
+
+    class FakeTTS(ve.TTSEngine):
+        id = "fake-basic"
+        capabilities = ve.EngineCapabilities(cloning=False)
+        calls = []
+
+        def is_installed(self):
+            return True
+
+        def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
+            FakeTTS.calls.append((text, speed))
+            return ve.wav_bytes_mono16(np.zeros(8000, dtype=np.float32), 8000)
+
+    monkeypatch.setattr(engine, "_studio_tts_engines", lambda *_a: [FakeTTS()])
+    voice = store.create_studio_voice("Narrator", "fake-basic", language="en")
+    char = store.create_character(project["id"], "Nova", prompt="x",
+                                  voice={"backend": "studio", "voice_id": voice["id"], "speed": 1.2})
+    asset = engine.voice_line(store, None, project["id"], "hello there", character_id=char["id"])
+    assert asset["recipe"]["provider"] == "studio:fake-basic"
+    assert FakeTTS.calls == [("hello there", 1.2)]
+    # a library voice id given as an override also goes through the studio
+    other = engine.voice_line(store, None, project["id"], "again", voice_override=voice["id"])
+    assert other["recipe"]["provider"] == "studio:fake-basic"
+
+
 def test_update_timeline_finishing_persists_and_validates(store, project):
     img = engine.render_design(store, project["id"], "thumbnail", {"title": "cover"})
     tl = store.create_timeline(project["id"], "Test cut", tracks=[
