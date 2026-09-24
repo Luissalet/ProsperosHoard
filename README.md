@@ -63,8 +63,9 @@ with ids and pictures.
 | Voice studio | A pluggable TTS/STT engine registry (Piper plus optional local cloning engines - Coqui XTTS-v2, F5-TTS, Kokoro, Chatterbox - and an optional ComfyUI TTS workflow; faster-whisper and optional openai-whisper for speech-to-text), installed on request, never silently; a voice library from an uploaded sample (loudness normalisation, silence trim, an SNR/clipping quality check, an automatic reference transcript, named presets); transcription and short-clip dictation with word timestamps and SRT/VTT/TXT export; audiobook narration from text or a `.txt`/`.md`/`.epub` file as a resumable background job (per-chapter files, MP3 or M4B with chapter markers, an aligned SRT/LRC); video dubbing (extract audio, transcribe with timestamps, translate segment by segment through the local model with a glossary, re-synthesise in the chosen voice, time-fit to the original pacing, mux back in) with every stage's files kept so one segment can be fixed and re-run without repeating the rest | Cloning engines must be installed (a documented `pip install`, sometimes a GPU); dubbing needs a local LLM behind Hoard Link for translation and fails with a clear message without one; only use a voice you have the right to reproduce |
 | Music generation | `studio_compose` (tags, lyrics, bpm, key, language) via ACE-Step 1.5 on ComfyUI (`ComfyMusic`, resolves automatically once the checkpoint is installed) or a small documented HTTP API for another local server; composed songs get lineage and are analysed automatically | Needs the ACE-Step checkpoint in ComfyUI (the example single was composed with ACE-Step 1.5 turbo); imported songs work fully either way |
 | Video | Beat-synced auto-cut (density per energy - from the lyrics' verse/chorus markers when present - flashes on phrase downbeats, a new shot per section and optionally per sung line, per-section storyboards in story order, no immediate repeats, whole song covered) into an editable timeline; ffmpeg renderer with Ken Burns moves, cut/crossfade/dip/flash transitions that keep cuts on the beat, burned lyric captions with optional karaoke, the song muxed in; 540p preview or 1080p final; SVD/Wan clips converted to mp4; optional finishing pass (colour grade presets, film grain, vignette, letterbox, downbeat glitch flashes, a condensed-uppercase horror caption style) | Ken Burns is a zoom range plus pan direction, not free start/end rectangles; colour grades are `eq`/`colorbalance`/`curves` approximations, not a 3D LUT |
-| Agent control | 31 MCP tools mirroring `/api/agent/*` (22 production tools plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
-| Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
+| Productions and recipes | A whole music video as one resumable, checkpointed job (lead and its reference sheet, song, stills, lyric timing, Wan clips, photocards, album art, the cut and its renders, a `REPORT.md`) that queues its frames and clips as ordinary jobs, so a render pool spreads them over every card; "change shots" (another variant, clip on/off, a new prompt or seed) redoes only what depends on them. A finished production - made in the app or by the production script - becomes a **recipe** with the lead abstracted into a `{lead}` casting slot; "Recreate with..." runs it with another character from the studio or a new description, reusing the song and the stills and clips the lead is not in | The cut's pace (beats per shot) is not recorded by the production script, so a recipe exported from a scripted run uses the defaults; prompts that describe the old lead's props are flagged, not rewritten |
+| Agent control | 40 MCP tools mirroring `/api/agent/*` (31 production tools plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes), Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, synthetic demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
@@ -173,6 +174,10 @@ loading anything of its own.
 | `studio_timeline` / `studio_render` | Auto-cut, read, edit a timeline / render it | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Queue, one job (with wait), cancel | yes / yes / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Find assets, look at them, their recipe | yes |
+| `studio_productions` / `studio_production` | List productions / one production's stages, renders and next step | yes |
+| `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Start a whole production from a spec / resume or approve it / change shots before the render | no |
+| `studio_recipe_export` / `studio_recipes_list` / `studio_recipe_get` | Turn a finished production into a recipe with a `{lead}` slot / list recipes / read one | no / yes / yes |
+| `studio_recipe_run` | "Recreate this with X": a new production from a recipe with another lead | no |
 | `voice_engines` / `voice_create` / `voice_list` | Engine status and install hints / clone a voice from a sample / list saved voices | yes / no / yes |
 | `voice_speak` / `voice_transcribe` | Synthesise a line / transcribe audio with timestamps | no / yes |
 | `voice_audiobook` / `voice_dub` | Narrate text as chapters / dub a video into another language | no |
@@ -243,6 +248,31 @@ On Windows, with the app running and ComfyUI started on a 16 GB card:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<you>\Music\no_mires_atras.lrc
 ```
 
+### In the app: productions and recipes
+
+The same pipeline also runs inside the app as a **production**
+(`studio_production_create`, or the **Productions** screen): one
+orchestrator job that queues the reference sheet, the song, every still and
+every clip as ordinary jobs (a render pool renders them side by side),
+checkpoints each item into `data/productions/<slug>/state.json`, and writes
+a `REPORT.md`. It resumes where it stopped after a failure, a cancel or a
+restart; `studio_production_shots` swaps a still for another variant, turns
+a clip on or off or rewrites a shot, and only what depends on it is redone.
+
+A finished production - including one made by the script above - becomes a
+**recipe**: `studio_recipe_export(production, name)` writes
+`data/recipes/<name>.json` with every stage, prompt, seed, template and
+setting, and the lead abstracted into a `{lead}` casting slot (`{lead}`,
+`{lead.look}`, `{lead.negative}`, `{lead.palette[0]}`...), plus warnings
+for shot prompts that still describe the old lead's props.
+`studio_recipe_run(recipe, cast={"lead": <character id or {name, look}>})`
+("recreate this with X", or **Recreate with...** on the Productions
+screen) starts a new production with the slot filled: an existing
+character keeps its canonical reference, a new one gets a reference sheet
+first, and the song (unless its lyrics name the old lead) and the stills
+and clips of the shots the lead is not in are reused
+(`options.reuse: ["song", "frames", "clips"]`).
+
 ### The real run
 
 The same script ran against a real ComfyUI 0.37 on 16 GB cards, in two
@@ -280,10 +310,11 @@ in 2 min, and both cuts (preview and 1080p final) in about 7 min.
 
 ## Architecture
 
-FastAPI + SQLite (WAL, one connection per thread) with a GPU worker and a
-CPU worker thread over a persistent job table; business logic in plain
-modules (`engine`, `comfy_driver`, `design`, `audio`, `timeline`, `video`,
-`voices`) with no web imports; Hoard Link vendored for backend resolution;
+FastAPI + SQLite (WAL, one connection per thread) with a GPU worker, a
+CPU worker and an orchestrator thread (whole productions) over a persistent
+job table; business logic in plain modules (`engine`, `comfy_driver`,
+`design`, `audio`, `timeline`, `video`, `voices`, `productions`, `recipes`)
+with no web imports; Hoard Link vendored for backend resolution;
 the MCP adapter is a separate stdio script that only speaks HTTP to the app.
 
 ```mermaid
@@ -380,8 +411,10 @@ Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
 
 - Picking the best variant is manual (the production records the picks); an
   automatic reviewer that scores outputs against the bible and re-rolls the
-  weak ones is planned, and so are production recipes you can re-run with
-  another cast.
+  weak ones is planned.
+- A recipe abstracts the lead's name, look, negative, palette and bio; shot
+  prompts that describe the old lead's props ("the lantern head") are listed
+  as warnings for you to rewrite, not rewritten.
 - `consistent=true` keeps a character's design from its canonical
   reference; Kontext takes a single reference (Qwen-Image 2.1 up to 10) and
   Wan is image-to-video only.

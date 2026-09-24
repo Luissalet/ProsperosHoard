@@ -41,6 +41,15 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_assets` | `?project&kind&query&tag&favourite&limit&offset` |
 | GET | `/api/agent/studio_show` | `?asset_ids=a,b,c&size=768` -> `{items:[{asset_id, kind, mime, base64, order?}]}` |
 | GET | `/api/agent/studio_lineage` | `?asset_id` |
+| GET | `/api/agent/studio_productions` | - -> `{items:[{slug, name, status, stage, project_id, recipe, legacy?}]}` |
+| GET | `/api/agent/studio_production` | `?production=<slug>` -> compact view: `{slug, status, stages{stage: done\|partial\|pending}, character_id, song_asset_id, renders, animatic?, qa?, next}` |
+| POST | `/api/agent/studio_production_create` | `{name, spec, settings?, project?}` -> `{production, job}` |
+| POST | `/api/agent/studio_production_continue?production=` | - -> `{production, job}` (approves a paused production, resumes a failed/cancelled one) |
+| POST | `/api/agent/studio_production_shots?production=` | `{changes:[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?}], run}` -> `{changed, status, job?, production}` |
+| POST | `/api/agent/studio_recipe_export` | `{production, name?}` -> recipe summary + `cast`, `warnings`, `notes` |
+| GET | `/api/agent/studio_recipes_list` | - -> `{items:[recipe summary]}` |
+| GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
+| POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
 | GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
 | POST | `/api/agent/voice_create` | `{name, engine_id, source_path, language?, project?}` |
 | GET | `/api/agent/voice_list` | `?project` |
@@ -140,6 +149,36 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/voice/dub/{job_id}/segments/{index}/resynthesize` | `{text?, voice?, remix}` -> `{segment}` |
 
 Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
+
+## Productions and recipes (UI routes)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/productions` | every production folder under `data/productions/` (app-made and scripted, `legacy: true`) |
+| POST | `/api/productions` | `{name, spec, settings?, project?}`: create and queue |
+| GET | `/api/productions/{slug}` | the full `state.json` plus `view` (the compact agent view) |
+| POST | `/api/productions/{slug}/continue` | approve / resume |
+| PATCH | `/api/productions/{slug}/shots` | `{changes, run}` |
+| GET | `/api/productions/{slug}/report` | `REPORT.md` (written on demand when missing) |
+| POST | `/api/productions/{slug}/recipe` | `{name?}` -> recipe summary |
+| GET | `/api/recipes` / `/api/recipes/{name}` | list / the whole recipe JSON |
+| POST | `/api/recipes/{name}/run` | `{cast, name?, options}` -> `{production, job, notes}` |
+
+A production's spec (all optional except `lead`):
+
+```json
+{"title": "DON'T LOOK BACK", "engine": "auto",
+ "lead": {"name": "FAROL", "look": "...", "negative": "...", "palette": ["#F28C28"], "bio": "..."},
+ "reference": {"prompt": "{look}, character turnaround reference sheet...", "seed": 1001, "count": 4, "pick": 3, "crop": "left_third"},
+ "world": {"look": "cinematic 35mm film still, night...", "negative": "cartoon, cute, ..."},
+ "song": {"tags": "...", "lyrics": "[Verse 1]...", "bpm": 130, "key": "D minor", "language": "en", "duration": 150, "seed": 2001, "count": 4, "take": 4},
+ "shots": [{"key": "1", "lead": true, "prompt": "standing perfectly still under a far lamp...", "seed": 3010, "variants": 3,
+            "width": 1344, "height": 768, "clips": [0, 1], "motion": "still", "motion_prompt": "light rain falling...", "clip_seed": 5001}],
+ "photocards": {"looks": [{"prompt": "...", "seed": 4001, "role": "Visual", "message": "thanks for coming", "accent": "#F4A7C0"}]},
+ "album": [{"template": "album_cover", "variant": "night", "image_shot": "3", "fields": {"title": "DON'T LOOK BACK", "artist": "FAROL"}}],
+ "timeline": {"aspects": ["9:16", "16:9"], "qualities": ["preview", "final"], "options": {"fps": 24, "cut_on_lyrics": true, "karaoke": true},
+              "storyboard": {"Chorus": ["3", "2", "11", "10v2"]}, "finishing": {"color_grade": "sodium_night", "grain": 0.3}}}
+```
 
 ## Timeline finishing
 

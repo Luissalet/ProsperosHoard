@@ -5,8 +5,8 @@ import { useT } from "../i18n";
 import { ConfirmButton, Empty, JobState, Progress, timeAgo, useApp } from "../components/ui";
 
 const LABEL: Record<string, Record<string, string>> = {
-  en: { generate_image: "Generate", edit_image: "Edit", animate: "Animate", render_timeline: "Render", download_voice: "Voice download" },
-  es: { generate_image: "Generar", edit_image: "Editar", animate: "Animar", render_timeline: "Renderizar", download_voice: "Descarga de voz" },
+  en: { generate_image: "Generate", edit_image: "Edit", animate: "Animate", render_timeline: "Render", download_voice: "Voice download", production: "Production", production_qa: "QA pass" },
+  es: { generate_image: "Generar", edit_image: "Editar", animate: "Animar", render_timeline: "Renderizar", download_voice: "Descarga de voz", production: "Producción", production_qa: "Revisión QA" },
 };
 
 export function JobsView({ projects }: { projects: Project[] }) {

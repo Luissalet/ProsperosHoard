@@ -87,6 +87,16 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_show` | yes | `asset_ids[1-24], size=768 (128-1024)` | pictures: up to 4 images, or one contact sheet with `contact_sheet_order`; video = 3-frame strip; audio = waveform with sections |
 | `studio_lineage` | yes | `asset_id` | `{asset_id, kind, source, recipe, reproduce?, inputs[{asset_id, operation, template, seed}]}` |
 
+| `studio_productions` | yes | - | `items[{slug, name, status, stage, project_id, recipe, legacy?}]` |
+| `studio_production` | yes | `production` | `{slug, status, stages{...}, lead, shots, character_id, song_asset_id, renders{aspect: {quality: asset_id}}, animatic?, qa?, next}` |
+| `studio_production_create` | no | `name, spec, settings=None, project=None` | `{production, job}` - see [API.md](API.md#productions-and-recipes-ui-routes) for the spec |
+| `studio_production_continue` | no | `production` | `{production, job}` |
+| `studio_production_shots` | no | `production, changes[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?}], run=True` | `{changed, status, job?, production}` |
+| `studio_recipe_export` | no | `production, name=None` | recipe summary + `cast` (what the `{lead}` slot needs), `warnings`, `notes` |
+| `studio_recipes_list` | yes | - | `items[{name, title, original_lead, shots, lead_shots, clips, reusable{song, frames, clips}, warnings}]` |
+| `studio_recipe_get` | yes | `recipe` | summary, `cast`, `placeholders`, song, world, `shot_list[{key, lead, prompt, seed, variants, clips, motion}]`, timeline, settings, warnings |
+| `studio_recipe_run` | no | `recipe, cast={"lead": <character id or {name, look, negative?, palette?, bio?}>}, name=None, options={reuse, title, project, settings, engine}` | `{production, job, notes}` |
+
 \* `studio_cast` with `action="list"` does not change anything; the tool as a
 whole is annotated as writing because create/update do.
 
@@ -270,3 +280,22 @@ studio_render(tl_..., "preview")                 -> job; studio_job(job, wait_s=
 A full, scripted example driving every tool end to end (project, cast,
 song, stills, clips, photocards, album art, a finished timeline) is
 [`scripts/productions/no_mires_atras.py`](../scripts/productions/no_mires_atras.py).
+
+### Productions and recipes
+
+```text
+studio_productions()                             -> [{slug: "dont_look_back", legacy: true, status: "done"}]
+studio_recipe_export("dont_look_back", "horror anthem")
+                                                 -> {name: "horror_anthem", cast: {lead: {slot: "{lead}", needs: {...}}},
+                                                     reusable: {song: false (the lyrics name the lead), frames: 3, clips: 3},
+                                                     warnings: ["shot 3 prompt repeats words from the lead's look (lantern, candle)..."]}
+# "recreate this with Iris": a character already in the studio keeps her canonical reference
+studio_recipe_run("horror_anthem", cast={"lead": "char_01..."}, options={"title": "AFTERGLOW"})
+                                                 -> {production: {slug: "afterglow_iris_volt", status: "queued"}, job}
+studio_production("afterglow_iris_volt")         -> stages, renders, next
+```
+
+A recipe keeps every stage, prompt, seed and setting of the production it
+came from; only the lead changes. Rewrite the prompts its `warnings` list
+(they describe the old lead's props) with `studio_production_shots` after
+the run starts, or edit the recipe JSON before running it.

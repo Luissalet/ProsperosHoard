@@ -80,12 +80,20 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_analyze_audio", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_timeline", "studio_render",
                         "studio_jobs", "studio_job", "studio_cancel_job", "studio_assets", "studio_show", "studio_lineage",
                         "voice_engines", "voice_create", "voice_list", "voice_speak", "voice_transcribe",
-                        "voice_audiobook", "voice_dub", "voice_resynthesize_segment", "voice_job"}
+                        "voice_audiobook", "voice_dub", "voice_resynthesize_segment", "voice_job",
+                        "studio_productions", "studio_production", "studio_production_create", "studio_production_continue",
+                        "studio_production_shots", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
+                        "studio_recipe_run"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
                 assert t.annotations is not None and t.annotations.destructiveHint is False
             assert by_name["studio_show"].annotations.readOnlyHint is True
+            for name in ("studio_productions", "studio_production", "studio_recipes_list", "studio_recipe_get"):
+                assert by_name[name].annotations.readOnlyHint is True, name
+            for t in tools.tools:
+                if t.name.startswith(("studio_production", "studio_recipe")):
+                    assert len((t.description or "").splitlines()[0]) <= 110, t.name
             assert by_name["studio_generate_image"].annotations.readOnlyHint is False
             assert by_name["studio_voice"].annotations.openWorldHint is True  # first use downloads a voice
 
@@ -96,6 +104,11 @@ async def test_mcp_protocol_end_to_end(running_app):
             # models the production example uses), so ComfyMusic (ACE-Step) resolves.
             assert status["music_generation"][0]["name"] == "comfy_music"
             assert status["music_generation"][0]["available"] is True
+
+            result = await session.call_tool("studio_recipes_list", {})
+            assert json.loads(result.content[0].text) == {"items": []}
+            result = await session.call_tool("studio_production", {"production": "nope"})
+            assert result.isError and "not_found" in result.content[0].text
 
             result = await session.call_tool("studio_create_project", {"name": "MCP Test"})
             project_id = json.loads(result.content[0].text)["id"]

@@ -41,6 +41,17 @@ Order matters. Each step returns ids; pass them to the next call.
    `studio_render(timeline_id, "preview")` + `studio_job(job_id, wait_s=120)`.
    Render "final" only after the user approves the preview.
 
+Whole productions and recipes:
+- A finished production becomes a recipe: `studio_recipe_export(production,
+  name)` abstracts the lead into a `{lead}` slot. "Recreate this with X":
+  `studio_recipe_run(recipe, cast={"lead": "<char id>"} or {"lead": {"name",
+  "look"}}, options={"title": ...})`, then poll `studio_production(slug)`.
+  Tell the user the recipe's `warnings` (prompts about the old lead's props)
+  and what was reused (`notes`).
+- A failed or cancelled production resumes with
+  `studio_production_continue(production)`; `studio_production_shots` swaps
+  a still (`best`), turns a clip on/off or rewrites a shot.
+
 Traps:
 - `waiting_gpu` is normal on a shared GPU: keep polling, it has not failed.
 - Never describe an image you have not looked at with `studio_show`.

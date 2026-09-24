@@ -434,3 +434,8 @@ table.list tr:hover td { background: var(--surface-2); }
 .input-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .render-row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
 .render-row .video-frame { flex: none; }
+
+/* productions */
+.productions-grid { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 18px; align-items: start; }
+@media (max-width: 980px) { .productions-grid { grid-template-columns: 1fr; } }
+table.list tr.selected td { background: var(--accent-soft); }

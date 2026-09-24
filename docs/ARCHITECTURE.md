@@ -9,7 +9,14 @@ prosperos_hoard/
                    logged) and the richer UI routes, SPA serving
   engine.py        the business logic behind every route (no FastAPI imports)
   store.py, db.py  SQLite (WAL, per-thread connections, schema v2 with in-place upgrade)
-  jobs.py          JobQueue: one GPU worker + one CPU worker thread, cancel, VRAM waits
+  jobs.py          JobQueue: GPU worker(s), one CPU worker, one orchestrator worker
+                   (production jobs), cancel, VRAM waits
+  productions.py   a whole production as one resumable pipeline: spec, stages,
+                   per-item checkpoints and lineage in data/productions/<slug>/,
+                   "change shots", REPORT.md, and reading the production
+                   script's own state.json
+  recipes.py       recipe export (lead -> {lead} casting slot), list/get, and
+                   filling the slot to start a new production
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
                    /object_info pre-flight, checkpoint resolution, template hash
   workflows/       API-format *.json + *.params.json per built-in template, plus
@@ -89,6 +96,56 @@ per-segment re-run reads back), `workflows/` (imported workflows), `inbox/`
 (always-allowed import folder), `tmp/` (render and upload scratch),
 `logs/app.log` (rotating), `backend.json` (overrides and the Faustus
 token), `fake_comfy/` in demo mode.
+
+## Productions and recipes
+
+A **production** is `data/productions/<slug>/state.json`: a `spec` (the
+lead - a character id or a name and look -, an optional reference sheet,
+the world look and negative, the song, every shot with its prompt, seed,
+variants, `clips` and `motion`, photocard looks, album designs, and the cut:
+aspects, qualities, auto-cut options, a storyboard of shot keys per section,
+finishing), `settings`, and the progress: `done[stage]`, the sub-jobs in
+flight (`partial[stage].pending`), `timings` and a `lineage` log. Shot keys
+are `"3"` (shot 3's chosen still) and `"3v2"` (its second variant, used for
+a second clip).
+
+`productions.Run` walks `STAGES` (character, song, frames, lyrics, clips,
+photocards, album, timeline, report) and skips what is done, so the same
+job resumes after a failure, a cancel or a restart. It never talks to
+ComfyUI or ffmpeg itself: GPU/CPU work goes through a `Studio` (in `api.py`
+the same `op_generate`/`op_compose`/`op_render` the routes use; in the tests
+a fake), queued as ordinary jobs, and the runner polls them - so frames and
+clips spread over a render pool, show up in Jobs with their own progress,
+and cancelling the production cancels what it queued. Synchronous steps
+(cast, lyric timing, the auto-cut, designs) call `engine` directly. A shot
+with the lead in frame is an edit from the lead's canonical reference
+(`consistent=true`); the others are txt2img in the world look with the world
+negative; a clip whose subject must stay still (`motion: "still"`) uses
+Wan's stock negative without its stillness terms plus walking (the real
+run's "FAROL walked" lesson).
+
+Production jobs (`production`, and later `production_qa`) are stored on the
+cpu lane but claimed by a dedicated **orchestrator** worker
+(`jobs.ORCHESTRATOR_TYPES`): they only wait for sub-jobs, and waiting on the
+cpu lane itself would deadlock behind the renders they queue.
+
+A **recipe** (`data/recipes/<name>.json`, `prospero.recipe/1`) is a spec
+with the lead abstracted: every string outside ids has the lead's name
+replaced by `{lead}` (word-bounded, case-sensitive), its look by
+`{lead.look}`, its negative by `{lead.negative}`, each palette colour by
+`{lead.palette[i]}`, its bio by `{lead.bio}` and the title by `{title}`; the
+`cast` block says what a slot needs and where it is used; `reusable` keeps
+the source song and the stills/clips of the shots without the lead; and
+`warnings` list prompts that still repeat words of the old lead's look.
+`spec_from_legacy` reads a production script's `state.json` (numbered
+steps, ids only) by taking each asset's own recipe: the shared suffix of
+the shot prompts becomes the world look, `@Name` marks a lead shot, a
+clip's input still tells which shot and variant it animates, and the cut's
+storyboard is read back from the timeline's clips per lyric section.
+`recipes.run_recipe` fills the slot (a character id from any project - its
+canonical reference is copied into the new project - or an inline
+description) and creates the production; reused assets are copied into the
+new project with `copied_from` in their recipe.
 
 ## Threads and processes
 
