@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from prosperos_hoard.ids import new_id
 from prosperos_hoard import animatic, engine
 from prosperos_hoard import productions as prod
 from prosperos_hoard import video
@@ -20,7 +21,7 @@ LYRICS = "[Intro]\nhum\n[Verse]\nlamps along the road\nshadows at my back\n[Chor
 
 
 def _image(store, pid, colour, w=640, h=360) -> str:
-    aid = f"a_{time.monotonic_ns()}"
+    aid = new_id("a")  # monotonic_ns ticks every ~15 ms on Windows: ids collided
     path = store.path_for_asset_file(aid, ".png")
     Image.new("RGB", (w, h), colour).save(path)
     return store.create_asset(project_id=pid, kind="image", file_path=path.relative_to(store.data_dir).as_posix(),
@@ -28,7 +29,7 @@ def _image(store, pid, colour, w=640, h=360) -> str:
 
 
 def _fake_video(store, pid, seconds=5.04) -> str:
-    aid = f"a_{time.monotonic_ns()}"
+    aid = new_id("a")  # monotonic_ns ticks every ~15 ms on Windows: ids collided
     path = store.path_for_asset_file(aid, ".mp4")
     path.write_bytes(b"not decoded by the cut")
     return store.create_asset(project_id=pid, kind="video", file_path=path.relative_to(store.data_dir).as_posix(),

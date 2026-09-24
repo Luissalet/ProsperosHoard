@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
+from prosperos_hoard.ids import new_id
 from prosperos_hoard import procutil
 from prosperos_hoard import productions as prod
 from prosperos_hoard import qa
@@ -107,7 +108,7 @@ def test_lyric_coverage_and_score_parsing():
 # ------------------------------------------------------------ with a store
 
 def _save(store, pid: str, img: Image.Image, **recipe) -> str:
-    aid = f"a_{time.monotonic_ns()}"
+    aid = new_id("a")  # monotonic_ns ticks every ~15 ms on Windows: ids collided
     path = store.path_for_asset_file(aid, ".png")
     img.save(path)
     return store.create_asset(project_id=pid, kind="image", file_path=path.relative_to(store.data_dir).as_posix(),
@@ -118,7 +119,7 @@ def _clip(store, pid: str, frames: np.ndarray, source: str | None = None) -> str
     exe = ffmpeg_path()
     if not exe:
         pytest.skip("ffmpeg missing")
-    aid = f"a_{time.monotonic_ns()}"
+    aid = new_id("a")  # monotonic_ns ticks every ~15 ms on Windows: ids collided
     path = store.path_for_asset_file(aid, ".mp4")
     n, h, w = frames.shape
     proc = procutil.run([exe, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "gray", "-s", f"{w}x{h}", "-r", "24",
@@ -157,7 +158,7 @@ class FakeStudio:
 def _production(store, project, shots, settings=None, **spec_extra):
     spec = {"title": "QA Test", "lead": {"name": "WISP", "look": "WISP, a moth spirit", "palette": ["#F28C28"]},
             "world": {"look": "night lamps"}, "shots": shots, "timeline": {"aspects": ["9:16"]}, **spec_extra}
-    state = prod.create_production(store.data_dir, f"qa {time.monotonic_ns()}", spec,
+    state = prod.create_production(store.data_dir, f"qa {new_id('p')[-8:].lower()}", spec,
                                    settings or {"qa": {"enabled": True, "max_retries": 2}}, project_id=project["id"])
     return state
 
