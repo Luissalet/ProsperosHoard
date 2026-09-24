@@ -162,3 +162,26 @@ def test_object_info_is_cached_and_falls_back_on_error(backend_with_comfy, fake_
 
     monkeypatch.setattr(ComfyClient, "object_info", broken)
     assert engine._object_info(backend_with_comfy) is first  # stale copy beats a failed job
+
+
+def test_template_readiness_names_what_is_missing():
+    import copy
+
+    from prosperos_hoard.devtools.fake_comfy import real_object_info
+
+    info = copy.deepcopy(real_object_info())
+    ready = comfy_driver.template_readiness(info)
+    assert ready["wan22_ti2v"] == "ready" and ready["sdxl_txt2img"] == "ready"
+    unet = info["UNETLoader"]["input"]["required"]["unet_name"]
+    unet[0] = [f for f in unet[0] if "kontext" not in f]
+    del info["TextEncodeAceStepAudio1.5"]
+    out = comfy_driver.template_readiness(info)
+    assert out["flux_kontext_edit"] == {"missing": ["flux1-dev-kontext_fp8_scaled.safetensors"]}
+    assert out["ace15_song"] == {"missing": ["TextEncodeAceStepAudio1.5"]}
+    assert out["wan22_ti2v"] == "ready"
+    assert comfy_driver.template_readiness({}) == {}
+
+
+def test_status_reports_template_readiness(backend_with_comfy):
+    templates = backend_with_comfy.status()["comfy"]["templates"]
+    assert templates["sdxl_txt2img"] == "ready" and "wan22_ti2v" in templates

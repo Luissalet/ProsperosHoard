@@ -646,5 +646,58 @@ def validate_against_object_info(spec: dict[str, Any], values: dict[str, Any], o
     return values
 
 
+_WANTS_RE = re.compile(r"""wants ['"]([^'"]+)['"]""")
+
+
+def template_readiness(object_info: dict[str, Any]) -> dict[str, Any]:
+    """For every built-in template: "ready" when its default prompt would
+    queue on this ComfyUI, else {"missing": [...]} naming the node classes
+    or model files it lacks (or {"invalid": [...]}, the first problems, for
+    anything else). A checkpoint template counts as ready when any
+    checkpoint of its family is installed, as a job would pick it. Empty
+    when there is no node list to check against."""
+    from .workflows import convert
+
+    if not object_info:
+        return {}
+    out: dict[str, Any] = {}
+    for listed in list_builtin_templates():
+        name = listed.get("template")
+        try:
+            workflow, spec = load_template(name)
+        except (WorkflowError, TypeError):
+            continue
+        classes = sorted({n.get("class_type") for n in workflow.values() if n.get("class_type") not in object_info})
+        if classes:
+            out[name] = {"missing": classes[:6]}
+            continue
+        missing: list[str] = []
+        values = dict(spec.get("defaults") or {})
+        try:
+            values = validate_against_object_info(spec, values, object_info, workflow)
+        except ValidationError as exc:
+            if exc.missing_checkpoint:
+                missing.append(exc.missing_checkpoint)
+        wf = apply_params(workflow, spec, values)
+        group = spec.get("reference_group")
+        if group:
+            wire_reference_group(wf, spec, ["reference.png"] * max(1, int(group.get("min", 1))))
+        invalid: list[str] = []
+        for problem in convert.validate_values(wf, object_info):
+            wanted = _WANTS_RE.search(problem) if problem.startswith("model not installed") else None
+            if wanted:
+                if wanted.group(1) not in missing:
+                    missing.append(wanted.group(1))
+            else:
+                invalid.append(problem[:160])
+        if missing:
+            out[name] = {"missing": missing[:6]}
+        elif invalid:
+            out[name] = {"invalid": invalid[:2]}
+        else:
+            out[name] = "ready"
+    return out
+
+
 def estimate_vram_mb(spec: dict[str, Any], vram_table: dict[str, int]) -> int:
     return int(vram_table.get(spec.get("vram_class", "sdxl"), 7000))

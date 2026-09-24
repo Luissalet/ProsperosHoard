@@ -147,8 +147,9 @@ def studio_status() -> dict[str, Any]:
     """What the studio can do right now: each model capability through Hoard Link (image = ComfyUI,
     tts, music...) with the reason, ComfyUI checkpoints and free VRAM, ffmpeg, Piper, music generation
     (not installed unless a backend was added), image_engine (which engines exist and which one "auto"
-    currently resolves to - Qwen-Image 2.1 when it is installed, else Flux, else SDXL), the queue counts
-    and the last 5 jobs. demo_backend=true means images come from the procedural demo backend, not a
+    currently resolves to - Qwen-Image 2.1 when it is installed, else Flux, else SDXL), comfyui.templates
+    (each built-in template: "ready", or {"missing": [node classes / model files to install]}), the queue
+    counts and the last 5 jobs. demo_backend=true means images come from the procedural demo backend, not a
     real model. Call first when unsure.
 
     Keywords: status, backend, is it running, gpu, comfyui, what can you do, estado, esta funcionando, gpu libre, que puedes hacer

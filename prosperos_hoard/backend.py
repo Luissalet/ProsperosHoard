@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import procutil
+from . import comfy_driver, procutil
 from .hoard_link import Link, LinkConfig, Unavailable
 
 # SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
@@ -641,6 +641,8 @@ class Backend:
                         for d in stats.get("devices", [])
                     ]
                     comfy_info["version"] = (stats.get("system") or {}).get("comfyui_version")
+                    # which built-in templates would run here, or what each lacks
+                    comfy_info["templates"] = comfy_driver.template_readiness(object_info or {})
         except Exception as exc:  # pragma: no cover - defensive
             comfy_info = {"reachable": False, "reason": str(exc)[:300]}
 

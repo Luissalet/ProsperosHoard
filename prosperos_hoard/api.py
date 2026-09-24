@@ -1795,7 +1795,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
                                                          "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
                                  for cap, r in link.items()},
-                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
+                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason",
+                                                                "templates") if k != "templates" or status["comfy"].get(k)},
                 "image_engine": {"available": list(engine.IMAGE_ENGINES), "auto_resolves_to": _auto_image_engine()},
                 "ffmpeg": status["ffmpeg"]["found"],
                 "piper_tts": status["piper"]["installed"],
