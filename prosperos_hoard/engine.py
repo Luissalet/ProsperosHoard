@@ -1678,16 +1678,25 @@ def analyze_audio(store: Store, asset_id: str, force: bool = False) -> dict[str,
         return asset["analysis"]
     path = store.data_dir / asset["file_path"]
     try:
-        samples = audio_mod.decode_to_mono(path)
+        samples = audio_mod.decode_to_mono(path, max_duration_s=ANALYSIS_MAX_S)
     except audio_mod.DecodeError as exc:
         raise EngineError("decode_failed", f"could not decode {asset.get('name') or asset_id}: {exc}") from None
     result = audio_mod.analyze_samples(samples)
     result["version"] = ANALYSIS_VERSION
-    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=result["duration_s"])
+    duration_s = result["duration_s"]
+    if duration_s >= ANALYSIS_MAX_S - 0.1:
+        # the decode stopped at the analysis cap: the analysis covers the
+        # first ANALYSIS_MAX_S seconds, but the asset keeps its real length
+        probed = asset.get("duration_s") or audio_mod.probe_duration_s(path)
+        if probed and probed > duration_s:
+            duration_s = probed
+            result["analyzed_s"] = result["duration_s"]
+    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=duration_s)
     return result
 
 
 ANALYSIS_VERSION = 2
+ANALYSIS_MAX_S = 1200.0  # decode cap for beat/section analysis (memory bound)
 
 
 def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) -> dict[str, Any]:
@@ -1834,6 +1843,9 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     if song["kind"] != "audio":
         raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
     analysis = analyze_audio(store, song_asset_id)
+    if float(analysis.get("duration_s") or 0.0) < timeline_mod.MIN_CLIP_S:
+        raise EngineError("song_too_short", f"song {song_asset_id} is {float(analysis.get('duration_s') or 0.0):.2f} s long; "
+                                            f"an auto-cut needs at least {timeline_mod.MIN_CLIP_S} s of audio")
     pool = _pool(store, project_id, asset_ids, board_id)
     lyrics_lines = None
     sections = analysis["sections"]

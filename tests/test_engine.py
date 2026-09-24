@@ -320,6 +320,40 @@ def test_import_bakes_exif_orientation_and_cleans_up_on_failure(store, project, 
     assert sorted(p.name for p in store.thumbs_dir.iterdir()) == thumbs_before
 
 
+def _tone_wav(path, seconds, sr=22050):
+    import wave
+
+    import numpy as np
+
+    t = np.arange(int(seconds * sr)) / sr
+    data = (0.3 * np.sin(2 * np.pi * 220 * t) * 32767).astype("<i2").tobytes()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(data)
+    return path
+
+
+def test_auto_cut_refuses_a_song_shorter_than_one_clip(store, project):
+    if not engine.ffmpeg_path():
+        pytest.skip("ffmpeg missing")
+    song = engine.import_asset(store, project["id"], _tone_wav(store.data_dir / "inbox" / "blip.wav", 0.3))
+    with pytest.raises(engine.EngineError, match="at least"):
+        engine.auto_cut(store, project["id"], song["id"], None, None, None, None)
+
+
+def test_analysis_cap_does_not_shorten_the_songs_duration(store, project, monkeypatch):
+    if not engine.ffmpeg_path():
+        pytest.skip("ffmpeg missing")
+    song = engine.import_asset(store, project["id"], _tone_wav(store.data_dir / "inbox" / "long.wav", 4.0))
+    monkeypatch.setattr(engine, "ANALYSIS_MAX_S", 2.0)
+    result = engine.analyze_audio(store, song["id"], force=True)
+    assert result["duration_s"] == pytest.approx(2.0, abs=0.1)
+    assert store.get_asset(song["id"])["duration_s"] == pytest.approx(4.0, abs=0.1)
+
+
 def test_character_with_a_studio_voice_speaks_through_the_voice_library(store, project, monkeypatch):
     import numpy as np
 
