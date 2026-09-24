@@ -9,6 +9,7 @@ Kept free of FastAPI (see AGENTS.md): the job handler takes the same
 
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from pathlib import Path
@@ -304,20 +305,34 @@ def audiobook_job(store: Store, backend: Backend, job: dict[str, Any], progress:
     for idx, chapter in enumerate(chapters_text):
         progress.check_cancel()
         ch_path = work_dir / f"ch{idx:03d}.wav"
+        lines_path = work_dir / f"ch{idx:03d}.lines.json"
         sentences = split_into_sentences(chapter["text"]) or [chapter["text"] or chapter["title"]]
         if ch_path.is_file():
             # resumed from a previous run of the same book: reuse the file,
-            # still advance the transcript cursor and progress counters
+            # still advance the transcript cursor and progress counters, and
+            # restore this chapter's transcript lines from the sidecar saved
+            # alongside it the first time - otherwise a resumed chapter's
+            # sentences would be missing from the SRT/LRC and sentence_count
             samples, sr = _wav_bytes_to_float(ch_path.read_bytes())
             duration = len(samples) / sr
             done_sentences += len(sentences)
+            if lines_path.is_file():
+                for line in json.loads(lines_path.read_text(encoding="utf-8")):
+                    lines.append({"chapter": idx, "index": line["index"], "text": line["text"],
+                                 "start_s": round(t_cursor + line["start_s"], 3),
+                                 "end_s": round(t_cursor + line["end_s"], 3)})
         else:
+            chapter_lines: list[dict[str, Any]] = []
+
             def on_sentence(i: int, sentence: str, start_s: float, end_s: float, _ch=idx) -> None:
+                entry = {"index": i, "text": sentence, "start_s": round(start_s, 3), "end_s": round(end_s, 3)}
+                chapter_lines.append(entry)
                 lines.append({"chapter": _ch, "index": i, "text": sentence,
                              "start_s": round(t_cursor + start_s, 3), "end_s": round(t_cursor + end_s, 3)})
 
             samples = synthesize_sentences(store, tts_engines, voice_spec, sentences, on_sentence=on_sentence)
             _write_wav(ch_path, samples, COMMON_SR)
+            lines_path.write_text(json.dumps(chapter_lines, ensure_ascii=False), encoding="utf-8")
             duration = len(samples) / COMMON_SR
             done_sentences += len(sentences)
             progress(min(0.95, done_sentences / max(1, total_sentences)), f"chapter {idx + 1}/{len(chapters_text)}: {chapter['title']}")
