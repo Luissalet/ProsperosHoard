@@ -166,8 +166,9 @@ def studio_status() -> dict[str, Any]:
     """What the studio can do right now: each model capability through Hoard Link (image = ComfyUI,
     tts, music...) with the reason, ComfyUI checkpoints and free VRAM, ffmpeg, Piper, music generation
     (not installed unless a backend was added), image_engine (which engines exist and which one "auto"
-    currently resolves to - Qwen-Image 2.1 when it is installed, else Flux, else SDXL), the queue counts
-    and the last 5 jobs. demo_backend=true means images come from the procedural demo backend, not a
+    currently resolves to - Qwen-Image 2.1 when it is installed, else Flux, else SDXL), comfyui.templates
+    (each built-in template: "ready", or {"missing": [node classes / model files to install]}), the queue
+    counts and the last 5 jobs. demo_backend=true means images come from the procedural demo backend, not a
     real model. Call first when unsure.
 
     Keywords: status, backend, is it running, gpu, comfyui, what can you do, estado, esta funcionando, gpu libre, que puedes hacer
@@ -208,7 +209,8 @@ def studio_cast(
     Character fields: role, bio, prompt (the look, inlined wherever @Name appears), negative, palette
     (hex list), canonical_asset_id (reference image), canonical_crop (crop that image into the canonical:
     "left_third"|"middle_third"|"right_third" - one pose of a turnaround sheet - or [x, y, w, h] fractions;
-    the sheet is kept in reference_asset_ids), voice {backend: piper|faustus, voice_id, speed}.
+    the sheet is kept in reference_asset_ids), voice {backend: piper|faustus|studio, voice_id, speed}
+    (studio: voice_id is a saved library voice from voice_list, spoken with its own engine/sample).
     Group fields: concept, member_ids (ordered character ids), colours, logo_asset_id.
     update needs `id`. Names must be unique in a project (they are the @mention).
 
@@ -342,9 +344,11 @@ def studio_compose(
 def studio_voice(project: str, text: str, character_id: Optional[str] = None, voice: Optional[str] = None,
                   speed: Optional[float] = None) -> dict[str, Any]:
     """Speak a line as an audio asset with a character's voice (their `voice` setting) or an explicit
-    Piper voice id: es_ES-davefx-medium, es_ES-sharvard-medium, es_ES-mls_10246-low, en_US-amy-medium,
-    en_US-lessac-medium, en_GB-alba-medium. speed 0.5-2.0. Synchronous; returns the audio asset id.
-    The first use of a voice downloads it (~60 MB). Generic synthetic voices only - no voice cloning.
+    voice: a Piper voice id (es_ES-davefx-medium, es_ES-sharvard-medium, es_ES-mls_10246-low,
+    en_US-amy-medium, en_US-lessac-medium, en_GB-alba-medium) or a saved library voice id (voice_...,
+    see voice_list; also what a character voice {"backend": "studio", "voice_id": ...} uses, with that
+    voice's own engine and sample). speed 0.5-2.0. Synchronous; returns the audio asset id.
+    The first use of a Piper voice downloads it (~60 MB).
 
     Keywords: voice, text to speech, tts, say this line, narrate, voz, texto a voz, decir esta linea, locucion
     """

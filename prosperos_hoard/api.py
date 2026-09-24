@@ -540,8 +540,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
         proj = store.get_project(project)
-        engine_name = engine.resolve_image_engine(engine._object_info(backend), body.engine or proj.get("image_engine"))
+        object_info = engine._object_info(backend)
+        requested_engine = body.engine or proj.get("image_engine")
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
+        # an edit needs the engine's edit model (Kontext for Flux), not only its txt2img one
+        engine_op = "edit" if (body.consistent or body.reference_asset_id or extra_refs) else "txt2img"
+        engine_name = engine.resolve_image_engine(object_info, requested_engine, engine_op)
         if body.consistent:
             # "Cast -> Reference sheet": route through an edit template with
             # the canonical reference as input (image_1, for Qwen) and the
@@ -565,6 +569,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if not reference and body.use_character_reference:
                 reference = composed["reference_asset_id"]
             all_refs = extra_refs or ([reference] if reference else [])
+            if all_refs and engine_op != "edit":
+                engine_name = engine.resolve_image_engine(object_info, requested_engine, "edit")
             template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit" if all_refs else "txt2img"]
         reference = all_refs[0] if all_refs else None
         width, height = body.width, body.height
@@ -1943,7 +1949,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
                                                          "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
                                  for cap, r in link.items()},
-                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
+                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason",
+                                                                "templates") if k != "templates" or status["comfy"].get(k)},
                 "image_engine": {"available": list(engine.IMAGE_ENGINES), "auto_resolves_to": _auto_image_engine()},
                 "ffmpeg": status["ffmpeg"]["found"],
                 "piper_tts": status["piper"]["installed"],

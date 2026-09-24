@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import procutil
+from . import comfy_driver, procutil
 from .hoard_link import Link, LinkConfig, Unavailable
 
 # SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
@@ -149,6 +149,98 @@ class HttpMusic(MusicBackend):
         return resp.content
 
 
+OBJECT_INFO_TTL_S = 60.0
+
+
+class ComfyRunner:
+    """One job's view of ComfyUI: the Link (so one event loop) it was
+    created on, and the ComfyUI client made on that loop. See
+    `Backend.runner()`."""
+
+    def __init__(self, backend: "Backend", link: Any, pool_url: Optional[str]):
+        self._backend = backend
+        self.link = link
+        self.pool_url = pool_url
+        self._client: Any = None
+        self._resolved = False
+        self._closed = False
+
+    def run(self, call: Any) -> Any:
+        """Run `lambda link: <coroutine>` or a coroutine on this runner's loop."""
+        if callable(call):
+            return self.link.sync._run(call)
+        coro = call
+        return self.link.sync._run(lambda _link: coro)
+
+    def comfy(self):
+        """The ComfyClient for this runner's server (None when the main
+        ComfyUI cannot be resolved). Resolved once, then reused."""
+        if not self._resolved:
+            if self.pool_url:
+                self._client = self._backend._pool_client(self.pool_url, self.link)
+            else:
+                self._client = self.run(lambda link: link.comfy())
+            self._resolved = True
+        return self._client
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._backend._release(self.link)
+
+    def __enter__(self) -> "ComfyRunner":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+
+# The vendored ComfyClient only knows `/interrupt` without a body (which
+# stops whatever ComfyUI is running, maybe someone else's prompt) and has no
+# `/queue` call; these wrap its HTTP client instead of editing hoard_link.
+
+async def comfy_queue_ids(comfy: Any) -> tuple[set[str], set[str]]:
+    """(running, pending) prompt ids from ComfyUI's `GET /queue`."""
+    resp = await comfy._client.get(f"{comfy.url}/queue", timeout=5.0)
+    resp.raise_for_status()
+    data = resp.json() or {}
+
+    def ids(key: str) -> set[str]:
+        out = set()
+        for item in data.get(key) or []:
+            if isinstance(item, (list, tuple)) and len(item) > 1:
+                out.add(str(item[1]))
+        return out
+
+    return ids("queue_running"), ids("queue_pending")
+
+
+async def cancel_prompt(comfy: Any, prompt_id: str) -> dict[str, bool]:
+    """Take one prompt off ComfyUI without touching anyone else's: delete it
+    from the pending queue, and interrupt only when it is the prompt
+    running right now (the body names it, so a ComfyUI that understands
+    `prompt_id` also refuses to stop a different one). Best effort: every
+    step swallows its own errors. Returns what was done."""
+    done = {"deleted": False, "interrupted": False}
+    running: set[str] = set()
+    try:
+        running, _pending = await comfy_queue_ids(comfy)
+    except Exception:
+        pass
+    try:
+        resp = await comfy._client.post(f"{comfy.url}/queue", json={"delete": [prompt_id]}, timeout=5.0)
+        done["deleted"] = resp.status_code < 400
+    except Exception:
+        pass
+    if prompt_id in running:
+        try:
+            resp = await comfy._client.post(f"{comfy.url}/interrupt", json={"prompt_id": prompt_id}, timeout=5.0)
+            done["interrupted"] = resp.status_code < 400
+        except Exception:
+            pass
+    return done
+
+
 _FFMPEG_CACHE: dict[str, Optional[str]] = {}
 
 
@@ -207,10 +299,16 @@ class Backend:
         self.link = self._build_link()
         # render pool: which ComfyUI this worker thread talks to (None = the
         # main one Hoard Link resolves), one cached client per extra server
+        # and per Link (a client's HTTP pool belongs to that Link's loop)
         self._bound = threading.local()
-        self._pool_clients: dict[str, Any] = {}
+        self._pool_clients: dict[Any, dict[str, Any]] = {}
         self._pool_health: dict[str, tuple[float, bool]] = {}
         self._pool_lock = threading.Lock()
+        # how many runners (jobs, status calls) still use each Link; a Link
+        # replaced by reload() is closed once nothing holds it any more
+        self._link_refs: dict[Any, int] = {}
+        # object_info per ComfyUI URL: (fetched_at, info)
+        self._object_info_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:
@@ -227,28 +325,71 @@ class Backend:
         return Link(config)
 
     def reload(self) -> None:
-        # The previous Link is not closed here: a GPU job may be mid-call on
-        # its event loop. Its daemon loop thread simply goes idle.
-        self.link = self._build_link()
+        """Swap in a Link built from the current config. A job that is
+        mid-call keeps the Link (and event loop) its runner pinned; the old
+        Link is closed - its loop thread stopped, its clients released -
+        as soon as the last runner holding it is done."""
+        new_link = self._build_link()
+        with self._pool_lock:
+            old = self.link
+            self.link = new_link
+            idle = self._link_refs.get(old, 0) <= 0
+        self._pool_health.clear()
+        if idle:
+            self._close_link(old)
+
+    def runner(self, url: Optional[str] = None) -> "ComfyRunner":
+        """A handle that pins the current Link (and so one event loop) for a
+        whole job: every ComfyUI call a job makes goes through it, so a
+        Settings save (`reload()`) mid-render never moves a later poll onto
+        a different loop than the client it was made with. Use it as a
+        context manager (or call `close()`). `url` names a render-pool
+        server; by default the worker thread's bound server (or the main
+        one)."""
+        with self._pool_lock:
+            link = self.link
+            self._link_refs[link] = self._link_refs.get(link, 0) + 1
+        return ComfyRunner(self, link, url.rstrip("/") if url else getattr(self._bound, "url", None))
+
+    def _release(self, link: Any) -> None:
+        with self._pool_lock:
+            left = self._link_refs.get(link, 0) - 1
+            if left > 0:
+                self._link_refs[link] = left
+                return
+            self._link_refs.pop(link, None)
+            retired = link is not self.link
+        if retired:
+            self._close_link(link)
+
+    def _close_link(self, link: Any) -> None:
+        with self._pool_lock:
+            clients = list((self._pool_clients.pop(link, None) or {}).values())
+        try:
+            for client in clients:
+                try:
+                    link.sync._run(lambda _l, c=client: c.aclose())
+                except Exception:  # pragma: no cover - best effort
+                    pass
+            link.sync.close()
+        except Exception:  # pragma: no cover - best effort
+            pass
 
     def run_async(self, call: Any) -> Any:
         """Run async Hoard Link work from a plain sync worker thread on Hoard
         Link's own background event loop. `call` is either
         `lambda link: <coroutine>` (preferred: it gets the loop-bound link)
         or a coroutine that only touches objects created on that loop
-        (e.g. methods of the ComfyClient returned by `comfy()`)."""
-        if callable(call):
-            return self.link.sync._run(call)
-        coro = call
-        return self.link.sync._run(lambda _link: coro)
+        (e.g. methods of the ComfyClient returned by `comfy()`). Work that
+        spans several calls (a whole job) should use `runner()` instead."""
+        with self.runner() as r:
+            return r.run(call)
 
     def comfy(self):
         """The ComfyUI client bound to Hoard Link's loop, or None. On a
         render-pool worker thread this is that worker's own server."""
-        url = getattr(self._bound, "url", None)
-        if url:
-            return self._pool_client(url)
-        return self.run_async(lambda link: link.comfy())
+        with self.runner() as r:
+            return r.comfy()
 
     # -- render pool -------------------------------------------------
     # One ComfyUI per GPU, all sharing the GPU job queue: `render_pool` in
@@ -272,18 +413,21 @@ class Backend:
         """Pin the calling worker thread to one ComfyUI (None = the main one)."""
         self._bound.url = url.rstrip("/") if url else None
 
-    def _pool_client(self, url: str):
+    def _pool_client(self, url: str, link: Any = None):
+        """The cached ComfyClient for one extra server, created on `link`'s
+        loop (default: the current Link)."""
+        link = link if link is not None else self.link
         with self._pool_lock:
-            client = self._pool_clients.get(url)
+            client = (self._pool_clients.get(link) or {}).get(url)
         if client is None:
             from .hoard_link._comfy import ComfyClient
 
             async def make(_link):
-                return ComfyClient(url)  # created on Hoard Link's loop, reused by every job
+                return ComfyClient(url)  # created on that Link's loop, reused by every job on it
 
-            client = self.run_async(make)
+            client = link.sync._run(make)
             with self._pool_lock:
-                client = self._pool_clients.setdefault(url, client)
+                client = self._pool_clients.setdefault(link, {}).setdefault(url, client)
         return client
 
     def pool_server_ready(self, url: str, ttl_s: float = 10.0) -> bool:
@@ -294,12 +438,39 @@ class Backend:
         if cached and now - cached[0] < ttl_s:
             return cached[1]
         try:
-            self.run_async(self._pool_client(url).system_stats())
+            with self.runner(url) as r:
+                r.run(r.comfy().system_stats())
             ok = True
         except Exception:
             ok = False
         self._pool_health[url] = (now, ok)
         return ok
+
+    def object_info(self, runner: "ComfyRunner", ttl_s: Optional[float] = None) -> dict[str, Any]:
+        """ComfyUI's `/object_info` for the runner's server, cached ~60 s per
+        URL (it is a large answer and every job needs it). A fetch that
+        fails falls back to the last copy of that server's answer, however
+        old; with none, the error propagates."""
+        comfy = runner.comfy()
+        if comfy is None:
+            raise Unavailable("image", ["ComfyUI is not reachable"])
+        key = comfy.url
+        ttl_s = OBJECT_INFO_TTL_S if ttl_s is None else ttl_s
+        now = time.monotonic()
+        with self._pool_lock:
+            cached = self._object_info_cache.get(key)
+        if cached and now - cached[0] < ttl_s:
+            return cached[1]
+        try:
+            info = runner.run(comfy.object_info())
+        except Exception:
+            if cached:
+                return cached[1]
+            raise
+        if info:
+            with self._pool_lock:
+                self._object_info_cache[key] = (now, info)
+        return info
 
     def set_overrides(
         self,
@@ -357,17 +528,19 @@ class Backend:
         raw = self._raw_config()
         return {**DEFAULT_VRAM_ESTIMATES_MB, **(raw.get("vram_estimates_mb") or {})}
 
-    def import_roots(self) -> list[Path]:
+    def import_roots(self, lexical: bool = False) -> list[Path]:
         """Folders `studio_import` may read from: the user's home folder,
         the app's own `data/inbox/`, and any extra folders configured in
-        Settings (`backend.json -> import_roots`)."""
+        Settings (`backend.json -> import_roots`). `lexical=True` gives them
+        made absolute without touching the filesystem (no symlink
+        resolution), for a check that must run before any stat."""
         roots = [Path.home(), self.data_dir / "inbox"]
         for extra in self._raw_config().get("import_roots") or []:
             roots.append(Path(extra))
         out: list[Path] = []
         for r in roots:
             try:
-                resolved = r.expanduser().resolve()
+                resolved = Path(os.path.abspath(r.expanduser())) if lexical else r.expanduser().resolve()
             except OSError:
                 continue
             if resolved not in out:
@@ -412,10 +585,11 @@ class Backend:
 
     def _comfy_available_mb(self) -> Optional[int]:
         try:
-            comfy = self.comfy()
-            if comfy is None:
-                return None
-            stats = self.run_async(comfy.system_stats())
+            with self.runner() as r:
+                comfy = r.comfy()
+                if comfy is None:
+                    return None
+                stats = r.run(comfy.system_stats())
         except Exception:
             return None
         frees: list[int] = []
@@ -427,15 +601,17 @@ class Backend:
         return max(frees) if frees else None
 
     def free_comfy_memory(self) -> dict[str, Any]:
-        comfy = self.comfy()
-        if comfy is None:
-            raise Unavailable("image", ["ComfyUI is not reachable"])
-        self.run_async(comfy.free(unload_models=True, free_memory=True))
+        with self.runner() as r:
+            comfy = r.comfy()
+            if comfy is None:
+                raise Unavailable("image", ["ComfyUI is not reachable"])
+            r.run(comfy.free(unload_models=True, free_memory=True))
         return {"ok": True, "message": "asked ComfyUI to unload its models and free memory"}
 
     # -- status ---------------------------------------------------------
     def status(self) -> dict[str, Any]:
-        link_status = self.link.sync.status()
+        with self.runner() as r:  # holds the Link so a concurrent reload cannot close it mid-call
+            link_status = r.link.sync.status()
         exe = ffmpeg_path()
         fonts_dir = Path(__file__).parent / "fonts"
         bundled_fonts = sorted(p.name for p in fonts_dir.iterdir() if p.is_dir()) if fonts_dir.is_dir() else []
@@ -455,16 +631,19 @@ class Backend:
                 "gpus": details.get("gpus", []),
             }
             if reachable:
-                client = self.comfy()
-                if client is not None:
-                    object_info = self.run_async(client.object_info())
-                    stats = self.run_async(client.system_stats())
+                with self.runner() as r:
+                    client = r.comfy()
+                    if client is not None:
+                        object_info = self.object_info(r)
+                        stats = r.run(client.system_stats())
                     comfy_info["devices"] = [
                         {"name": d.get("name"), "vram_total_mb": int(d.get("vram_total", 0)) // (1024 * 1024),
                          "vram_free_mb": int(d.get("vram_free", 0)) // (1024 * 1024)}
                         for d in stats.get("devices", [])
                     ]
                     comfy_info["version"] = (stats.get("system") or {}).get("comfyui_version")
+                    # which built-in templates would run here, or what each lacks
+                    comfy_info["templates"] = comfy_driver.template_readiness(object_info or {})
         except Exception as exc:  # pragma: no cover - defensive
             comfy_info = {"reachable": False, "reason": str(exc)[:300]}
 

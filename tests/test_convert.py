@@ -208,3 +208,35 @@ def test_unknown_node_class_raises() -> None:
 def test_not_ui_format_raises() -> None:
     with pytest.raises(convert.ConversionError):
         convert.ui_to_api({"3": {"class_type": "KSampler", "inputs": {}}}, {})
+
+
+@pytest.mark.parametrize("mode", [convert.MUTE_MODE, convert.BYPASS_MODE])
+def test_muted_or_bypassed_subgraph_instance_is_not_expanded(mode: int, object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / "flux_kontext_dev_basic.json").read_text(encoding="utf-8"))
+    next(n for n in ui_workflow["nodes"] if n["id"] == 192)["mode"] = mode
+    api = convert.ui_to_api(ui_workflow, object_info)
+    assert not any(key.startswith("192:") for key in api)
+    if mode == convert.BYPASS_MODE:
+        # bypass passes the instance's first IMAGE input straight through
+        assert api["136"]["inputs"]["images"] == ["190", 0]
+    else:
+        assert "images" not in api["136"]["inputs"]
+
+
+def test_dict_form_top_level_links_convert_the_same(object_info: dict) -> None:
+    ui_workflow = json.loads((FIXTURES / "flux_kontext_dev_basic.json").read_text(encoding="utf-8"))
+    expected = convert.ui_to_api(ui_workflow, object_info)
+    ui_workflow["links"] = [{"id": e[0], "origin_id": e[1], "origin_slot": e[2], "target_id": e[3],
+                             "target_slot": e[4], "type": e[5]} for e in ui_workflow["links"]]
+    assert convert.ui_to_api(ui_workflow, object_info) == expected
+
+
+def test_only_real_control_after_generate_values_are_skipped() -> None:
+    info = {"Seedy": {"input": {"required": {"seed": ["INT", {"default": 0}], "label": ["STRING", {}]}},
+                      "output": []}}
+    # a seed followed straight by a string widget (no control widget saved)
+    ui = {"nodes": [{"id": 1, "type": "Seedy", "mode": 0, "inputs": [], "outputs": [],
+                     "widgets_values": [42, "hello"]}], "links": []}
+    assert convert.ui_to_api(ui, info)["1"]["inputs"] == {"seed": 42, "label": "hello"}
+    ui["nodes"][0]["widgets_values"] = [42, "randomize", "hello"]
+    assert convert.ui_to_api(ui, info)["1"]["inputs"] == {"seed": 42, "label": "hello"}

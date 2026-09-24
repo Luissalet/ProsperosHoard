@@ -71,6 +71,24 @@ def test_qwen21_edit_with_two_references(store, backend_with_comfy, fake_comfy, 
     assert "images.image_3" not in encode
 
 
+def test_vary_a_two_reference_edit_keeps_both_references(store, backend_with_comfy, fake_comfy, project):
+    a = _still(store, backend_with_comfy, project, seed=5)
+    b = _still(store, backend_with_comfy, project, seed=6)
+    ref1, ref2 = a["outputs"]["asset_ids"][0], b["outputs"]["asset_ids"][0]
+    params = {"prompt": "<image1> wearing the jacket from <image2>", "positive_prompt": "<image1> wearing the jacket from <image2>",
+              "negative_prompt": "", "seed": 31, "count": 1, "template": "qwen21_edit", "reference_asset_ids": [ref1, ref2]}
+    done = _run_job(store, backend_with_comfy, "generate_image", params, project["id"])
+    assert done["state"] == "done", done
+    varied = _run_job(store, backend_with_comfy, "edit_image",
+                      {"asset_id": done["outputs"]["asset_ids"][0], "operation": "vary", "seed": 32}, project["id"])
+    assert varied["state"] == "done", varied
+    asset = store.get_asset(varied["outputs"]["asset_ids"][0])
+    assert asset["recipe"]["input_asset_ids"] == [ref1, ref2]
+    server, _ = fake_comfy
+    encode = server.prompts_seen[-1]["459:474"]["inputs"]
+    assert "images.image_1" in encode and "images.image_2" in encode
+
+
 def test_qwen21_edit_with_a_single_reference_drops_the_unused_slot(store, backend_with_comfy, fake_comfy, project):
     a = _still(store, backend_with_comfy, project, seed=3)
     ref1 = a["outputs"]["asset_ids"][0]
@@ -107,6 +125,16 @@ def test_qwen21_edit_custom_size_switches_the_canvas(store, backend_with_comfy, 
 
 
 # ---------------------------------------------------- engine resolution
+
+def test_edits_need_the_kontext_model_for_flux():
+    flux_only = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["flux1-schnell-fp8.safetensors"]]}}}}
+    assert engine.resolve_image_engine(flux_only, "auto", "txt2img") == "flux"
+    assert engine.resolve_image_engine(flux_only, "auto", "edit") == "sdxl"
+    assert engine.resolve_image_engine(flux_only, "flux", "edit") == "sdxl"
+    kontext = dict(flux_only, UNETLoader={"input": {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"]]}}})
+    assert engine.resolve_image_engine(kontext, "flux", "edit") == "flux"
+    assert engine.resolve_image_engine(kontext, "auto", "edit") == "flux"
+
 
 def test_resolve_image_engine_auto_prefers_qwen_then_flux_then_sdxl():
     assert engine.resolve_image_engine({}, "auto") == "sdxl"

@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import httpx
 from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
@@ -29,8 +30,8 @@ from . import templates as design_templates
 from . import timeline as timeline_mod
 from . import video as video_mod
 from . import voices as voices_mod
-from .backend import Backend, ffmpeg_path
-from .hoard_link.errors import Unavailable
+from .backend import Backend, ComfyRunner, cancel_prompt, comfy_queue_ids, ffmpeg_path
+from .hoard_link.errors import BackendError, Unavailable
 from .ids import new_id
 from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
@@ -397,13 +398,14 @@ def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
         )
 
 
-def _comfy(backend: Backend):
+def _comfy(backend: Backend, runner: Optional[ComfyRunner] = None):
     try:
-        comfy = backend.comfy()
+        comfy = runner.comfy() if runner is not None else backend.comfy()
     except Exception as exc:  # noqa: BLE001 - resolver failures become one readable reason
         raise Unavailable("image", [f"ComfyUI could not be resolved: {exc}"]) from exc
     if comfy is None:
-        res = backend.link.sync.resolve("image")
+        link = runner.link if runner is not None else backend.link
+        res = link.sync.resolve("image")
         raise Unavailable("image", (res.details or {}).get("reasons") or [res.reason or "ComfyUI is not reachable"])
     return comfy
 
@@ -415,6 +417,13 @@ def _comfy(backend: Backend):
 # overrides it for every kind.
 COMFY_TIMEOUT_S = {"video": 3600.0, "audio": 1800.0}
 COMFY_TIMEOUT_DEFAULT_S = 1200.0
+# While polling: how long ComfyUI may stay unreachable (a hiccup, a busy
+# server) before the job fails, and how long a prompt may be missing from
+# both its queue and its history (ComfyUI restarted and forgot it) before
+# the job fails instead of waiting for the full deadline.
+COMFY_TRANSPORT_GRACE_S = 60.0
+COMFY_LOST_GRACE_S = 30.0
+COMFY_QUEUE_CHECK_EVERY_S = 5.0
 
 
 def comfy_timeout_s(kind: Optional[str]) -> float:
@@ -429,31 +438,77 @@ def comfy_timeout_s(kind: Optional[str]) -> float:
     return COMFY_TIMEOUT_S.get(kind or "", COMFY_TIMEOUT_DEFAULT_S)
 
 
+def _transient(exc: BaseException) -> bool:
+    """A poll failure worth retrying: no answer at all, or a 5xx."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, BackendError) and (exc.status == 0 or exc.status >= 500)
+
+
+def _cancel_prompt(runner: ComfyRunner, comfy, prompt_id: str) -> None:
+    try:
+        runner.run(cancel_prompt(comfy, prompt_id))
+    except Exception:  # pragma: no cover - best effort
+        pass
+
+
 def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
-                         progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
-    comfy = _comfy(backend)
+                         progress: Callable[..., None], timeout_s: float, output_node: Optional[str],
+                         runner: Optional[ComfyRunner] = None) -> list:
+    if runner is None:
+        with backend.runner() as own:
+            return _run_comfy_workflow(backend, workflow, uploads, progress, timeout_s, output_node, runner=own)
+    comfy = _comfy(backend, runner)
     for data, name in uploads:
-        backend.run_async(comfy.upload_image(data, name))
+        runner.run(comfy.upload_image(data, name))
     client_id = str(uuid.uuid4())
-    prompt_id = backend.run_async(comfy.queue(workflow, client_id))
+    prompt_id = runner.run(comfy.queue(workflow, client_id))
     deadline = time.monotonic() + timeout_s
     cancelled = getattr(progress, "cancelled", lambda: False)
+    unreachable_since: Optional[float] = None
+    missing_since: Optional[float] = None
+    next_queue_check = time.monotonic() + COMFY_QUEUE_CHECK_EVERY_S
     while True:
         if cancelled():
-            try:
-                backend.run_async(comfy.interrupt())
-            except Exception:  # pragma: no cover - best effort
-                pass
+            # only our prompt: dequeue it, interrupt it only if it is the one
+            # running (never a bare /interrupt, which stops anyone's job)
+            _cancel_prompt(runner, comfy, prompt_id)
             raise JobCancelled("cancelled")
         try:
-            backend.run_async(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
+            runner.run(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
             break
         except TimeoutError:
-            if time.monotonic() > deadline:
-                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
-                                  "(it may still be running there - check ComfyUI's queue; on a shared or busy "
-                                  "GPU raise PROSPERO_COMFY_TIMEOUT_S)") from None
-    outputs = backend.run_async(comfy.outputs(prompt_id))
+            unreachable_since = None
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if not _transient(exc):
+                raise
+            now = time.monotonic()
+            unreachable_since = unreachable_since or now
+            if now - unreachable_since > COMFY_TRANSPORT_GRACE_S:
+                raise EngineError("comfy_unreachable", f"lost contact with ComfyUI for over {int(COMFY_TRANSPORT_GRACE_S)} s "
+                                  f"while waiting for job {prompt_id} ({str(exc)[:160]})") from None
+            time.sleep(min(2.0, COMFY_QUEUE_CHECK_EVERY_S))
+            continue
+        now = time.monotonic()
+        if now >= next_queue_check:
+            next_queue_check = now + COMFY_QUEUE_CHECK_EVERY_S
+            try:
+                running, pending = runner.run(comfy_queue_ids(comfy))
+            except Exception:  # noqa: BLE001 - an older/odd server: rely on the deadline
+                running, pending = None, None
+            if running is not None and prompt_id not in running and prompt_id not in pending:
+                missing_since = missing_since or now
+                if now - missing_since > COMFY_LOST_GRACE_S:
+                    raise EngineError("comfy_lost_job", f"ComfyUI no longer has job {prompt_id} in its queue or history "
+                                      "(it was probably restarted, or the job was deleted there); run it again")
+            else:
+                missing_since = None
+        if time.monotonic() > deadline:
+            _cancel_prompt(runner, comfy, prompt_id)
+            raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
+                              "(it was taken off ComfyUI's queue; on a shared or busy GPU raise "
+                              "PROSPERO_COMFY_TIMEOUT_S)") from None
+    outputs = runner.run(comfy.outputs(prompt_id))
     saved = [o for o in outputs if o.type == "output"]
     if output_node:
         preferred = [o for o in saved if o.node_id == output_node]
@@ -461,35 +516,45 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
     return saved
 
 
-def _download_output(backend: Backend, output) -> bytes:
-    comfy = _comfy(backend)
-    return backend.run_async(comfy.download(output))
+def _download_output(backend: Backend, output, runner: Optional[ComfyRunner] = None) -> bytes:
+    if runner is None:
+        with backend.runner() as own:
+            return _download_output(backend, output, own)
+    comfy = _comfy(backend, runner)
+    return runner.run(comfy.download(output))
 
 
 _object_info_cache_hash: dict[str, str] = {}
+_object_info_written: dict[str, Any] = {}
 
 
 def object_info_cache_path(data_dir: Path) -> Path:
     return Path(data_dir) / "comfy" / "object_info.json"
 
 
-def _object_info(backend: Backend) -> dict[str, Any]:
-    """The live `/object_info`, also saved to `data/comfy/object_info.json`
-    whenever it changes, so UI-format workflows can still be converted while
-    ComfyUI is off (see `cached_object_info`)."""
-    comfy = _comfy(backend)
-    info = backend.run_async(comfy.object_info())
+def _object_info(backend: Backend, runner: Optional[ComfyRunner] = None) -> dict[str, Any]:
+    """The live `/object_info` (cached ~60 s per server by the backend, and
+    its last good copy reused when a refresh fails), also saved to
+    `data/comfy/object_info.json` whenever it changes, so UI-format
+    workflows can still be converted while ComfyUI is off (see
+    `object_info_live_or_cached`)."""
+    if runner is None:
+        with backend.runner() as own:
+            return _object_info(backend, own)
+    _comfy(backend, runner)
+    info = backend.object_info(runner)
     try:
-        if info:
+        path = object_info_cache_path(backend.data_dir)
+        if info and _object_info_written.get(str(path)) is not info:
             blob = json.dumps(info, sort_keys=True)
             digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
-            path = object_info_cache_path(backend.data_dir)
-            if _object_info_cache_hash.get(str(path)) != digest:
+            if _object_info_cache_hash.get(str(path)) != digest or not path.is_file():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_suffix(".tmp")
                 tmp.write_text(blob, encoding="utf-8")
                 tmp.replace(path)
                 _object_info_cache_hash[str(path)] = digest
+            _object_info_written[str(path)] = info
     except OSError:
         pass  # the cache is a convenience; never fail a job over it
     return info
@@ -519,9 +584,18 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
                  mask_asset_id: Optional[str] = None,
-                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
+                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
+                 runner: Optional[ComfyRunner] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
-    each output as an asset whose recipe can re-run it exactly."""
+    each output as an asset whose recipe can re-run it exactly. Every
+    ComfyUI call of the job goes through one runner (one event loop), so a
+    backend reload mid-job does not strand it."""
+    if runner is None:
+        with backend.runner() as own:
+            return run_template(store, backend, job, progress, template_name=template_name, values=values,
+                                operation=operation, count=count, reference_asset_id=reference_asset_id,
+                                reference_asset_ids=reference_asset_ids, mask_asset_id=mask_asset_id,
+                                extra_recipe=extra_recipe, name=name, runner=own)
     project_id = job["project_id"]
     try:
         workflow, spec = comfy_driver.load_template(template_name, store.data_dir)
@@ -531,7 +605,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     progress(0.02, "checking free VRAM")
     check_vram_or_wait(backend, spec)
     progress(0.05, "validating against ComfyUI")
-    object_info = _object_info(backend)
+    object_info = _object_info(backend, runner)
     try:
         values = comfy_driver.validate_against_object_info(spec, values, object_info, workflow)
     except comfy_driver.ValidationError as exc:
@@ -607,11 +681,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         t0 = time.monotonic()
         outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,
                                       timeout_s=comfy_timeout_s(spec.get("kind")),
-                                      output_node=spec.get("output_node"))
+                                      output_node=spec.get("output_node"), runner=runner)
         if not outputs:
             raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
         for out in outputs:
-            data = _download_output(backend, out)
+            data = _download_output(backend, out, runner)
             recipe = {
                 "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
                 "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
@@ -720,7 +794,10 @@ def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[
     t = dict(template_defaults or {})
     d = {} if t else (params.get("style_defaults") or {})
     values = {
-        "checkpoint": _first(params.get("checkpoint"), d.get("checkpoint")),
+        # only an explicit checkpoint is a requirement; a style preset's is
+        # a preference (see comfy_driver.validate_against_object_info)
+        "checkpoint": params.get("checkpoint"),
+        "checkpoint_preferred": None if params.get("checkpoint") else d.get("checkpoint"),
         "positive_prompt": params["positive_prompt"],
         "negative_prompt": params.get("negative_prompt") or t.get("negative_prompt") or "",
         "width": _first(params.get("width"), (params.get("style_defaults") or {}).get("width"), t.get("width"), 1024),
@@ -786,7 +863,7 @@ def _has_model_file(object_info: dict[str, Any], class_type: str, input_name: st
     return isinstance(entry, list) and any(needle in str(f).lower() for f in entry)
 
 
-def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None) -> str:
+def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None, op: str = "txt2img") -> str:
     """`auto|qwen21|flux|sdxl` (spec item 3) -> the engine this call
     actually gets. `auto` picks Qwen-Image 2.1 when its node class
     (`TextEncodeQwenImage21`) *and* a matching model file are installed,
@@ -794,12 +871,17 @@ def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] =
     ship as built-in checkpoints/templates. An engine requested by name
     that turns out not to be installed falls back the same way, so a
     project already set to "qwen21" keeps rendering before the model
-    finishes downloading."""
+    finishes downloading. `op` is "txt2img" or "edit": Flux's edit template
+    is Kontext, a separate UNet, so a Flux checkpoint alone does not make
+    Flux an edit engine."""
     requested = (requested or "auto").lower()
     if requested not in IMAGE_ENGINES:
         requested = "auto"
     has_qwen = "TextEncodeQwenImage21" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "qwen")
-    has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
+    if op == "edit":
+        has_flux = _has_model_file(object_info, "UNETLoader", "unet_name", "kontext")
+    else:
+        has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
     if requested == "sdxl":
         return "sdxl"
     if requested == "flux":
@@ -813,22 +895,43 @@ def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] =
     return "sdxl"
 
 
+def _has_text_encoder(template: str, store: Store) -> bool:
+    try:
+        workflow, _ = comfy_driver.load_template(template, store.data_dir)
+    except comfy_driver.WorkflowError:
+        return False
+    return any(comfy_driver._is_text_encoder(str(n.get("class_type"))) for n in workflow.values())
+
+
 def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
     template = params.get("template")
     engine_name = TEMPLATE_TO_ENGINE.get(template)
     if not template:
         is_edit = bool(params.get("reference_asset_id") or params.get("reference_asset_ids"))
-        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"))
+        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"), "edit" if is_edit else "txt2img")
         template = ENGINE_TEMPLATES[engine_name]["edit" if is_edit else "txt2img"]
     try:
         _, spec = comfy_driver.load_template(template, store.data_dir)
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
     values = _generation_values(params, spec.get("defaults"))
-    for key in spec.get("map", {}):
-        if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
+    mapping = spec.get("map", {})
+    for key in mapping:
+        # "prompt" is the job's raw request (with @mentions), never a node value
+        if key not in _CORE_GENERATION_KEYS and key != "prompt" and params.get(key) is not None:
             values[key] = params[key]
+    if "positive_prompt" not in mapping and comfy_driver.CUSTOM_ID_RE.match(template):
+        if "prompt" in mapping:
+            # imported before the map said positive_prompt/text_N: its one
+            # unclassified prompt input takes the composed prompt
+            values["prompt"] = values["positive_prompt"]
+        elif str(params.get("positive_prompt") or "").strip() and (
+                any(k.startswith("text_") for k in mapping) or _has_text_encoder(template, store)):
+            raise EngineError("unmapped_prompt",
+                              f"workflow {template} has no positive_prompt in its parameter map, so this prompt would be "
+                              "ignored; edit the workflow's map and point positive_prompt at its prompt input "
+                              f"(candidates: {', '.join(k for k in mapping if k.startswith('text_')) or 'none detected'})")
     if template == "qwen21_edit" and params.get("custom_size") is None and (params.get("width") or params.get("height")):
         values["custom_size"] = True
     size_mode = spec.get("size_from_reference")
@@ -847,6 +950,25 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
 
 
 _EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires"}
+_SD_TEMPLATES = {"sdxl_txt2img", "sdxl_img2img", "sdxl_inpaint", "sdxl_hires", "sd15_txt2img"}
+_INSTRUCTION_TEMPLATES = {"flux_kontext_edit", "qwen21_edit"}
+
+
+def _is_sd_family(store: Store, recipe: dict[str, Any]) -> bool:
+    """Was this recipe made with an SDXL/SD1.5 template (built-in, or an
+    imported workflow whose VRAM class says so)?"""
+    template = recipe.get("template")
+    if recipe.get("backend") != "comfyui" or not template:
+        return False
+    if template in _SD_TEMPLATES:
+        return True
+    if comfy_driver.CUSTOM_ID_RE.match(str(template)):
+        try:
+            _, spec = comfy_driver.load_template(template, store.data_dir)
+        except comfy_driver.WorkflowError:
+            return False
+        return spec.get("vram_class") in ("sdxl", "sd15")
+    return False
 
 
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
@@ -857,11 +979,22 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
         return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
                             count=params.get("count", 1))
     template = _EDIT_TEMPLATES[operation]
-    src_params = (src.get("recipe") or {}).get("params") or {}
+    src_recipe = src.get("recipe") or {}
+    all_src_params = src_recipe.get("params") or {}
+    # the SDXL edit templates only inherit sampling settings and the
+    # checkpoint from an SD-family source: a Flux/Qwen/Kontext recipe's
+    # cfg 1 / 4 steps / UNet name would wash out or break an SDXL pass
+    sd_source = _is_sd_family(store, src_recipe)
+    src_params = all_src_params if sd_source else {}
+    source_prompt = all_src_params.get("positive_prompt")
+    if src_recipe.get("template") in _INSTRUCTION_TEMPLATES or (not sd_source and src_recipe.get("prompt")):
+        # an edit template's positive_prompt is an instruction ("keep <image1>
+        # ..., now ..."), not a scene an img2img pass can use
+        source_prompt = src_recipe.get("prompt") or ""
     values = {
         "checkpoint": src_params.get("checkpoint"),
-        "positive_prompt": _first(params.get("prompt"), src_params.get("positive_prompt"), ""),
-        "negative_prompt": _first(params.get("negative_prompt"), src_params.get("negative_prompt"), ""),
+        "positive_prompt": _first(params.get("prompt"), source_prompt, ""),
+        "negative_prompt": _first(params.get("negative_prompt"), all_src_params.get("negative_prompt"), ""),
         "seed": params.get("seed"),
         "steps": _first(params.get("steps"), src_params.get("steps"), 30),
         "cfg": _first(params.get("cfg"), src_params.get("cfg"), 6.5),
@@ -907,24 +1040,30 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     values = dict(recipe.get("params") or {})
     if vary:
         values["seed"] = seed if seed is not None else random_seed()
-    inputs = recipe.get("input_asset_ids") or []
-    ref = inputs[0] if inputs else None
-    mask = inputs[1] if len(inputs) > 1 else None
-    current = None
+    inputs = list(recipe.get("input_asset_ids") or [])
+    unchanged = True
+    spec: dict[str, Any] = {}
     try:
         workflow, spec = comfy_driver.load_template(recipe["template"], store.data_dir)
-        current = comfy_driver.template_hash(workflow, spec)
+        unchanged = comfy_driver.template_hash_matches(recipe.get("template_hash"), workflow, spec)
     except comfy_driver.WorkflowError:
         pass
+    ref_ids: Optional[list[str]] = None
+    if spec.get("reference_group"):
+        # a multi-reference edit (Qwen-Image 2.1): every input is a reference
+        ref, mask, ref_ids = (inputs[0] if inputs else None), None, inputs
+    else:
+        ref = inputs[0] if inputs else None
+        mask = inputs[1] if len(inputs) > 1 else None
     result = run_template(
         store, backend, job, progress, template_name=recipe["template"], values=values,
         operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
-        reference_asset_id=ref, mask_asset_id=mask,
+        reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",
     )
-    if current and recipe.get("template_hash") and current != recipe["template_hash"]:
+    if not unchanged:
         result["note"] = "the workflow template changed since this asset was made; the result may differ"
     return result
 
@@ -1003,6 +1142,14 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_unc(path: str) -> bool:
+    r"""A UNC path (`\\host\share\x`, or `//host/share/x` on Windows) or an
+    extended-length one (`\\?\C:\x`, `\\.\x`)."""
+    if path.startswith("\\\\"):
+        return True
+    return os.name == "nt" and path.replace("\\", "/").startswith("//")
+
+
 def resolve_import_path(backend: Backend, store: Store, raw_path: str) -> Path:
     """The only way a client-supplied path reaches the filesystem. The path
     is made absolute (relative paths are taken from `data/inbox/`),
@@ -1011,18 +1158,37 @@ def resolve_import_path(backend: Backend, store: Store, raw_path: str) -> Path:
     database/asset folders."""
     if not isinstance(raw_path, str) or not raw_path.strip() or "\x00" in raw_path:
         raise EngineError("bad_path", "give the absolute path of a local file")
-    candidate = Path(raw_path.strip().strip('"')).expanduser()
+    raw = raw_path.strip().strip('"')
+    roots = backend.import_roots()
+    lexical_roots = backend.import_roots(lexical=True)
+    # A network (UNC) or extended-length path is refused before anything
+    # touches it: on Windows even a stat() of a UNC path opens an SMB
+    # connection that offers the user's credentials. Allowed only when an
+    # import folder is itself on a network share.
+    if _is_unc(raw) and not any(_is_unc(str(r)) for r in lexical_roots):
+        raise EngineError("network_path", "network (UNC) and extended-length paths cannot be imported; copy the "
+                                          "file to a local folder first, or add the share in Settings > Import folders")
+    candidate = Path(raw).expanduser()
     inbox = (store.data_dir / "inbox")
     if not candidate.is_absolute():
         inbox.mkdir(parents=True, exist_ok=True)
         candidate = inbox / candidate
+    # lexical check first, with no filesystem access: the path with `..`
+    # collapsed must already sit inside an import folder
+    lexical = Path(os.path.abspath(candidate))
+    if not any(_inside(lexical, r) for r in (*lexical_roots, *roots)):
+        raise EngineError(
+            "outside_import_folders",
+            f"{lexical} is outside the folders Prospero may import from ({', '.join(str(r) for r in roots)}). "
+            "Move the file into one of them or add its folder in Settings > Import folders.",
+        )
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError):
         raise EngineError("file_not_found", f"no such file: {raw_path[:200]}") from None
     if not resolved.is_file():
         raise EngineError("not_a_file", f"{raw_path[:200]} is not a regular file")
-    roots = backend.import_roots()
+    # and again after symlinks are resolved
     if not any(_inside(resolved, r) for r in roots):
         raise EngineError(
             "outside_import_folders",
@@ -1101,6 +1267,35 @@ def _validate_content(path: Path, kind: str) -> dict[str, Any]:
 
 
 _MIME = {"image": None, "audio": None, "video": None, "lyrics": "text/plain; charset=utf-8", "font": None}
+_EXIF_ORIENTATION = 0x0112
+
+
+def _bake_exif_orientation(path: Path) -> None:
+    """A phone photo stored sideways with an EXIF "rotate me" flag is
+    rewritten upright (same format), so every consumer - designs, ffmpeg
+    clips, ComfyUI uploads - sees it the way the user does, not only the
+    thumbnails."""
+    with Image.open(path) as img:
+        orientation = img.getexif().get(_EXIF_ORIENTATION, 1)
+        if orientation in (None, 1):
+            return
+        fmt = (img.format or "PNG").upper()
+        upright = ImageOps.exif_transpose(img)
+        upright.load()
+    if fmt == "MPO":
+        fmt = "JPEG"
+    save_kwargs: dict[str, Any] = {}
+    if fmt == "JPEG":
+        save_kwargs = {"quality": 95, "subsampling": 0}
+        if upright.mode not in ("RGB", "L", "CMYK"):
+            upright = upright.convert("RGB")
+    exif = upright.getexif()
+    if exif:
+        exif[_EXIF_ORIENTATION] = 1
+        save_kwargs["exif"] = exif.tobytes()
+    tmp = path.with_name(path.name + ".tmp")
+    upright.save(tmp, format=fmt, **save_kwargs)
+    tmp.replace(path)
 
 
 def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
@@ -1117,29 +1312,37 @@ def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Op
     stored_ext = ".lrc" if kind == "lyrics" else ext
     dest = store.path_for_asset_file(asset_id, stored_ext)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if kind == "lyrics":
-        dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
-    else:
-        shutil.copyfile(source_path, dest)
+    thumb = store.path_for_thumb(asset_id)
+    try:
+        if kind == "lyrics":
+            dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
+        else:
+            shutil.copyfile(source_path, dest)
 
-    thumb_path = None
-    mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
-    if kind == "image":
-        thumb = store.path_for_thumb(asset_id)
-        make_thumbnail(dest, thumb)
-        thumb_path = _rel(store, thumb)
-        mime = Image.MIME.get((info.get("format") or "").upper(), mime)
-    elif kind == "video":
-        thumb_path = _video_thumbnail(dest, store.path_for_thumb(asset_id))
-        info["width"], info["height"] = _probe_video_size(dest)
-    elif kind == "audio":
-        mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
+        thumb_path = None
+        mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
+        if kind == "image":
+            _bake_exif_orientation(dest)
+            make_thumbnail(dest, thumb)
+            thumb_path = _rel(store, thumb)
+            mime = Image.MIME.get((info.get("format") or "").upper(), mime)
+        elif kind == "video":
+            thumb_path = _video_thumbnail(dest, thumb)
+            info["width"], info["height"] = _probe_video_size(dest)
+        elif kind == "audio":
+            mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
 
-    asset = store.create_asset(
-        project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
-        width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
-        source="import", asset_id=asset_id, name=name,
-    )
+        asset = store.create_asset(
+            project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
+            width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
+            source="import", asset_id=asset_id, name=name,
+        )
+    except BaseException:
+        # no orphaned assets/<id>.* (or its thumbnail) for an import that failed
+        dest.unlink(missing_ok=True)
+        thumb.unlink(missing_ok=True)
+        thumb.with_suffix(".jpg").unlink(missing_ok=True)
+        raise
     if kind == "audio":
         try:
             samples = audio_mod.decode_to_mono(dest)
@@ -1475,16 +1678,25 @@ def analyze_audio(store: Store, asset_id: str, force: bool = False) -> dict[str,
         return asset["analysis"]
     path = store.data_dir / asset["file_path"]
     try:
-        samples = audio_mod.decode_to_mono(path)
+        samples = audio_mod.decode_to_mono(path, max_duration_s=ANALYSIS_MAX_S)
     except audio_mod.DecodeError as exc:
         raise EngineError("decode_failed", f"could not decode {asset.get('name') or asset_id}: {exc}") from None
     result = audio_mod.analyze_samples(samples)
     result["version"] = ANALYSIS_VERSION
-    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=result["duration_s"])
+    duration_s = result["duration_s"]
+    if duration_s >= ANALYSIS_MAX_S - 0.1:
+        # the decode stopped at the analysis cap: the analysis covers the
+        # first ANALYSIS_MAX_S seconds, but the asset keeps its real length
+        probed = asset.get("duration_s") or audio_mod.probe_duration_s(path)
+        if probed and probed > duration_s:
+            duration_s = probed
+            result["analyzed_s"] = result["duration_s"]
+    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=duration_s)
     return result
 
 
 ANALYSIS_VERSION = 2
+ANALYSIS_MAX_S = 1200.0  # decode cap for beat/section analysis (memory bound)
 
 
 def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) -> dict[str, Any]:
@@ -1495,6 +1707,40 @@ def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) 
         "beat_count": len(beats), "beat_times": beats[:max_beats], "beats_truncated": len(beats) > max_beats,
         "downbeats": downs[: max_beats // 4], "sections": analysis.get("sections") or [], "notes": analysis.get("notes"),
     }
+
+
+def _studio_tts_engines(store: Store, backend: Backend, engine_id: Optional[str]) -> list[Any]:
+    """The voice studio's TTS engines (the same list `voice_speak` uses).
+    ComfyUI's node list is only fetched for a ComfyUI-hosted engine."""
+    from . import voice_engines as ve
+
+    object_info = None
+    if engine_id and "comfy" in engine_id.lower():
+        try:
+            object_info = _object_info(backend)
+        except Exception:  # noqa: BLE001 - unreachable ComfyUI: that engine reports not installed
+            object_info = None
+    return ve.default_tts_engines(voices_dir=store.data_dir / "voices", object_info=object_info)
+
+
+def _studio_voice_line(store: Store, backend: Backend, voice_cfg: dict[str, Any], text: str) -> tuple[bytes, str]:
+    """A character voice {"backend": "studio", "voice_id": "<library voice>",
+    "preset"?, "speed"?}: synthesized with that saved voice's own engine
+    and sample, like `voice_speak`. Provider reads "studio:<engine>"."""
+    from . import voice_lab
+
+    voice_id = voice_cfg.get("voice_id")
+    if not voice_id:
+        raise EngineError("voice_required", "a studio voice needs voice_id (a saved library voice, see voice_list)")
+    library_voice = store.get_studio_voice(voice_id)
+    spec = {k: voice_cfg[k] for k in ("voice_id", "engine_id", "preset", "speed", "pitch", "style", "language")
+            if voice_cfg.get(k) is not None}
+    engines = _studio_tts_engines(store, backend, spec.get("engine_id") or library_voice.get("engine_id"))
+    try:
+        wav, engine_id = voice_lab.synthesize_with_spec(store, engines, spec, text)
+    except voice_lab.VoiceLabError as exc:
+        raise EngineError(exc.code, str(exc)) from None
+    return wav, f"studio:{engine_id}"
 
 
 def voice_line(store: Store, backend: Backend, project_id: str, text: str, character_id: Optional[str] = None,
@@ -1512,16 +1758,25 @@ def voice_line(store: Store, backend: Backend, project_id: str, text: str, chara
         voice_cfg = dict(char.get("voice") or {})
     if voice_override:
         voice_cfg["voice_id"] = voice_override
+        # a library voice id ("voice_...") speaks through the voice studio;
+        # anything else is a curated Piper voice id
+        if voice_override.startswith("voice_"):
+            voice_cfg["backend"] = "studio"
+        elif voice_cfg.get("backend") == "studio":
+            voice_cfg["backend"] = "piper"
         voice_cfg.setdefault("backend", "piper")
     if speed:
         if not 0.5 <= float(speed) <= 2.0:
             raise EngineError("bad_speed", "speed must be between 0.5 and 2.0")
         voice_cfg["speed"] = float(speed)
     voices_dir = store.data_dir / "voices"
-    try:
-        wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text.strip(), voice_cfg)
-    except voices_mod.VoiceError as exc:
-        raise EngineError(exc.code, str(exc)) from None
+    if voice_cfg.get("backend") == "studio":
+        wav_bytes, provider = _studio_voice_line(store, backend, voice_cfg, text.strip())
+    else:
+        try:
+            wav_bytes, provider = voices_mod.synthesize(backend, voices_dir, text.strip(), voice_cfg)
+        except voices_mod.VoiceError as exc:
+            raise EngineError(exc.code, str(exc)) from None
     asset_id = new_id("a")
     dest = store.path_for_asset_file(asset_id, ".wav")
     dest.write_bytes(wav_bytes)
@@ -1588,6 +1843,9 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     if song["kind"] != "audio":
         raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
     analysis = analyze_audio(store, song_asset_id)
+    if float(analysis.get("duration_s") or 0.0) < timeline_mod.MIN_CLIP_S:
+        raise EngineError("song_too_short", f"song {song_asset_id} is {float(analysis.get('duration_s') or 0.0):.2f} s long; "
+                                            f"an auto-cut needs at least {timeline_mod.MIN_CLIP_S} s of audio")
     pool = _pool(store, project_id, asset_ids, board_id)
     lyrics_lines = None
     sections = analysis["sections"]

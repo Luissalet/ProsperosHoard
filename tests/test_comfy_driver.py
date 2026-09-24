@@ -135,3 +135,89 @@ def test_template_hash_changes_with_the_graph():
     h1 = comfy_driver.template_hash(workflow, spec)
     workflow["3"]["inputs"]["steps"] = 99
     assert comfy_driver.template_hash(workflow, spec) != h1
+
+
+def test_template_hash_covers_linked_params_and_still_accepts_old_recipes():
+    workflow, spec = comfy_driver.load_template("ace15_song")
+    old = comfy_driver._template_hash_v1(workflow, spec)
+    assert comfy_driver.template_hash_matches(old, workflow, spec)  # recorded before the hash grew
+    assert comfy_driver.template_hash_matches(comfy_driver.template_hash(workflow, spec), workflow, spec)
+    changed = dict(spec, linked_params={"duration": []})
+    assert comfy_driver.template_hash(workflow, changed) != comfy_driver.template_hash(workflow, spec)
+    assert not comfy_driver.template_hash_matches(comfy_driver.template_hash(workflow, spec), workflow, changed)
+
+
+def test_style_checkpoint_is_a_preference_an_explicit_one_a_requirement():
+    workflow, spec = comfy_driver.load_template("sdxl_txt2img")
+    info = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["juggernautXL_v9.safetensors"]]}}}}
+    out = comfy_driver.validate_against_object_info(spec, {"checkpoint": None, "checkpoint_preferred": "sd_xl_base_1.0.safetensors"},
+                                                    info, None)
+    assert out["checkpoint"] == "juggernautXL_v9.safetensors" and "checkpoint_preferred" not in out
+    info2 = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["a.safetensors", "sd_xl_base_1.0.safetensors"]]}}}}
+    out = comfy_driver.validate_against_object_info(spec, {"checkpoint_preferred": "sd_xl_base_1.0"}, info2, None)
+    assert out["checkpoint"] == "sd_xl_base_1.0.safetensors"
+    with pytest.raises(comfy_driver.ValidationError):
+        comfy_driver.validate_against_object_info(spec, {"checkpoint": "sd_xl_base_1.0.safetensors"}, info, None)
+
+
+# ---------------------------------------------- param map for custom imports
+
+def test_propose_map_walks_through_guidance_nodes_and_infers_vram():
+    kontext, _ = comfy_driver.load_template("flux_kontext_edit")
+    spec = comfy_driver.propose_param_map(kontext)
+    assert spec["map"]["positive_prompt"] == "192:6.text"  # KSampler <- FluxGuidance <- ReferenceLatent <- encoder
+    assert spec["vram_class"] == "kontext"
+    qwen, _ = comfy_driver.load_template("qwen21_txt2img")
+    spec = comfy_driver.propose_param_map(qwen)
+    assert spec["map"]["positive_prompt"] == "459:452.prompt" and spec["vram_class"] == "qwen21"
+    wan, _ = comfy_driver.load_template("wan22_ti2v")
+    spec = comfy_driver.propose_param_map(wan)
+    assert spec["vram_class"] == "wan" and spec["map"]["positive_prompt"] == "6.text"
+    assert spec["map"]["negative_prompt"] == "7.text"
+    song, _ = comfy_driver.load_template("ace15_song")
+    spec = comfy_driver.propose_param_map(song)
+    assert spec["kind"] == "audio" and spec["vram_class"] == "ace"
+    comfy_driver.validate_param_map(song, spec)  # an audio workflow is a valid custom workflow
+
+
+def test_propose_map_understands_custom_sampler_guiders_and_extra_seeds():
+    wf = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux1-dev.safetensors", "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPTextEncodeFlux", "inputs": {"clip_l": "a cat", "t5xxl": "a cat", "guidance": 3.5,
+                                                              "clip": ["9", 0]}},
+        "3": {"class_type": "BasicGuider", "inputs": {"model": ["1", 0], "conditioning": ["2", 0]}},
+        "4": {"class_type": "RandomNoise", "inputs": {"noise_seed": 1}},
+        "5": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["4", 0], "guider": ["3", 0], "sampler": ["6", 0],
+                                                                 "sigmas": ["7", 0], "latent_image": ["8", 0]}},
+        "6": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "7": {"class_type": "BasicScheduler", "inputs": {"model": ["1", 0], "scheduler": "simple", "steps": 20, "denoise": 1.0}},
+        "8": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+        "9": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "a", "clip_name2": "b", "type": "flux"}},
+        "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": 2}},
+        "11": {"class_type": "CLIPTextEncode", "inputs": {"text": "unused", "clip": ["9", 0]}},
+        "20": {"class_type": "SaveImage", "inputs": {"images": ["5", 0], "filename_prefix": "x"}},
+    }
+    spec = comfy_driver.propose_param_map(wf)
+    m = spec["map"]
+    assert m["positive_prompt"] == "2.t5xxl" and spec["linked_params"]["positive_prompt"] == ["2.clip_l"]
+    assert m["seed"] == "4.noise_seed" and spec["linked_seeds"] == ["10.noise_seed"] and "seed_2" not in m
+    assert m["sampler"] == "6.sampler_name" and m["scheduler"] == "7.scheduler" and m["width"] == "8.width"
+    assert m["text_1"] == "11.text" and "prompt" not in m  # never collides with the job's raw prompt
+    assert spec["vram_class"] == "flux"
+    applied = comfy_driver.apply_params(wf, spec, {"positive_prompt": "a dog", "seed": 77})
+    assert applied["2"]["inputs"]["t5xxl"] == applied["2"]["inputs"]["clip_l"] == "a dog"
+    assert applied["4"]["inputs"]["noise_seed"] == applied["10"]["inputs"]["noise_seed"] == 77
+
+
+def test_custom_workflow_without_a_positive_prompt_refuses_to_ignore_the_prompt(store, project):
+    from prosperos_hoard import engine
+
+    workflow, _ = comfy_driver.load_template("sdxl_txt2img")
+    spec = comfy_driver.import_custom_workflow(store.data_dir, "no prompt", workflow)
+    mapping = {k: v for k, v in spec["map"].items() if k != "positive_prompt"}
+    mapping["text_1"] = spec["map"]["positive_prompt"]
+    comfy_driver.update_custom_workflow(store.data_dir, spec["template"], {"map": mapping})
+    job = {"id": "j", "project_id": project["id"],
+           "params": {"prompt": "a cat", "positive_prompt": "a cat", "template": spec["template"]}}
+    with pytest.raises(engine.EngineError, match="positive_prompt"):
+        engine.generate_image(store, None, job, lambda *a, **k: None)

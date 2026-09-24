@@ -79,6 +79,8 @@ _WIDGET_SCALARS = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "COMFY_DYNAMICC
 DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
 AUTOGROW = "COMFY_AUTOGROW_V3"
 SEED_NAMES = ("seed", "noise_seed")
+# the values of the UI-only widget ComfyUI adds after a seed
+CONTROL_AFTER_GENERATE = {"fixed", "increment", "decrement", "randomize"}
 SUBGRAPH_INPUT_ORIGIN = -10
 SUBGRAPH_OUTPUT_TARGET = -20
 # Socketless widget types the real frontend still puts in the API prompt,
@@ -107,10 +109,19 @@ def _prefixed(prefix: str, node_id: Any) -> str:
 
 
 def _links_from_array(raw_links: list) -> dict[Any, dict[str, Any]]:
-    """Top-level `links`: `[link_id, origin_id, origin_slot, target_id, target_slot, type]`."""
+    """Top-level `links`: `[link_id, origin_id, origin_slot, target_id, target_slot, type]`
+    (the classic export), or already `{id, origin_id, ...}` objects (what
+    newer frontends write, the same shape as a subgraph's links)."""
     out: dict[Any, dict[str, Any]] = {}
     for entry in raw_links or []:
-        link_id, origin_id, origin_slot, target_id, target_slot, ltype = entry
+        if isinstance(entry, dict):
+            if "id" in entry:
+                out[entry["id"]] = entry
+            continue
+        if not isinstance(entry, (list, tuple)) or len(entry) < 5:
+            raise ConversionError(f"malformed link entry {str(entry)[:80]}")
+        link_id, origin_id, origin_slot, target_id, target_slot = entry[:5]
+        ltype = entry[5] if len(entry) > 5 else None
         out[link_id] = {"origin_id": origin_id, "origin_slot": origin_slot,
                          "target_id": target_id, "target_slot": target_slot, "type": ltype}
     return out
@@ -134,8 +145,6 @@ def _resolve(scope: _Scope, node_id: Any, slot: int) -> Optional[Resolved]:
     if node is None:
         return None
     ctype = node.get("type")
-    if ctype in scope.subgraphs:
-        return _resolve_subgraph_output(scope, node, ctype, slot)
     if ctype == "PrimitiveNode":
         values = node.get("widgets_values") or [None]
         return ("value", values[0])
@@ -164,6 +173,10 @@ def _resolve(scope: _Scope, node_id: Any, slot: int) -> Optional[Resolved]:
                     continue
                 return _resolve(scope, link["origin_id"], link["origin_slot"])
         return None
+    # after the mute/bypass rules: a bypassed subgraph instance passes its
+    # input through like any bypassed node, it is not expanded
+    if ctype in scope.subgraphs:
+        return _resolve_subgraph_output(scope, node, ctype, slot)
     return ("link", _prefixed(scope.prefix, node_id), slot)
 
 
@@ -287,7 +300,9 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
                 continue
             consumed, value = take()
             if consumed and (short in SEED_NAMES or cfg.get("control_after_generate")) \
-                    and cursor["i"] < len(widget_values) and isinstance(widget_values[cursor["i"]], str):
+                    and cursor["i"] < len(widget_values) \
+                    and isinstance(widget_values[cursor["i"]], str) \
+                    and widget_values[cursor["i"]] in CONTROL_AFTER_GENERATE:
                 cursor["i"] += 1  # the UI-only control_after_generate widget ("fixed"/"randomize"...)
             if linked:
                 resolved = resolve_link(ui_in["link"])
@@ -320,6 +335,8 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
 def _emit_graph(scope: _Scope, api: dict[str, Any], object_info: dict) -> None:
     for node_id, node in scope.nodes.items():
         ctype = node.get("type")
+        if node.get("mode", 0) in (MUTE_MODE, BYPASS_MODE) and ctype not in PASSTHROUGH_TYPES:
+            continue  # a muted/bypassed node (subgraph instance included) is never emitted
         if ctype in scope.subgraphs:
             inner_scope = _make_inner_scope(scope, node, ctype)
             _emit_graph(inner_scope, api, object_info)

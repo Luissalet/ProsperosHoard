@@ -127,6 +127,36 @@ def test_img2img_records_reference_and_strength(store, backend_with_comfy, proje
     assert isinstance(recipe["params"]["seed"], int)
 
 
+def test_img2img_of_a_flux_image_does_not_inherit_flux_sampling(store, backend_with_comfy, project):
+    base = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "idol on a rooftop", "positive_prompt": "idol on a rooftop", "width": 512, "height": 512,
+                     "seed": 1, "template": "flux_schnell_txt2img"}, project["id"])
+    assert base["state"] == "done", base
+    src = base["outputs"]["asset_ids"][0]
+    assert store.get_asset(src)["recipe"]["params"]["cfg"] == 1
+    edited = _run_job(store, backend_with_comfy, "edit_image", {"asset_id": src, "operation": "img2img"}, project["id"])
+    assert edited["state"] == "done", edited
+    params = store.get_asset(edited["outputs"]["asset_ids"][0])["recipe"]["params"]
+    assert params["cfg"] == 6.5 and params["steps"] == 30 and params["sampler"] == "dpmpp_2m"
+    assert "flux" not in str(params["checkpoint"]).lower()
+    assert params["positive_prompt"] == "idol on a rooftop"
+
+
+def test_img2img_of_an_instruction_edit_uses_the_users_words(store, backend_with_comfy, project):
+    base = _run_job(store, backend_with_comfy, "generate_image",
+                    {"positive_prompt": "idol", "width": 256, "height": 256, "seed": 1, "template": "sdxl_txt2img"}, project["id"])
+    ref = base["outputs"]["asset_ids"][0]
+    edit = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "in the rain", "positive_prompt": "Keep the character in <image1> exactly the same, in the rain",
+                     "seed": 2, "template": "qwen21_edit", "reference_asset_ids": [ref]}, project["id"])
+    assert edit["state"] == "done", edit
+    again = _run_job(store, backend_with_comfy, "edit_image",
+                     {"asset_id": edit["outputs"]["asset_ids"][0], "operation": "img2img"}, project["id"])
+    assert again["state"] == "done", again
+    params = store.get_asset(again["outputs"]["asset_ids"][0])["recipe"]["params"]
+    assert params["positive_prompt"] == "in the rain" and params["cfg"] == 6.5
+
+
 def test_animate_produces_mp4_video_asset(store, backend_with_comfy, project):
     import shutil
 
@@ -231,6 +261,127 @@ def test_inpaint_and_hires_run_on_the_backend(store, backend_with_comfy, project
 
 
 # ------------------------------------------------------------- finishing
+
+class _Roots:
+    def __init__(self, *roots):
+        self.roots = list(roots)
+
+    def import_roots(self, lexical=False):
+        return self.roots
+
+
+def test_import_path_outside_the_roots_is_refused_before_any_stat(store, tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    from pathlib import Path
+
+    touched = []
+    real_resolve = Path.resolve
+
+    def spy(self, *a, **k):
+        touched.append(str(self))
+        return real_resolve(self, *a, **k)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, str(tmp_path / "elsewhere" / "x.png"))
+    assert "outside" in str(exc.value) and touched == []
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, "\\\\fileserver\\share\\x.png")
+    assert "network" in str(exc.value) and touched == []
+    with pytest.raises(engine.EngineError) as exc:
+        engine.resolve_import_path(_Roots(allowed), store, "\\\\?\\C:\\x.png")
+    assert "network" in str(exc.value)
+
+
+def test_import_bakes_exif_orientation_and_cleans_up_on_failure(store, project, monkeypatch):
+    src = store.data_dir / "inbox" / "phone.jpg"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (40, 20), (200, 10, 10))
+    exif = img.getexif()
+    exif[0x0112] = 6  # "rotate 90 degrees clockwise to display"
+    img.save(src, format="JPEG", exif=exif.tobytes())
+    asset = engine.import_asset(store, project["id"], src)
+    assert (asset["width"], asset["height"]) == (20, 40)
+    with Image.open(store.data_dir / asset["file_path"]) as stored:
+        assert stored.size == (20, 40)
+        assert stored.getexif().get(0x0112, 1) == 1
+
+    before = sorted(p.name for p in store.assets_dir.iterdir())
+    thumbs_before = sorted(p.name for p in store.thumbs_dir.iterdir())
+
+    def broken(**_kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(store, "create_asset", broken)
+    with pytest.raises(RuntimeError):
+        engine.import_asset(store, project["id"], src)
+    assert sorted(p.name for p in store.assets_dir.iterdir()) == before
+    assert sorted(p.name for p in store.thumbs_dir.iterdir()) == thumbs_before
+
+
+def _tone_wav(path, seconds, sr=22050):
+    import wave
+
+    import numpy as np
+
+    t = np.arange(int(seconds * sr)) / sr
+    data = (0.3 * np.sin(2 * np.pi * 220 * t) * 32767).astype("<i2").tobytes()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(data)
+    return path
+
+
+def test_auto_cut_refuses_a_song_shorter_than_one_clip(store, project):
+    if not engine.ffmpeg_path():
+        pytest.skip("ffmpeg missing")
+    song = engine.import_asset(store, project["id"], _tone_wav(store.data_dir / "inbox" / "blip.wav", 0.3))
+    with pytest.raises(engine.EngineError, match="at least"):
+        engine.auto_cut(store, project["id"], song["id"], None, None, None, None)
+
+
+def test_analysis_cap_does_not_shorten_the_songs_duration(store, project, monkeypatch):
+    if not engine.ffmpeg_path():
+        pytest.skip("ffmpeg missing")
+    song = engine.import_asset(store, project["id"], _tone_wav(store.data_dir / "inbox" / "long.wav", 4.0))
+    monkeypatch.setattr(engine, "ANALYSIS_MAX_S", 2.0)
+    result = engine.analyze_audio(store, song["id"], force=True)
+    assert result["duration_s"] == pytest.approx(2.0, abs=0.1)
+    assert store.get_asset(song["id"])["duration_s"] == pytest.approx(4.0, abs=0.1)
+
+
+def test_character_with_a_studio_voice_speaks_through_the_voice_library(store, project, monkeypatch):
+    import numpy as np
+
+    from prosperos_hoard import voice_engines as ve
+
+    class FakeTTS(ve.TTSEngine):
+        id = "fake-basic"
+        capabilities = ve.EngineCapabilities(cloning=False)
+        calls = []
+
+        def is_installed(self):
+            return True
+
+        def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
+            FakeTTS.calls.append((text, speed))
+            return ve.wav_bytes_mono16(np.zeros(8000, dtype=np.float32), 8000)
+
+    monkeypatch.setattr(engine, "_studio_tts_engines", lambda *_a: [FakeTTS()])
+    voice = store.create_studio_voice("Narrator", "fake-basic", language="en")
+    char = store.create_character(project["id"], "Nova", prompt="x",
+                                  voice={"backend": "studio", "voice_id": voice["id"], "speed": 1.2})
+    asset = engine.voice_line(store, None, project["id"], "hello there", character_id=char["id"])
+    assert asset["recipe"]["provider"] == "studio:fake-basic"
+    assert FakeTTS.calls == [("hello there", 1.2)]
+    # a library voice id given as an override also goes through the studio
+    other = engine.voice_line(store, None, project["id"], "again", voice_override=voice["id"])
+    assert other["recipe"]["provider"] == "studio:fake-basic"
+
 
 def test_update_timeline_finishing_persists_and_validates(store, project):
     img = engine.render_design(store, project["id"], "thumbnail", {"title": "cover"})
