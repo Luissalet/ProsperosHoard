@@ -235,7 +235,7 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
   const [editing, setEditing] = useState(false);
   const legacy = Boolean(state.view.legacy);
   const entry = (legacy ? (state as unknown as { animatic?: Record<string, any> }).animatic : state.done?.animatic) as
-    { renders?: Record<string, string>; made_at?: string;
+    { renders?: Record<string, string>; made_at?: string; contact_sheet_id?: string;
       plan?: { cuts_total: number; clips_planned: number; gpu_minutes: number; unused_shots?: string[] } } | undefined;
   const framesReady = legacy || state.view.stages?.frames === "done";
   // the full plan (per shot, which clips are left) lives next to the animatic
@@ -314,6 +314,15 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
               </div>
             </div>
           ))}
+          {entry.contact_sheet_id && (
+            <div className="stack" style={{ gap: 4 }}>
+              <span className="small muted">{t("shotSheet")}</span>
+              <button className="video-frame" style={{ width: 220, padding: 0, border: 0, cursor: "zoom-in" }}
+                onClick={() => app.openAsset(entry.contact_sheet_id!)} aria-label={t("shotSheet")}>
+                <img src={`/api/assets/${entry.contact_sheet_id}/thumb`} alt="" style={{ width: "100%", display: "block" }} />
+              </button>
+            </div>
+          )}
         </div>
       )}
       {editing && <ShotsModal state={state} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}

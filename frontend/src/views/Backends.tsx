@@ -95,6 +95,20 @@ export function BackendsView() {
                 <div className="panel-title">{t("checkpoints")}</div>
                 <div className="row wrap">{(s.comfy.checkpoints || []).map((c) => <span key={c} className="pill mono">{c}</span>)}</div>
               </div>
+              {s.comfy.templates && Object.keys(s.comfy.templates).length > 0 && (
+                <div>
+                  <div className="panel-title">{t("templateReadiness")}</div>
+                  <div className="stack" style={{ gap: 4 }}>
+                    {Object.entries(s.comfy.templates).map(([name, r]) => (
+                      <div key={name} className="row small" style={{ alignItems: "baseline", gap: 8 }}>
+                        <span className={`pill ${r === "ready" ? "ok" : "bad"}`}>{r === "ready" ? t("ready") : t("missing")}</span>
+                        <span className="mono">{name}</span>
+                        {r !== "ready" && <span className="muted ellipsis" title={r.missing.join(", ")}>{r.missing.join(", ")}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="panel-title"><Cpu size={14} /> {t("gpu")}</div>
                 {(s.comfy.devices || []).map((d) => (
@@ -120,7 +134,7 @@ export function BackendsView() {
             <div className="stack">
               <div className="card stack">
                 <h2><HardDrive size={16} /> {t("ffmpeg")} <span className={`pill ${s.ffmpeg.found ? "ok" : "bad"}`}>{s.ffmpeg.found ? "ok" : t("notFound")}</span></h2>
-                <div className="mono small muted">{s.ffmpeg.version}</div>
+                <div className="mono small muted" style={{ overflowWrap: "anywhere" }}>{s.ffmpeg.version}</div>
                 <div className="mono small muted ellipsis">{s.ffmpeg.path}</div>
               </div>
               <div className="card stack">

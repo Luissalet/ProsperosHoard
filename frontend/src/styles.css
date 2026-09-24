@@ -159,7 +159,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .row { display: flex; gap: 10px; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .muted { color: var(--muted); }

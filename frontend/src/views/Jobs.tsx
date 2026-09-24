@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, X } from "lucide-react";
+import { ListChecks, RotateCcw, X } from "lucide-react";
 import { api, type Job, type Project } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, Empty, JobState, Progress, timeAgo, useApp } from "../components/ui";
@@ -86,6 +86,17 @@ export function JobsView({ projects }: { projects: Project[] }) {
     }
   };
 
+  const retry = async (id: string) => {
+    try {
+      const job = await api.retryJob(id);
+      trackJobs([job.id]);
+      app.refreshJobs();
+      app.toast(t("retryQueued"), "ok");
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
+
   return (
     <>
       <div className="page-head">
@@ -131,9 +142,14 @@ export function JobsView({ projects }: { projects: Project[] }) {
                     </td>
                     <td className="small">{j.project_id ? names[j.project_id] || j.project_id : "-"}</td>
                     <td className="small muted nowrap">{timeAgo(j.created_at, lang)}</td>
-                    <td>{ACTIVE.includes(j.state) && (
-                      <ConfirmButton onConfirm={() => cancel(j.id)}><X size={13} /> {t("cancelJob")}</ConfirmButton>
-                    )}</td>
+                    <td>
+                      {ACTIVE.includes(j.state) && (
+                        <ConfirmButton onConfirm={() => cancel(j.id)}><X size={13} /> {t("cancelJob")}</ConfirmButton>
+                      )}
+                      {(j.state === "failed" || j.state === "cancelled") && !["production", "production_qa"].includes(j.type) && (
+                        <button className="btn ghost sm" onClick={() => retry(j.id)}><RotateCcw size={13} /> {t("retry")}</button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
