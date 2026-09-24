@@ -610,7 +610,8 @@ class Backend:
 
     # -- status ---------------------------------------------------------
     def status(self) -> dict[str, Any]:
-        link_status = self.link.sync.status()
+        with self.runner() as r:  # holds the Link so a concurrent reload cannot close it mid-call
+            link_status = r.link.sync.status()
         exe = ffmpeg_path()
         fonts_dir = Path(__file__).parent / "fonts"
         bundled_fonts = sorted(p.name for p in fonts_dir.iterdir() if p.is_dir()) if fonts_dir.is_dir() else []
