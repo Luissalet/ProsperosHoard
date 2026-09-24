@@ -206,6 +206,24 @@ def build_translation_messages(text: str, target_lang: str, source_lang: Optiona
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
 
+_WRAPPING_QUOTE_PAIRS = [('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("«", "»")]
+
+
+def _clean_translated_line(text: str) -> str:
+    """Defend against a garbled reply despite the prompt's "no quotes, no
+    notes" instruction: collapse embedded newlines/repeated whitespace to
+    single spaces (an embedded blank line would otherwise break the SRT
+    block format), then strip one matching pair of quotes wrapping the
+    *whole* line - not a quote that is only part of the dialogue itself."""
+    text = " ".join(text.split())
+    if len(text) >= 2:
+        for open_q, close_q in _WRAPPING_QUOTE_PAIRS:
+            if text[0] == open_q and text[-1] == close_q:
+                text = text[1:-1].strip()
+                break
+    return text
+
+
 def translate_segments(chat_fn: ChatFn, segments: list[dict[str, Any]], target_lang: str,
                        source_lang: Optional[str] = None, glossary: Optional[dict[str, str]] = None) -> list[str]:
     """One LLM call per segment (through Hoard Link's `chat`, injected as
@@ -216,7 +234,7 @@ def translate_segments(chat_fn: ChatFn, segments: list[dict[str, Any]], target_l
     for seg in segments:
         messages = build_translation_messages(seg["text"], target_lang, source_lang, glossary)
         translated = chat_fn(messages)
-        out.append((translated or "").strip() or seg["text"])
+        out.append(_clean_translated_line(translated or "") or seg["text"])
     return out
 
 
