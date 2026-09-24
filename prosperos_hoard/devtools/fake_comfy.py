@@ -325,10 +325,18 @@ class FakeComfyServer:
         self.devices_override: Optional[list[dict]] = None  # tests: a custom /system_stats device list
         self.history_delay_s = 0.0  # tests: how long a prompt "renders" before /history shows it
         self._ready_at: dict[str, float] = {}
+        self.deleted: list[str] = []  # prompt ids taken off the queue via POST /queue {"delete": [...]}
+        self.interrupts: list[Optional[str]] = []  # POST /interrupt calls (the prompt_id they named, if any)
         self._server = None
         self._thread: Optional[threading.Thread] = None
         self.port: Optional[int] = None
         self.app = self._build_app()
+
+    def forget_everything(self) -> None:
+        """Tests: what a ComfyUI restart looks like from outside (no queue,
+        no history)."""
+        self.history.clear()
+        self._ready_at.clear()
 
     # ------------------------------------------------------------------
     def _object_info(self, node: Optional[str] = None) -> dict[str, Any]:
@@ -560,8 +568,41 @@ class FakeComfyServer:
         async def free(request: Request):
             return JSONResponse({"ok": True})
 
+        @app.get("/queue")
+        def queue_state():
+            # a prompt still "rendering" (history_delay_s) is the running one
+            now = time.monotonic()
+            busy = [pid for pid, ready in self._ready_at.items() if now < ready and pid in self.history]
+            running = [[i, pid, {}, {}, []] for i, pid in enumerate(busy[:1])]
+            pending = [[i + 1, pid, {}, {}, []] for i, pid in enumerate(busy[1:])]
+            return {"queue_running": running, "queue_pending": pending}
+
+        @app.post("/queue")
+        async def queue_edit(request: Request):
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            body = body if isinstance(body, dict) else {}
+            if body.get("clear"):
+                for pid in list(self._ready_at):
+                    self.history.pop(pid, None)
+                self._ready_at.clear()
+            for pid in body.get("delete") or []:
+                pid = str(pid)
+                self.deleted.append(pid)
+                if time.monotonic() < self._ready_at.get(pid, 0.0):
+                    self.history.pop(pid, None)
+                    self._ready_at.pop(pid, None)
+            return JSONResponse({"ok": True})
+
         @app.post("/interrupt")
-        def interrupt():
+        async def interrupt(request: Request):
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            self.interrupts.append(body.get("prompt_id") if isinstance(body, dict) else None)
             return JSONResponse({"ok": True})
 
         return app

@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import httpx
 from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
@@ -29,8 +30,8 @@ from . import templates as design_templates
 from . import timeline as timeline_mod
 from . import video as video_mod
 from . import voices as voices_mod
-from .backend import Backend, ffmpeg_path
-from .hoard_link.errors import Unavailable
+from .backend import Backend, ComfyRunner, cancel_prompt, comfy_queue_ids, ffmpeg_path
+from .hoard_link.errors import BackendError, Unavailable
 from .ids import new_id
 from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
@@ -397,13 +398,14 @@ def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
         )
 
 
-def _comfy(backend: Backend):
+def _comfy(backend: Backend, runner: Optional[ComfyRunner] = None):
     try:
-        comfy = backend.comfy()
+        comfy = runner.comfy() if runner is not None else backend.comfy()
     except Exception as exc:  # noqa: BLE001 - resolver failures become one readable reason
         raise Unavailable("image", [f"ComfyUI could not be resolved: {exc}"]) from exc
     if comfy is None:
-        res = backend.link.sync.resolve("image")
+        link = runner.link if runner is not None else backend.link
+        res = link.sync.resolve("image")
         raise Unavailable("image", (res.details or {}).get("reasons") or [res.reason or "ComfyUI is not reachable"])
     return comfy
 
@@ -415,6 +417,13 @@ def _comfy(backend: Backend):
 # overrides it for every kind.
 COMFY_TIMEOUT_S = {"video": 3600.0, "audio": 1800.0}
 COMFY_TIMEOUT_DEFAULT_S = 1200.0
+# While polling: how long ComfyUI may stay unreachable (a hiccup, a busy
+# server) before the job fails, and how long a prompt may be missing from
+# both its queue and its history (ComfyUI restarted and forgot it) before
+# the job fails instead of waiting for the full deadline.
+COMFY_TRANSPORT_GRACE_S = 60.0
+COMFY_LOST_GRACE_S = 30.0
+COMFY_QUEUE_CHECK_EVERY_S = 5.0
 
 
 def comfy_timeout_s(kind: Optional[str]) -> float:
@@ -429,31 +438,77 @@ def comfy_timeout_s(kind: Optional[str]) -> float:
     return COMFY_TIMEOUT_S.get(kind or "", COMFY_TIMEOUT_DEFAULT_S)
 
 
+def _transient(exc: BaseException) -> bool:
+    """A poll failure worth retrying: no answer at all, or a 5xx."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, BackendError) and (exc.status == 0 or exc.status >= 500)
+
+
+def _cancel_prompt(runner: ComfyRunner, comfy, prompt_id: str) -> None:
+    try:
+        runner.run(cancel_prompt(comfy, prompt_id))
+    except Exception:  # pragma: no cover - best effort
+        pass
+
+
 def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
-                         progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
-    comfy = _comfy(backend)
+                         progress: Callable[..., None], timeout_s: float, output_node: Optional[str],
+                         runner: Optional[ComfyRunner] = None) -> list:
+    if runner is None:
+        with backend.runner() as own:
+            return _run_comfy_workflow(backend, workflow, uploads, progress, timeout_s, output_node, runner=own)
+    comfy = _comfy(backend, runner)
     for data, name in uploads:
-        backend.run_async(comfy.upload_image(data, name))
+        runner.run(comfy.upload_image(data, name))
     client_id = str(uuid.uuid4())
-    prompt_id = backend.run_async(comfy.queue(workflow, client_id))
+    prompt_id = runner.run(comfy.queue(workflow, client_id))
     deadline = time.monotonic() + timeout_s
     cancelled = getattr(progress, "cancelled", lambda: False)
+    unreachable_since: Optional[float] = None
+    missing_since: Optional[float] = None
+    next_queue_check = time.monotonic() + COMFY_QUEUE_CHECK_EVERY_S
     while True:
         if cancelled():
-            try:
-                backend.run_async(comfy.interrupt())
-            except Exception:  # pragma: no cover - best effort
-                pass
+            # only our prompt: dequeue it, interrupt it only if it is the one
+            # running (never a bare /interrupt, which stops anyone's job)
+            _cancel_prompt(runner, comfy, prompt_id)
             raise JobCancelled("cancelled")
         try:
-            backend.run_async(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
+            runner.run(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
             break
         except TimeoutError:
-            if time.monotonic() > deadline:
-                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
-                                  "(it may still be running there - check ComfyUI's queue; on a shared or busy "
-                                  "GPU raise PROSPERO_COMFY_TIMEOUT_S)") from None
-    outputs = backend.run_async(comfy.outputs(prompt_id))
+            unreachable_since = None
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if not _transient(exc):
+                raise
+            now = time.monotonic()
+            unreachable_since = unreachable_since or now
+            if now - unreachable_since > COMFY_TRANSPORT_GRACE_S:
+                raise EngineError("comfy_unreachable", f"lost contact with ComfyUI for over {int(COMFY_TRANSPORT_GRACE_S)} s "
+                                  f"while waiting for job {prompt_id} ({str(exc)[:160]})") from None
+            time.sleep(min(2.0, COMFY_QUEUE_CHECK_EVERY_S))
+            continue
+        now = time.monotonic()
+        if now >= next_queue_check:
+            next_queue_check = now + COMFY_QUEUE_CHECK_EVERY_S
+            try:
+                running, pending = runner.run(comfy_queue_ids(comfy))
+            except Exception:  # noqa: BLE001 - an older/odd server: rely on the deadline
+                running, pending = None, None
+            if running is not None and prompt_id not in running and prompt_id not in pending:
+                missing_since = missing_since or now
+                if now - missing_since > COMFY_LOST_GRACE_S:
+                    raise EngineError("comfy_lost_job", f"ComfyUI no longer has job {prompt_id} in its queue or history "
+                                      "(it was probably restarted, or the job was deleted there); run it again")
+            else:
+                missing_since = None
+        if time.monotonic() > deadline:
+            _cancel_prompt(runner, comfy, prompt_id)
+            raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
+                              "(it was taken off ComfyUI's queue; on a shared or busy GPU raise "
+                              "PROSPERO_COMFY_TIMEOUT_S)") from None
+    outputs = runner.run(comfy.outputs(prompt_id))
     saved = [o for o in outputs if o.type == "output"]
     if output_node:
         preferred = [o for o in saved if o.node_id == output_node]
@@ -461,35 +516,45 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
     return saved
 
 
-def _download_output(backend: Backend, output) -> bytes:
-    comfy = _comfy(backend)
-    return backend.run_async(comfy.download(output))
+def _download_output(backend: Backend, output, runner: Optional[ComfyRunner] = None) -> bytes:
+    if runner is None:
+        with backend.runner() as own:
+            return _download_output(backend, output, own)
+    comfy = _comfy(backend, runner)
+    return runner.run(comfy.download(output))
 
 
 _object_info_cache_hash: dict[str, str] = {}
+_object_info_written: dict[str, Any] = {}
 
 
 def object_info_cache_path(data_dir: Path) -> Path:
     return Path(data_dir) / "comfy" / "object_info.json"
 
 
-def _object_info(backend: Backend) -> dict[str, Any]:
-    """The live `/object_info`, also saved to `data/comfy/object_info.json`
-    whenever it changes, so UI-format workflows can still be converted while
-    ComfyUI is off (see `cached_object_info`)."""
-    comfy = _comfy(backend)
-    info = backend.run_async(comfy.object_info())
+def _object_info(backend: Backend, runner: Optional[ComfyRunner] = None) -> dict[str, Any]:
+    """The live `/object_info` (cached ~60 s per server by the backend, and
+    its last good copy reused when a refresh fails), also saved to
+    `data/comfy/object_info.json` whenever it changes, so UI-format
+    workflows can still be converted while ComfyUI is off (see
+    `object_info_live_or_cached`)."""
+    if runner is None:
+        with backend.runner() as own:
+            return _object_info(backend, own)
+    _comfy(backend, runner)
+    info = backend.object_info(runner)
     try:
-        if info:
+        path = object_info_cache_path(backend.data_dir)
+        if info and _object_info_written.get(str(path)) is not info:
             blob = json.dumps(info, sort_keys=True)
             digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
-            path = object_info_cache_path(backend.data_dir)
-            if _object_info_cache_hash.get(str(path)) != digest:
+            if _object_info_cache_hash.get(str(path)) != digest or not path.is_file():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_suffix(".tmp")
                 tmp.write_text(blob, encoding="utf-8")
                 tmp.replace(path)
                 _object_info_cache_hash[str(path)] = digest
+            _object_info_written[str(path)] = info
     except OSError:
         pass  # the cache is a convenience; never fail a job over it
     return info
@@ -519,9 +584,18 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
                  mask_asset_id: Optional[str] = None,
-                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
+                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
+                 runner: Optional[ComfyRunner] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
-    each output as an asset whose recipe can re-run it exactly."""
+    each output as an asset whose recipe can re-run it exactly. Every
+    ComfyUI call of the job goes through one runner (one event loop), so a
+    backend reload mid-job does not strand it."""
+    if runner is None:
+        with backend.runner() as own:
+            return run_template(store, backend, job, progress, template_name=template_name, values=values,
+                                operation=operation, count=count, reference_asset_id=reference_asset_id,
+                                reference_asset_ids=reference_asset_ids, mask_asset_id=mask_asset_id,
+                                extra_recipe=extra_recipe, name=name, runner=own)
     project_id = job["project_id"]
     try:
         workflow, spec = comfy_driver.load_template(template_name, store.data_dir)
@@ -531,7 +605,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     progress(0.02, "checking free VRAM")
     check_vram_or_wait(backend, spec)
     progress(0.05, "validating against ComfyUI")
-    object_info = _object_info(backend)
+    object_info = _object_info(backend, runner)
     try:
         values = comfy_driver.validate_against_object_info(spec, values, object_info, workflow)
     except comfy_driver.ValidationError as exc:
@@ -607,11 +681,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         t0 = time.monotonic()
         outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,
                                       timeout_s=comfy_timeout_s(spec.get("kind")),
-                                      output_node=spec.get("output_node"))
+                                      output_node=spec.get("output_node"), runner=runner)
         if not outputs:
             raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
         for out in outputs:
-            data = _download_output(backend, out)
+            data = _download_output(backend, out, runner)
             recipe = {
                 "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
                 "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,

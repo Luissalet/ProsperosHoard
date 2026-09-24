@@ -319,8 +319,8 @@ def test_missing_unet_file_is_reported_before_queueing(store, backend_with_comfy
 
     original = engine_mod._object_info
 
-    def without_wan(backend):
-        info = original(backend)
+    def without_wan(backend, *rest):
+        info = original(backend, *rest)
         patched = dict(info)
         unet = dict(patched["UNETLoader"])
         unet["input"] = {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"], {}],
