@@ -226,8 +226,16 @@ def _ffmpeg() -> str:
 
 
 def _concat_wavs(paths: list[Path], out_path: Path) -> None:
+    # Entries are bare file names (every wav lives next to the list file,
+    # in the same work directory) via video.concat_list_text, which escapes
+    # any embedded single quote the concat-demuxer way - never the resolved
+    # absolute path, which on the real Windows install lives under a folder
+    # named "Prospero's Hoard" and would otherwise break the demuxer's own
+    # quoting.
+    from .video import concat_list_text
+
     list_file = out_path.with_suffix(".concat.txt")
-    list_file.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in paths), encoding="utf-8")
+    list_file.write_text(concat_list_text(paths), encoding="utf-8")
     try:
         cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(list_file),
                "-c", "copy", str(out_path)]
