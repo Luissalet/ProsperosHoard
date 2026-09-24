@@ -317,6 +317,7 @@ class FakeComfyServer:
         self.storage_dir = Path(storage_dir)
         self.output_dir = self.storage_dir / "output"
         self.input_dir = self.storage_dir / "input"
+        self.lora_dir = self.storage_dir / "loras"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.input_dir.mkdir(parents=True, exist_ok=True)
         self.history: dict[str, dict[str, Any]] = {}
@@ -333,6 +334,13 @@ class FakeComfyServer:
     # ------------------------------------------------------------------
     def _object_info(self, node: Optional[str] = None) -> dict[str, Any]:
         full = real_object_info()
+        loras = sorted(p.relative_to(self.lora_dir).as_posix() for p in self.lora_dir.rglob("*.safetensors")) \
+            if self.lora_dir.is_dir() else []
+        if loras and "LoraLoaderModelOnly" in full:
+            # the demo trainer drops its LoRAs here, like ComfyUI's models/loras
+            node_info = json.loads(json.dumps(full["LoraLoaderModelOnly"]))
+            node_info["input"]["required"]["lora_name"][0] = loras
+            full = {**full, "LoraLoaderModelOnly": node_info}
         if node:
             if node not in full:
                 raise HTTPException(status_code=404, detail=f"unknown node class {node}")

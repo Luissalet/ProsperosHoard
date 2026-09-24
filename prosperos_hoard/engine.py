@@ -588,6 +588,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         seed = base_seed + i
         run_values = {**values, "seed": seed}
         wf = comfy_driver.apply_params(workflow, spec, run_values)
+        if run_values.get("loras"):
+            # character adapters (charkit.resolve_adapters): part of the
+            # recipe's params, so reuse/vary re-inject the same LoRAs
+            comfy_driver.inject_loras(wf, run_values["loras"])
         if reference_group:
             comfy_driver.wire_reference_group(wf, spec, group_names)
         elif spec.get("requires_reference"):
@@ -829,6 +833,8 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     for key in spec.get("map", {}):
         if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
             values[key] = params[key]
+    if params.get("loras"):
+        values["loras"] = list(params["loras"])
     if template == "qwen21_edit" and params.get("custom_size") is None and (params.get("width") or params.get("height")):
         values["custom_size"] = True
     size_mode = spec.get("size_from_reference")

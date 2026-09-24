@@ -213,6 +213,7 @@ def studio_generate_image(
     strength: Optional[float] = None, template: Optional[str] = None, engine: Optional[str] = None,
     wait_s: float = 0, use_character_reference: bool = False,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
+    characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
@@ -243,6 +244,11 @@ def studio_generate_image(
     the asset ids and, only when include_image=true, a picture of them (default false: a text-only model
     does not want an image block on its turn - use studio_show once you need to look).
     A job in "waiting_gpu" is waiting for free VRAM - normal, not an error.
+    Character adapters (LoRAs, see studio_character_train): a mentioned character (or an id in
+    `characters`) with an adapter for the engine gets it loaded and its trigger word added - the result
+    lists `adapters`; use_adapters=false renders without. prefer_adapter=true with consistent=true renders
+    txt2img + adapter (free poses) instead of an edit of the canonical image when every mentioned
+    character has one.
 
     Keywords: generate image, txt2img, make a photo, draw, render a portrait, character consistency, same character, qwen, flux, image engine, generar imagen, crear foto, dibujar, hacer una foto, personaje consistente
     """
@@ -252,7 +258,8 @@ def studio_generate_image(
         "seed": seed, "count": count, "reference_asset_id": reference_asset_id,
         "reference_asset_ids": reference_asset_ids, "strength": strength,
         "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
-        "checkpoint": checkpoint, "consistent": consistent,
+        "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
+        "use_adapters": use_adapters, "prefer_adapter": prefer_adapter,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)
@@ -883,6 +890,146 @@ def studio_animatic(production: str, aspects: Optional[list[str]] = None, wait_s
     Keywords: animatic, preview cut, storyboard video, before rendering, animatico, previsualizacion, antes de renderizar
     """
     return _call("POST", "/api/agent/studio_animatic", json={"production": production, "aspects": aspects, "wait_s": wait_s})
+
+
+# ------------------------------------------------------- character kit --
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_sheet(character_id: str, views: Optional[list[str]] = None, engine: Optional[str] = None,
+                           seed: Optional[int] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Model sheet of a character: same design redrawn from set angles / hoja de personaje, turnaround.
+
+    Redraws the character's canonical image with the edit engine (Qwen-Image 2.1 or Flux Kontext) once per
+    view: front, three_quarter, profile, back, closeup, happy, angry, scared, surprised, action, sitting,
+    night (default 8 of them). Each view is tagged and added to the character's dataset with a caption;
+    a labelled contact sheet is made too. Needs a canonical image (studio_cast). Returns the job.
+
+    Keywords: model sheet, turnaround, character sheet, angles, expressions, hoja de modelo, vistas, expresiones
+    """
+    return _call("POST", "/api/agent/studio_character_sheet",
+                 json={"character_id": character_id, "views": views, "engine": engine, "seed": seed, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_dataset(character_id: str, action: str = "get", sources: Optional[list[str]] = None,
+                             min_identity: Optional[float] = None, replace: bool = False,
+                             items: Optional[list[dict[str, Any]]] = None, only_missing: bool = False,
+                             wait_s: float = 0) -> dict[str, Any]:
+    """Training images + captions of a character for its LoRA / dataset de entrenamiento del personaje.
+
+    action "get" (items + readiness report), "report", "build" (collect from sources: canonical,
+    references, sheet, takes - takes below min_identity are skipped), "update" (items: [{asset_id,
+    caption?, include?, remove?}] - an unknown image id of the project is added), "caption" (a job:
+    captions by the vision model, trigger first, describing only what varies; without a vision model it
+    derives them from the render prompts). The report lists blockers: too few images, blurry, near
+    duplicates, captions without the trigger.
+
+    Keywords: dataset, training images, captions, lora dataset, dataset, imagenes de entrenamiento, subtitulos, captions
+    """
+    return _call("POST", "/api/agent/studio_character_dataset",
+                 json={"character_id": character_id, "action": action, "sources": sources, "min_identity": min_identity,
+                       "replace": replace, "items": items, "only_missing": only_missing, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_train(action: str = "plan", character_id: Optional[str] = None, arch: Optional[str] = None,
+                           trainer: Optional[str] = None, overrides: Optional[dict[str, Any]] = None,
+                           run_id: Optional[str] = None, training: Optional[dict[str, Any]] = None,
+                           wait_s: float = 0) -> dict[str, Any]:
+    """Train a character LoRA locally so it stays the same in every shot / entrenar LoRA del personaje.
+
+    action "trainers" (configured trainers, LoRA folder, per-architecture VRAM/time estimates), "settings"
+    (read, or replace with `training`: {lora_dir, gpu, trainers: [{kind: ai_toolkit|musubi|custom|fake,
+    name, dir, python?, command?}], base_models: {arch: path or hub id}}), "plan" (steps, rank, lr,
+    resolution, VRAM and minutes estimate, dataset readiness, whether it can start), "start" (queues the
+    GPU job; when done the adapter is installed in ComfyUI's loras folder and attached to the character),
+    "status" (runs and adapters of the character), "log" (tail of a run's log: run_id). arch: qwen_image,
+    flux1, sdxl, sd15, wan22_5b, z_image (default: the project's image engine). overrides: steps, rank,
+    lr, resolution. Training takes the GPU for a long time: say so and plan it with the user.
+
+    Keywords: train lora, fine-tune character, adapter training, entrenar lora, entrenar personaje, afinar modelo
+    """
+    return _call("POST", "/api/agent/studio_character_train",
+                 json={"action": action, "character_id": character_id, "arch": arch, "trainer": trainer,
+                       "overrides": overrides or {}, "run_id": run_id, "training": training, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_adapters(character_id: str, action: str = "list", adapter_id: Optional[str] = None,
+                              lora_name: Optional[str] = None, arch: Optional[str] = None,
+                              strength: Optional[float] = None, trigger: Optional[str] = None,
+                              enabled: Optional[bool] = None, settings: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """A character's LoRA adapters and kit settings / adaptadores LoRA y ajustes del personaje.
+
+    action "list" (kit summary: trigger, adapters, dataset, sheet, library), "available" (LoRA files ComfyUI
+    lists), "attach" (an existing LoRA file: lora_name as ComfyUI lists it + arch; strength, trigger),
+    "update" (adapter_id: strength 0-2, trigger, enabled - one enabled adapter per architecture), "remove",
+    "settings" (settings: {trigger, use_adapters, identity_threshold, good_seeds}). Enabled adapters are
+    injected automatically whenever the character is rendered with a matching engine.
+
+    Keywords: lora, adapter, trigger word, strength, adaptador, palabra clave, fuerza del lora
+    """
+    return _call("POST", "/api/agent/studio_character_adapters",
+                 json={"character_id": character_id, "action": action, "adapter_id": adapter_id, "lora_name": lora_name,
+                       "arch": arch, "strength": strength, "trigger": trigger, "enabled": enabled,
+                       "settings": settings or {}})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_takes(character_id: str, action: str = "list", sort: str = "recent", kind: Optional[str] = None,
+                           limit: int = 40, asset_ids: Optional[list[str]] = None, asset_id: Optional[str] = None,
+                           take_action: Optional[str] = None, force: bool = False, wait_s: float = 0) -> dict[str, Any]:
+    """Every render of a character as versioned takes, scored for identity / tomas del personaje, parecido.
+
+    action "list" (images/clips of the character grouped into takes of the same shot: take N of M, seed,
+    adapters used, identity score if scored; sort recent|identity), "score" (a job: identity 0-10 against
+    the canonical/references - by the vision model, else a rough colour check, the method is reported;
+    `below_threshold` lists drifted ones), "act" (asset_id + take_action: reference, unreference,
+    canonical, dataset, reject, unreject).
+
+    Keywords: takes, versions, identity score, drift, best render, tomas, versiones, parecido, deriva, mejor toma
+    """
+    return _call("POST", "/api/agent/studio_character_takes",
+                 json={"character_id": character_id, "action": action, "sort": sort, "kind": kind, "limit": limit,
+                       "asset_ids": asset_ids, "asset_id": asset_id, "take_action": take_action, "force": force,
+                       "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_pack(action: str = "export", character_id: Optional[str] = None, project: Optional[str] = None,
+                          path: Optional[str] = None, rename: Optional[str] = None, include_dataset: bool = True,
+                          include_adapters: bool = True) -> dict[str, Any]:
+    """Portable .hoardchar file of a character: export, inspect, import / exportar e importar personaje.
+
+    One file with the look, voice, palette, canonical + reference images, model sheet, dataset with
+    captions and the LoRA weights, so the same character works in any project or on another machine.
+    action "export" (character_id; returns the file name and a download route), "inspect" (path),
+    "import" (path + project; renamed on a name clash; adapters are installed into ComfyUI's loras
+    folder when it is configured).
+
+    Keywords: export character, import character, portable character, hoardchar, exportar personaje, importar personaje
+    """
+    return _call("POST", "/api/agent/studio_character_pack", params={"project": project},
+                 json={"action": action, "character_id": character_id, "path": path, "rename": rename,
+                       "include_dataset": include_dataset, "include_adapters": include_adapters})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_character_library(action: str = "list", character_id: Optional[str] = None, id: Optional[str] = None,
+                             version: Optional[int] = None, project: Optional[str] = None, note: Optional[str] = None,
+                             query: Optional[str] = None, rename: Optional[str] = None) -> dict[str, Any]:
+    """Global casting library of characters with versions / biblioteca de personajes con versiones.
+
+    action "list" (query), "save" (character_id [+ note]: a new version v1, v2... of that character),
+    "use" (id [+ version, project, rename]: casts it into a project - the "Casting" project when none is
+    given), "history" (id: versions with what changed), "delete" (id). A recipe run accepts a library
+    character as the lead: cast={"lead": "lib_..."} or {"lead": {"library": "lib_...", "version": 2}}.
+
+    Keywords: character library, casting, reuse character, versions, biblioteca de personajes, reutilizar personaje
+    """
+    return _call("POST", "/api/agent/studio_character_library", params={"project": project},
+                 json={"action": action, "character_id": character_id, "id": id, "version": version, "note": note,
+                       "query": query, "rename": rename})
 
 
 def main() -> None:

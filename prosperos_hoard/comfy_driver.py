@@ -515,3 +515,59 @@ def validate_against_object_info(spec: dict[str, Any], values: dict[str, Any], o
 
 def estimate_vram_mb(spec: dict[str, Any], vram_table: dict[str, int]) -> int:
     return int(vram_table.get(spec.get("vram_class", "sdxl"), 7000))
+
+
+# ------------------------------------------------------------ adapters --
+# Node classes whose output 0 is a diffusion MODEL a LoRA can patch.
+MODEL_LOADERS = ("UNETLoader", "CheckpointLoaderSimple", "CheckpointLoader", "UnetLoaderGGUF",
+                 "ImageOnlyCheckpointLoader", "DiffusionModelLoaderKJ")
+
+# Which LoRA family a built-in template's model belongs to: a character
+# adapter trained for one architecture is only injected into templates of
+# the same one (a Qwen-Image LoRA does nothing useful on Flux).
+TEMPLATE_ARCH = {
+    "qwen21_txt2img": "qwen_image", "qwen21_edit": "qwen_image",
+    "flux_schnell_txt2img": "flux1", "flux_kontext_edit": "flux1",
+    "sdxl_txt2img": "sdxl", "sdxl_img2img": "sdxl", "sdxl_inpaint": "sdxl", "sdxl_hires": "sdxl",
+    "sd15_txt2img": "sd15", "wan22_ti2v": "wan22_5b",
+}
+
+
+def template_arch(template_name: str, spec: Optional[dict[str, Any]] = None) -> Optional[str]:
+    """The adapter architecture of a template: its own `arch` in the params
+    file (custom workflows can declare one) or the built-in table."""
+    if spec and spec.get("arch"):
+        return str(spec["arch"])
+    return TEMPLATE_ARCH.get(template_name)
+
+
+def lora_choices(object_info: dict[str, Any]) -> list[str]:
+    """LoRA files ComfyUI can load (LoraLoaderModelOnly's list)."""
+    return _choices(object_info, "LoraLoaderModelOnly", "lora_name")
+
+
+def inject_loras(workflow: dict[str, Any], loras: list[dict[str, Any]]) -> dict[str, Any]:
+    """Mutate `workflow` in place: after every model loader, chain one
+    `LoraLoaderModelOnly` per entry of `loras` ({"name", "strength"}) and
+    rewire every consumer of the loader's MODEL output (index 0) to the end
+    of the chain. Loaders whose output 0 is not consumed are left alone.
+    Returns `workflow`."""
+    loras = [l for l in loras or [] if l.get("name")]
+    if not loras:
+        return workflow
+    loaders = [nid for nid, node in list(workflow.items()) if node.get("class_type") in MODEL_LOADERS]
+    for loader in loaders:
+        consumers = [(nid, key) for nid, node in workflow.items() for key, value in (node.get("inputs") or {}).items()
+                     if isinstance(value, list) and len(value) == 2 and str(value[0]) == str(loader) and value[1] == 0]
+        if not consumers:
+            continue
+        prev = [loader, 0]
+        for i, lora in enumerate(loras):
+            nid = f"{loader}_lora{i + 1}"
+            workflow[nid] = {"class_type": "LoraLoaderModelOnly",
+                             "inputs": {"model": prev, "lora_name": str(lora["name"]),
+                                        "strength_model": float(lora.get("strength", 1.0))}}
+            prev = [nid, 0]
+        for nid, key in consumers:
+            workflow[nid]["inputs"][key] = list(prev)
+    return workflow

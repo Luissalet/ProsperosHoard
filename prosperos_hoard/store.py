@@ -393,7 +393,18 @@ class Store:
         d["palette"] = loads(d.pop("palette_json"), [])
         d["reference_asset_ids"] = loads(d.pop("reference_asset_ids_json"), [])
         d["voice"] = loads(d.pop("voice_json"), None)
+        d["kit"] = loads(d.pop("kit_json", None), {}) or {}
         return d
+
+    def set_character_kit(self, character_id: str, kit: dict[str, Any]) -> dict[str, Any]:
+        """Replace the character's kit (adapters, dataset, sheet, history...;
+        see `charkit`). Validation of the kit's shape lives in `charkit`."""
+        self.get_character(character_id)
+        if not isinstance(kit, dict):
+            raise ValueError("a character kit must be an object")
+        self.conn.execute("UPDATE characters SET kit_json=?, updated_at=? WHERE id=?", (dumps(kit), now_iso(), character_id))
+        self.conn.commit()
+        return self.get_character(character_id)
 
     def _check_character_fields(self, fields: dict[str, Any]) -> None:
         allowed = {"role", "bio", "prompt", "negative", "palette", "reference_asset_ids", "canonical_asset_id", "voice", "notes", "name"}
