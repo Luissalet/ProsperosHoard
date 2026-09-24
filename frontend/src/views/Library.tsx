@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderInput, Images, Search, Upload } from "lucide-react";
-import { api, type Asset } from "../api";
-import { useT } from "../i18n";
+import { api, type Asset, type Paged } from "../api";
+import { useT, type MessageKey } from "../i18n";
 import { AssetTile, Empty, Modal, useApp, useDebounced } from "../components/ui";
+
+const PAGE = 60;
+const MAX_RELOAD = PAGE * 10;
+const KINDS: [string, MessageKey][] = [["image", "kindImage"], ["video", "kindVideo"], ["audio", "kindAudio"], ["lyrics", "kindLyrics"], ["font", "kindFont"]];
+const SOURCES: [string, MessageKey][] = [["generated", "sourceGenerated"], ["rendered", "sourceRendered"], ["import", "sourceImport"], ["derived", "sourceDerived"]];
 
 export function LibraryView() {
   const { t } = useT();
@@ -21,17 +26,56 @@ export function LibraryView() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dq = useDebounced(query, 250);
 
-  const params = { query: dq, kind, source, favourite: fav || undefined, min_rating: minRating || undefined, limit: 60 };
+  const params = { query: dq, kind, source, favourite: fav || undefined, min_rating: minRating || undefined, limit: PAGE };
+  const filterKey = JSON.stringify([pid, dq, kind, source, fav, minRating]);
+  const lastKey = useRef<string | null>(null);
+  const loaded = useRef(0);   // how many items the user has paged in
+  const request = useRef(0);  // only the newest request may set the list
+  const [loadingMore, setLoadingMore] = useState(false);
+
   useEffect(() => {
-    api.assets(pid, params).then((r) => { setItems(r.items); setNext(r.next_offset); setFocus(0); }).catch((e) => app.toast(e.message, "bad"));
+    // new filters start at page one; a data change (a job finished, a rating)
+    // reloads as many items as were already shown, keeping the place
+    const reset = lastKey.current !== filterKey;
+    lastKey.current = filterKey;
+    const want = reset ? PAGE : Math.min(MAX_RELOAD, Math.max(PAGE, loaded.current));
+    const mine = ++request.current;
+    (async () => {
+      const out: Asset[] = [];
+      let offset: number | null = 0;
+      while (offset !== null && out.length < want) {
+        const r: Paged<Asset> = await api.assets(pid, { ...params, offset });
+        out.push(...r.items);
+        offset = r.next_offset;
+      }
+      if (mine !== request.current) return;
+      setItems(out);
+      setNext(offset);
+      loaded.current = out.length;
+      setFocus((f) => (reset ? 0 : Math.min(f, Math.max(0, out.length - 1))));
+    })().catch((e) => { if (mine === request.current) app.toast((e as Error).message, "bad"); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pid, dq, kind, source, fav, minRating, app.dataVersion]);
+  }, [filterKey, app.dataVersion]);
 
   const more = async () => {
-    if (next === null) return;
-    const r = await api.assets(pid, { ...params, offset: next });
-    setItems((xs) => [...xs, ...r.items]);
-    setNext(r.next_offset);
+    if (next === null || loadingMore) return;
+    setLoadingMore(true);
+    const mine = request.current;
+    try {
+      const r = await api.assets(pid, { ...params, offset: next });
+      if (mine !== request.current) return;  // the list was reloaded meanwhile
+      setItems((xs) => {
+        const seen = new Set(xs.map((x) => x.id));
+        const merged = [...xs, ...r.items.filter((a) => !seen.has(a.id))];
+        loaded.current = merged.length;
+        return merged;
+      });
+      setNext(r.next_offset);
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   useEffect(() => {
@@ -44,7 +88,8 @@ export function LibraryView() {
       if (e.key === "Enter" && items[focus]) app.openAsset(items[focus].id, items.map((x) => x.id));
       if ((e.key === "f" || e.key === "F") && items[focus]) {
         const a = items[focus];
-        api.updateAsset(a.id, { favourite: !a.favourite }).then((u) => setItems((xs) => xs.map((x) => (x.id === u.id ? u : x))));
+        api.updateAsset(a.id, { favourite: !a.favourite }).then((u) => setItems((xs) => xs.map((x) => (x.id === u.id ? u : x))))
+          .catch((err) => app.toast((err as Error).message, "bad"));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -98,11 +143,11 @@ export function LibraryView() {
         </div>
         <select value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">{t("kindAll")}</option>
-          {["image", "video", "audio", "lyrics", "font"].map((k) => <option key={k} value={k}>{k}</option>)}
+          {KINDS.map(([k, label]) => <option key={k} value={k}>{t(label)}</option>)}
         </select>
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">{t("sourceAll")}</option>
-          {["generated", "rendered", "import", "derived"].map((k) => <option key={k} value={k}>{k}</option>)}
+          {SOURCES.map(([k, label]) => <option key={k} value={k}>{t(label)}</option>)}
         </select>
         <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} aria-label={t("minRating")}>
           <option value={0}>{t("minRating")}</option>
@@ -118,7 +163,7 @@ export function LibraryView() {
               <AssetTile key={a.id} asset={a} focused={i === focus} onClick={() => { setFocus(i); app.openAsset(a.id, items.map((x) => x.id)); }} />
             ))}
           </div>
-          {next !== null && <div style={{ textAlign: "center", marginTop: 16 }}><button className="btn" onClick={more}>{t("loadMore")}</button></div>}
+          {next !== null && <div style={{ textAlign: "center", marginTop: 16 }}><button className="btn" onClick={more} disabled={loadingMore}>{t("loadMore")}</button></div>}
         </>
       )}
       {pathOpen && (

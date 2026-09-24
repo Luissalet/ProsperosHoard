@@ -489,6 +489,9 @@ class Backend:
                 "comfy_url": (raw.get("comfy") or {}).get("url"),
                 "render_pool": self.render_pool(),
                 "import_roots": [str(p) for p in self.import_roots()],
+                # only the folders set in Settings, as saved: what the Settings form edits
+                # (the list above also holds the built-in roots, resolved and deduplicated)
+                "import_roots_user": [str(r) for r in raw.get("import_roots") or []],
             },
             "token_set": self.token_set(),
         }

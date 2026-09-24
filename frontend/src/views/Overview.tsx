@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { CheckCircle2, Circle, Pencil } from "lucide-react";
-import { api, fileUrl, thumbUrl } from "../api";
+import { api, ENGINE_NAMES, fileUrl, IMAGE_ENGINES, thumbUrl, type ImageEngine } from "../api";
 import { useT, type MessageKey } from "../i18n";
-import { AssetTile, useApp, useAsync } from "../components/ui";
+import { AssetTile, ErrorNote, useApp, useAsync } from "../components/ui";
 
 export function OverviewView() {
   const { t } = useT();
@@ -14,9 +14,32 @@ export function OverviewView() {
   const timelines = useAsync(() => api.timelines(pid), [pid, app.dataVersion]);
   const [editing, setEditing] = useState(false);
   const [brief, setBrief] = useState("");
+  const [savingEngine, setSavingEngine] = useState(false);
+
+  const saveBrief = async () => {
+    try {
+      await api.updateProject(pid, { brief });
+      setEditing(false);
+      project.reload();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
+  const saveEngine = async (engine: ImageEngine) => {
+    setSavingEngine(true);
+    try {
+      await api.updateProject(pid, { image_engine: engine });
+      app.toast(t("saved"), "ok");
+      project.reload();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setSavingEngine(false);
+    }
+  };
 
   const p = project.data;
-  if (!p) return <p className="muted">{t("loading")}</p>;
+  if (!p) return project.error ? <ErrorNote error={project.error} onRetry={project.reload} /> : <p className="muted">{t("loading")}</p>;
   const c = p.counts;
   const chars = cast.data?.items || [];
   const renders = (recent.data?.items || []).filter((a) => a.kind === "video" && a.source === "rendered");
@@ -43,7 +66,7 @@ export function OverviewView() {
         <div className="card stack" style={{ marginBottom: 18 }}>
           <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} />
           <div className="row">
-            <button className="btn primary sm" onClick={async () => { await api.updateProject(pid, { brief }); setEditing(false); project.reload(); }}>{t("save")}</button>
+            <button className="btn primary sm" onClick={saveBrief}>{t("save")}</button>
             <button className="btn ghost sm" onClick={() => setEditing(false)}>{t("cancel")}</button>
           </div>
         </div>
@@ -64,6 +87,15 @@ export function OverviewView() {
                 </li>
               ))}
             </ul>
+          </div>
+          <div className="card stack">
+            <h2>{t("projectSettings")}</h2>
+            <label className="field">{t("imageEngine")}
+              <select value={p.image_engine || "auto"} disabled={savingEngine} onChange={(e) => saveEngine(e.target.value as ImageEngine)}>
+                {IMAGE_ENGINES.map((x) => <option key={x} value={x}>{x === "auto" ? t("engineAuto") : ENGINE_NAMES[x]}</option>)}
+              </select>
+              <span className="hint">{t("imageEngineHint")}</span>
+            </label>
           </div>
         </div>
         <div className="stack">

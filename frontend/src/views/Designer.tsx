@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, Printer, Stamp, X } from "lucide-react";
 import { api, thumbUrl, type DesignTemplate } from "../api";
 import { useT } from "../i18n";
@@ -28,6 +28,7 @@ export function DesignerView() {
   const [variant, setVariant] = useState<string | null>(null);
   const [print, setPrint] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const previewUrl = useRef<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
@@ -65,18 +66,21 @@ export function DesignerView() {
     const state = JSON.parse(dState) as { name: string; variant: string | null; fields: Record<string, string> };
     if (!tpl || state.name !== name || !fieldsByTemplate[name]) return;  // wait for the starting values
     let alive = true;
-    let url: string | null = null;
     setPreviewing(true);
     const clean = Object.fromEntries(Object.entries(state.fields).filter(([, v]) => v));
     api.preview(state.name, clean, state.variant).then((blob) => {
       if (!alive) return;
-      url = URL.createObjectURL(blob);
-      setPreview(url);
+      // the old preview stays on screen until this one is ready, then is freed
+      const old = previewUrl.current;
+      previewUrl.current = URL.createObjectURL(blob);
+      setPreview(previewUrl.current);
       setPreviewError(null);
+      if (old) URL.revokeObjectURL(old);
     }).catch((e) => alive && setPreviewError(e.message)).finally(() => alive && setPreviewing(false));
-    return () => { alive = false; if (url) setTimeout(() => URL.revokeObjectURL(url!), 2000); };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dState, tpl]);
+  useEffect(() => () => { if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); previewUrl.current = null; }, []);
 
   const render = async () => {
     setRendering(true);
@@ -123,7 +127,7 @@ export function DesignerView() {
                   onDrop={(e) => { const id = e.dataTransfer.getData("text/prospero-asset"); if (id) setField(f.name, id); }}>
                   {fields[f.name] ? <img src={thumbUrl({ id: fields[f.name], thumb_path: "x", kind: "image" })} alt="" /> : <ImagePlus size={20} />}
                   <button className="btn sm" onClick={() => setPicking(f.name)}>{t("pickImage")}</button>
-                  {fields[f.name] && <button className="btn sm icon ghost" onClick={() => setField(f.name, "")}><X size={14} /></button>}
+                  {fields[f.name] && <button className="btn sm icon ghost" onClick={() => setField(f.name, "")} aria-label={t("clear")} title={t("clear")}><X size={14} /></button>}
                 </div>
               ) : f.type === "colour" ? (
                 <div className="row">

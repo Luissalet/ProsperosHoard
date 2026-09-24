@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
+  Activity, AudioLines, Menu, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
   Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
-import { api, type Job, type Project } from "./api";
+import { api, type ApiError, type Job, type Paged, type Project } from "./api";
 import { I18nContext, detectLang, makeT, type Lang, type MessageKey } from "./i18n";
-import { AppContext, type Route, useToasts } from "./components/ui";
+import { AppContext, ErrorBoundary, type Route, useToasts } from "./components/ui";
 import { Lightbox } from "./components/Lightbox";
 import { ProjectsView } from "./views/Projects";
 import { OverviewView } from "./views/Overview";
@@ -46,6 +46,7 @@ const GLOBAL_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "settings", key: "navSettings", icon: SettingsIcon },
 ];
 const PROJECT_IDS = new Set(PROJECT_SECTIONS.map((s) => s.id));
+const ACTIVE_STATES: string[] = ["queued", "waiting_gpu", "running"];
 
 function parseHash(): Route {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -71,8 +72,10 @@ export default function App() {
   const [demo, setDemo] = useState(false);
   const [lightbox, setLightbox] = useState<{ id: string; list: string[] } | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
   const { toast, host } = useToasts();
   const t = useMemo(() => makeT(lang), [lang]);
+  const i18n = useMemo(() => ({ t, lang }), [t, lang]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; writeStore("prospero.theme", theme); }, [theme]);
   useEffect(() => { writeStore("prospero.lang", lang); document.documentElement.lang = lang; }, [lang]);
@@ -95,10 +98,56 @@ export default function App() {
   }, [projects, lastProject]);
   useEffect(() => { api.health().then((h) => setDemo(h.demo)).catch(() => undefined); }, []);
 
+  // Jobs: every active job (paged), the most recent ones, and any job a view
+  // tracks (a render, an audiobook...) even once it is older than both.
+  const tracked = useRef<Set<string>>(new Set());
+  const trackedCache = useRef<Map<string, Job>>(new Map());
+  const pollSeq = useRef(0);
+  const jobsSig = useRef("");
   const refreshJobs = useCallback(() => {
-    api.jobs({ limit: 40 }).then((r) => setJobs(r.items)).catch(() => undefined);
+    const seq = ++pollSeq.current;
+    (async () => {
+      const activeItems: Job[] = [];
+      let offset: number | null = 0;
+      for (let page = 0; page < 4 && offset !== null; page++) {
+        const r: Paged<Job> = await api.jobs({ state: "active", limit: 50, offset });
+        activeItems.push(...r.items);
+        offset = r.next_offset;
+      }
+      const recent = await api.jobs({ limit: 50 });
+      const byId = new Map<string, Job>();
+      for (const j of [...recent.items, ...activeItems]) byId.set(j.id, j);
+      const missing = [...tracked.current].filter((id) => {
+        if (byId.has(id)) return false;
+        const cached = trackedCache.current.get(id);
+        return !cached || ACTIVE_STATES.includes(cached.state);
+      });
+      const fetched = await Promise.all(missing.map((id) => api.job(id).catch((e) => {
+        if ((e as ApiError).status === 404) tracked.current.delete(id);
+        return null;
+      })));
+      for (const j of fetched) if (j) trackedCache.current.set(j.id, j);
+      for (const id of tracked.current) {
+        const cached = trackedCache.current.get(id);
+        if (byId.has(id)) trackedCache.current.set(id, byId.get(id)!);
+        else if (cached) byId.set(id, cached);
+      }
+      if (seq !== pollSeq.current) return;  // a newer poll already answered
+      const list = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+      const sig = list.map((j) => `${j.id}:${j.state}:${j.progress}:${j.message}:${j.finished_at}`).join("|");
+      if (sig !== jobsSig.current) { jobsSig.current = sig; setJobs(list); }
+    })().catch(() => undefined);
   }, []);
-  const active = jobs.filter((j) => ["queued", "waiting_gpu", "running"].includes(j.state));
+  const trackJobs = useCallback((ids: (string | null | undefined)[]) => {
+    for (const id of ids) if (id) tracked.current.add(id);
+    // keep the set bounded: the oldest tracked ids go first
+    while (tracked.current.size > 200) {
+      const first = tracked.current.values().next().value as string;
+      tracked.current.delete(first);
+      trackedCache.current.delete(first);
+    }
+  }, []);
+  const active = useMemo(() => jobs.filter((j) => ACTIVE_STATES.includes(j.state)), [jobs]);
   useEffect(() => {
     refreshJobs();
     const id = setInterval(refreshJobs, active.length ? 1200 : 5000);
@@ -142,14 +191,33 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [go, route.section, lightbox]);
 
-  const ctx = {
-    route: { ...route, projectId }, go, projectId, setProject, toast,
-    openAsset: (id: string, list?: string[]) => setLightbox({ id, list: list || [id] }),
-    jobs, refreshJobs, demo, dataVersion, bump: () => setDataVersion((v) => v + 1),
-  };
+  const openAsset = useCallback((id: string, list?: string[]) => setLightbox({ id, list: list || [id] }), []);
+  const bump = useCallback(() => setDataVersion((v) => v + 1), []);
+  // one object per real change, so consumers' effects are not re-run on every render
+  const ctx = useMemo(() => ({
+    route: { ...route, projectId }, go, projectId, setProject, toast, openAsset,
+    jobs, refreshJobs, trackJobs, demo, dataVersion, bump,
+  }), [route, projectId, go, setProject, toast, openAsset, jobs, refreshJobs, trackJobs, demo, dataVersion, bump]);
 
-  // a new section starts at the top
-  useEffect(() => { document.querySelector(".content")?.scrollTo({ top: 0 }); }, [route.section, route.projectId]);
+  // a new section starts at the top (and the narrow-screen menu closes)
+  useEffect(() => {
+    document.querySelector(".content")?.scrollTo({ top: 0 });
+    setNavOpen(false);
+  }, [route.section, route.projectId]);
+
+  // a file dropped outside a drop zone must not make the browser navigate away
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onOver = (e: DragEvent) => {
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    };
+    const onDrop = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => { window.removeEventListener("dragover", onOver); window.removeEventListener("drop", onDrop); };
+  }, []);
 
   const current = projects.find((p) => p.id === projectId);
   const section = route.section;
@@ -176,10 +244,10 @@ export default function App() {
   else view = <ProjectsView projects={projects} reload={loadProjects} />;
 
   return (
-    <I18nContext.Provider value={{ t, lang }}>
+    <I18nContext.Provider value={i18n}>
       <AppContext.Provider value={ctx}>
-        <div className="app">
-          <aside className="sidebar">
+        <div className={`app${navOpen ? " nav-open" : ""}`}>
+          <aside className="sidebar" id="app-sidebar">
             <div className="brand">
               <div className="brand-mark"><img src="/favicon-192.png" alt="" width={28} height={28} /></div>
               <div>
@@ -197,7 +265,7 @@ export default function App() {
               <div className="nav-label">{t("studio")}</div>
               {PROJECT_SECTIONS.map((s) => (
                 <button key={s.id} className={`nav-item${section === s.id && projectId ? " active" : ""}`} disabled={!projectId && !projects.length}
-                  onClick={() => go(s.id)}>
+                  onClick={() => { setNavOpen(false); go(s.id); }}>
                   <s.icon size={17} /> {t(s.key)}
                   {s.id === "library" && current && <span className="count">{current.counts.assets}</span>}
                   {s.id === "cast" && current && <span className="count">{current.counts.characters}</span>}
@@ -207,7 +275,7 @@ export default function App() {
             <nav className="nav-group">
               <div className="nav-label">{t("global")}</div>
               {GLOBAL_SECTIONS.map((s) => (
-                <button key={s.id} className={`nav-item${section === s.id ? " active" : ""}`} onClick={() => go(s.id)}>
+                <button key={s.id} className={`nav-item${section === s.id ? " active" : ""}`} onClick={() => { setNavOpen(false); go(s.id); }}>
                   <s.icon size={17} /> {t(s.key)}
                   {s.id === "jobs" && active.length > 0 && <span className="pill accent">{active.length}</span>}
                 </button>
@@ -229,6 +297,10 @@ export default function App() {
           </aside>
           <main className="main">
             <header className="topbar">
+              <button className="btn sm icon ghost nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label={t("menu")} title={t("menu")}
+                aria-expanded={navOpen} aria-controls="app-sidebar">
+                <Menu size={17} />
+              </button>
               <div className="crumbs">
                 {needsProject && current && <><span className="ellipsis">{current.name}</span><span>/</span></>}
                 <strong>{t(title)}</strong>
@@ -241,8 +313,9 @@ export default function App() {
                 </button>
               )}
             </header>
-            <div className="content">{view}</div>
+            <div className="content"><ErrorBoundary key={`${section}/${projectId || ""}/${route.arg || ""}`}>{view}</ErrorBoundary></div>
           </main>
+          {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
         </div>
         {lightbox && <Lightbox assetId={lightbox.id} list={lightbox.list} onClose={() => setLightbox(null)}
           onNavigate={(id) => setLightbox({ ...lightbox, id })} />}

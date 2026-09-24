@@ -17,7 +17,7 @@ export function ActivityView() {
     <>
       <div className="page-head"><div><h1>{t("activityTitle")}</h1><p>{t("activityLead")}</p></div></div>
       {items.length === 0 ? <Empty icon={<Bot size={34} />} text={t("noActivity")} /> : (
-        <div className="card" style={{ padding: 6 }}>
+        <div className="card table-scroll" style={{ padding: 6 }}>
           <table className="list">
             <thead><tr><th /><th>{t("tool")}</th><th style={{ width: "46%" }}>{t("args")}</th><th>{t("ms")}</th><th>{t("when")}</th></tr></thead>
             <tbody>

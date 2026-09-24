@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Clapperboard, Film, Loader2, Minus, Plus, Scissors, Wand2 } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Analysis, type Asset, type Clip, type LyricClip, type Timeline } from "../api";
 import { useT } from "../i18n";
-import { Empty, JobState, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
+import { Empty, JobState, Modal, Progress, fmtTime, useApp, useAsync, useTrackedJob } from "../components/ui";
 
 const TRANSITIONS = ["cut", "crossfade", "dip_black", "flash_white"];
 const PANS = ["none", "left", "right", "up", "down"];
@@ -29,8 +29,21 @@ export function TimelineView() {
     const items = timelines.data?.items || [];
     if (!tlId && items[0]) setTlId(items[0].id);
   }, [timelines.data, tlId]);
-  useEffect(() => { if (tlId) api.timeline(tlId).then(setTl); }, [tlId, app.dataVersion]);
-  useEffect(() => { if (tl?.audio_asset_id) api.asset(tl.audio_asset_id).then(setSong); else setSong(null); }, [tl?.audio_asset_id]);
+  // an answer for a timeline or song that is no longer selected is dropped
+  useEffect(() => {
+    if (!tlId) return;
+    let alive = true;
+    api.timeline(tlId).then((x) => { if (alive) setTl(x); }).catch((e) => { if (alive) app.toast((e as Error).message, "bad"); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tlId, app.dataVersion]);
+  useEffect(() => {
+    const songId = tl?.audio_asset_id;
+    if (!songId) { setSong(null); return; }
+    let alive = true;
+    api.asset(songId).then((a) => { if (alive) setSong(a); }).catch(() => { if (alive) setSong(null); });
+    return () => { alive = false; };
+  }, [tl?.audio_asset_id]);
 
   const [extra, setExtra] = useState<Record<string, Asset>>({});
   const byId = useMemo(() => ({ ...extra, ...Object.fromEntries((assets.data?.items || []).map((a) => [a.id, a])) }), [assets.data, extra]);
@@ -57,7 +70,7 @@ export function TimelineView() {
     setFitted(tl.id);
   }, [tl, duration, fitted]);
   const latest = (renders.data?.items || []).find((r) => r.recipe?.timeline_id === tl?.id);
-  const job = app.jobs.find((j) => j.id === renderJob);
+  const job = useTrackedJob(renderJob);
 
   const patch = async (body: Record<string, unknown>) => {
     if (!tl) return;
@@ -109,9 +122,9 @@ export function TimelineView() {
           <div className="tl-toolbar">
             <span className="muted small">{t("selectClip")}</span>
             <div className="grow" />
-            <button className="btn sm icon" onClick={() => setPxPerS((p) => Math.max(12, p / 1.4))}><Minus size={14} /></button>
+            <button className="btn sm icon" onClick={() => setPxPerS((p) => Math.max(12, p / 1.4))} aria-label={t("zoomOut")} title={t("zoomOut")}><Minus size={14} /></button>
             <span className="mono small muted">{Math.round(pxPerS)} px/s</span>
-            <button className="btn sm icon" onClick={() => setPxPerS((p) => Math.min(200, p * 1.4))}><Plus size={14} /></button>
+            <button className="btn sm icon" onClick={() => setPxPerS((p) => Math.min(200, p * 1.4))} aria-label={t("zoomIn")} title={t("zoomIn")}><Plus size={14} /></button>
           </div>
           <div className="tracks">
             <div className="tracks-inner" style={{ width }}>
@@ -135,7 +148,13 @@ export function TimelineView() {
                         backgroundImage: a && thumbUrl(a) ? `url(${thumbUrl(a)})` : undefined }}
                       title={`${t("clip", { n: i + 1 })} · ${c.duration_s.toFixed(2)} s · ${tr}`}
                       onClick={() => setSel(i)}
-                      onDragStart={() => setDragFrom(i)}
+                      onDragStart={(e) => {
+                        // Firefox only starts a drag that carries data
+                        e.dataTransfer.setData("text/prospero-clip", String(i));
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragFrom(i);
+                      }}
+                      onDragEnd={() => { setDragFrom(null); setDropAt(null); }}
                       onDragOver={(e) => { e.preventDefault(); setDropAt(i); }}
                       onDragLeave={() => setDropAt(null)}
                       onDrop={(e) => {

@@ -3,20 +3,21 @@ import {
   BookOpen, CheckCircle2, Download, Languages, Loader2, Mic, Mic2, Plus, RefreshCw, Save, Sparkles,
   Square, Trash2, UploadCloud, Video, Volume2, Wand2, XCircle,
 } from "lucide-react";
-import { api, type DubSegment, type EngineStatus, type Job, type StudioVoice, type VoiceSpec } from "../api";
+import { api, type DubSegment, type EngineStatus, type StudioVoice, type VoiceSpec } from "../api";
 import { useT } from "../i18n";
-import { AssetPicker, ConfirmButton, Empty, JobState, Progress, useApp, useAsync } from "../components/ui";
+import { AssetPicker, ConfirmButton, Empty, JobState, Progress, useApp, useAsync, useSessionState, useTrackedJob } from "../components/ui";
 
 type Tab = "engines" | "library" | "speak" | "transcribe" | "audiobook" | "dub";
 
 function EngineRow({ e, onInstalled }: { e: EngineStatus; onInstalled: () => void }) {
   const { t } = useT();
   const app = useApp();
-  const [jobId, setJobId] = useState<string | null>(null);
-  const job = app.jobs.find((j) => j.id === jobId) || null;
+  // kept per engine for the session, so leaving the tab does not lose a running install
+  const [jobId, setJobId] = useSessionState(`prospero.voice.install.${e.kind}.${e.id}`);
+  const job = useTrackedJob(jobId);
   useEffect(() => {
     if (job && job.state === "done") { app.toast(`${e.label}: ${t("installed")}`, "ok"); onInstalled(); setJobId(null); }
-    if (job && job.state === "failed") { app.toast(job.message || t("installFailed"), "bad"); setJobId(null); }
+    if (job && (job.state === "failed" || job.state === "cancelled")) { app.toast(job.message || t("installFailed"), "bad"); setJobId(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.state]);
 
@@ -162,7 +163,9 @@ function LibraryTab() {
                 <strong className="grow">{v.name}</strong>
                 <span className="pill mono">{v.engine_id}</span>
                 <span className={`pill ${v.quality.ok ? "ok" : "warn"}`}>{v.quality.ok ? t("qualityOk") : t("qualityWarn")}</span>
-                <ConfirmButton onConfirm={async () => { await api.deleteStudioVoice(v.id); voices.reload(); }}><Trash2 size={13} /></ConfirmButton>
+                <ConfirmButton label={t("deleteVoice")} onConfirm={async () => {
+                  try { await api.deleteStudioVoice(v.id); voices.reload(); } catch (err) { app.toast((err as Error).message, "bad"); }
+                }}><Trash2 size={13} /></ConfirmButton>
               </div>
               <div className="row small muted wrap">
                 <span>{t("duration")}: {v.quality.duration_s}s</span>
@@ -194,13 +197,21 @@ function SpeakTab() {
   const [spec, setSpec] = useState<VoiceSpec>({});
   const [speaking, setSpeaking] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  // each take replaces the last one: free the old blob (and the last one on unmount)
+  const urlRef = useRef<string | null>(null);
+  const showAudio = (url: string | null) => {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = url;
+    setAudioUrl(url);
+  };
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
 
   const speak = async () => {
     if (!text.trim() || (!spec.engine_id && !spec.voice_id)) return;
     setSpeaking(true);
     try {
       const result = await api.speak(text.trim(), spec, app.projectId || undefined);
-      if (result instanceof Blob) setAudioUrl(URL.createObjectURL(result));
+      if (result instanceof Blob) showAudio(URL.createObjectURL(result));
       else app.toast(t("saved"), "ok");
       app.bump();
     } catch (e) {
@@ -233,7 +244,21 @@ function TranscribeTab() {
   const [recording, setRecording] = useState(false);
   const [dictated, setDictated] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
+  const stream = useRef<MediaStream | null>(null);
   const chunks = useRef<Blob[]>([]);
+  const mounted = useRef(true);
+  // leaving the tab mid-recording turns the microphone off (and sends nothing)
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const rec = recorder.current;
+      if (rec && rec.state !== "inactive") { rec.onstop = null; rec.ondataavailable = null; rec.stop(); }
+      stream.current?.getTracks().forEach((tr) => tr.stop());
+      recorder.current = null;
+      stream.current = null;
+    };
+  }, []);
 
   const upload = async (file: File) => {
     setBusy(true);
@@ -260,12 +285,15 @@ function TranscribeTab() {
   const startRecording = async () => {
     if (!recordingSupported) { app.toast(t("recordingUnsupported"), "bad"); return; }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) { media.getTracks().forEach((tr) => tr.stop()); return; }
+      stream.current = media;
       chunks.current = [];
-      const rec = new MediaRecorder(stream);
+      const rec = new MediaRecorder(media);
       rec.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
       rec.onstop = async () => {
-        stream.getTracks().forEach((tr) => tr.stop());
+        media.getTracks().forEach((tr) => tr.stop());
+        stream.current = null;
         const blob = new Blob(chunks.current, { type: "audio/webm" });
         setBusy(true);
         try {
@@ -325,11 +353,6 @@ function TranscribeTab() {
   );
 }
 
-function useJob(jobId: string | null): Job | null {
-  const app = useApp();
-  return app.jobs.find((j) => j.id === jobId) || null;
-}
-
 function AudiobookTab() {
   const { t } = useT();
   const app = useApp();
@@ -339,9 +362,10 @@ function AudiobookTab() {
   const [text, setText] = useState("");
   const [format, setFormat] = useState<"mp3" | "m4b">("mp3");
   const [spec, setSpec] = useState<VoiceSpec>({});
-  const [jobId, setJobId] = useState<string | null>(null);
+  // kept for the session: switching tabs or sections does not lose a running audiobook
+  const [jobId, setJobId] = useSessionState("prospero.voice.audiobookJob");
   const [busy, setBusy] = useState(false);
-  const job = useJob(jobId);
+  const job = useTrackedJob(jobId);
 
   const loadFile = (file: File) => {
     if (!/\.(txt|md)$/i.test(file.name)) { app.toast(t("audiobookFileHint"), "info"); return; }
@@ -405,6 +429,16 @@ function AudiobookTab() {
   );
 }
 
+type DubEdits = { jobId: string | null; v: number; segments: Record<number, DubSegment> };
+
+function parseDubEdits(raw: string | null, jobId: string | null): DubEdits {
+  try {
+    const parsed = raw ? (JSON.parse(raw) as DubEdits) : null;
+    if (parsed && parsed.jobId === jobId && parsed.segments) return parsed;
+  } catch { /* a corrupt entry is just ignored */ }
+  return { jobId, v: 0, segments: {} };
+}
+
 function DubTab() {
   const { t } = useT();
   const app = useApp();
@@ -417,11 +451,17 @@ function DubTab() {
   const [targetLanguage, setTargetLanguage] = useState("en");
   const [sourceLanguage, setSourceLanguage] = useState("");
   const [spec, setSpec] = useState<VoiceSpec>({});
-  const [jobId, setJobId] = useState<string | null>(null);
+  // kept for the session: switching tabs or sections does not lose a running dub
+  const [jobId, setJobIdRaw] = useSessionState("prospero.voice.dubJob");
   const [busy, setBusy] = useState(false);
-  const job = useJob(jobId);
+  const job = useTrackedJob(jobId);
   const [fixIndex, setFixIndex] = useState<number | null>(null);
   const [fixText, setFixText] = useState("");
+  // Re-synthesized segments: the job's outputs keep the first run's text, so the
+  // server's answer is kept here (per job), and `v` busts the cached video.
+  const [editsRaw, setEditsRaw] = useSessionState("prospero.voice.dubEdits");
+  const edits = parseDubEdits(editsRaw, jobId);
+  const setJobId = (id: string | null) => { setJobIdRaw(id); setEditsRaw(null); };
 
   const submit = async () => {
     if (!videoAsset || !targetLanguage.trim() || (!spec.engine_id && !spec.voice_id)) return;
@@ -445,7 +485,9 @@ function DubTab() {
   const resynth = async (index: number) => {
     if (!job) return;
     try {
-      await api.resynthesizeDubSegment(job.id, index, { text: fixText || undefined });
+      const r = await api.resynthesizeDubSegment(job.id, index, { text: fixText || undefined });
+      const next: DubEdits = { jobId: job.id, v: Date.now(), segments: { ...edits.segments, [index]: r.segment } };
+      setEditsRaw(JSON.stringify(next));
       app.toast(t("saved"), "ok");
       setFixIndex(null);
       setFixText("");
@@ -454,6 +496,8 @@ function DubTab() {
       app.toast((e as Error).message, "bad");
     }
   };
+  const segments = (outputs.segments || []).map((s) => edits.segments[s.index] || s);
+  const bust = edits.v ? `&v=${edits.v}` : "";
 
   return (
     <div className="card stack">
@@ -480,11 +524,11 @@ function DubTab() {
           {["queued", "waiting_gpu", "running"].includes(job.state) && <Progress value={job.progress} />}
           {job.state === "failed" && <div className="row"><XCircle size={14} className="err-text" /><span className="small err-text">{job.message}</span></div>}
           {(outputs.segments?.length || 0) > 0 && (
-            <div className="card" style={{ padding: 6 }}>
+            <div className="card table-scroll" style={{ padding: 6 }}>
               <table className="list">
                 <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th /></tr></thead>
                 <tbody>
-                  {(outputs.segments || []).map((s) => (
+                  {segments.map((s) => (
                     <tr key={s.index}>
                       <td className="mono small">{s.index}</td>
                       <td className="small">{s.source_text}</td>
@@ -495,7 +539,7 @@ function DubTab() {
                       </td>
                       <td>
                         {fixIndex === s.index
-                          ? <button className="btn sm" onClick={() => resynth(s.index)}><Save size={12} /></button>
+                          ? <button className="btn sm" onClick={() => resynth(s.index)} aria-label={t("saveSegment")} title={t("saveSegment")}><Save size={12} /></button>
                           : <button className="btn sm ghost" onClick={() => { setFixIndex(s.index); setFixText(s.translated_text); }}><Sparkles size={12} /> {t("dubResynth")}</button>}
                       </td>
                     </tr>
@@ -506,10 +550,10 @@ function DubTab() {
           )}
           {job.state === "done" && outputs.final_video && (
             <div className="stack">
-              <video src={api.dubDownloadUrl(job.id, "video")} controls style={{ width: "100%", maxHeight: 360 }} />
+              <video key={bust} src={`${api.dubDownloadUrl(job.id, "video")}${bust}`} controls style={{ width: "100%", maxHeight: 360 }} />
               <div className="row">
-                <a className="btn sm" href={api.dubDownloadUrl(job.id, "video")}><Download size={13} /> {t("dubFinalVideo")}</a>
-                {outputs.subtitles && <a className="btn sm" href={api.dubDownloadUrl(job.id, "subtitles")}><Download size={13} /> {t("dubSubtitles")}</a>}
+                <a className="btn sm" href={`${api.dubDownloadUrl(job.id, "video")}${bust}`}><Download size={13} /> {t("dubFinalVideo")}</a>
+                {outputs.subtitles && <a className="btn sm" href={`${api.dubDownloadUrl(job.id, "subtitles")}${bust}`}><Download size={13} /> {t("dubSubtitles")}</a>}
               </div>
             </div>
           )}
