@@ -56,12 +56,13 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
 | POST | `/api/agent/voice_create` | `{name, engine_id, source_path, language?, project?}` |
 | GET | `/api/agent/voice_list` | `?project` |
-| POST | `/api/agent/voice_speak` | `{text, voice: {engine_id?, voice_id?, voice_ref?, preset?, speed?, language?}, project?}` |
+| POST | `/api/agent/voice_speak` | `{text, voice: {engine_id?, voice_id?, voice_ref?, preset?, speed?, pitch?, language?, lexicon?}, project?}` |
 | POST | `/api/agent/voice_transcribe` | `{path?, asset_id?, language?, engine_id?}` |
 | POST | `/api/agent/voice_audiobook` | `{text?, source_path?, title?, voice, format, project?, wait_s}` |
 | POST | `/api/agent/voice_dub` | `{source_path?, video_asset_id?, target_language, source_language?, glossary?, voice, stt_engine_id?, title?, project?, wait_s}` |
-| POST | `/api/agent/voice_resynthesize_segment?job_id=&index=` | `{text?, voice?, remix}` |
-| GET | `/api/agent/voice_job` | `?job_id&wait_s` |
+| POST | `/api/agent/voice_resynthesize_segment?job_id=&index=` | `{text?, voice?, remix}` -> `{segment, remixed, asset_id?}` |
+| GET | `/api/agent/voice_dub_segments` | `?job_id&offset&limit` -> a page of a finished dub's lines |
+| GET | `/api/agent/voice_job` | `?job_id&wait_s` (done: compact `outputs`, no file paths) |
 
 Shapes and limits: see [MCP.md](MCP.md).
 
@@ -86,7 +87,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | --- | --- | --- |
 | GET | `/api/health` | `{service: "prosperos-hoard", name, version, status: "ok", demo, projects, active_jobs}` |
 | GET / POST | `/api/backend` | status: Hoard Link per capability, ComfyUI (checkpoints, devices, VRAM), ffmpeg, Piper, fonts, music adapters, VRAM estimates, overrides, `token_set`; POST `{faustus_url?, faustus_token?, comfy_url?, vram_estimates_mb?, import_roots?}` (empty string clears) |
-| POST | `/api/backend/comfy/free` | ask ComfyUI to unload models (only on user request) |
+| POST | `/api/backend/comfy/free` | ask ComfyUI to unload models and drop the voice studio's cached models (only on user request) |
 | GET | `/api/agent-calls?limit=` | the audit log |
 | GET / POST | `/api/projects` | list (with counts) / create `{name, brief?}` |
 | GET / PATCH | `/api/projects/{id}` | `{name?, brief?, cover_asset_id?, image_engine?}` (`image_engine`: `auto` \| `qwen21` \| `flux` \| `sdxl`, default `auto`) |
@@ -135,8 +136,8 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/voice/engines/{engine_id}/install` | `{kind: "tts"\|"stt"}` -> job `install_voice_engine` (a `pip install`, explicit and user-triggered) |
 | GET / POST | `/api/voice/voices` | list `?project&engine_id` / create `{name, engine_id, source_path, language?, project?, tags?}` |
 | POST | `/api/voice/voices/upload` | multipart `file` + query `name, engine_id, language?, project?` |
-| GET / PATCH / DELETE | `/api/voice/voices/{id}` | full voice / `{name?, tags?, notes?}` / delete |
-| POST | `/api/voice/voices/{id}/presets` | `{name, speed?, pitch?, style?}` |
+| GET / PATCH / DELETE | `/api/voice/voices/{id}` | full voice / `{name?, tags?, notes?, lexicon?}` / delete (also removes its sample folder) |
+| POST | `/api/voice/voices/{id}/presets` | `{name, speed?, pitch?, style?, lexicon?}` (a name may not start with `_`) |
 | GET | `/api/voice/voices/{id}/sample` | the processed sample, `audio/wav` |
 | POST | `/api/voice/voices/{id}/preview` | `{text, voice}` -> `audio/wav` (does not save an asset) |
 | POST | `/api/voice/speak` | `{text, voice, project?}` -> `audio/wav`, or the asset when `project` is given |
@@ -149,7 +150,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/voice/dub` | `{source_path?, video_asset_id?, target_language, source_language?, glossary?, voice, stt_engine_id?, title?, project?, wait_s}` -> `{job}` |
 | GET | `/api/voice/dub/{job_id}` | the job |
 | GET | `/api/voice/dub/{job_id}/download?file=video\|subtitles` | the file |
-| POST | `/api/voice/dub/{job_id}/segments/{index}/resynthesize` | `{text?, voice?, remix}` -> `{segment}` |
+| POST | `/api/voice/dub/{job_id}/segments/{index}/resynthesize` | `{text?, voice?, remix}` -> `{segment, final_video?, asset_id?}` |
 
 Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 

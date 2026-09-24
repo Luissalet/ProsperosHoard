@@ -590,7 +590,7 @@ def voice_create(name: str, engine_id: str, source_path: str, language: Optional
 @tool(_ro(readOnlyHint=True))
 def voice_list(project: Optional[str] = None) -> dict[str, Any]:
     """List saved voices in the library (id, engine, language, whether a sample was cloned, quality,
-    preset names). project filters to one project's voices plus the shared ones. Use a voice's id as
+    preset names, pronunciation lexicon). project filters to one project's voices plus the shared ones. Use a voice's id as
     voice_id in voice_speak, voice_audiobook or voice_dub, or as a character's voice
     {"backend": "studio", "voice_id": "..."} in studio_cast.
 
@@ -602,18 +602,21 @@ def voice_list(project: Optional[str] = None) -> dict[str, Any]:
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def voice_speak(text: str, engine_id: Optional[str] = None, voice_id: Optional[str] = None,
                 voice_ref: Optional[str] = None, preset: Optional[str] = None, speed: Optional[float] = None,
-                language: Optional[str] = None, project: Optional[str] = None) -> dict[str, Any]:
+                language: Optional[str] = None, project: Optional[str] = None,
+                pitch: Optional[float] = None, lexicon: Optional[dict[str, str]] = None) -> dict[str, Any]:
     """Synthesize a line of text with any installed engine (unlike studio_voice, which is Piper-only):
     voice_id picks a saved library voice (its own engine and sample, unless engine_id/voice_ref override
     it), voice_ref is an engine-native voice id (e.g. a Piper voice id) for a non-cloning engine, preset is
-    a named preset saved on that library voice. project saves the result as a project's audio asset
-    (recommended - otherwise only a byte count is returned, since MCP tool results are text/JSON).
+    a named preset saved on that library voice. language is a code or name ("es", "Spanish"); pitch is in
+    semitones (-12..12). lexicon fixes pronunciations, whole words: {"Prospero": "PROS-per-oh"} (merged
+    over the voice's own lexicon). project saves the result as a project's audio asset (recommended -
+    otherwise only a byte count is returned, since MCP tool results are text/JSON).
 
-    Keywords: speak, text to speech, synthesize voice, tts, hablar, sintetizar voz, texto a voz
+    Keywords: speak, text to speech, synthesize voice, tts, pronunciation, hablar, sintetizar voz, texto a voz, pronunciacion
     """
     body = {"text": text, "project": project,
             "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "preset": preset,
-                      "speed": speed, "language": language}}
+                      "speed": speed, "language": language, "pitch": pitch, "lexicon": lexicon}}
     return _call("POST", "/api/agent/voice_speak", json=body)
 
 
@@ -622,7 +625,7 @@ def voice_transcribe(path: Optional[str] = None, asset_id: Optional[str] = None,
                      engine_id: Optional[str] = None) -> dict[str, Any]:
     """Transcribe an audio/video file (word-level timestamps when the engine supports it): give either
     path (an absolute path - see studio_import for allowed folders) or asset_id (an existing library
-    asset). language auto-detects when omitted. engine_id picks faster-whisper or whisper (see
+    asset). language ("es", "Spanish"...) auto-detects when omitted or "auto". engine_id picks faster-whisper or whisper (see
     voice_engines); fails clearly if neither is installed.
 
     Keywords: transcribe, speech to text, stt, subtitles, transcribir, voz a texto, subtitulos
@@ -636,19 +639,24 @@ def voice_audiobook(
     text: Optional[str] = None, source_path: Optional[str] = None, title: Optional[str] = None,
     engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
     speed: Optional[float] = None, format: str = "mp3", project: Optional[str] = None, wait_s: float = 0,
+    language: Optional[str] = None, lexicon: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """Narrate text (or a .txt/.md/.epub file at source_path) as a long-form audiobook: splits it into
-    chapters and sentences, synthesizes each as a background job with progress (poll with voice_job),
-    then assembles the chapters into one file (format "mp3", or "m4b" for chapter markers) plus an SRT/LRC
-    aligned transcript. Re-running the exact same text and voice resumes from whatever chapters already
-    rendered. project saves the final file as an audio asset. Returns the job (poll voice_job); its
-    finished outputs list each chapter's timing and the file paths.
+    chapters (markdown headings or short standalone "Chapter 3" / "Capítulo IV" lines) and sentences,
+    synthesizes each as a background job with progress (poll with voice_job; cancel with
+    studio_cancel_job), then assembles one file (format "mp3", or "m4b" for chapter markers) plus an
+    SRT/LRC aligned transcript. The voice is checked before the job is queued. lexicon fixes
+    pronunciations: {"Prospero": "PROS-per-oh"}. Re-running the exact same text and voice resumes from
+    the chapters already rendered. project saves the final file as an audio asset (its id in asset_ids).
+    Returns the job; when done, job.outputs = {title, format, duration_s, sentence_count, chapter_count,
+    chapters[{index, title, start_s, duration_s}], asset_ids} - no file paths.
 
     Keywords: audiobook, narrate, long text to speech, chapters, audiolibro, narrar, texto largo a voz, capitulos
     """
     body = {"text": text, "source_path": source_path, "title": title, "format": format, "project": project,
             "wait_s": wait_s,
-            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "speed": speed}}
+            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "speed": speed,
+                      "language": language, "lexicon": lexicon}}
     return _call("POST", "/api/agent/voice_audiobook", json=body)
 
 
@@ -658,22 +666,39 @@ def voice_dub(
     source_language: Optional[str] = None, glossary: Optional[dict[str, str]] = None,
     engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
     title: Optional[str] = None, project: Optional[str] = None, wait_s: float = 0,
+    lexicon: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
-    """Dub a video into target_language as a background job: extracts its audio, transcribes it with
-    timestamps, translates each line with the local LLM (glossary maps names/terms; fails clearly with no
-    local LLM available - see studio_status's llm capability), synthesizes each line in the chosen voice,
-    time-fits it back onto the original line's duration, mixes it under the original track (ducked, or
-    replacing vocals when a background separator is installed) and muxes a new video with target-language
-    subtitles. Give source_path (an absolute path) or video_asset_id. Every stage's files are kept, so a
-    single line can be fixed with voice_resynthesize_segment instead of re-running the whole job.
-    Poll with voice_job; its finished outputs include a per-segment table (source/translated text, timing).
+    """Dub a video into target_language ("es", "Spanish", "español"...) as a background job: extracts its
+    audio, transcribes it with timestamps, translates each line with the local LLM (glossary maps
+    names/terms; fails clearly with no local LLM available - see studio_status's llm capability),
+    synthesizes each line in the chosen voice speaking the target language, time-fits it onto the
+    original line (speeds up long lines, never drags out short ones), mixes it under the original track
+    (ducked, or replacing vocals when a background separator is installed) and muxes a new video with
+    target-language subtitles. Give source_path (an absolute path) or video_asset_id; project saves the
+    result as a video asset. The language and voice are checked before the job is queued. lexicon fixes
+    pronunciations: {"Prospero": "PROS-per-oh"}. Poll with voice_job; when done, job.outputs = {title,
+    target_language, asset_ids, segments{total, items[{index, start_s, end_s, source_text,
+    translated_text}], next_offset}} (first 20 lines; voice_dub_segments pages the rest). Fix one line
+    with voice_resynthesize_segment instead of re-running the whole job.
 
     Keywords: dub video, translate video, voice dubbing, subtitles, doblar video, traducir video, doblaje, subtitulos
     """
     body = {"target_language": target_language, "source_path": source_path, "video_asset_id": video_asset_id,
             "source_language": source_language, "glossary": glossary, "title": title, "project": project,
-            "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
+            "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref,
+                                        "lexicon": lexicon}}
     return _call("POST", "/api/agent/voice_dub", json=body)
+
+
+@tool(_ro(readOnlyHint=True))
+def voice_dub_segments(job_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """Page through a finished voice_dub job's lines: {job_id, total, offset, items[{index, start_s,
+    end_s, source_text, translated_text}], next_offset} (texts clipped to 300 chars; limit up to 200).
+    Use an item's index with voice_resynthesize_segment to fix that line.
+
+    Keywords: dub segments, dub lines, translated lines, dubbing transcript, segmentos del doblaje, lineas traducidas, frases del doblaje
+    """
+    return _call("GET", "/api/agent/voice_dub_segments", params={"job_id": job_id, "offset": offset, "limit": limit})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
@@ -681,9 +706,11 @@ def voice_resynthesize_segment(job_id: str, index: int, text: Optional[str] = No
                                engine_id: Optional[str] = None, voice_id: Optional[str] = None,
                                voice_ref: Optional[str] = None, remix: bool = True) -> dict[str, Any]:
     """Fix one line of a finished voice_dub job without re-running transcription or translation: edit its
-    translated text and/or swap the voice, re-synthesize and re-time-fit just that segment, and (remix=true,
-    default) rebuild the mixed audio and re-mux the final video. index is the segment's position in the
-    dub job's outputs.segments table (0-based).
+    translated text and/or swap the voice for that line only, re-synthesize and re-time-fit just that
+    segment, and (remix=true, default) rebuild the mixed audio and re-mux the final video. index is the
+    segment's index from voice_dub_segments (0-based). Returns {segment{index, start_s, end_s,
+    source_text, translated_text, engine_id}, remixed, asset_id?} - asset_id is the new video asset when
+    the dub was saved to a project; the dub job's outputs are updated too.
 
     Keywords: fix dub line, re-synthesize segment, redo translation, corregir linea doblaje, resintetizar segmento
     """
@@ -696,9 +723,10 @@ def voice_resynthesize_segment(job_id: str, index: int, text: Optional[str] = No
 
 @tool(_ro(readOnlyHint=True))
 def voice_job(job_id: str, wait_s: float = 0) -> dict[str, Any]:
-    """One voice-studio job's (audiobook, dub, engine install) state, progress and message; when done,
-    its full outputs (chapters, segments, file paths). wait_s (up to 300) waits server-side instead of
-    polling in a tight loop - use 30-120 for an audiobook or dub job, which can take a while.
+    """One voice-studio job's (audiobook, dub, engine install) state, progress and message; when done, a
+    compact outputs summary (audiobook: chapters, sentence_count, duration_s; dub: the first 20 lines
+    and their total - voice_dub_segments pages the rest) plus asset_ids, never file paths. wait_s (up to
+    300) waits server-side instead of polling in a tight loop - use 30-120 for an audiobook or dub job.
 
     Keywords: voice job status, dub progress, audiobook progress, estado del trabajo de voz, progreso doblaje
     """

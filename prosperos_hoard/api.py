@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
@@ -357,6 +358,7 @@ class VoiceSpecBody(BaseModel):
     pitch: Optional[float] = None
     style: Optional[str] = None
     language: Optional[str] = None
+    lexicon: Optional[dict[str, str]] = None  # {"Prospero": "PROS-per-oh"}: said this way, whole words
 
 
 class VoiceCreateBody(BaseModel):
@@ -371,14 +373,16 @@ class VoiceCreateBody(BaseModel):
 class VoicePresetBody(BaseModel):
     name: str
     speed: Optional[float] = None
-    pitch: Optional[float] = None
+    pitch: Optional[float] = None  # semitones, -12..12
     style: Optional[str] = None
+    lexicon: Optional[dict[str, str]] = None
 
 
 class VoiceUpdateBody(BaseModel):
     name: Optional[str] = None
     tags: Optional[list[str]] = None
     notes: Optional[str] = None
+    lexicon: Optional[dict[str, str]] = None  # replaces the voice's pronunciation lexicon; {} clears it
 
 
 class VoiceSpeakBody(BaseModel):
@@ -698,7 +702,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/backend/comfy/free")
     def free_comfy():
-        return backend.free_comfy_memory()
+        voice = ve.unload_models()  # the voice studio's cached TTS/STT models, even when ComfyUI is down
+        return {**backend.free_comfy_memory(), "voice_models_unloaded": voice["unloaded"]}
 
     @app.get("/api/agent-calls")
     def agent_calls(limit: int = 50):
@@ -894,11 +899,55 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return engine.resolve_import_path(backend, store, raw_path)
 
     def _voice_studio_path(rel: str) -> Path:
-        root = store.data_dir.resolve()
-        path = (root / rel).resolve()
+        # only the voice studio's own work folder: never backend.json, the
+        # database or another project's files, whatever a job output says
+        root = (store.data_dir / "voice_studio").resolve()
+        path = (store.data_dir / rel).resolve()
         if not _is_within(path, root) or not path.is_file():
             raise NotFound("file", rel)
         return path
+
+    def _language_or_error(value: Optional[str], allow_auto: bool = True) -> Optional[str]:
+        try:
+            return ve.normalize_language(value, allow_auto=allow_auto)
+        except ve.UnsupportedLanguage as exc:
+            raise engine.EngineError("bad_language", str(exc)) from None
+
+    def _voice_spec(body_voice: VoiceSpecBody) -> dict[str, Any]:
+        spec = body_voice.model_dump(exclude_none=True)
+        if "lexicon" in spec:
+            spec["lexicon"] = voice_lab.normalize_lexicon(spec["lexicon"])
+        return spec
+
+    async def _save_upload(file: UploadFile, default_name: str, limit: int, too_large: str) -> Path:
+        tmp_dir = store.data_dir / "tmp" / "uploads"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path((file.filename or default_name).replace("\\", "/")).suffix.lower() or ".wav"
+        tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
+        total = 0
+        try:
+            with tmp_path.open("wb") as fh:
+                while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > limit:
+                        raise engine.EngineError("too_large", too_large)
+                    fh.write(chunk)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        return tmp_path
+
+    def _voice_job_view(job: dict[str, Any]) -> dict[str, Any]:
+        """job_result plus a compact, path-free view of a finished voice
+        job's outputs (dub: the first segments; audiobook: its chapters)."""
+        view = job_result(job)
+        outputs = job.get("outputs") or {}
+        if job.get("state") == "done" and outputs:
+            if job.get("type") == "dub":
+                view["outputs"] = dubbing_mod.dub_outputs_view(outputs)
+            elif job.get("type") == "audiobook":
+                view["outputs"] = vp.audiobook_outputs_view(outputs)
+        return view
 
     @app.get("/api/agent/voice_engines")
     def agent_voice_engines():
@@ -959,20 +1008,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/voice/voices/upload")
     async def voice_voices_upload(file: UploadFile, name: str, engine_id: str, language: Optional[str] = None,
                                   project: Optional[str] = None):
-        tmp_dir = store.data_dir / "tmp" / "uploads"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        ext = Path((file.filename or "sample.wav").replace("\\", "/")).suffix.lower() or ".wav"
-        tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
-        total = 0
+        tmp_path = await _save_upload(file, "sample.wav", engine.MAX_MEDIA_BYTES, "sample exceeds the upload size limit")
         try:
-            with tmp_path.open("wb") as fh:
-                while chunk := await file.read(1024 * 1024):
-                    total += len(chunk)
-                    if total > engine.MAX_MEDIA_BYTES:
-                        raise engine.EngineError("too_large", "sample exceeds the upload size limit")
-                    fh.write(chunk)
-            row = voice_lab.create_voice(store, name, tmp_path, engine_id, language=language, project_id=project,
-                                         stt_engine=ve.best_installed_stt(_stt_engines()))
+            # ffmpeg passes + an optional transcription: seconds to minutes
+            # of blocking work, kept off the event loop so the rest of the
+            # app keeps answering meanwhile
+            row = await run_in_threadpool(voice_lab.create_voice, store, name, tmp_path, engine_id, language=language,
+                                          project_id=project, stt_engine=ve.best_installed_stt(_stt_engines()))
             return voice_lab.voice_view(row)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -983,16 +1025,30 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.patch("/api/voice/voices/{voice_id}")
     def voice_voice_update(voice_id: str, body: VoiceUpdateBody):
-        return store.update_studio_voice(voice_id, **body.model_dump(exclude_none=True))
+        fields = body.model_dump(exclude_none=True)
+        lexicon = fields.pop("lexicon", None)
+        row = store.update_studio_voice(voice_id, **fields)
+        if lexicon is not None:
+            row = voice_lab.set_voice_lexicon(store, voice_id, lexicon)
+        return row
 
     @app.delete("/api/voice/voices/{voice_id}")
     def voice_voice_delete(voice_id: str):
+        voice = store.get_studio_voice(voice_id)
         store.delete_studio_voice(voice_id)
-        return {"ok": True, "deleted": voice_id}
+        # the processed sample is a recording of someone's voice: it goes
+        # with the voice, not left behind on disk
+        files_removed = voice_lab.delete_voice_files(store, voice)
+        return {"ok": True, "deleted": voice_id, "files_removed": files_removed}
 
     @app.post("/api/voice/voices/{voice_id}/presets")
     def voice_voice_add_preset(voice_id: str, body: VoicePresetBody):
-        return store.add_voice_preset(voice_id, body.model_dump(exclude_none=True))
+        preset = body.model_dump(exclude_none=True)
+        if not preset["name"].strip() or preset["name"].startswith("_"):
+            raise engine.EngineError("bad_preset_name", "a preset name must not be empty or start with '_'")
+        if "lexicon" in preset:
+            preset["lexicon"] = voice_lab.normalize_lexicon(preset["lexicon"])
+        return store.add_voice_preset(voice_id, preset)
 
     @app.get("/api/voice/voices/{voice_id}/sample")
     def voice_voice_sample(voice_id: str):
@@ -1004,7 +1060,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/voice/voices/{voice_id}/preview")
     def voice_voice_preview(voice_id: str, body: VoiceSpeakBody):
-        spec = body.voice.model_dump(exclude_none=True)
+        spec = _voice_spec(body.voice)
         spec["voice_id"] = voice_id
         wav, engine_id = voice_lab.synthesize_with_spec(store, _tts_engines(), spec, body.text[:500])
         return Response(wav, media_type="audio/wav", headers={"X-Engine": engine_id})
@@ -1013,7 +1069,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def op_voice_speak(body: VoiceSpeakBody) -> dict[str, Any]:
         if not body.text.strip():
             raise engine.EngineError("empty_text", "give the text to speak")
-        spec = body.voice.model_dump(exclude_none=True)
+        spec = _voice_spec(body.voice)
         wav, engine_id = voice_lab.synthesize_with_spec(store, _tts_engines(), spec, body.text.strip())
         if body.project:
             asset_id = new_id("a")
@@ -1051,6 +1107,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if stt is None:
             raise engine.EngineError("stt_not_installed", "no speech-to-text engine is installed; "
                                                           "install faster-whisper (pip install faster-whisper)")
+        language = _language_or_error(language)  # "auto"/None -> detect
         return {"engine_id": stt.id, **stt.transcribe(path, language=language, word_timestamps=word_timestamps)}
 
     def op_voice_transcribe(body: VoiceTranscribeBody) -> dict[str, Any]:
@@ -1079,19 +1136,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/voice/transcribe/upload")
     async def voice_transcribe_upload(file: UploadFile, language: Optional[str] = None, engine_id: Optional[str] = None):
-        tmp_dir = store.data_dir / "tmp" / "uploads"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        ext = Path((file.filename or "audio.wav").replace("\\", "/")).suffix.lower() or ".wav"
-        tmp_path = tmp_dir / f"{new_id('up')}{ext if re.fullmatch(r'[.a-z0-9]{1,6}', ext) else '.wav'}"
-        total = 0
+        tmp_path = await _save_upload(file, "audio.wav", engine.MAX_MEDIA_BYTES, "file exceeds the upload size limit")
         try:
-            with tmp_path.open("wb") as fh:
-                while chunk := await file.read(1024 * 1024):
-                    total += len(chunk)
-                    if total > engine.MAX_MEDIA_BYTES:
-                        raise engine.EngineError("too_large", "file exceeds the upload size limit")
-                    fh.write(chunk)
-            result = _run_transcribe(tmp_path, language, engine_id, word_timestamps=True)
+            # transcription blocks for seconds to minutes: off the event loop
+            result = await run_in_threadpool(_run_transcribe, tmp_path, language, engine_id, True)
             return {**result, "srt": ve.segments_to_srt(result["segments"]), "vtt": ve.segments_to_vtt(result["segments"]),
                     "txt": ve.segments_to_txt(result["segments"])}
         finally:
@@ -1099,18 +1147,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/voice/dictate")
     async def voice_dictate(file: UploadFile, language: Optional[str] = None):
-        tmp_dir = store.data_dir / "tmp" / "uploads"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = tmp_dir / f"{new_id('up')}.wav"
+        tmp_path = await _save_upload(file, "clip.wav", 30 * 1024 * 1024, "dictation clips are limited to 30 MB")
         try:
-            total = 0
-            with tmp_path.open("wb") as fh:
-                while chunk := await file.read(1024 * 1024):
-                    total += len(chunk)
-                    if total > 30 * 1024 * 1024:
-                        raise engine.EngineError("too_large", "dictation clips are limited to 30 MB")
-                    fh.write(chunk)
-            result = _run_transcribe(tmp_path, language, None, word_timestamps=False)
+            result = await run_in_threadpool(_run_transcribe, tmp_path, language, None, False)
             return {"text": result.get("text", ""), "language": result.get("language"), "engine_id": result["engine_id"]}
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -1127,14 +1166,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise engine.EngineError("empty_text", "the source has no text to narrate")
         if body.format not in ("mp3", "m4b"):
             raise engine.EngineError("bad_format", "format must be 'mp3' or 'm4b'")
-        params = {"text": text, "title": body.title, "voice": body.voice.model_dump(exclude_none=True),
-                  "format": body.format, "project_id": body.project}
+        spec = _voice_spec(body.voice)
+        # a bad voice fails this request, not the queued job an hour in
+        voice_lab.validate_voice_spec(store, _tts_engines(), spec)
+        params = {"text": text, "title": body.title, "voice": spec, "format": body.format, "project_id": body.project}
         job = queue.enqueue("audiobook", "cpu", params, project_id=body.project)
         return {"job": wait(job, body.wait_s)}
 
     @app.post("/api/agent/voice_audiobook")
     def agent_voice_audiobook(body: VoiceAudiobookBody):
-        return agent("voice_audiobook", body.title or "", lambda: {"job": job_result(op_voice_audiobook(body)["job"])})
+        return agent("voice_audiobook", body.title or "", lambda: {"job": _voice_job_view(op_voice_audiobook(body)["job"])})
 
     @app.post("/api/voice/audiobook")
     def voice_audiobook(body: VoiceAudiobookBody):
@@ -1165,10 +1206,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             video_path = _asset_path(store, asset["file_path"])
         else:
             raise engine.EngineError("source_required", "give source_path or video_asset_id")
+        target = _language_or_error(body.target_language, allow_auto=False)
+        if not target:
+            raise engine.EngineError("bad_language", "give target_language (e.g. 'es' or 'Spanish')")
+        source = _language_or_error(body.source_language)
+        # the dub's voice speaks the target language unless it says otherwise
+        spec = dubbing_mod.voice_spec_for_language(_voice_spec(body.voice), target)
+        voice_lab.validate_voice_spec(store, _tts_engines(), spec)
         params = {
-            "video_path": str(video_path), "target_language": body.target_language,
-            "source_language": body.source_language, "glossary": body.glossary or {},
-            "voice": body.voice.model_dump(exclude_none=True), "stt_engine_id": body.stt_engine_id,
+            "video_path": str(video_path), "target_language": target, "source_language": source,
+            "glossary": body.glossary or {}, "voice": spec, "stt_engine_id": body.stt_engine_id,
             "title": body.title, "project_id": body.project,
         }
         job = queue.enqueue("dub", "cpu", params, project_id=body.project)
@@ -1177,7 +1224,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/voice_dub")
     def agent_voice_dub(body: VoiceDubBody):
         return agent("voice_dub", f"{body.target_language}:{body.source_path or body.video_asset_id or ''}",
-                     lambda: {"job": job_result(op_voice_dub(body)["job"])})
+                     lambda: {"job": _voice_job_view(op_voice_dub(body)["job"])})
 
     @app.post("/api/voice/dub")
     def voice_dub(body: VoiceDubBody):
@@ -1197,31 +1244,62 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         path = _voice_studio_path(outputs[key])
         return FileResponse(path, filename=path.name)
 
-    def _dub_work_dir(job_id: str) -> Path:
+    def _dub_job(job_id: str) -> dict[str, Any]:
         job = store.get_job(job_id)
+        if job["type"] != "dub":
+            raise engine.EngineError("not_dub_job", f"job {job_id} is a {job['type']} job, not a dub")
+        return job
+
+    def _dub_work_dir(job_id: str) -> Path:
+        job = _dub_job(job_id)
         outputs = job.get("outputs") or {}
         if not outputs.get("work_dir"):
             raise engine.EngineError("job_not_done", "the dub job has not produced a work directory yet")
         return _voice_studio_path(outputs["work_dir"] + "/manifest.json").parent
 
+    def op_voice_resegment(job_id: str, index: int, body: VoiceResegmentBody) -> dict[str, Any]:
+        work_dir = _dub_work_dir(job_id)
+        voice_spec = _voice_spec(body.voice) if body.voice else None
+        if voice_spec:
+            target = (dubbing_mod.load_manifest(work_dir).get("target_language") or None)
+            voice_lab.validate_voice_spec(store, _tts_engines(), dubbing_mod.voice_spec_for_language(voice_spec, target))
+        return dubbing_mod.resynthesize_segment(store, backend, work_dir, index, new_text=body.text,
+                                                voice_spec=voice_spec or None, remix=body.remix, job_id=job_id)
+
     @app.post("/api/voice/dub/{job_id}/segments/{index}/resynthesize")
     def voice_dub_resegment(job_id: str, index: int, body: VoiceResegmentBody):
-        work_dir = _dub_work_dir(job_id)
-        voice_spec = body.voice.model_dump(exclude_none=True) if body.voice else None
-        return dubbing_mod.resynthesize_segment(store, backend, work_dir, index, new_text=body.text,
-                                                voice_spec=voice_spec or None, remix=body.remix)
+        return op_voice_resegment(job_id, index, body)
 
     @app.post("/api/agent/voice_resynthesize_segment")
     def agent_voice_resegment(job_id: str, index: int, body: VoiceResegmentBody):
-        return agent("voice_resynthesize_segment", f"{job_id}:{index}",
-                     lambda: voice_dub_resegment(job_id, index, body))
+        def run():
+            result = op_voice_resegment(job_id, index, body)
+            seg = result["segment"]
+            out = {"segment": {"index": seg.get("index"), "start_s": seg.get("start_s"), "end_s": seg.get("end_s"),
+                               "source_text": engine._clip(seg.get("source_text"), 300),
+                               "translated_text": engine._clip(seg.get("translated_text"), 300),
+                               "engine_id": seg.get("engine_id")}}
+            if result.get("asset_id"):
+                out["asset_id"] = result["asset_id"]
+            out["remixed"] = "final_video" in result
+            return out
+        return agent("voice_resynthesize_segment", f"{job_id}:{index}", run)
+
+    @app.get("/api/agent/voice_dub_segments")
+    def agent_voice_dub_segments(job_id: str, offset: int = 0, limit: int = 50):
+        def run():
+            job = _dub_job(job_id)
+            if job["state"] != "done":
+                raise engine.EngineError("job_not_done", f"the dub job is {job['state']}; poll voice_job first")
+            return {"job_id": job_id, **dubbing_mod.dub_segments_view(job.get("outputs") or {}, offset, limit)}
+        return agent("voice_dub_segments", f"{job_id}:{offset}", run)
 
     # ------------------------------------------------------------ voice jobs
     @app.get("/api/agent/voice_job")
     def agent_voice_job(job_id: str, wait_s: float = 0):
         def run():
             job = queue.wait_for(job_id, min(wait_s, MAX_WAIT_S)) if wait_s > 0 else store.get_job(job_id)
-            return job_result(job)
+            return _voice_job_view(job)
         return agent("voice_job", job_id, run)
 
     # ------------------------------------------------------------------ import

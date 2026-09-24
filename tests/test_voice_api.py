@@ -8,6 +8,7 @@ test_voice_pipelines.py and test_dubbing.py.
 
 from __future__ import annotations
 
+import json
 import wave
 from pathlib import Path
 
@@ -242,3 +243,159 @@ def test_voice_job_not_found(client):
     c, app, _allowed = client
     resp = c.get("/api/agent/voice_job", params={"job_id": "job_does_not_exist"})
     assert resp.status_code == 404
+
+
+# ------------------------------------------------------------ regressions
+
+def test_upload_routes_run_blocking_work_off_the_event_loop(client, monkeypatch):
+    import asyncio
+
+    seen = []
+
+    class LoopProbeSTT(FakeSTT):
+        def transcribe(self, path, language=None, word_timestamps=True):
+            try:
+                asyncio.get_running_loop()
+                seen.append("event-loop")
+            except RuntimeError:
+                seen.append("worker-thread")
+            return super().transcribe(path, language, word_timestamps)
+
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_stt_engines", lambda: [LoopProbeSTT()])
+    c, app, _allowed = client
+    files = {"file": ("clip.wav", _wav_bytes(), "audio/wav")}
+    assert c.post("/api/voice/transcribe/upload", files=files).status_code == 200
+    assert c.post("/api/voice/dictate", files={"file": ("clip.wav", _wav_bytes(), "audio/wav")}).status_code == 200
+    resp = c.post("/api/voice/voices/upload", params={"name": "Probe", "engine_id": "fake-tts"},
+                  files={"file": ("s.wav", _wav_bytes(), "audio/wav")})
+    assert resp.status_code == 200, resp.text
+    assert seen == ["worker-thread"] * 3
+
+
+def test_transcribe_language_auto_means_detect(client, monkeypatch):
+    got = []
+
+    class LangSTT(FakeSTT):
+        def transcribe(self, path, language=None, word_timestamps=True):
+            got.append(language)
+            return super().transcribe(path, language, word_timestamps)
+
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_stt_engines", lambda: [LangSTT()])
+    c, app, _allowed = client
+    for lang in ("auto", "Spanish"):
+        resp = c.post("/api/voice/dictate", params={"language": lang},
+                      files={"file": ("clip.wav", _wav_bytes(), "audio/wav")})
+        assert resp.status_code == 200
+    assert got == [None, "es"]
+    resp = c.post("/api/voice/dictate", params={"language": "Klingon"},
+                  files={"file": ("clip.wav", _wav_bytes(), "audio/wav")})
+    assert resp.status_code == 400 and resp.json()["error"] == "bad_language"
+
+
+def test_voice_studio_downloads_never_leave_the_voice_studio_folder(client, data_dir):
+    c, app, _allowed = client
+    store = app.state.store
+    (data_dir / "backend.json").write_text('{"faustus_token": "secret"}', encoding="utf-8")
+    job = store.create_job("audiobook", "cpu", {"text": "x"})
+    store.update_job(job["id"], state="done", outputs={"final_file": "backend.json", "srt_file": "../backend.json"})
+    for which in ("final", "srt"):
+        resp = c.get(f"/api/voice/audiobook/{job['id']}/download", params={"file": which})
+        assert resp.status_code == 404
+        assert b"secret" not in resp.content
+
+
+def test_voice_delete_removes_the_sample_folder_and_lexicon_roundtrip(client, data_dir):
+    c, app, _allowed = client
+    resp = c.post("/api/voice/voices/upload", params={"name": "Private Person", "engine_id": "fake-tts"},
+                  files={"file": ("s.wav", _wav_bytes(), "audio/wav")})
+    voice_id = resp.json()["id"]
+    row = c.get(f"/api/voice/voices/{voice_id}").json()
+    folder = (data_dir / row["sample_path"]).parent
+    assert folder.is_dir()
+
+    patched = c.patch(f"/api/voice/voices/{voice_id}", json={"lexicon": {"Prospero": "PROS-per-oh"}})
+    assert patched.status_code == 200
+    listed = {v["id"]: v for v in c.get("/api/voice/voices").json()["items"]}
+    assert listed[voice_id]["lexicon"] == {"Prospero": "PROS-per-oh"}
+    assert listed[voice_id]["presets"] == []
+    bad = c.post(f"/api/voice/voices/{voice_id}/presets", json={"name": "_lexicon", "speed": 2})
+    assert bad.status_code == 400 and bad.json()["error"] == "bad_preset_name"
+
+    deleted = c.delete(f"/api/voice/voices/{voice_id}").json()
+    assert deleted["ok"] is True and deleted["files_removed"] is True
+    assert not folder.exists()
+
+
+def test_voice_speak_applies_request_lexicon(client, monkeypatch):
+    spoken = []
+
+    class Rec(FakeTTS):
+        def synthesize(self, text, **kw):
+            spoken.append(text)
+            return super().synthesize(text, **kw)
+
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_tts_engines", lambda **kw: [Rec()])
+    c, app, _allowed = client
+    resp = c.post("/api/voice/speak", json={"text": "Hello Prospero",
+                                            "voice": {"engine_id": "fake-tts", "lexicon": {"prospero": "PROS-per-oh"}}})
+    assert resp.status_code == 200
+    assert spoken == ["Hello PROS-per-oh"]
+
+
+def test_voice_dub_validates_language_and_voice_before_queueing(client):
+    c, app, allowed = client
+    video = allowed / "clip.mp4"
+    video.write_bytes(b"not really a video")
+    resp = c.post("/api/voice/dub", json={"source_path": str(video), "target_language": "Klingon",
+                                          "voice": {"engine_id": "fake-tts"}})
+    assert resp.status_code == 400 and resp.json()["error"] == "bad_language"
+    resp = c.post("/api/voice/dub", json={"source_path": str(video), "target_language": "Spanish",
+                                          "voice": {"engine_id": "no-such-engine"}})
+    assert resp.status_code == 400 and resp.json()["error"] == "unknown_engine"
+    assert not app.state.store.conn.execute("SELECT 1 FROM jobs WHERE type='dub'").fetchone()
+
+
+def test_voice_audiobook_validates_voice_before_queueing(client):
+    c, app, _allowed = client
+    resp = c.post("/api/voice/audiobook", json={"text": "Hello.", "voice": {"engine_id": "nope"}})
+    assert resp.status_code == 400 and resp.json()["error"] == "unknown_engine"
+    resp = c.post("/api/voice/audiobook", json={"text": "Hello.", "voice": {"engine_id": "fake-tts", "pitch": 40}})
+    assert resp.status_code == 400 and resp.json()["error"] == "bad_pitch"
+
+
+def test_agent_voice_job_shows_compact_audiobook_outputs(client):
+    c, app, _allowed = client
+    resp = c.post("/api/agent/voice_audiobook", json={"text": "# One\nHello world.\n\n# Two\nBye now.",
+                                                      "voice": {"engine_id": "fake-tts"}, "wait_s": 30})
+    job = resp.json()["job"]
+    assert job["state"] == "done"
+    outputs = job["outputs"]
+    assert [ch["title"] for ch in outputs["chapters"]] == ["One", "Two"]
+    assert outputs["sentence_count"] == 2
+    assert "final_file" not in outputs and "work_dir" not in outputs
+    again = c.get("/api/agent/voice_job", params={"job_id": job["id"]}).json()
+    assert again["outputs"]["chapter_count"] == 2
+
+
+def test_agent_voice_dub_segments_pages(client):
+    c, app, _allowed = client
+    store = app.state.store
+    rows = [{"index": i, "start_s": float(i), "end_s": i + 0.5, "source_text": f"s{i}", "translated_text": f"t{i}",
+             "fit": {}} for i in range(30)]
+    job = store.create_job("dub", "cpu", {"target_language": "es"})
+    store.update_job(job["id"], state="done", outputs={"segments": rows, "final_video": "voice_studio/dub/x/d.mp4"})
+    page = c.get("/api/agent/voice_dub_segments", params={"job_id": job["id"], "offset": 20, "limit": 50}).json()
+    assert page["job_id"] == job["id"] and page["total"] == 30
+    assert [r["index"] for r in page["items"]] == list(range(20, 30)) and page["next_offset"] is None
+    view = c.get("/api/agent/voice_job", params={"job_id": job["id"]}).json()
+    assert view["outputs"]["segments"]["total"] == 30 and "final_video" not in json.dumps(view)
+    other = store.create_job("audiobook", "cpu", {"text": "x"})
+    assert c.get("/api/agent/voice_dub_segments", params={"job_id": other["id"]}).status_code == 400
+
+
+def test_free_memory_also_unloads_voice_models(client, monkeypatch):
+    called = []
+    monkeypatch.setattr("prosperos_hoard.api.ve.unload_models", lambda: called.append(1) or {"unloaded": 0})
+    c, app, _allowed = client
+    c.post("/api/backend/comfy/free")
+    assert called == [1]
