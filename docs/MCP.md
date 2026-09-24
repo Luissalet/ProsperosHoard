@@ -97,6 +97,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_recipe_get` | yes | `recipe` | summary, `cast`, `placeholders`, song, world, `shot_list[{key, lead, prompt, seed, variants, clips, motion}]`, timeline, settings, warnings |
 | `studio_recipe_run` | no | `recipe, cast={"lead": <character id or {name, look, negative?, palette?, bio?}>}, name=None, options={reuse, title, project, settings, engine}` | `{production, job, notes}` |
 
+| `studio_animatic` | no | `production, aspects=None, wait_s=0` | `{job, animatic?{renders, plan}}` - the stills cut like the final at 720p, with `plan.json` |
 | `studio_qa_run` | no | `production, stage="all", dry_run=True, keys=None, wait_s=120` | `{job, scorecard?, requeued?}` - see [ARCHITECTURE.md](ARCHITECTURE.md#qa-director) for the checks |
 | `studio_qa_report` | yes | `production` | the last scorecard (failures first, one-line `why`) + `retries` |
 
@@ -316,3 +317,15 @@ studio_qa_report("afterglow_iris_volt")                              -> scorecar
 
 With `settings: {"qa": {"enabled": true, "max_retries": 2}}` the same
 checks run after every stage of the production itself.
+
+### Animatic
+
+```text
+studio_production_create("Night Walk", spec)       # settings.animatic defaults to true
+studio_production("night_walk")                    -> status "awaiting_review",
+     animatic {renders {"9:16": a_..., "16:9": a_...}, clips_planned: 18, gpu_minutes_estimate: 171}
+# watch it (studio_show on the render gives a 3-frame strip), then either
+studio_production_shots("night_walk", [{"key": "7", "best": 2}, {"key": "9", "clip": false}])   # remade, paused again
+studio_production_continue("night_walk")           # renders the clips, then the final cut
+studio_animatic("dont_look_back", aspects=["9:16"])  # on demand, also for a scripted production
+```

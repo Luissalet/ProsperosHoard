@@ -17,6 +17,8 @@ prosperos_hoard/
                    script's own state.json
   recipes.py       recipe export (lead -> {lead} casting slot), list/get, and
                    filling the slot to start a new production
+  animatic.py      the animatic: the final cut's cut points from the stills only,
+                   Ken Burns + crossfades, 720p renders per aspect, plan.json
   qa.py            the QA director: model-free checks (numpy/Pillow/ffmpeg), vision
                    scores through Hoard Link, the retry policy with targeted fixes
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
@@ -111,8 +113,8 @@ flight (`partial[stage].pending`), `timings` and a `lineage` log. Shot keys
 are `"3"` (shot 3's chosen still) and `"3v2"` (its second variant, used for
 a second clip).
 
-`productions.Run` walks `STAGES` (character, song, frames, lyrics, clips,
-photocards, album, timeline, report) and skips what is done, so the same
+`productions.Run` walks `STAGES` (character, song, frames, lyrics,
+animatic, clips, photocards, album, timeline, report) and skips what is done, so the same
 job resumes after a failure, a cancel or a restart. It never talks to
 ComfyUI or ffmpeg itself: GPU/CPU work goes through a `Studio` (in `api.py`
 the same `op_generate`/`op_compose`/`op_render` the routes use; in the tests
@@ -148,6 +150,33 @@ storyboard is read back from the timeline's clips per lyric section.
 canonical reference is copied into the new project - or an inline
 description) and creates the production; reused assets are copied into the
 new project with `copied_from` in their recipe.
+
+## Animatic
+
+`engine.auto_cut` is the auto-cut without storing a timeline;
+`engine.timeline_auto` (the final cut) and `animatic.build` both call it
+with the same song, lyrics and options (`spec.timeline.options`), so the
+cut points are identical by construction - only the assignment differs:
+each storyboard entry resolves to its clip for the final cut and to its
+still for the animatic (a test checks the start times match). The animatic
+then sets a crossfade into every shot (at most a third of either shot,
+0.35 s) and keeps the Ken Burns move the auto-cut gives each still, and
+`video.render_timeline` renders it with the `animatic` quality preset
+(720p short side, `veryfast`, CRF 26) with the captions and the finishing
+pass, one video asset per aspect (`recipe.operation = "animatic"`).
+`animatic/plan.json` lists every cut (start, duration, shot key, still,
+section), every shot (screen time, cuts, still, `will_be_clip`, the clips
+still to render), unused shots, and the estimate: clips to render x 9.5
+GPU minutes (and 1.75 CPU minutes per final render), from the real run's
+timings, overridable with `settings.gpu_minutes`.
+
+As a stage it runs after frames and lyrics; unless
+`settings.animatic_autocontinue` or an earlier approval
+(`review.animatic_approved`, set by `studio_production_continue`), the run
+returns `awaiting_review` and the job ends - nothing holds a worker while
+you watch. "Change shots" drops the animatic (and the approval), so the
+next run remakes it and pauses again. `studio_animatic` (an `animatic` job
+on the cpu lane) remakes it on demand, also for a scripted production.
 
 ## QA director
 

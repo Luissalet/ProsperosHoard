@@ -100,12 +100,25 @@ def test_look_words_in_shot_prompts_are_flagged():
 
 def test_production_runs_end_to_end_and_exports_a_recipe(client):
     c, app, _ = client
-    r = c.post("/api/agent/studio_production_create",
-               json={"name": "Night Walk", "spec": tiny_spec(), "settings": {"animatic": False}})
+    r = c.post("/api/agent/studio_production_create", json={"name": "Night Walk", "spec": tiny_spec()})
     assert r.status_code == 200, r.text
     body = r.json()
     slug = body["production"]["slug"]
     job = wait_job(c, body["job"]["id"])
+    assert job["state"] == "done", job
+    # the animatic (on by default) pauses the production before any clip is made
+    paused = c.get(f"/api/agent/studio_production?production={slug}").json()
+    assert paused["status"] == "awaiting_review" and paused["stages"]["clips"] == "pending", paused
+    assert paused["animatic"]["clips_planned"] == 2 and paused["animatic"]["gpu_minutes_estimate"] == 19.0
+    store = app.state.store
+    animatic_video = store.get_asset(paused["animatic"]["renders"]["9:16"])
+    assert animatic_video["kind"] == "video" and animatic_video["height"] == 1280
+    assert abs(animatic_video["duration_s"] - 8.0) < 0.3
+    plan = c.get(f"/api/productions/{slug}/animatic").json()
+    assert plan["cuts_total"] >= 2 and {s["key"] for s in plan["shots"]} == {"1", "2"}
+    r = c.post(f"/api/agent/studio_production_continue?production={slug}")
+    assert r.status_code == 200, r.text
+    job = wait_job(c, r.json()["job"]["id"])
     assert job["state"] == "done", job
     state = c.get(f"/api/productions/{slug}").json()
     assert state["status"] == "done", state["message"]
@@ -115,8 +128,8 @@ def test_production_runs_end_to_end_and_exports_a_recipe(client):
     assert done["character"]["canonical_asset_id"] and done["character"]["sheet_asset_id"]
     assert len(done["frames"]["items"]["1"]["variants"]) == 2
     assert set(done["clips"]["items"]) == {"1", "2"}
+    assert state["review"]["animatic_approved"] is True
     # a still subject gets the stillness negative (no walking), a moving one the stock negative
-    store = app.state.store
     still_clip = store.get_asset(done["clips"]["items"]["1"])["recipe"]["params"]["negative_prompt"]
     moving_clip = store.get_asset(done["clips"]["items"]["2"])["recipe"]["params"]["negative_prompt"]
     assert "walking" in still_clip and "walking" not in moving_clip
@@ -130,6 +143,12 @@ def test_production_runs_end_to_end_and_exports_a_recipe(client):
     assert "Night Walk" in report and "| 1 | yes |" in report
     events = [e["event"] for e in state["lineage"]]
     assert "canonical_reference" in events and "render" in events
+    assert events.index("paused_for_review") < events.index("clip")
+
+    # an animatic on demand, in one aspect
+    r = c.post("/api/agent/studio_animatic", json={"production": slug, "aspects": ["16:9"], "wait_s": 60})
+    assert r.status_code == 200, r.text
+    assert r.json()["job"]["state"] == "done" and list(r.json()["animatic"]["renders"]) == ["16:9"]
 
     # export: the lead becomes a slot, what does not depend on it stays reusable
     r = c.post("/api/agent/studio_recipe_export", json={"production": slug, "name": "night walk"})

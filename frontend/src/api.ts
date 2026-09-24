@@ -659,6 +659,8 @@ export const api = {
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),
   runQa: (slug: string, body: { stage?: string; dry_run?: boolean; keys?: string[] }) =>
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
+  makeAnimatic: (slug: string, aspects?: string[]) =>
+    request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
   recipes: () => request<{ items: RecipeSummary[] }>("GET", "/api/recipes"),
   runRecipe: (name: string, body: { cast: Record<string, unknown>; name?: string; options?: Record<string, unknown> }) =>
     request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/api/recipes/${name}/run`, body),

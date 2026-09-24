@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
+from . import animatic as animatic_mod
 from . import audio as audio_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
@@ -277,6 +278,12 @@ class QaRunBody(BaseModel):
     dry_run: bool = True
     keys: Optional[list[str]] = None
     wait_s: float = 120
+
+
+class AnimaticBody(BaseModel):
+    production: Optional[str] = None
+    aspects: Optional[list[str]] = None
+    wait_s: float = 0
 
 
 class RecipeExportBody(BaseModel):
@@ -1622,6 +1629,41 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def production_qa_get(slug: str):
         state = productions_mod.load_state(store.data_dir, slug)
         return {"last": (state.get("qa") or {}).get("last"), "history": (state.get("qa") or {}).get("history") or []}
+
+    def _animatic_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        params = job["params"]
+        entry = animatic_mod.make_for_production(store, params["slug"], params.get("aspects"), progress)
+        return {**entry, "asset_ids": list(entry["renders"].values())}
+
+    queue.register("animatic", _animatic_job)
+
+    def op_animatic(slug: str, body: AnimaticBody) -> dict[str, Any]:
+        state = productions_mod.load_state(store.data_dir, slug)
+        for aspect in body.aspects or []:
+            if aspect not in timeline_mod.ASPECTS:
+                raise engine.EngineError("bad_aspect", f"aspect must be one of {', '.join(timeline_mod.ASPECTS)}")
+        project_id = state.get("project_id") or (state.get("done", {}).get("1") or {}).get("project_id")
+        job = queue.enqueue("animatic", "cpu", {"slug": slug, "aspects": body.aspects}, project_id=project_id)
+        job = wait(job, body.wait_s)
+        out: dict[str, Any] = {"job": engine.job_view(job)}
+        if job["state"] == "done":
+            outputs = job.get("outputs") or {}
+            out["animatic"] = {k: outputs.get(k) for k in ("renders", "plan")}
+        return out
+
+    @app.post("/api/agent/studio_animatic")
+    def agent_animatic(body: AnimaticBody):
+        if not body.production:
+            raise engine.EngineError("production_required", "give the production slug (studio_productions)")
+        return agent("studio_animatic", body.production, lambda: op_animatic(body.production, body))
+
+    @app.post("/api/productions/{slug}/animatic")
+    def production_animatic_make(slug: str, body: AnimaticBody):
+        return op_animatic(slug, body)
+
+    @app.get("/api/productions/{slug}/animatic")
+    def production_animatic_plan(slug: str):
+        return animatic_mod.read_plan(store.data_dir, slug)
 
     @app.get("/api/productions")
     def productions_list():

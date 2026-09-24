@@ -7,7 +7,8 @@ part that actually shells out.
 
 Quality presets: `preview` = 540p short side, `-preset ultrafast`;
 `final` = the timeline's native resolution, `-preset medium -crf 18`,
-AAC 192k.
+AAC 192k; `animatic` = 720p short side, `-preset veryfast -crf 26` (a
+production's animatic, see `animatic.py`).
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ FONTS_DIR = Path(__file__).parent / "fonts"
 QUALITY_PRESETS = {
     "preview": {"preset": "ultrafast", "crf": 28, "short_side": 540, "audio_bitrate": "128k"},
     "final": {"preset": "medium", "crf": 18, "short_side": None, "audio_bitrate": "192k"},
+    # a production's animatic: the stills with Ken Burns and crossfades, cheap to make
+    "animatic": {"preset": "veryfast", "crf": 26, "short_side": 720, "audio_bitrate": "128k"},
 }
 
 TRANSITION_MAP = {"crossfade": "fade", "dip_black": "fadeblack", "flash_white": "fadewhite"}

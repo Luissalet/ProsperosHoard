@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookCopy, Clapperboard, Play, RotateCcw, Save, ShieldCheck, Users } from "lucide-react";
+import { BookCopy, Clapperboard, Film, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users } from "lucide-react";
 import {
   api, fileUrl, type Character, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
@@ -21,8 +21,8 @@ export function StatusPill({ status }: { status: string }) {
 }
 
 /** "Recreate with…": pick a studio character (any project) or describe a new lead, then run the recipe. */
-export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
-  recipe?: RecipeSummary; fromProduction?: ProductionSummary; onClose: () => void; onStarted: (slug: string) => void;
+export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onStarted }: {
+  recipe?: RecipeSummary; fromProduction?: ProductionSummary; defaultTitle?: string; onClose: () => void; onStarted: (slug: string) => void;
 }) {
   const { t } = useT();
   const app = useApp();
@@ -32,9 +32,10 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
   const [name, setName] = useState("");
   const [look, setLook] = useState("");
   const [palette, setPalette] = useState("");
-  const [title, setTitle] = useState(recipe?.title || "");
+  const [title, setTitle] = useState(recipe?.title || defaultTitle || "");
   const [reuse, setReuse] = useState<Record<string, boolean>>({ song: true, frames: true, clips: true });
   const [qaInline, setQaInline] = useState(false);
+  const [animaticFirst, setAnimaticFirst] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
         cast: { lead },
         options: {
           reuse: Object.entries(reuse).filter(([, v]) => v).map(([k]) => k), ...(title.trim() ? { title: title.trim() } : {}),
-          settings: { qa: { enabled: qaInline } },
+          settings: { qa: { enabled: qaInline }, animatic: animaticFirst },
         },
       });
       app.toast(t("productionQueued"), "ok");
@@ -109,6 +110,9 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
           ))}
         </div>
         <label className="row small" style={{ gap: 5 }}>
+          <input type="checkbox" checked={animaticFirst} onChange={(e) => setAnimaticFirst(e.target.checked)} /> {t("animaticSetting")}
+        </label>
+        <label className="row small" style={{ gap: 5 }}>
           <input type="checkbox" checked={qaInline} onChange={(e) => setQaInline(e.target.checked)} /> {t("qaInline")}
         </label>
       </div>
@@ -142,19 +146,17 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
   return (
     <div className="stack">
       <div className="card">
-        <h2>
-          <Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} />
-          <div className="card-actions">
-            {!legacy && ["failed", "cancelled", "awaiting_review"].includes(view.status) && (
-              <button className="btn sm primary" onClick={() => act(() => api.continueProduction(slug))}>
-                <RotateCcw size={13} /> {view.status === "awaiting_review" ? t("continueProduction") : t("resumeProduction")}
-              </button>
-            )}
-            {view.project_id && <button className="btn sm ghost" onClick={() => app.setProject(view.project_id!)}>{t("openProject")}</button>}
-            <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>
-            <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>
-          </div>
-        </h2>
+        <h2><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
+        <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+          {!legacy && ["failed", "cancelled"].includes(view.status) && (
+            <button className="btn sm primary" onClick={() => act(() => api.continueProduction(slug))}>
+              <RotateCcw size={13} /> {t("resumeProduction")}
+            </button>
+          )}
+          <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>
+          <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>
+          {view.project_id && <button className="btn sm ghost" onClick={() => app.setProject(view.project_id!)}>{t("openProject")}</button>}
+        </div>
         {legacy && <p className="small muted">{t("legacyNote")}</p>}
         {data.recipe && <p className="small muted">{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
         {data.message && <p className={`small ${view.status === "failed" ? "err-text" : "muted"}`}>{data.message}</p>}
@@ -168,6 +170,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         )}
       </div>
+      {view.status !== "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {Object.keys(renders).length > 0 && (
         <div className="card">
           <h2>{t("finalCut")}</h2>
@@ -178,7 +181,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
                 <div key={aspect} className="stack" style={{ gap: 4 }}>
                   <span className="small muted">{aspect}</span>
                   <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
-                    <video src={fileUrl(id)} controls preload="metadata" />
+                    <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
                   </div>
                 </div>
               ) : null;
@@ -186,6 +189,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         </div>
       )}
+      {view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {!legacy && (data.spec.shots || []).length > 0 && (
         <div className="card">
           <h2>{t("shotsTitle")}</h2>
@@ -219,8 +223,128 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </ul>
         </div>
       )}
-      {recast && <RecastModal fromProduction={view} onClose={() => setRecast(false)} onStarted={(s) => { setRecast(false); onStarted(s); }} />}
+      {recast && <RecastModal fromProduction={view} defaultTitle={legacy ? undefined : data.spec.title} onClose={() => setRecast(false)} onStarted={(s) => { setRecast(false); onStarted(s); }} />}
     </div>
+  );
+}
+
+function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const [editing, setEditing] = useState(false);
+  const legacy = Boolean(state.view.legacy);
+  const entry = (legacy ? (state as unknown as { animatic?: Record<string, any> }).animatic : state.done?.animatic) as
+    { renders?: Record<string, string>; plan?: { cuts_total: number; clips_planned: number; gpu_minutes: number; unused_shots?: string[] } } | undefined;
+  const framesReady = legacy || state.view.stages?.frames === "done";
+  if (!entry?.renders && !framesReady) return null;
+  const make = async () => {
+    try { await api.makeAnimatic(state.slug); app.toast(t("animaticQueued"), "info"); onChanged(); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+  };
+  const plan = entry?.plan;
+  return (
+    <div className="card">
+      <h2>
+        <Film size={16} /> {t("animaticTitle")}
+        <div className="card-actions">
+          {state.status === "awaiting_review" && (
+            <button className="btn sm primary" onClick={async () => {
+              try { await api.continueProduction(state.slug); onChanged(); } catch (e) { app.toast((e as Error).message, "bad"); }
+            }}><Play size={13} /> {t("continueProduction")}</button>
+          )}
+          {!legacy && state.spec.shots?.length ? (
+            <button className="btn sm" onClick={() => setEditing(true)}><Shuffle size={13} /> {t("changeShots")}</button>
+          ) : null}
+          {state.status !== "running" && <button className="btn sm ghost" onClick={make}>{t("makeAnimatic")}</button>}
+        </div>
+      </h2>
+      <p className="small muted" style={{ marginTop: -6 }}>{t("animaticLead")}</p>
+      {plan && (
+        <p className="small">
+          {t("animaticPlan", { cuts: plan.cuts_total, clips: plan.clips_planned, gpu: plan.gpu_minutes })}
+          {plan.unused_shots && plan.unused_shots.length > 0 && <span className="muted"> · {t("unusedShots", { list: plan.unused_shots.join(", ") })}</span>}
+        </p>
+      )}
+      {entry?.renders && (
+        <div className="row wrap" style={{ alignItems: "flex-start" }}>
+          {Object.entries(entry.renders).map(([aspect, id]) => (
+            <div key={aspect} className="stack" style={{ gap: 4 }}>
+              <span className="small muted">{aspect}</span>
+              <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
+                <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {editing && <ShotsModal state={state} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
+    </div>
+  );
+}
+
+type ShotEdit = { best?: number; clip?: boolean; regenerate?: boolean; prompt?: string };
+
+function ShotsModal({ state, onClose, onSaved }: { state: ProductionState; onClose: () => void; onSaved: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const frames = (state.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
+  const [edits, setEdits] = useState<Record<string, ShotEdit>>({});
+  const set = (key: string, patch: ShotEdit) => setEdits({ ...edits, [key]: { ...edits[key], ...patch } });
+  const save = async () => {
+    const changes = Object.entries(edits).map(([key, e]) => {
+      const shot = (state.spec.shots || []).find((s) => s.key === key)!;
+      const change: Record<string, unknown> = { key };
+      if (e.best !== undefined) change.best = e.best;
+      if (e.clip !== undefined && e.clip !== shot.clips.length > 0) change.clip = e.clip;
+      if (e.regenerate) change.regenerate = true;
+      if (e.prompt !== undefined && e.prompt.trim() && e.prompt !== shot.prompt) change.prompt = e.prompt.trim();
+      return change;
+    }).filter((c) => Object.keys(c).length > 1);
+    if (!changes.length) { onClose(); return; }
+    try {
+      const out = await api.changeShots(state.slug, changes);
+      app.toast(t("shotsChanged", { n: out.changed.length }), "ok");
+      onSaved();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
+  return (
+    <Modal title={t("changeShots")} onClose={onClose} wide footer={<button className="btn primary" onClick={save}>{t("applyChanges")}</button>}>
+      <div className="stack">
+        {(state.spec.shots || []).map((shot) => {
+          const entry = frames[shot.key] || {};
+          const variants = entry.variants || [];
+          const e = edits[shot.key] || {};
+          const bestIndex = e.best ?? Math.max(0, variants.indexOf(entry.best || ""));
+          return (
+            <div key={shot.key} className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+              <strong style={{ width: 28 }}>{shot.key}</strong>
+              <div className="row wrap" style={{ gap: 6, flex: "none" }}>
+                {variants.map((id, i) => (
+                  <button key={id} className={`tile${i === bestIndex ? " selected" : ""}`} style={{ width: 84 }}
+                    onClick={() => set(shot.key, { best: i })} title={id}>
+                    <img src={`/api/assets/${id}/thumb`} alt="" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+              <div className="stack grow" style={{ gap: 6 }}>
+                <textarea rows={2} defaultValue={shot.prompt} onChange={(ev) => set(shot.key, { prompt: ev.target.value })} />
+                <div className="row small" style={{ gap: 14 }}>
+                  {shot.lead && <span className="pill">{t("leadBadge")}</span>}
+                  <label className="row" style={{ gap: 5 }}>
+                    <input type="checkbox" checked={e.clip ?? shot.clips.length > 0} onChange={(ev) => set(shot.key, { clip: ev.target.checked })} /> {t("makeClip")}
+                  </label>
+                  <label className="row" style={{ gap: 5 }}>
+                    <input type="checkbox" checked={Boolean(e.regenerate)} onChange={(ev) => set(shot.key, { regenerate: ev.target.checked })} /> {t("regenerateShot")}
+                  </label>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
 

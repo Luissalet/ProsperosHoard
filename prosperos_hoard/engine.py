@@ -1572,6 +1572,18 @@ def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], a
         raise EngineError("song_required", "action 'auto' needs song_asset_id (an audio asset)")
     if aspect not in timeline_mod.ASPECTS:
         raise EngineError("bad_aspect", f"aspect must be one of {', '.join(timeline_mod.ASPECTS)}")
+    cut = auto_cut(store, project_id, song_asset_id, asset_ids, board_id, lyrics_asset_id, options)
+    width, height = timeline_mod.ASPECTS[aspect]
+    return store.create_timeline(project_id, name=f"Auto-cut - {cut['song_name']}"[:100], aspect=aspect,
+                                 fps=cut["fps"], width=width, height=height, audio_asset_id=song_asset_id, tracks=cut["tracks"])
+
+
+def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optional[list[str]], board_id: Optional[str],
+             lyrics_asset_id: Optional[str], options: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """The auto-cut itself, without storing a timeline: `{"tracks", "fps",
+    "sections", "duration_s", "song_name"}`. The final cut and a
+    production's animatic both come from here, so their cut points are the
+    same for the same song, lyrics and options."""
     song = store.get_asset(song_asset_id)
     if song["kind"] != "audio":
         raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
@@ -1614,9 +1626,8 @@ def timeline_auto(store: Store, project_id: str, song_asset_id: Optional[str], a
     fps = int((options or {}).get("fps", 30))
     if fps not in (24, 25, 30):
         raise EngineError("bad_fps", "fps must be 24, 25 or 30")
-    width, height = timeline_mod.ASPECTS[aspect]
-    return store.create_timeline(project_id, name=f"Auto-cut - {song.get('name') or song['id']}"[:100], aspect=aspect,
-                                 fps=fps, width=width, height=height, audio_asset_id=song_asset_id, tracks=built["tracks"])
+    return {"tracks": built["tracks"], "fps": fps, "sections": sections, "duration_s": analysis["duration_s"],
+            "song_name": song.get("name") or song["id"]}
 
 
 def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> dict[str, Any]:
