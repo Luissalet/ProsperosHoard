@@ -1341,3 +1341,38 @@ def spec_from_legacy(store: Store, state: dict[str, Any]) -> tuple[dict[str, Any
     notes.append("cut density (beats per shot per section energy) is not recorded by the script; the recipe uses the "
                  "defaults with a cut on every sung line - adjust spec.timeline.options if the pace differs")
     return spec, notes
+
+
+def state_from_legacy(store: Store, state: dict[str, Any]) -> dict[str, Any]:
+    """A read-only, app-shaped view of a scripted production (spec rebuilt
+    by `spec_from_legacy`, outputs mapped onto the app's stage names), for
+    checks that only read (the QA director's dry run)."""
+    spec, _ = spec_from_legacy(store, state)
+    done = state.get("done") or {}
+    frames = {}
+    for shot in spec.get("shots") or []:
+        variants = shot.get("source_asset_ids") or []
+        if variants:
+            best = variants[min(shot.get("best", 0), len(variants) - 1)]
+            frames[shot["key"]] = {"variants": variants, "best": best}
+    clips = {k: v for s in spec.get("shots") or [] for k, v in (s.get("source_clips") or {}).items()}
+    d8 = done.get("8") or {}
+    view_done: dict[str, Any] = {
+        "character": {"character_id": (done.get("2") or {}).get("character_id"),
+                      "canonical_asset_id": (done.get("2") or {}).get("canonical_asset_id")},
+        "frames": {"complete": True, "items": frames},
+        "clips": {"complete": True, "items": clips},
+        "timeline": {"complete": True, "timelines": d8.get("timelines") or {}},
+    }
+    if (done.get("3") or {}).get("song_asset_id"):
+        view_done["song"] = {"song_asset_id": done["3"]["song_asset_id"]}
+    if d8.get("lyrics_asset_id"):
+        view_done["lyrics"] = {"lyrics_asset_id": d8["lyrics_asset_id"],
+                               "source": "imported" if str(d8.get("lyrics_source", "")).startswith("imported") else "estimated"}
+    photos = (done.get("6") or {}).get("photo_ids") or []
+    if photos:
+        view_done["photocards"] = {"complete": True, "items": {str(i): p for i, p in enumerate(photos, start=1)}}
+    if spec.get("song"):
+        spec["song"].pop("asset_id", None)  # the plan it was composed with, not a reuse
+    return {"format": FORMAT, "slug": state["slug"], "name": state.get("name") or state["slug"], "spec": spec,
+            "settings": normalise_settings(None), "done": view_done, "legacy": True}

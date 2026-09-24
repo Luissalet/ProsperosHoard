@@ -25,6 +25,7 @@ from . import audio as audio_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import productions as productions_mod
+from . import qa as qa_mod
 from . import recipes as recipes_mod
 from . import templates as design_templates
 from . import timeline as timeline_mod
@@ -268,6 +269,14 @@ class ProductionCreateBody(BaseModel):
 class ProductionShotsBody(BaseModel):
     changes: list[dict[str, Any]]
     run: bool = True
+
+
+class QaRunBody(BaseModel):
+    production: Optional[str] = None
+    stage: str = "all"
+    dry_run: bool = True
+    keys: Optional[list[str]] = None
+    wait_s: float = 120
 
 
 class RecipeExportBody(BaseModel):
@@ -1507,6 +1516,28 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             productions_mod.save_state(store.data_dir, state)
             return job
 
+    def vision_for_qa() -> tuple[Optional[Callable[[list[bytes], str], str]], str]:
+        """The family's vision model through Hoard Link, or (None, "no vision
+        model"): QA then runs its model-free checks only. Tests set
+        app.state.qa_vision to a (fn, name) pair."""
+        override = getattr(app.state, "qa_vision", None)
+        if override is not None:
+            return override
+        try:
+            res = backend.link.sync.resolve("vision")
+        except Exception:  # noqa: BLE001 - no resolver, no model checks
+            return None, "no vision model"
+        if not res.resolved:
+            return None, "no vision model"
+
+        def ask(images: list[bytes], prompt: str) -> str:
+            return backend.link.sync.chat(messages=[{"role": "user", "content": prompt}], images=images,
+                                          capability="vision", max_tokens=240, temperature=0.0).text
+
+        return ask, f"{res.provider or 'vision'}:{res.model or ''}".rstrip(":")
+
+    production_hooks["qa_hook"] = lambda run, stage: qa_mod.inline_hook(run, stage, *vision_for_qa())
+
     def production_view(slug: str) -> dict[str, Any]:
         return productions_mod.compact_view(productions_mod.load_state(store.data_dir, slug))
 
@@ -1538,6 +1569,59 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = queue_production(state["slug"])
         return {"production": production_view(state["slug"]), "job": engine.job_view(job),
                 "notes": (state.get("recipe") or {}).get("notes") or []}
+
+    def _qa_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        params = job["params"]
+        fn, name = vision_for_qa()
+        out = qa_mod.run_qa(store, studio, params["slug"], params.get("stage") or "all", bool(params.get("dry_run", True)),
+                            params.get("keys"), fn, name, progress)
+        if out["requeue"]:
+            queue_production(params["slug"])
+        return {"scorecard": qa_mod.compact_scorecard(out["scorecard"]), "requeued": out["requeue"]}
+
+    queue.register("production_qa", _qa_job)
+
+    def op_qa_run(slug: str, body: QaRunBody) -> dict[str, Any]:
+        state = productions_mod.load_state(store.data_dir, slug)
+        if body.stage != "all" and body.stage not in qa_mod.CHECKED_STAGES:
+            raise engine.EngineError("bad_stage", f"stage must be 'all' or one of {', '.join(qa_mod.CHECKED_STAGES)}")
+        project_id = state.get("project_id") or (state.get("done", {}).get("1") or {}).get("project_id")
+        job = queue.enqueue("production_qa", "cpu", {"slug": slug, "stage": body.stage, "dry_run": body.dry_run,
+                                                     "keys": body.keys}, project_id=project_id)
+        job = wait(job, body.wait_s)
+        out: dict[str, Any] = {"job": engine.job_view(job)}
+        if job["state"] == "done":
+            out.update((job.get("outputs") or {}))
+        return out
+
+    def qa_report(slug: str) -> dict[str, Any]:
+        state = productions_mod.load_state(store.data_dir, slug)
+        card = (state.get("qa") or {}).get("last")
+        if not card:
+            raise engine.EngineError("no_qa_yet", f"no QA pass has run on '{slug}' yet; run studio_qa_run first")
+        retries = [{k: v for k, v in e.items() if k in ("at", "stage", "event", "key", "attempt", "reason", "fix", "asset_id")}
+                   for e in state.get("lineage", []) if str(e.get("event", "")).startswith("qa_")]
+        return {**qa_mod.compact_scorecard(card), "retries": retries[-30:]}
+
+    @app.post("/api/agent/studio_qa_run")
+    def agent_qa_run(body: QaRunBody):
+        if not body.production:
+            raise engine.EngineError("production_required", "give the production slug (studio_productions)")
+        return agent("studio_qa_run", f"{body.production}:{body.stage}", lambda: op_qa_run(body.production, body))
+
+    @app.get("/api/agent/studio_qa_report")
+    def agent_qa_report(production: str):
+        return agent("studio_qa_report", production, lambda: qa_report(production))
+
+    @app.post("/api/productions/{slug}/qa")
+    def production_qa_run(slug: str, body: QaRunBody):
+        body.wait_s = min(body.wait_s, 5)
+        return op_qa_run(slug, body)
+
+    @app.get("/api/productions/{slug}/qa")
+    def production_qa_get(slug: str):
+        state = productions_mod.load_state(store.data_dir, slug)
+        return {"last": (state.get("qa") or {}).get("last"), "history": (state.get("qa") or {}).get("history") or []}
 
     @app.get("/api/productions")
     def productions_list():

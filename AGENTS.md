@@ -44,3 +44,16 @@ Qué hacer cuando el usuario pide, con sus palabras:
 - Una producción en `failed` o `cancelled` se reanuda con
   `studio_production_continue(production)`: no se rehace lo terminado.
 - Nunca describas un fotograma sin mirarlo con `studio_show`.
+- **«Revisa la producción» / "check the production"**:
+  `studio_qa_run(production)` (solo informa, `dry_run=true`). Resume los
+  fallos con su motivo; si el usuario quiere que se arreglen,
+  `studio_qa_run(production, stage, dry_run=false)`: regenera con otra
+  semilla y un arreglo concreto, hasta el límite de reintentos, y vuelve a
+  encolar la producción. Sin modelo de visión la hoja dice «no vision model»:
+  dilo, no lo ocultes.
+- **«¿Por qué el clip 11 está mal?»**: `studio_qa_report(production)`; si no
+  hay revisión o no incluye ese plano, `studio_qa_run(production,
+  stage="clips", keys=["11"])`. Explica el `why` (salto de exposición en el
+  segundo X, se mueve cuando debía estar quieto, nota baja contra la
+  biblia…) y ofrece `dry_run=false` o `studio_production_shots` para
+  cambiarlo.
