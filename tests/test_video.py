@@ -1,9 +1,12 @@
-import shutil
 from pathlib import Path
 
 import pytest
 
 from prosperos_hoard import video
+
+# the app's own ffmpeg (a system one, else the imageio-ffmpeg 4.2 wheel)
+FFMPEG = video.ffmpeg_path()
+needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
 
 
 def test_build_image_clip_cmd_snapshot():
@@ -222,7 +225,7 @@ def test_mux_cmd_finishing_runs_before_captions():
     assert "-vf" not in cmd3
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@needs_ffmpeg
 def test_real_render_end_to_end(tmp_path):
     from PIL import Image
     import wave
@@ -265,7 +268,7 @@ def test_real_render_end_to_end(tmp_path):
     assert progress_calls[-1] == 1.0
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@needs_ffmpeg
 def test_real_render_with_apostrophe_unicode_paths_lyrics_and_transitions(tmp_path):
     import subprocess
     import wave
@@ -294,13 +297,13 @@ def test_real_render_with_apostrophe_unicode_paths_lyrics_and_transitions(tmp_pa
     out = root / "out it's.mp4"
     result = video.render_timeline(timeline, lambda i: paths[i], root / "work 'x'", out, quality="preview")
     assert out.is_file()
-    probe = subprocess.run(["ffmpeg", "-i", str(out)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    probe = subprocess.run([FFMPEG, "-i", str(out)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     m = __import__("re").search(r"Duration: 00:00:(\d+\.\d+)", probe.stderr)
     assert m and abs(float(m.group(1)) - 3.0) < 0.15  # transitions do not shorten the video
     assert result["width"] == 540
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@needs_ffmpeg
 def test_animated_webp_is_converted_to_mp4(tmp_path):
     from PIL import Image
 
@@ -312,7 +315,7 @@ def test_animated_webp_is_converted_to_mp4(tmp_path):
     assert n == 6 and dest.is_file() and dest.stat().st_size > 0
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@needs_ffmpeg
 def test_real_render_with_finishing_applies_grade_grain_vignette_letterbox_and_glitch(tmp_path):
     from PIL import Image
 
@@ -360,19 +363,19 @@ def test_render_timeline_rejects_bad_finishing(tmp_path):
         video.render_timeline(timeline, lambda _i: Path("/nonexistent.png"), tmp_path / "work", tmp_path / "out.mp4")
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@needs_ffmpeg
 def test_short_video_clip_is_padded_to_its_slot(tmp_path):
     import subprocess
 
     src = tmp_path / "anim.mp4"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=8:duration=1",
+    subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=8:duration=1",
                     "-pix_fmt", "yuv420p", str(src)], check=True)
     timeline = {"width": 360, "height": 640, "fps": 20, "audio_asset_id": None, "tracks": [
         {"type": "visual", "clips": [{"asset_id": "v", "kind": "video", "duration_s": 2.5, "trim_start_s": 0.0,
                                       "transition_in": {"type": "cut"}}]}]}
     out = tmp_path / "o.mp4"
     video.render_timeline(timeline, lambda _i: src, tmp_path / "w", out, quality="preview")
-    probe = subprocess.run(["ffmpeg", "-i", str(out)], capture_output=True, text=True)
+    probe = subprocess.run([FFMPEG, "-i", str(out)], capture_output=True, text=True)
     import re
 
     m = re.search(r"Duration: 00:00:(\d+\.\d+)", probe.stderr)
@@ -421,3 +424,54 @@ def test_render_with_transitions_keeps_the_full_length(tmp_path):
     from prosperos_hoard import audio as audio_mod
 
     assert abs(audio_mod.probe_duration_s(out) - sum(durations)) < 0.1
+
+
+def _gray_frames(path, width, height):
+    import subprocess
+
+    import numpy as np
+
+    raw = subprocess.run([FFMPEG, "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, height, width)
+
+
+def _square_width(frame):
+    """Width in pixels of the white square in a frame (the zoom indicator)."""
+    import numpy as np
+
+    cols = np.where((frame > 128).sum(axis=0) > 0)[0]
+    return int(cols.max() - cols.min() + 1) if cols.size else 0
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("zs,ze", [(1.5, 1.0), (1.2, 1.5)])
+def test_ken_burns_zoom_runs_from_start_to_end(tmp_path, zs, ze):
+    """The zoom is exactly zoom_start on the first frame and zoom_end on the
+    last, in both directions (a zoom-out used to snap to 1.0 after one
+    frame; a zoom-in started at 1.0 whatever zoom_start said)."""
+    import subprocess
+
+    from PIL import Image, ImageDraw
+
+    w, h = 160, 90
+    src = tmp_path / "sq.png"
+    img = Image.new("RGB", (w, h), (0, 0, 0))
+    ImageDraw.Draw(img).rectangle([w // 2 - 20, h // 2 - 10, w // 2 + 19, h // 2 + 9], fill=(255, 255, 255))
+    img.save(src)
+    out = tmp_path / "kb.mp4"
+    subprocess.run(video.build_image_clip_cmd(FFMPEG, src, out, w, h, 10, 1.0,
+                                              {"zoom_start": zs, "zoom_end": ze, "pan": "left"}), check=True)
+    widths = [_square_width(f) / 40 for f in _gray_frames(out, w, h)]
+    assert len(widths) == 10
+    assert widths[0] == pytest.approx(zs, abs=0.06)
+    assert widths[-1] == pytest.approx(ze, abs=0.06)
+    step = 1 if ze > zs else -1
+    assert all(step * (b - a) >= -0.03 for a, b in zip(widths, widths[1:]))  # monotonic, no jump
+
+
+def test_zoompan_expr_is_a_closed_form_and_clamps_the_pan():
+    z, x, y = video._zoompan_expr(1.2, 1.0, "right", 31)
+    assert z == "1.200000+(-0.200000)*(on/30)"
+    assert x.startswith("max(0,min(iw-iw/zoom,") and "(on/30)*48" in x
+    assert y == "max(0,min(ih-ih/zoom,ih/2-(ih/zoom/2)))"

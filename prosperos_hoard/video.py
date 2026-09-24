@@ -164,20 +164,30 @@ def _scaled_resolution(width: int, height: int, short_side: Optional[int]) -> tu
 
 
 def _zoompan_expr(zoom_start: float, zoom_end: float, pan: str, n_frames: int) -> tuple[str, str, str]:
+    """zoompan expressions for one still. The zoom is a closed form of the
+    output frame number `on` (0 on the first frame): exactly `zoom_start` on
+    the first frame and `zoom_end` on the last, in either direction. (An
+    incremental `zoom+inc` capped with `min()` ignored `zoom_start` on a
+    zoom-in and snapped a zoom-out to 1.0 after one frame.) The pan drifts
+    the crop window by up to `drift` source pixels over the clip, clamped to
+    the room the zoom leaves (none at zoom 1.0)."""
     n_frames = max(1, n_frames)
-    inc = (zoom_end - zoom_start) / n_frames
-    z = f"if(eq(on,1),{zoom_start},min(zoom+{inc:.6f},{zoom_end}))"
+    span = max(1, n_frames - 1)
+    progress = f"(on/{span})"
+    z = f"{zoom_start:.6f}+({zoom_end - zoom_start:.6f})*{progress}"
     drift = 48
     x = "iw/2-(iw/zoom/2)"
     y = "ih/2-(ih/zoom/2)"
     if pan == "left":
-        x = f"(iw/2-(iw/zoom/2))-(on/{n_frames})*{drift}"
+        x = f"(iw/2-(iw/zoom/2))-{progress}*{drift}"
     elif pan == "right":
-        x = f"(iw/2-(iw/zoom/2))+(on/{n_frames})*{drift}"
+        x = f"(iw/2-(iw/zoom/2))+{progress}*{drift}"
     elif pan == "up":
-        y = f"(ih/2-(ih/zoom/2))-(on/{n_frames})*{drift}"
+        y = f"(ih/2-(ih/zoom/2))-{progress}*{drift}"
     elif pan == "down":
-        y = f"(ih/2-(ih/zoom/2))+(on/{n_frames})*{drift}"
+        y = f"(ih/2-(ih/zoom/2))+{progress}*{drift}"
+    x = f"max(0,min(iw-iw/zoom,{x}))"
+    y = f"max(0,min(ih-ih/zoom,{y}))"
     return z, x, y
 
 
