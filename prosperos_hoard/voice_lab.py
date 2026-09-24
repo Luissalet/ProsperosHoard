@@ -65,8 +65,14 @@ def process_sample(src: Path, dest: Path) -> None:
         if not trimmed_duration or trimmed_duration < 0.05:
             raise VoiceLabError("silent_sample", f"{src.name} is silent (or too quiet) from end to end: "
                                                  "nothing was left after trimming silence")
+        # ffmpeg's loudnorm filter has a well-known quirk of emitting at
+        # 192kHz (for its internal true-peak oversampling) regardless of
+        # the input rate; force the output back to 44.1kHz explicitly so
+        # `dest` is actually the "clean 44.1 kHz mono WAV" this promises,
+        # not a 192kHz file some readers (voice-cloning engines included)
+        # do not expect.
         cmd2 = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(tmp), "-af", "loudnorm=I=-19:TP=-2:LRA=7",
-                str(dest)]
+                "-ar", "44100", str(dest)]
         proc = procutil.run(cmd2, timeout=120)
         if proc.returncode != 0 or not dest.is_file():
             raise VoiceLabError("process_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500] or "ffmpeg failed (loudnorm)")

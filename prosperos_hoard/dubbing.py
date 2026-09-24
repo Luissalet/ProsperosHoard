@@ -29,6 +29,7 @@ ChatFn = Callable[[list[dict[str, Any]]], str]
 MIN_ATEMPO, MAX_ATEMPO = 0.5, 2.0
 MAX_OVERALL_FACTOR = 4.0  # two chained atempo stages cover 0.25x-4x
 DUCK_DB = -18.0
+MIX_SAMPLE_RATE = 44100  # matches extract_audio's default; every mix input is normalised to this
 
 
 class DubbingError(RuntimeError):
@@ -124,21 +125,29 @@ def separate_background(audio_path: Path, out_dir: Path) -> Optional[dict[str, P
     return {"vocals": folder / "vocals.wav", "no_vocals": folder / "no_vocals.wav"}
 
 
-def build_dub_mix_filter(segments: list[dict[str, Any]], duck_db: float = DUCK_DB) -> str:
+def build_dub_mix_filter(segments: list[dict[str, Any]], duck_db: float = DUCK_DB,
+                         sample_rate: int = MIX_SAMPLE_RATE) -> str:
     """The `filter_complex` string that ducks the original track under each
     dubbed segment and mixes in the delayed dub clips. `segments`:
     [{"start_s", "end_s"}] in the original timeline; input `0:a` is the
     original (or separated background) track, inputs `1:a`..`N:a` are each
-    segment's time-fitted dub clip, in the same order. Pure string
-    building - unit-tested without running ffmpeg."""
+    segment's time-fitted dub clip, in the same order - each TTS engine
+    (and the video's own audio track) can emit a different sample rate, so
+    every branch is normalised to `sample_rate`/mono before it reaches
+    `amix`: left to ffmpeg's own format negotiation, mismatched inputs do
+    not fail outright but can silently resample the whole mix up to an
+    unrelated, much higher rate (observed: two branches at 44100/24000
+    negotiating to 192000). Pure string building - unit-tested without
+    running ffmpeg."""
+    fmt = f"aformat=sample_rates={sample_rate}:channel_layouts=mono"
     if not segments:
-        return "[0:a]anull[mixed]"
+        return f"[0:a]{fmt}[mixed]"
     enables = "+".join(f"between(t\\,{s['start_s']:.3f}\\,{s['end_s']:.3f})" for s in segments)
-    parts = [f"[0:a]volume=enable='{enables}':volume={10 ** (duck_db / 20):.6f}[bg]"]
+    parts = [f"[0:a]{fmt},volume=enable='{enables}':volume={10 ** (duck_db / 20):.6f}[bg]"]
     delayed_labels = []
     for i, seg in enumerate(segments):
         delay_ms = max(0, int(round(seg["start_s"] * 1000)))
-        parts.append(f"[{i + 1}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
+        parts.append(f"[{i + 1}:a]{fmt},adelay={delay_ms}|{delay_ms}[d{i}]")
         delayed_labels.append(f"[d{i}]")
     mix_inputs = "[bg]" + "".join(delayed_labels)
     parts.append(f"{mix_inputs}amix=inputs={len(segments) + 1}:normalize=0[mixed]")
@@ -146,16 +155,21 @@ def build_dub_mix_filter(segments: list[dict[str, Any]], duck_db: float = DUCK_D
 
 
 def mix_dub_audio(original_audio: Path, dub_clip_paths: list[Path], segments: list[dict[str, Any]],
-                  out_path: Path, duck_db: float = DUCK_DB) -> None:
+                  out_path: Path, duck_db: float = DUCK_DB, sample_rate: int = MIX_SAMPLE_RATE) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # loudnorm has to be part of the same filtergraph as the mix (ffmpeg
     # refuses to chain a simple `-af` onto a stream that came out of
     # `-filter_complex`), so it is appended to the [mixed] label here.
-    filter_complex = build_dub_mix_filter(segments, duck_db) + ";[mixed]loudnorm=I=-18:TP=-1.5:LRA=9[out]"
+    filter_complex = (build_dub_mix_filter(segments, duck_db, sample_rate)
+                      + ";[mixed]loudnorm=I=-18:TP=-1.5:LRA=9[out]")
     cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(original_audio)]
     for p in dub_clip_paths:
         cmd += ["-i", str(p)]
-    cmd += ["-filter_complex", filter_complex, "-map", "[out]", str(out_path)]
+    # loudnorm's single-pass true-peak limiting emits at 192kHz regardless
+    # of the graph's own aformat upstream of it; force the output back down
+    # explicitly so the mixed track is actually `sample_rate` (see
+    # build_dub_mix_filter's docstring for the same issue on the inputs).
+    cmd += ["-filter_complex", filter_complex, "-map", "[out]", "-ar", str(sample_rate), str(out_path)]
     proc = procutil.run(cmd, timeout=1200)
     if proc.returncode != 0 or not out_path.is_file():
         raise DubbingError("mix_failed", (proc.stderr or b"").decode("utf-8", "replace")[:800])

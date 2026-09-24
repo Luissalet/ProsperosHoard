@@ -167,6 +167,34 @@ def test_audiobook_job_with_fake_engine(tmp_path, monkeypatch):
     assert asset["recipe"]["operation"] == "audiobook"
 
 
+def _probe_sample_rate(path: Path) -> int:
+    from prosperos_hoard import procutil
+    from prosperos_hoard.backend import ffprobe_path
+
+    proc = procutil.run([ffprobe_path(), "-v", "error", "-select_streams", "a:0", "-show_entries",
+                        "stream=sample_rate", "-of", "csv=p=0", str(path)], text=True, timeout=30)
+    return int(proc.stdout.strip())
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+@pytest.mark.parametrize("fmt,chapters", [
+    ("mp3", None),
+    ("m4b", [{"title": "C1", "start_s": 0.0, "end_s": 1.0}]),
+])
+def test_encode_final_output_sample_rate_is_fixed(tmp_path, fmt, chapters):
+    # ffmpeg's loudnorm filter emits at 192kHz internally; left unfixed the
+    # mp3/aac encoders each pick their own nearest supported rate from that
+    # (48000 for libmp3lame, 96000 for aac in practice) instead of a sane,
+    # predictable, universally-compatible rate for narrated speech.
+    samples = (0.2 * np.sin(np.linspace(0, 40, vp.COMMON_SR * 2))).astype("float32")
+    work_wav = tmp_path / "work.wav"
+    work_wav.write_bytes(ve.wav_bytes_mono16(samples, vp.COMMON_SR))
+    out = tmp_path / f"final.{fmt}"
+    vp.encode_final(work_wav, out, chapters=chapters)
+    assert out.is_file()
+    assert _probe_sample_rate(out) == 44100
+
+
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
 def test_audiobook_job_m4b_has_chapters(tmp_path, monkeypatch):
     store = Store(tmp_path / "data")

@@ -54,6 +54,20 @@ def test_process_sample_and_quality_check(tmp_path):
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_process_sample_output_is_44100hz(tmp_path):
+    # documented as "a clean 44.1 kHz mono WAV" - ffmpeg's loudnorm filter
+    # (used for the loudness-normalisation pass) has a well-known quirk of
+    # emitting at 192kHz regardless of the input/requested rate unless the
+    # output is explicitly resampled back down afterwards.
+    src = tmp_path / "src.wav"
+    _write_wav(src, _speechlike(2.0, sr=16000), sr=16000)
+    dest = tmp_path / "out.wav"
+    voice_lab.process_sample(src, dest)
+    with wave.open(str(dest), "rb") as w:
+        assert w.getframerate() == 44100
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
 def test_quality_check_flags_clipping_and_short_duration(tmp_path):
     short = tmp_path / "short.wav"
     _write_wav(short, np.ones(200, dtype=np.float32) * 0.999, sr=8000)  # ~25ms, clipped
