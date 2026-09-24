@@ -55,6 +55,28 @@ def test_build_xfade_cmd_offsets():
     assert video.transition_duration({"type": "cut"}, 25) == pytest.approx(0.04)
 
 
+def test_build_overlay_fade_cmd_matches_the_xfade_offsets():
+    """The join for an ffmpeg without xfade (imageio-ffmpeg ships 4.2):
+    same offsets, each incoming clip padded to its start, the chain faded
+    out over it."""
+    clips = [Path("c0.mp4"), Path("c1.mp4"), Path("c2.mp4")]
+    transitions = [None, {"type": "crossfade", "duration_s": 0.3}, {"type": "dip_black", "duration_s": 0.2}]
+    cmd = video.build_overlay_fade_cmd("ffmpeg", clips, [2.0, 2.0, 2.0], transitions, Path("out.mp4"), fps=25)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade" not in fc
+    assert "tpad=start_duration=2.000[p1]" in fc
+    assert "fade=t=out:st=2.000:d=0.300:alpha=1[a1]" in fc
+    assert "fade=t=in:st=0:d=0.200:color=black,tpad=start_duration=4.000[p2]" in fc
+    assert cmd[cmd.index("-map") + 1] == "[v2]"
+
+
+@pytest.mark.skipif(not video.ffmpeg_path(), reason="ffmpeg not available")
+def test_ffmpeg_has_filter_reads_the_listing():
+    ff = video.ffmpeg_path()
+    assert video.ffmpeg_has_filter(ff, "scale")
+    assert not video.ffmpeg_has_filter(ff, "no_such_filter_here")
+
+
 def test_build_ass_karaoke_timing():
     clips = [
         {"text": "hello world", "start_s": 1.0, "end_s": 3.0, "karaoke": True},
