@@ -66,3 +66,20 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `studio_production_shots` para cambiar planos (se rehace el animático y
   vuelve a parar), o `studio_production_continue` para renderizar los clips.
   No continúes sin que el usuario lo apruebe.
+- **«Que el personaje salga siempre igual» / "keep X consistent"**: mira su
+  kit (`studio_character_adapters(action="list")`). Sin adaptador para el
+  motor del proyecto: `studio_character_sheet` (necesita canónica) →
+  `studio_character_dataset(action="build", sources=[...])` → lee el
+  `report` y díselo → `studio_character_train(action="plan")`. Entrenar
+  ocupa una GPU mucho tiempo: enseña el plan (minutos, VRAM, entrenador) y
+  pide permiso antes de `action="start"`. Si `trainer_problem` dice que no
+  hay entrenador o falta el modelo base, explícalo; no inventes rutas.
+- Con adaptador, no hace falta nada: cada `@Nombre` lo carga solo (mira
+  `adapters` en la respuesta de `studio_generate_image`). Para posturas
+  libres usa `consistent=true, prefer_adapter=true`.
+- **«¿Cuál es la mejor toma?» / "which take is best"**:
+  `studio_character_takes(action="score")`, luego `list` con
+  `sort="identity"`. Di si la nota es del modelo de visión o `rough`.
+- **«Guárdalo para otros proyectos» / "save this character"**:
+  `studio_character_library(action="save")`; para llevarlo a otro proyecto,
+  `action="use"`; para un fichero, `studio_character_pack(action="export")`.

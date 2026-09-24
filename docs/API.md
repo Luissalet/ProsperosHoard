@@ -4,7 +4,10 @@ Base URL `http://127.0.0.1:8815`. JSON in and out. Errors are always
 `{"error": "<code>", "message": "<what to do>"}` with a 4xx status (404
 `not_found`, 400 for validation, 409 `<capability>_unavailable` when no
 backend resolves, 422 `invalid_arguments` for malformed bodies, 502
-`backend_error` when ComfyUI/Faustus failed a call).
+`backend_error` when ComfyUI/Faustus failed a call). Character-kit routes
+raise `charkit.KitError`, `charpack.PackError` or `trainers.TrainingError`,
+which all answer 400 with their own `code` the same way (e.g. `no_canonical`,
+`bad_pack`, `trainer_unavailable`).
 
 **Guard (every route):** the `Host` header must be `127.0.0.1:<port>`,
 `localhost:<port>` or `[::1]:<port>` (DNS rebinding); writes (not
@@ -23,7 +26,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_projects` | `?query&limit&offset` |
 | POST | `/api/agent/studio_create_project` | `{name, brief?, image_engine?}` |
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
-| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, wait_s}` |
+| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, wait_s}` |
 | POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
@@ -49,10 +52,17 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_recipe_export` | `{production, name?}` -> recipe summary + `cast`, `warnings`, `notes` |
 | GET | `/api/agent/studio_recipes_list` | - -> `{items:[recipe summary]}` |
 | GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
-| POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
+| POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id, "lib_..." library id, {library: "lib_...", version?}, or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
 | POST | `/api/agent/studio_animatic` | `{production, aspects?, wait_s=0}` -> `{job, animatic?: {renders{aspect: asset_id}, plan{cuts_total, clips_planned, gpu_minutes, cpu_minutes_renders, unused_shots, duration_s}}}` |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
+| POST | `/api/agent/studio_character_sheet` | `{character_id, views?, engine?, seed?, wait_s}` -> `{job, views}`; done job outputs `{asset_ids, contact_sheet_id, views, engine}` |
+| POST | `/api/agent/studio_character_dataset` | `{character_id, action="get"\|"report"\|"build"\|"update"\|"caption", sources?, min_identity?, replace, items?, only_missing, wait_s}` -> get/build/update: `{character_id, trigger, items[], report}`; report: the report alone; caption: `{job}` (done outputs add `captioned, method, model`) |
+| POST | `/api/agent/studio_character_train` | `{action="plan"\|"trainers"\|"settings"\|"start"\|"status"\|"log", character_id?, arch?, trainer?, overrides, run_id?, training?, wait_s}` -> action-dependent, see [MCP.md](MCP.md#character-kit-tools) |
+| POST | `/api/agent/studio_character_adapters` | `{character_id, action="list"\|"available"\|"attach"\|"update"\|"remove"\|"settings", adapter_id?, lora_name?, arch?, strength?, trigger?, enabled?, settings}` -> action-dependent |
+| POST | `/api/agent/studio_character_takes` | `{character_id, action="list"\|"score"\|"act", sort="recent"\|"identity", kind?, limit, asset_ids?, asset_id?, take_action?, force, wait_s}` -> list: `{character_id, name, total, shots, items[]}`; score: `{job}` (done outputs `results[], below_threshold[], method`); act: `{asset_id, action}` |
+| POST | `/api/agent/studio_character_pack?project=` | `{action="export"\|"import"\|"inspect", character_id?, path?, rename?, include_dataset, include_adapters}` -> export: pack summary + `download`; inspect: pack contents; import: `{character_id, name, ..., notes}` |
+| POST | `/api/agent/studio_character_library?project=` | `{action="list"\|"save"\|"use"\|"history"\|"delete", character_id?, id?, version?, note?, query?, rename?}` -> action-dependent, see [MCP.md](MCP.md#character-kit-tools) |
 | GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
 | POST | `/api/agent/voice_create` | `{name, engine_id, source_path, language?, project?}` |
 | GET | `/api/agent/voice_list` | `?project` |
@@ -90,8 +100,22 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET | `/api/agent-calls?limit=` | the audit log |
 | GET / POST | `/api/projects` | list (with counts) / create `{name, brief?}` |
 | GET / PATCH | `/api/projects/{id}` | `{name?, brief?, cover_asset_id?, image_engine?}` (`image_engine`: `auto` \| `qwen21` \| `flux` \| `sdxl`, default `auto`) |
-| GET / POST | `/api/projects/{id}/characters` | create `{name, fields}` |
+| GET / POST | `/api/projects/{id}/characters` | list (each with its `kit` summary) / create `{name, fields}` |
+| GET | `/api/characters/{id}` | the full character row + `kit` (trigger, adapters, dataset, sheet, identity threshold, library, history) |
 | PATCH | `/api/characters/{id}` | `{name?, fields}` |
+| GET | `/api/characters/{id}/kit` | kit summary + `history` (last 30), `sheet_asset_ids`, `views`, `default_views` |
+| POST | `/api/characters/{id}/sheet` | body: `studio_character_sheet` without `character_id` -> `{job, views}` |
+| POST | `/api/characters/{id}/dataset` | body: `studio_character_dataset` without `character_id` |
+| POST | `/api/characters/{id}/train` | body: `studio_character_train` without `character_id` |
+| POST | `/api/training` | `{action: "trainers"\|"settings"\|"log", ...}` - the trainer-only actions of `studio_character_train`, with no character |
+| POST | `/api/characters/{id}/adapters` | body: `studio_character_adapters` without `character_id` |
+| POST | `/api/characters/{id}/takes` | body: `studio_character_takes` without `character_id` |
+| POST | `/api/characters/{id}/pack` | export this character -> `{..., download: "/api/character-packs/{file}"}` |
+| GET | `/api/character-packs/{file}` | the exported `.hoardchar` file |
+| POST | `/api/projects/{id}/character-packs` | multipart `file` (a `.hoardchar`, up to 2 GB) + `?rename=` -> import into this project |
+| POST | `/api/character-packs/inspect` | multipart `file` -> pack contents without importing |
+| POST | `/api/library/characters?project=` | body: `studio_character_library`; `use` without `project` casts into the "Casting" project |
+| GET | `/api/library/characters/{lib_id}/preview` | the library entry's contact-sheet preview, `image/png` |
 | GET / POST | `/api/projects/{id}/groups` | create `{name, fields: {concept, member_ids, colours, logo_asset_id}}` |
 | PATCH | `/api/groups/{id}` | `{name?, fields}` |
 | GET | `/api/style-presets?project=` | presets with defaults |
@@ -178,7 +202,7 @@ A production's settings: `{"animatic": true, "animatic_autocontinue": false,
 A production's spec (all optional except `lead`):
 
 ```json
-{"title": "DON'T LOOK BACK", "engine": "auto",
+{"title": "DON'T LOOK BACK", "engine": "auto", "lead_route": "auto",
  "lead": {"name": "FAROL", "look": "...", "negative": "...", "palette": ["#F28C28"], "bio": "..."},
  "reference": {"prompt": "{look}, character turnaround reference sheet...", "seed": 1001, "count": 4, "pick": 3, "crop": "left_third"},
  "world": {"look": "cinematic 35mm film still, night...", "negative": "cartoon, cute, ..."},
@@ -190,6 +214,15 @@ A production's spec (all optional except `lead`):
  "timeline": {"aspects": ["9:16", "16:9"], "qualities": ["preview", "final"], "options": {"fps": 24, "cut_on_lyrics": true, "karaoke": true},
               "storyboard": {"Chorus": ["3", "2", "11", "10v2"]}, "finishing": {"color_grade": "sodium_night", "grain": 0.3}}}
 ```
+
+`lead_route` (default `"auto"`) picks how the lead stays consistent across
+the production's shots: `"auto"` renders through the lead's LoRA adapter
+when it has one for the resolved engine (free poses, no drift toward a
+reference's framing), else falls back to an edit of the lead's canonical
+reference image; `"reference"` always uses the canonical-image edit, even
+when an adapter is available. `lead` also accepts a casting-library id in
+place of an inline description - see `studio_recipe_run`'s `cast.lead` in
+[MCP.md](MCP.md#character-kit-tools).
 
 ## Timeline finishing
 

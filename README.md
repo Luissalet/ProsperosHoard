@@ -66,8 +66,9 @@ with ids and pictures.
 | Productions and recipes | A whole music video as one resumable, checkpointed job (lead and its reference sheet, song, stills, lyric timing, Wan clips, photocards, album art, the cut and its renders, a `REPORT.md`) that queues its frames and clips as ordinary jobs, so a render pool spreads them over every card; "change shots" (another variant, clip on/off, a new prompt or seed) redoes only what depends on them. A finished production - made in the app or by the production script - becomes a **recipe** with the lead abstracted into a `{lead}` casting slot; "Recreate with..." runs it with another character from the studio or a new description, reusing the song and the stills and clips the lead is not in | The cut's pace (beats per shot) is not recorded by the production script, so a recipe exported from a scripted run uses the defaults; prompts that describe the old lead's props are flagged, not rewritten |
 | Animatic | Before the expensive clips (every 5 s Wan clip took ~9.5 min in the real run), the production cuts its stills exactly where the final cut will cut - the same auto-cut over the same song take, lyric/section marks and options - with a Ken Burns move and a crossfade per shot, captions and finishing, rendered at 720p in each target aspect, plus a `plan.json` (every cut, each shot's screen time and still, which shots become Wan clips, the estimated GPU minutes); the production pauses at `awaiting_review` until **Continue** (or goes on by itself with `animatic_autocontinue`), and **Change shots** swaps stills, turns clips on or off or rewrites a shot first | The animatic crossfades every cut (the final keeps its flashes and glitches); GPU minutes are estimates from the real run's timings (configurable) |
 | QA director | A pass over a production's outputs, per stage or all of them, inline after each stage (`settings.qa.enabled`) or on demand: flat or noisy stills, black/red bands along an edge (the ffmpeg 8 stripe), exposure jumps inside a clip, motion where stillness was asked (or a frozen clip), a photocard head touching the top edge, lyric coverage of an aligned LRC, durations against the plan; with a vision model behind Hoard Link each output is also scored 0-10 against the bible, the shot prompt and the reference, with a one-line reason. Failing stills, clips and photocards are regenerated with a new seed and a targeted fix (noise -> denoise 1, exposure jump -> another sampler, walking -> the stillness negative, a cropped head -> headroom), up to a retry cap, and every retry is written to the lineage and REPORT.md | The checks are heuristics with editable thresholds, not a trained critic; without a vision model only the model-free checks run (it never blocks); a scripted production is checked read-only |
-| Agent control | 43 MCP tools mirroring `/api/agent/*` (34 production tools plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
-| Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes), Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
+| Character kit | Each character carries a kit: a **model sheet** (the canonical redrawn by the edit engine from up to 12 set views - front, three-quarter, profile, back, close-up, expressions, action, sitting, night - tagged per view, with a labelled contact sheet); a **dataset** built from the canonical, references, sheet and good takes, with captions that name a trigger word and describe only what changes, a readiness report (too few images, blurry, near duplicates, captions without the trigger, missing views) and auto-captions from the vision model; **local LoRA training** through a configurable trainer (`ai_toolkit`, `musubi`, a custom command, or the demo trainer) with a plan sized to the dataset (steps, rank, lr, 512 px by default, VRAM and minutes estimate), the freest GPU picked, a live log, and the result installed in ComfyUI's loras folder; **adapters** per architecture (Qwen-Image, Flux, SDXL, SD 1.5, Wan 2.2 5B, Z-Image) injected automatically - with the trigger word - whenever the character is mentioned and the engine matches, recorded in the recipe so reuse and vary reproduce them, and `prefer_adapter` for free poses instead of an edit of the canonical; **takes**: every render of the character grouped by shot (take N of M), scored 0-10 for identity against the references (vision model, else a rough colour check that says so), promotable to canonical, reference or dataset, or rejected; a portable **`.hoardchar`** pack (look, voice, palette, images, sheet, dataset with captions, LoRA weights) and a global **casting library** with versions, usable as a recipe's lead | Training needs a trainer installed and the base model for the architecture; VRAM and time are estimates; the rough identity check only catches colour/costume drift |
+| Agent control | 50 MCP tools mirroring `/api/agent/*` (41 studio tools, 7 of them for the character kit, plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes), Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, synthetic demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
@@ -182,6 +183,12 @@ loading anything of its own.
 | `studio_recipe_run` | "Recreate this with X": a new production from a recipe with another lead | no |
 | `studio_animatic` | The stills cut like the final, 720p, with a plan and GPU estimate, before any clip is rendered | no |
 | `studio_qa_run` / `studio_qa_report` | QA pass over a production (check, or check and regenerate the failures) / its last scorecard and retries | no / yes |
+| `studio_character_sheet` | Model sheet: the canonical redrawn from set views, added to the dataset | no |
+| `studio_character_dataset` | Training images and captions: build, edit, auto-caption, readiness report | no (get/report read-only) |
+| `studio_character_train` | Trainers and settings, a training plan, start a local LoRA run, status and log | no (plan/status read-only) |
+| `studio_character_adapters` | LoRA adapters (attach, strength, enable) and kit settings (trigger, auto-use, identity threshold) | no |
+| `studio_character_takes` | Renders of a character as takes, identity scores, promote/reject | no (list read-only) |
+| `studio_character_pack` / `studio_character_library` | Portable `.hoardchar` export/inspect/import / global casting library with versions | no |
 | `voice_engines` / `voice_create` / `voice_list` | Engine status and install hints / clone a voice from a sample / list saved voices | yes / no / yes |
 | `voice_speak` / `voice_transcribe` | Synthesise a line / transcribe audio with timestamps | no / yes |
 | `voice_audiobook` / `voice_dub` | Narrate text as chapters / dub a video into another language | no |
@@ -413,6 +420,42 @@ Faustus manifest check.
 `npm run build` in `frontend/` passes with zero TypeScript errors.
 [CI](.github/workflows/ci.yml) runs the tests on Ubuntu and Windows with
 Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
+
+## Characters that stay the same
+
+The kit is how a character survives many shots, engines and projects
+([docs/CHARACTERS.md](docs/CHARACTERS.md) has the details):
+
+1. **Canonical** - one good image of the character (Cast -> Edit).
+2. **Model sheet** - Kit -> Model sheet renders the canonical from set views
+   with the edit engine; each view lands in the dataset with a caption.
+3. **Dataset** - add the best takes, fix captions (the trigger word stands
+   for the permanent look; captions describe pose, framing, light), watch
+   the readiness report.
+4. **Training** - pick the architecture of the engine you render with and
+   start; the adapter is installed in ComfyUI and attached. From then on
+   every `@Name` render with that engine loads it, and productions render
+   the lead's shots txt2img + adapter (free poses) instead of editing the
+   canonical.
+5. **Takes** - score identity, keep the good ones, reject the drifted ones,
+   promote a better canonical.
+6. **Pack / library** - export a `.hoardchar` or save a version to the
+   library; cast it into any project, or use it as a recipe's lead
+   (`cast={"lead": "lib_..."}`).
+
+Training runs a separate trainer program. Configure it in Kit -> Training ->
+Configure (or `training` in `data/backend.json`):
+
+```json
+"training": {
+  "lora_dir": "D:/LocalAI/ComfyUI/models/loras",
+  "gpu": "auto",
+  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "D:/LocalAI/ai-toolkit"}],
+  "base_models": {"qwen_image": "Qwen/Qwen-Image", "flux1": "black-forest-labs/FLUX.1-dev"}
+}
+```
+
+`--demo` configures a fake trainer so the whole flow can be tried without a GPU.
 
 ## Roadmap / known limits
 

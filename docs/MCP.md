@@ -68,7 +68,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
 | `studio_create_project` | no | `name, brief=None, image_engine=None` | `{id, name, brief, image_engine}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |
-| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, reference_asset_ids, strength, template, engine, checkpoint, consistent=False, wait_s=0, use_character_reference=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, engine, seed}` (+ picture only when `include_image=true`) |
+| `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, reference_asset_ids, strength, template, engine, checkpoint, consistent=False, wait_s=0, use_character_reference=False, characters, use_adapters=True, prefer_adapter=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, engine, seed}` + `adapters` (LoRAs actually used, one per character) and `adapter_notes` when any adapter was skipped, both only when non-empty; `route: "adapter"` when `prefer_adapter` sent it through txt2img+LoRA instead of an edit of the canonical (+ picture only when `include_image=true`) |
 | `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0, include_image=False` | `{job}`; the output is an mp4 video asset |
 | `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
@@ -136,6 +136,91 @@ behind Hoard Link and fails with a clear message without one.
 - **Consent.** Only clone a voice from a sample the caller has the right to
   use; a cloned voice is stored and reused deliberately, never inferred.
 
+### Character kit tools
+
+Everything that keeps a character the same across shots, engines and
+projects, on top of the plain `studio_cast` entry: model sheet, training
+dataset, local LoRA adapters, versioned takes, portable `.hoardchar` packs
+and a global casting library. Logic lives in `charkit.py` (sheet, dataset,
+adapters, takes, training), `charpack.py` (packs, library) and
+`trainers.py` (trainer discovery and the training run itself); errors are
+`KitError`, `PackError` or `TrainingError`, surfaced the same way as any
+other tool error (code + message).
+
+| Tool | Read-only | Arguments (defaults) | Returns |
+| --- | --- | --- | --- |
+| `studio_character_sheet` | no | `character_id, views=None (8 default), engine=None, seed=None, wait_s=0` | `{job, views}`; done job outputs `{asset_ids, contact_sheet_id, views, engine}` |
+| `studio_character_dataset` | no | `character_id, action="get"\|"report"\|"build"\|"update"\|"caption", sources=None, min_identity=None, replace=False, items=None, only_missing=False, wait_s=0` | get/build/update: `{character_id, trigger, items[], report}`; report: the readiness report alone; caption: `{job}`, done outputs add `{captioned, method, model}` |
+| `studio_character_train` | no | `action="plan"\|"trainers"\|"settings"\|"start"\|"status"\|"log", character_id=None, arch=None, trainer=None, overrides=None, run_id=None, training=None, wait_s=0` | trainers: `{trainers[], lora_dir, lora_dir_ok, gpu, base_models, archs}`; settings: the training config (read) or the updated one; plan/start: `{character_id, arch, plan, dataset, trainer, trainer_problem, base_model, base_hint, lora_dir, ready}` (start also `{job, run_id}`); status: `{character_id, runs[], adapters[]}`; log: `{run_id, lines[]}` |
+| `studio_character_adapters` | no | `character_id, action="list"\|"available"\|"attach"\|"update"\|"remove"\|"settings", adapter_id=None, lora_name=None, arch=None, strength=None, trigger=None, enabled=None, settings=None` | list: kit summary (`trigger, use_adapters, adapters[], dataset, sheet, references, identity_threshold, library, last_change`); available: `{loras[], comfy}`; attach/update: `{adapter}`; remove: `{removed}` |
+| `studio_character_takes` | no | `character_id, action="list"\|"score"\|"act", sort="recent"\|"identity", kind=None, limit=40, asset_ids=None, asset_id=None, take_action=None, force=False, wait_s=0` | list: `{character_id, name, total, shots, items[{asset_id, kind, take, takes_in_shot, seed, prompt, adapters, identity, is_reference, is_canonical, in_dataset, rejected, ...}]}`; score: `{job}`, done outputs `{results[], below_threshold[], method}`; act: `{asset_id, action}` |
+| `studio_character_pack` | no | `action="export"\|"import"\|"inspect", character_id=None, project=None, path=None, rename=None, include_dataset=True, include_adapters=True` | export: pack summary + `download` route; inspect: `{name, role, look, trigger, canonical, references, sheet_views, dataset, adapters, bytes}`; import: `{character_id, name, canonical_asset_id, references, sheet, dataset, adapters, adapters_installed, notes}` |
+| `studio_character_library` | no | `action="list"\|"save"\|"use"\|"history"\|"delete", character_id=None, id=None, version=None, project=None, note=None, query=None, rename=None` | list: `[{id, name, role, look, version, versions, updated_at, adapters, has_preview, origin}]`; save: `{id, version, bytes, changes, adapters_without_weights}`; use: same shape as pack import; history: `{id, name, versions[], origin}`; delete: `{deleted}` |
+
+- **Model sheet.** `studio_character_sheet` redraws the character's
+  canonical image with the resolved edit engine (Qwen-Image 2.1 or Flux
+  Kontext), once per view - `front, three_quarter, profile, back, closeup,
+  happy, angry, scared, surprised, action, sitting, night` (12 total, 8
+  by default) - tags each one, builds a labelled contact sheet, and adds
+  every view to the dataset with a caption. Needs a canonical image first
+  (`studio_cast` update); fails with `no_canonical` otherwise, or
+  `sheet_needs_edit_engine` when neither Qwen-Image 2.1 nor Flux Kontext is
+  installed.
+- **Dataset.** The images an adapter trains from: canonical, references,
+  sheet views and good takes, each captioned with the trigger word plus
+  what varies. `build` collects candidates from `sources` (`canonical`,
+  `references`, `sheet`, `takes` - takes below `min_identity` are skipped
+  when scored); `update` edits captions/inclusion by `asset_id` or adds an
+  unknown image of the project (`{asset_id, caption?, include?, remove?}`);
+  `caption` runs a job that captions with the vision model when one is
+  configured, else derives captions from the render prompts and says so.
+  `report`/`get` list blockers: fewer than 8 usable images, images under
+  512 px, blurry ones, near-duplicates (perceptual hash), captions missing
+  the trigger, missing sheet views; `ready` needs 8+ images and no caption
+  without the trigger.
+- **Training.** `studio_character_train` plans and runs a local LoRA per
+  architecture (`qwen_image, flux1, sdxl, sd15, wan22_5b, z_image`,
+  default: the project's image engine). `plan` sizes steps/rank/lr/
+  resolution to the dataset and estimated VRAM/minutes without running
+  anything; `start` needs a configured trainer and a ready dataset
+  (`trainer_unavailable` / `dataset_not_ready` otherwise) and queues a GPU
+  job that exports the dataset, runs the trainer, installs the resulting
+  LoRA into ComfyUI's loras folder and attaches it to the character as its
+  adapter for that architecture. Trainer kinds: `ai_toolkit`, `musubi`,
+  `custom` (a command template), `fake` (tests/demos) - configured in
+  `training.trainers` (`/api/backend`'s training section or
+  `studio_character_train` action `settings`). Training holds the GPU for a
+  while: plan it with the user before starting.
+- **Adapters.** One enabled adapter per architecture per character (an
+  older one is kept, disabled, so a bad train can be rolled back); `attach`
+  registers an existing LoRA file as ComfyUI lists it, `update` changes
+  strength (0-2) / trigger / `enabled`, `settings` sets the kit's `trigger`
+  (3-32 letters/digits/`_`), `use_adapters` and `identity_threshold` (0-10).
+  See `studio_generate_image`'s `use_adapters`/`characters`/`prefer_adapter`
+  for how an adapter is actually used in a render.
+- **Takes.** Every generated image/clip tagged for the character, grouped
+  into takes of the same shot (same template, view and prompt) so repeats
+  of a shot are `take 2 of 3` and so on. `score` runs identity scoring (0-10
+  against the canonical/references, by the vision model when one is
+  configured, else a rough colour-signature check - the `method` used is
+  always reported) and lists ids under the kit's `identity_threshold` in
+  `below_threshold`. `act` promotes/demotes an asset: `reference`,
+  `unreference`, `canonical`, `dataset`, `reject`, `unreject`.
+- **Portable characters.** `studio_character_pack` exports one `.hoardchar`
+  zip with the look, voice, palette, canonical/reference images, model
+  sheet, dataset with captions and (optionally) the LoRA weights, so a
+  character works in another project or on another machine; `import` casts
+  it into a project (renamed on a name clash, adapters installed into
+  ComfyUI's loras folder when one is configured); `inspect` reads a pack's
+  contents without importing it. Packs are capped at 2 GB.
+- **Casting library.** `studio_character_library` keeps versions of a
+  character (`save` adds v1, v2... as a pack under `data/library/`) so any
+  version can be cast into a project later (`use`, defaulting to a
+  "Casting" project) without redoing the look, dataset or training. A
+  recipe run accepts a library character straight as the lead:
+  `cast={"lead": "lib_..."}` or `cast={"lead": {"library": "lib_...",
+  "version": 2}}` - it is cast into the Casting project first, then the
+  production copies it as usual.
 
 ### Details the docstrings also carry
 
@@ -209,6 +294,18 @@ behind Hoard Link and fails with a clear message without one.
   lineage and the canonical; the sheet is kept in `reference_asset_ids`.
   Leave the character out of shots it must not appear in (an edit template
   keeps it in frame).
+- **Character adapters (LoRAs):** with `use_adapters=true` (default), every
+  mentioned character - or an id passed in `characters` - that has an
+  enabled adapter for the render's architecture gets it loaded automatically
+  and its trigger word added to the prompt; `use_adapters=false` renders
+  without any. A file ComfyUI does not list is skipped with a note in
+  `adapter_notes` rather than failing the render; two or more character
+  adapters in one frame are each scaled to 0.8, and at most three load.
+  `prefer_adapter=true` (with `consistent=true`, and only when every
+  mentioned character has an adapter) renders txt2img + adapter instead of
+  an edit of the canonical image - free poses and framing instead of
+  following the reference's - and the result reports `route: "adapter"`.
+  Train and manage adapters with the character kit tools below.
 - **Timeline finishing** (patch field, applied once at render): `{color_grade:
   "teal_orange"|"sodium_night"|"bleach_bypass", grain: 0-1, vignette: bool,
   letterbox: bool, glitch_on_downbeats: bool, lyric_style: "default"|"horror"}`.
@@ -302,7 +399,15 @@ studio_production("afterglow_iris_volt")         -> stages, renders, next
 A recipe keeps every stage, prompt, seed and setting of the production it
 came from; only the lead changes. Rewrite the prompts its `warnings` list
 (they describe the old lead's props) with `studio_production_shots` after
-the run starts, or edit the recipe JSON before running it.
+the run starts, or edit the recipe JSON before running it. A recipe's
+`cast.lead` also accepts a casting-library id straight away -
+`{"lead": "lib_..."}` or `{"lead": {"library": "lib_...", "version": 2}}` -
+resolved with `studio_character_library` before the production is created.
+A production's `spec.lead_route` picks how the lead is kept consistent
+through its shots: `"auto"` (default) uses the lead's LoRA adapter when it
+has one for the resolved engine, else falls back to an edit of the
+canonical reference; `"reference"` always uses the canonical-image edit,
+even when an adapter is available.
 
 ### QA
 
