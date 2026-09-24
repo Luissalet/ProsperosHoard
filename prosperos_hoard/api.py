@@ -24,6 +24,8 @@ from . import __version__
 from . import audio as audio_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
+from . import productions as productions_mod
+from . import recipes as recipes_mod
 from . import templates as design_templates
 from . import timeline as timeline_mod
 from . import voice_engines as ve
@@ -256,6 +258,30 @@ class TimelineBody(BaseModel):
     patch: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProductionCreateBody(BaseModel):
+    name: str
+    spec: dict[str, Any]
+    settings: Optional[dict[str, Any]] = None
+    project: Optional[str] = None
+
+
+class ProductionShotsBody(BaseModel):
+    changes: list[dict[str, Any]]
+    run: bool = True
+
+
+class RecipeExportBody(BaseModel):
+    production: str
+    name: Optional[str] = None
+
+
+class RecipeRunBody(BaseModel):
+    recipe: Optional[str] = None
+    cast: dict[str, Any]
+    name: Optional[str] = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class RenderBody(BaseModel):
     timeline_id: str
     quality: str = "preview"
@@ -404,7 +430,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("audiobook", lambda job, p: vp.audiobook_job(store, backend, job, p))
     queue.register("dub", lambda job, p: dubbing_mod.dub_job(store, backend, job, p))
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
-    queue.start()
+    # production/QA handlers are registered below, next to the operations
+    # they queue sub-jobs through; the workers start at the end of create_app
 
     app = FastAPI(title="Prospero's Hoard", version=__version__)
     app.add_middleware(GuardMiddleware, port=port)
@@ -1425,6 +1452,195 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def update_board_items(board_id: str, body: BoardItemsBody):
         return store.update_board_items(board_id, body.items)
 
+    # ------------------------------------------------------------ productions
+    # A production runs as one orchestrator job that queues ordinary
+    # generate/compose/render jobs through this studio facade (so a render
+    # pool spreads its frames and clips) and checkpoints into
+    # data/productions/<slug>/state.json - see productions.py.
+    class AppStudio:
+        def generate(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            return op_generate(project_id, GenerateImageBody(**{k: v for k, v in body.items() if v is not None}))["job"]
+
+        def compose(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            return op_compose(project_id, ComposeSongBody(**{k: v for k, v in body.items() if v is not None}))["job"]
+
+        def render(self, timeline_id: str, quality: str) -> dict[str, Any]:
+            return op_render(RenderBody(timeline_id=timeline_id, quality=quality))["job"]
+
+        def job(self, job_id: str) -> dict[str, Any]:
+            return store.get_job(job_id)
+
+        def cancel(self, job_id: str) -> None:
+            queue.cancel(job_id)
+
+    studio = AppStudio()
+    app.state.studio = studio
+    production_hooks: dict[str, Any] = {"qa_hook": None, "stage_hooks": {}}
+    app.state.production_hooks = production_hooks
+
+    def _production_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        slug = job["params"]["slug"]
+        return productions_mod.run_production(store, studio, slug, progress, qa_hook=production_hooks["qa_hook"],
+                                              stage_hooks=production_hooks["stage_hooks"])
+
+    queue.register("production", _production_job)
+
+    def queue_production(slug: str) -> dict[str, Any]:
+        """Queue a production's run (or return the one already queued/running)."""
+        with productions_mod.lock_for(slug):
+            state = productions_mod.load_state(store.data_dir, slug)
+            if productions_mod.is_legacy(state):
+                raise engine.EngineError("legacy_production", f"'{slug}' was made by the production script; export it as a "
+                                                              "recipe (studio_recipe_export) and run the recipe instead")
+            if state.get("job_id"):
+                try:
+                    current = store.get_job(state["job_id"])
+                    if current["state"] in ("queued", "waiting_gpu", "running"):
+                        return current
+                except NotFound:
+                    pass
+            job = queue.enqueue("production", "cpu", {"slug": slug, "name": state.get("name")},
+                                project_id=state.get("project_id"))
+            state["job_id"] = job["id"]
+            if state.get("status") != "running":
+                state["status"] = "queued"
+            productions_mod.save_state(store.data_dir, state)
+            return job
+
+    def production_view(slug: str) -> dict[str, Any]:
+        return productions_mod.compact_view(productions_mod.load_state(store.data_dir, slug))
+
+    def op_production_create(body: ProductionCreateBody) -> dict[str, Any]:
+        if body.project:
+            store.get_project(body.project)
+        state = productions_mod.create_production(store.data_dir, body.name, body.spec, body.settings, project_id=body.project)
+        job = queue_production(state["slug"])
+        return {"production": production_view(state["slug"]), "job": engine.job_view(job)}
+
+    def op_production_continue(slug: str) -> dict[str, Any]:
+        with productions_mod.lock_for(slug):
+            state = productions_mod.load_state(store.data_dir, slug)
+            if state.get("status") == "awaiting_review":
+                state.setdefault("review", {})["animatic_approved"] = True
+                productions_mod.log(state, "review", "approved")
+                productions_mod.save_state(store.data_dir, state)
+        job = queue_production(slug)
+        return {"production": production_view(slug), "job": engine.job_view(job)}
+
+    def op_production_shots(slug: str, body: ProductionShotsBody) -> dict[str, Any]:
+        result = productions_mod.update_shots(store.data_dir, slug, body.changes)
+        if body.run and result["changed"]:
+            result["job"] = engine.job_view(queue_production(slug))
+        return {**result, "production": production_view(slug)}
+
+    def op_recipe_run(name: str, body: RecipeRunBody) -> dict[str, Any]:
+        state = recipes_mod.run_recipe(store, name, body.cast, body.name, body.options)
+        job = queue_production(state["slug"])
+        return {"production": production_view(state["slug"]), "job": engine.job_view(job),
+                "notes": (state.get("recipe") or {}).get("notes") or []}
+
+    @app.get("/api/productions")
+    def productions_list():
+        return {"items": productions_mod.list_productions(store.data_dir)}
+
+    @app.post("/api/productions")
+    def production_create(body: ProductionCreateBody):
+        return op_production_create(body)
+
+    @app.get("/api/productions/{slug}")
+    def production_get(slug: str):
+        state = productions_mod.load_state(store.data_dir, slug)
+        return {**state, "view": productions_mod.compact_view(state)}
+
+    @app.post("/api/productions/{slug}/continue")
+    def production_continue(slug: str):
+        return op_production_continue(slug)
+
+    @app.patch("/api/productions/{slug}/shots")
+    def production_shots(slug: str, body: ProductionShotsBody):
+        return op_production_shots(slug, body)
+
+    @app.get("/api/productions/{slug}/report")
+    def production_report(slug: str):
+        path = productions_mod.production_dir(store.data_dir, slug) / "REPORT.md"
+        if not path.is_file():
+            state = productions_mod.load_state(store.data_dir, slug)
+            if productions_mod.is_legacy(state):
+                raise NotFound("report", slug)
+            path = productions_mod.write_report(store, state)
+        return Response(path.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8")
+
+    @app.post("/api/productions/{slug}/recipe")
+    def production_to_recipe(slug: str, body: RecipeExportBody):
+        return recipes_mod.recipe_summary(recipes_mod.export_recipe(store, slug, body.name))
+
+    @app.get("/api/recipes")
+    def recipes_list():
+        return {"items": recipes_mod.list_recipes(store.data_dir)}
+
+    @app.get("/api/recipes/{name}")
+    def recipe_get(name: str):
+        return recipes_mod.get_recipe(store.data_dir, name)
+
+    @app.post("/api/recipes/{name}/run")
+    def recipe_run(name: str, body: RecipeRunBody):
+        return op_recipe_run(name, body)
+
+    @app.get("/api/agent/studio_productions")
+    def agent_productions():
+        return agent("studio_productions", "", lambda: {"items": productions_mod.list_productions(store.data_dir)[:30]})
+
+    @app.get("/api/agent/studio_production")
+    def agent_production(production: str):
+        return agent("studio_production", production, lambda: production_view(production))
+
+    @app.post("/api/agent/studio_production_create")
+    def agent_production_create(body: ProductionCreateBody):
+        return agent("studio_production_create", body.name[:80], lambda: op_production_create(body))
+
+    @app.post("/api/agent/studio_production_continue")
+    def agent_production_continue(production: str):
+        return agent("studio_production_continue", production, lambda: op_production_continue(production))
+
+    @app.post("/api/agent/studio_production_shots")
+    def agent_production_shots(production: str, body: ProductionShotsBody):
+        return agent("studio_production_shots", production, lambda: op_production_shots(production, body))
+
+    @app.post("/api/agent/studio_recipe_export")
+    def agent_recipe_export(body: RecipeExportBody):
+        def run():
+            recipe = recipes_mod.export_recipe(store, body.production, body.name)
+            return {**recipes_mod.recipe_summary(recipe), "cast": recipe["cast"], "warnings": recipe["warnings"][:12],
+                    "notes": recipe["notes"]}
+        return agent("studio_recipe_export", body.production, run)
+
+    @app.get("/api/agent/studio_recipes_list")
+    def agent_recipes_list():
+        return agent("studio_recipes_list", "", lambda: {"items": recipes_mod.list_recipes(store.data_dir)[:50]})
+
+    @app.get("/api/agent/studio_recipe_get")
+    def agent_recipe_get(recipe: str):
+        def run():
+            data = recipes_mod.get_recipe(store.data_dir, recipe)
+            spec = data.get("spec") or {}
+            shots = [{k: v for k, v in {"key": s.get("key"), "lead": s.get("lead"), "prompt": engine._clip(s.get("prompt"), 140),
+                                        "seed": s.get("seed"), "variants": s.get("variants"), "clips": s.get("clips") or None,
+                                        "motion": s.get("motion")}.items() if v is not None}
+                     for s in spec.get("shots") or []]
+            return {**recipes_mod.recipe_summary(data), "cast": data.get("cast"), "placeholders": data.get("placeholders"),
+                    "song": {k: engine._clip(v, 160) if isinstance(v, str) else v for k, v in (spec.get("song") or {}).items()},
+                    "world": {k: engine._clip(v, 200) for k, v in (spec.get("world") or {}).items()},
+                    "shot_list": shots, "timeline": {k: v for k, v in (spec.get("timeline") or {}).items() if k != "storyboard"},
+                    "storyboard_sections": list(((spec.get("timeline") or {}).get("storyboard") or {}).keys()),
+                    "settings": data.get("settings"), "warnings": data.get("warnings"), "notes": data.get("notes")}
+        return agent("studio_recipe_get", recipe, run)
+
+    @app.post("/api/agent/studio_recipe_run")
+    def agent_recipe_run(body: RecipeRunBody):
+        if not body.recipe:
+            raise engine.EngineError("recipe_required", "give the recipe name (studio_recipes_list)")
+        return agent("studio_recipe_run", body.recipe, lambda: op_recipe_run(body.recipe, body))
+
     # ------------------------------------------------------------- status --
     def _auto_image_engine() -> str:
         try:
@@ -1485,6 +1701,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "</body></html>"
             )
 
+    queue.start()
     return app
 
 

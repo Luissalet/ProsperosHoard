@@ -366,6 +366,98 @@ export interface DubOutputs {
   asset_ids?: string[];
 }
 
+// ---------------------------------------------------------------- productions
+
+export type ProductionStatus = "queued" | "running" | "awaiting_review" | "done" | "failed" | "cancelled" | "partial";
+
+export interface ProductionSummary {
+  slug: string;
+  name: string;
+  status: ProductionStatus;
+  stage?: string | null;
+  project_id?: string | null;
+  updated_at?: string;
+  recipe?: string | null;
+  message?: string | null;
+  legacy?: boolean;
+  animatic?: boolean;
+}
+
+export interface ProductionShot {
+  key: string;
+  lead: boolean;
+  prompt: string;
+  seed: number;
+  variants: number;
+  best: number;
+  clips: number[];
+  motion: "still" | "move";
+  motion_prompt?: string;
+}
+
+export interface ProductionView extends ProductionSummary {
+  stages?: Record<string, "done" | "partial" | "pending">;
+  lead?: string;
+  renders?: Record<string, Record<string, string>>;
+  animatic?: boolean;
+  next?: string;
+  note?: string;
+}
+
+export interface ProductionState {
+  slug: string;
+  name: string;
+  status: ProductionStatus;
+  stage: string | null;
+  project_id: string | null;
+  message: string | null;
+  job_id: string | null;
+  recipe: { name: string; reuse: string[]; cast: { lead: string } } | null;
+  spec: { title?: string; lead?: { name: string; look: string; palette?: string[] }; shots?: ProductionShot[];
+          timeline?: { aspects?: string[] } } & Record<string, unknown>;
+  settings: { animatic: boolean; animatic_autocontinue: boolean; qa: { enabled: boolean; max_retries: number } };
+  done: Record<string, any>;
+  lineage: { at: string; stage: string; event: string; [k: string]: unknown }[];
+  qa?: { last?: QaScorecard };
+  view: ProductionView;
+  done_keys?: string[];
+}
+
+export interface QaItem {
+  stage: string;
+  key: string;
+  asset_id: string | null;
+  verdict: "pass" | "fail" | "skip";
+  score?: number | null;
+  reasons: string[];
+  checks: Record<string, unknown>;
+  model?: { bible?: number; prompt?: number; reference?: number; reason?: string; skipped?: string } | null;
+}
+
+export interface QaScorecard {
+  production: string;
+  stage: string;
+  at: string;
+  passed: number;
+  failed: number;
+  skipped: number;
+  vision: string;
+  items: QaItem[];
+}
+
+export interface RecipeSummary {
+  name: string;
+  title: string;
+  created_at: string;
+  from_production: string;
+  original_lead: string;
+  shots: number;
+  lead_shots: number;
+  clips: number;
+  reusable: { song: boolean; frames: number; clips: number };
+  warnings: number;
+}
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -558,6 +650,16 @@ export const api = {
     request<{ job: Job }>("POST", "/api/voice/dub", body),
   dubStatus: (jobId: string) => request<Job>("GET", `/api/voice/dub/${jobId}`),
   dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/api/voice/dub/${jobId}/download${q({ file })}`,
+  // ------------------------------------------------------------- productions
+  productions: () => request<{ items: ProductionSummary[] }>("GET", "/api/productions"),
+  production: (slug: string) => request<ProductionState>("GET", `/api/productions/${slug}`),
+  continueProduction: (slug: string) => request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue`),
+  changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
+    request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
+  exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),
+  recipes: () => request<{ items: RecipeSummary[] }>("GET", "/api/recipes"),
+  runRecipe: (name: string, body: { cast: Record<string, unknown>; name?: string; options?: Record<string, unknown> }) =>
+    request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/api/recipes/${name}/run`, body),
   resynthesizeDubSegment: (jobId: string, index: number, opts: { text?: string; voice?: VoiceSpec; remix?: boolean } = {}) =>
     request<{ segment: DubSegment }>("POST", `/api/voice/dub/${jobId}/segments/${index}/resynthesize`, opts),
 };

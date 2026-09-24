@@ -705,6 +705,135 @@ def voice_job(job_id: str, wait_s: float = 0) -> dict[str, Any]:
     return _call("GET", "/api/agent/voice_job", params={"job_id": job_id, "wait_s": wait_s})
 
 
+# ------------------------------------------------------------ productions --
+
+@tool(_ro(readOnlyHint=True))
+def studio_productions() -> dict[str, Any]:
+    """List productions (whole music-video pipelines) with status / listar producciones y su estado.
+
+    Each item: slug (pass it as `production` to the other production tools), name, status (queued,
+    running, awaiting_review, done, failed, cancelled), current stage, project id, and the recipe it
+    came from. legacy=true marks a production made by the production script: it can be exported as a
+    recipe but not resumed here.
+
+    Keywords: productions, list productions, pipeline status, music video, producciones, listar producciones, estado
+    """
+    return _call("GET", "/api/agent/studio_productions")
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_production(production: str) -> dict[str, Any]:
+    """One production's state: stages, ids, animatic, QA summary, next step / estado de una produccion.
+
+    stages maps each stage (character, song, frames, lyrics, animatic, clips, photocards, album,
+    timeline, report) to done/partial/pending; renders lists the final cut's video asset ids per
+    aspect; `next` says what to do (e.g. continue after reviewing the animatic).
+
+    Keywords: production status, stages, renders, animatic, estado de la produccion, etapas, animatico
+    """
+    return _call("GET", "/api/agent/studio_production", params={"production": production})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_create(name: str, spec: dict[str, Any], settings: Optional[dict[str, Any]] = None,
+                             project: Optional[str] = None) -> dict[str, Any]:
+    """Start a whole production from a spec (lead, song, shots, cut) as one job / crear una produccion.
+
+    spec: {"title", "lead": {"name", "look", "negative"?, "palette"?} or {"character_id"},
+    "reference": {"seed", "count", "crop": "left_third"}?, "world": {"look", "negative"},
+    "song": {"tags", "lyrics", "bpm", "duration", "key", "language", "seed", "count", "take"},
+    "shots": [{"key", "lead": bool, "prompt", "seed", "variants", "clips": [0], "motion": "still"|"move",
+    "motion_prompt"}], "photocards": {"looks": [...]}?, "album": [...]?, "timeline": {"aspects",
+    "qualities", "options", "storyboard": {"Chorus": ["3", "1v2"]}, "finishing"}}. settings:
+    {"animatic": true (pause for review before the expensive clips), "qa": {"enabled", "max_retries"}}.
+    Easier: studio_recipe_get an existing recipe and studio_recipe_run it. Poll with studio_production.
+
+    Keywords: new production, run pipeline, make music video, nueva produccion, lanzar produccion, videoclip
+    """
+    return _call("POST", "/api/agent/studio_production_create",
+                json={"name": name, "spec": spec, "settings": settings, "project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_continue(production: str) -> dict[str, Any]:
+    """Resume or approve a production (after the animatic review, a failure or a cancel) / continuar produccion.
+
+    From awaiting_review it approves the animatic and goes on to the clips and the final cut; from
+    failed/cancelled it resumes where it stopped (finished stills, clips and renders are kept).
+
+    Keywords: continue production, approve animatic, resume, continuar, aprobar animatico, reanudar
+    """
+    return _call("POST", "/api/agent/studio_production_continue", params={"production": production})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_shots(production: str, changes: list[dict[str, Any]], run: bool = True) -> dict[str, Any]:
+    """Change shots of a production before the render: best still, clip on/off, prompt / cambiar planos.
+
+    changes: [{"key": "3", "best": 1}] picks variant 1 as the still; {"key": "3", "clip": false}
+    keeps it a still (no Wan clip); {"key": "3", "prompt": "..."} or {"regenerate": true} makes it
+    again with a new seed; {"motion": "still"|"move"}, {"motion_prompt": "..."}. Only what depends on
+    a changed shot is redone; run=true queues the production (it rebuilds the animatic and pauses
+    again when animatic is on).
+
+    Keywords: change shots, swap still, regenerate shot, cambiar planos, cambiar toma, regenerar plano
+    """
+    return _call("POST", "/api/agent/studio_production_shots", params={"production": production},
+                json={"changes": changes, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_recipe_export(production: str, name: Optional[str] = None) -> dict[str, Any]:
+    """Turn a finished production into a reusable recipe with a {lead} casting slot / exportar receta.
+
+    Every stage, prompt, seed, template and setting is kept; the lead's name, look, negative and
+    palette become placeholders ({lead}, {lead.look}, {lead.negative}, {lead.palette[0]}), described in
+    the `cast` block. warnings list shot prompts that still repeat words of the old lead's look. Works
+    on productions made in the app and by the production script. Saved as data/recipes/<name>.json.
+
+    Keywords: recipe, export recipe, template production, recreate, receta, exportar receta, plantilla
+    """
+    return _call("POST", "/api/agent/studio_recipe_export", json={"production": production, "name": name})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_recipes_list() -> dict[str, Any]:
+    """List saved production recipes and what each can reuse / listar recetas de produccion.
+
+    Each: name, title, original lead, shots (and how many show the lead), clips, and reusable counts
+    (song, frames and clips of the shots without the lead).
+
+    Keywords: recipes, list recipes, production templates, recetas, listar recetas, plantillas
+    """
+    return _call("GET", "/api/agent/studio_recipes_list")
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_recipe_get(recipe: str) -> dict[str, Any]:
+    """Read a recipe: the casting slot, song, world look, shot list, cut and settings / ver una receta.
+
+    Keywords: recipe details, cast slot, shot list, ver receta, detalles de la receta, lista de planos
+    """
+    return _call("GET", "/api/agent/studio_recipe_get", params={"recipe": recipe})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_recipe_run(recipe: str, cast: dict[str, Any], name: Optional[str] = None,
+                      options: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Recreate a production from a recipe with another lead ("recrea esto con X") / ejecutar receta.
+
+    cast: {"lead": "<character id>"} (any project; its canonical reference is copied) or {"lead":
+    {"name", "look", "negative"?, "palette"?, "bio"?}} (a reference sheet is made first). options:
+    {"reuse": ["song", "frames", "clips"] (default all: the song unless its lyrics name the old lead,
+    and the stills/clips of shots without the lead), "title", "project" (default a new project),
+    "settings": {"animatic", "qa"}}. Queues the production job; poll with studio_production.
+
+    Keywords: recreate with, recast, run recipe, new lead, recrea esto con, ejecutar receta, otro protagonista
+    """
+    return _call("POST", "/api/agent/studio_recipe_run",
+                json={"recipe": recipe, "cast": cast, "name": name, "options": options or {}})
+
+
 def main() -> None:
     mcp.run()
 

@@ -26,3 +26,21 @@ Reglas para agentes de código que trabajen en este repositorio.
 9. **Commits**: identidad `Luissalet <luissalet@users.noreply.github.com>`,
    mensajes en inglés con prefijo convencional, sin nombres de otros productos
    ni datos personales.
+
+## Para el asistente que dirige el estudio (MCP)
+
+Qué hacer cuando el usuario pide, con sus palabras:
+
+- **«Recrea esto con X» / "remake this with X"**: la producción de origen es
+  la que acaba de terminar o la que nombre (`studio_productions`). Si aún no
+  es receta, `studio_recipe_export(production)`; lee sus `warnings` (prompts
+  que describen objetos del protagonista anterior) y díselos. Busca a X con
+  `studio_cast(action="list")` en sus proyectos: si existe, `cast={"lead":
+  "<char_id>"}`; si no, pide o redacta un aspecto de un párrafo y usa
+  `cast={"lead": {"name": "X", "look": "..."}}`. Luego
+  `studio_recipe_run(recipe, cast, options={"title": ...})` y sigue el
+  progreso con `studio_production(slug)`. Por defecto reutiliza la canción y
+  los planos sin protagonista; di qué se reutilizó (`notes`).
+- Una producción en `failed` o `cancelled` se reanuda con
+  `studio_production_continue(production)`: no se rehace lo terminado.
+- Nunca describas un fotograma sin mirarlo con `studio_show`.

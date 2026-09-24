@@ -65,8 +65,9 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Estudio de voz | Un registro de motores TTS/STT conectables (Piper más motores de clonación locales opcionales - Coqui XTTS-v2, F5-TTS, Kokoro, Chatterbox - y un flujo de trabajo de TTS por ComfyUI opcional; faster-whisper y opcionalmente openai-whisper para voz a texto), instalados solo cuando se piden, nunca en silencio; una biblioteca de voces a partir de una muestra subida (normalización de volumen, recorte de silencios, un control de calidad de SNR/recorte, una transcripción de referencia automática, preajustes con nombre); transcripción y dictado de clips cortos con marcas de tiempo por palabra y exportación a SRT/VTT/TXT; narración de audiolibros a partir de texto o un archivo `.txt`/`.md`/`.epub` como trabajo en segundo plano reanudable (archivos por capítulo, MP3 o M4B con marcadores de capítulo, un SRT/LRC alineado); doblaje de vídeo (extraer el audio, transcribir con marcas de tiempo, traducir segmento a segmento con el modelo local y un glosario, resintetizar con la voz elegida, ajustar el ritmo al original, volver a montarlo) guardando los archivos de cada etapa para poder corregir y rehacer un solo segmento sin repetir el resto | Los motores de clonación hay que instalarlos (un `pip install` documentado, a veces con GPU); el doblaje necesita un modelo local detrás de Hoard Link para traducir y falla con un mensaje claro si no lo hay; usa solo una voz que tengas derecho a reproducir |
 | Generación de música | `studio_compose` (etiquetas, letra, bpm, tonalidad, idioma) vía ACE-Step 1.5 en ComfyUI (`ComfyMusic`, se activa solo al instalar el checkpoint) o una API HTTP mínima documentada para otro servidor local; las canciones compuestas guardan linaje y se analizan automáticamente | Necesita el checkpoint de ACE-Step en ComfyUI (el single del ejemplo se compuso con ACE-Step 1.5 turbo); las canciones importadas funcionan del todo igualmente |
 | Vídeo | Montaje automático al ritmo (densidad según la energía - según las marcas de estrofa/estribillo de la letra cuando las hay - destellos al inicio de cada frase musical, plano nuevo en cada sección y, si se pide, en cada verso cantado, guiones por sección en orden de historia, sin repetir plano seguido, cubre la canción entera) en un montaje editable; renderizador ffmpeg con movimientos Ken Burns, transiciones de corte, fundido, fundido a negro y destello que mantienen los cortes en el pulso, subtítulos de la letra incrustados con karaoke opcional y la canción mezclada; vista previa a 540p o final a 1080p; los clips de SVD/Wan se convierten a mp4; acabado opcional (gradación de color, grano, viñeta, barras de cine, destellos glitch en los tiempos fuertes, estilo de letra en mayúsculas condensadas para terror) | El Ken Burns es un rango de zoom más una dirección de desplazamiento, no rectángulos libres de inicio y fin; las gradaciones de color son aproximaciones con `eq`/`colorbalance`/`curves`, no una LUT 3D |
-| Control por agentes | 31 herramientas MCP equivalentes a `/api/agent/*` (22 de producción más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
-| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+| Producciones y recetas | Un videoclip entero como un solo trabajo reanudable y con puntos de control (protagonista y su hoja de referencia, canción, fotogramas, sincronización de la letra, clips de Wan, photocards, arte del single, el montaje y sus renders, un `REPORT.md`) que encola sus fotogramas y clips como trabajos normales, así que un pool de render los reparte entre todas las tarjetas; «cambiar planos» (otra variante, clip sí o no, otro prompt u otra semilla) rehace solo lo que depende de ellos. Una producción terminada - hecha en la app o con el script de producción - se convierte en una **receta** con el protagonista abstraído en un hueco de reparto `{lead}`; «Recrea esto con…» la ejecuta con otro personaje del estudio o con una descripción nueva, reutilizando la canción y los fotogramas y clips en los que no sale el protagonista | El script de producción no guarda el ritmo del montaje (pulsos por plano), así que una receta exportada de una ejecución del script usa los valores por defecto; los prompts que describen objetos del protagonista anterior se señalan, no se reescriben |
+| Control por agentes | 40 herramientas MCP equivalentes a `/api/agent/*` (31 de producción más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
+| Interfaz | Estudio en React: Resumen, Reparto, Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas), Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
 *Aplicación real, datos de demostración sintéticos: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
@@ -178,6 +179,10 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_timeline` / `studio_render` | Montaje automático, lectura y edición / renderizado | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Cola, un trabajo (con espera), cancelar | sí / sí / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Buscar recursos, verlos y su receta | sí |
+| `studio_productions` / `studio_production` | Listar producciones / etapas, renders y siguiente paso de una producción | sí |
+| `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Lanzar una producción entera desde una especificación / reanudarla o aprobarla / cambiar planos antes del render | no |
+| `studio_recipe_export` / `studio_recipes_list` / `studio_recipe_get` | Convertir una producción terminada en receta con un hueco `{lead}` / listar recetas / leer una | no / sí / sí |
+| `studio_recipe_run` | «Recrea esto con X»: una producción nueva a partir de una receta con otro protagonista | no |
 | `voice_engines` / `voice_create` / `voice_list` | Estado de los motores y cómo instalarlos / clonar una voz a partir de una muestra / listar voces guardadas | sí / no / sí |
 | `voice_speak` / `voice_transcribe` | Sintetizar una frase / transcribir audio con marcas de tiempo | no / sí |
 | `voice_audiobook` / `voice_dub` | Narrar un texto por capítulos / doblar un vídeo a otro idioma | no |
@@ -253,6 +258,32 @@ de 16 GB:
 .venv\Scripts\python.exe scripts\productions\no_mires_atras.py --backend real --quality final --only timeline --lrc-path C:\Users\<tu-usuario>\Music\no_mires_atras.lrc
 ```
 
+### En la app: producciones y recetas
+
+La misma cadena se ejecuta también dentro de la app como una **producción**
+(`studio_production_create`, o la pantalla **Producciones**): un solo
+trabajo orquestador que encola la hoja de referencia, la canción, cada
+fotograma y cada clip como trabajos normales (un pool de render los hace a
+la vez), guarda cada elemento en `data/productions/<slug>/state.json` y
+escribe un `REPORT.md`. Se reanuda donde se quedó tras un fallo, una
+cancelación o un reinicio; `studio_production_shots` cambia un fotograma por
+otra variante, activa o quita un clip o reescribe un plano, y solo se rehace
+lo que depende de él.
+
+Una producción terminada - también una hecha con el script de arriba - se
+convierte en una **receta**: `studio_recipe_export(production, name)` escribe
+`data/recipes/<name>.json` con cada etapa, prompt, semilla, plantilla y
+ajuste, y el protagonista abstraído en un hueco de reparto `{lead}`
+(`{lead}`, `{lead.look}`, `{lead.negative}`, `{lead.palette[0]}`…), además de
+avisos para los prompts de plano que aún describen objetos del protagonista
+anterior. `studio_recipe_run(recipe, cast={"lead": <id de personaje o {name,
+look}>})` («recrea esto con X», o **Recrea esto con…** en la pantalla
+Producciones) lanza una producción nueva con el hueco relleno: un personaje
+existente conserva su referencia canónica, uno nuevo recibe antes una hoja de
+referencia, y se reutilizan la canción (salvo que su letra nombre al
+protagonista anterior) y los fotogramas y clips de los planos en los que no
+sale (`options.reuse: ["song", "frames", "clips"]`).
+
 ### La ejecución real
 
 El mismo script se ejecutó contra un ComfyUI 0.37 real en tarjetas de 16 GB,
@@ -293,9 +324,10 @@ en unos 7 min.
 ## Arquitectura
 
 FastAPI y SQLite (WAL, una conexión por hilo) con un hilo de trabajo para la
-GPU y otro para la CPU sobre una tabla de trabajos persistente; la lógica
-vive en módulos sin dependencias web (`engine`, `comfy_driver`, `design`,
-`audio`, `timeline`, `video`, `voices`); Hoard Link va incluido para resolver
+GPU, otro para la CPU y un orquestador (producciones enteras) sobre una tabla
+de trabajos persistente; la lógica vive en módulos sin dependencias web
+(`engine`, `comfy_driver`, `design`, `audio`, `timeline`, `video`, `voices`,
+`productions`, `recipes`); Hoard Link va incluido para resolver
 los backends; el adaptador MCP es un script stdio aparte que solo habla HTTP
 con la aplicación.
 
@@ -403,8 +435,11 @@ Python 3.11, 3.12 y 3.13 y compila la interfaz con Node.js 22.
 
 - Elegir la mejor variante es manual (la producción guarda lo elegido); está
   previsto un revisor automático que puntúe cada salida contra la biblia y
-  repita las flojas, y también recetas de producción que se puedan volver a
-  lanzar con otro reparto.
+  repita las flojas.
+- Una receta abstrae el nombre, el aspecto, el negativo, la paleta y la bio
+  del protagonista; los prompts de plano que describen objetos del
+  protagonista anterior («la cabeza de farol») salen como avisos para que los
+  reescribas, no se reescriben solos.
 - `consistent=true` mantiene el diseño de un personaje a partir de su
   referencia canónica; Kontext admite una sola referencia (Qwen-Image 2.1
   hasta 10) y Wan solo hace imagen a vídeo.

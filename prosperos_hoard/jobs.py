@@ -13,7 +13,12 @@ job dict and a `progress(fraction, message=None)` callback and return an
 - `JobCancelled`: raised for it by `progress()` (and by `check_cancel()`)
   once the user or the agent asked to cancel.
 
-Both worker loops are plain `threading.Thread`s (no multiprocessing), which
+Orchestrator jobs (`ORCHESTRATOR_TYPES`: a whole production, a QA pass)
+are stored on the cpu lane but run on a third, dedicated worker: they only
+enqueue GPU/CPU sub-jobs and wait for them, so running them on the cpu
+lane itself would deadlock behind the renders they wait for.
+
+Every worker loop is a plain `threading.Thread` (no multiprocessing), which
 behaves the same on Windows (spawn) and Linux.
 """
 
@@ -34,6 +39,7 @@ Handler = Callable[[dict[str, Any], "ProgressFn"], dict[str, Any]]
 ProgressFn = Callable[..., None]
 
 GPU_WAIT_POLL_S = 15.0
+ORCHESTRATOR_TYPES = ("production", "production_qa")
 GPU_WAIT_TIMEOUT_S = 30 * 60.0
 
 
@@ -85,7 +91,7 @@ class JobQueue:
         self._handlers: dict[str, Handler] = {}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._wake = {"gpu": threading.Event(), "cpu": threading.Event()}
+        self._wake = {"gpu": threading.Event(), "cpu": threading.Event(), "orchestrator": threading.Event()}
         self._gpu_targets: list[Optional[str]] = list(gpu_targets or [None])
         self._bind = bind
         self._target_ready = target_ready
@@ -96,7 +102,8 @@ class JobQueue:
 
     def start(self) -> None:
         self.store.requeue_running_jobs()
-        workers: list[tuple[str, Optional[str]]] = [("gpu", target) for target in self._gpu_targets] + [("cpu", None)]
+        workers: list[tuple[str, Optional[str]]] = ([("gpu", target) for target in self._gpu_targets]
+                                                    + [("cpu", None), ("orchestrator", None)])
         for i, (lane, target) in enumerate(workers):
             name = f"job-worker-{lane}" + (f"-{i}" if lane == "gpu" and i else "")
             t = threading.Thread(target=self._worker_loop, args=(lane, target), daemon=True, name=name)
@@ -115,7 +122,7 @@ class JobQueue:
         if type_ not in self._handlers:
             raise ValueError(f"no handler for job type '{type_}'")
         job = self.store.create_job(type_, lane, params, inputs, project_id)
-        self._wake[lane].set()
+        self._wake["orchestrator" if type_ in ORCHESTRATOR_TYPES else lane].set()
         return job
 
     def cancel(self, job_id: str) -> dict[str, Any]:
@@ -154,7 +161,12 @@ class JobQueue:
         read and the state change happen under one lock, so no two workers
         start the same job."""
         with self._claim_lock:
-            job = self.store.next_queued_job(lane)
+            if lane == "orchestrator":
+                job = self.store.next_queued_job("cpu", types=ORCHESTRATOR_TYPES)
+            elif lane == "cpu":
+                job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES)
+            else:
+                job = self.store.next_queued_job(lane)
             if job is not None:
                 self.store.update_job(job["id"], state="running", started_at=now_iso(), message="starting")
             return job

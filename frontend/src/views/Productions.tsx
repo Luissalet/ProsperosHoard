@@ -1,0 +1,290 @@
+import { useEffect, useMemo, useState } from "react";
+import { BookCopy, Clapperboard, Play, RotateCcw, Save, Users } from "lucide-react";
+import {
+  api, fileUrl, type Character, type Project, type ProductionSummary, type RecipeSummary,
+} from "../api";
+import { useT, type MessageKey } from "../i18n";
+import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
+
+const STATUS_TONE: Record<string, string> = {
+  queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
+};
+const STATUS_KEY: Record<string, MessageKey> = {
+  queued: "stateQueued", running: "stateRunning", awaiting_review: "statusAwaiting", done: "stateDone",
+  failed: "stateFailed", cancelled: "stateCancelled", partial: "statusPartial",
+};
+const STAGE_TONE: Record<string, string> = { done: "ok", partial: "warn", pending: "" };
+
+export function StatusPill({ status }: { status: string }) {
+  const { t } = useT();
+  return <span className={`pill ${STATUS_TONE[status] || ""}`}>{t(STATUS_KEY[status] || "stateQueued")}</span>;
+}
+
+/** "Recreate with…": pick a studio character (any project) or describe a new lead, then run the recipe. */
+export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
+  recipe?: RecipeSummary; fromProduction?: ProductionSummary; onClose: () => void; onStarted: (slug: string) => void;
+}) {
+  const { t } = useT();
+  const app = useApp();
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [chars, setChars] = useState<(Character & { projectName: string })[]>([]);
+  const [charId, setCharId] = useState("");
+  const [name, setName] = useState("");
+  const [look, setLook] = useState("");
+  const [palette, setPalette] = useState("");
+  const [title, setTitle] = useState(recipe?.title || "");
+  const [reuse, setReuse] = useState<Record<string, boolean>>({ song: true, frames: true, clips: true });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.projects().then(async (r) => {
+      const lists = await Promise.all(r.items.map((p: Project) => api.characters(p.id)
+        .then((c) => c.items.map((ch) => ({ ...ch, projectName: p.name }))).catch(() => [])));
+      if (alive) setChars(lists.flat());
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      let recipeName = recipe?.name;
+      if (!recipeName && fromProduction) recipeName = (await api.exportRecipe(fromProduction.slug)).name;
+      if (!recipeName) return;
+      const lead = mode === "existing" ? charId
+        : { name: name.trim(), look: look.trim(), palette: palette.split(",").map((c) => c.trim()).filter(Boolean) };
+      const out = await api.runRecipe(recipeName, {
+        cast: { lead },
+        options: { reuse: Object.entries(reuse).filter(([, v]) => v).map(([k]) => k), ...(title.trim() ? { title: title.trim() } : {}) },
+      });
+      app.toast(t("productionQueued"), "ok");
+      out.notes.forEach((n) => app.toast(n, "info"));
+      app.refreshJobs();
+      onStarted(out.production.slug);
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ready = mode === "existing" ? Boolean(charId) : Boolean(name.trim() && look.trim());
+
+  return (
+    <Modal title={t("recreateWith")} onClose={onClose}
+      footer={<button className="btn primary" disabled={!ready || busy} onClick={start}><Play size={14} /> {t("startProduction")}</button>}>
+      <div className="stack">
+        <div className="segmented">
+          <button className={mode === "existing" ? "on" : ""} onClick={() => setMode("existing")}>{t("existingCharacter")}</button>
+          <button className={mode === "new" ? "on" : ""} onClick={() => setMode("new")}>{t("newLead")}</button>
+        </div>
+        {mode === "existing" ? (
+          <select value={charId} onChange={(e) => setCharId(e.target.value)} aria-label={t("existingCharacter")}>
+            <option value="">-</option>
+            {chars.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.projectName}</option>)}
+          </select>
+        ) : (
+          <>
+            <label className="stack" style={{ gap: 4 }}><span className="small muted">{t("leadName")}</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} /></label>
+            <label className="stack" style={{ gap: 4 }}><span className="small muted">{t("leadLook")}</span>
+              <textarea rows={4} value={look} onChange={(e) => setLook(e.target.value)} /></label>
+            <label className="stack" style={{ gap: 4 }}><span className="small muted">{t("leadPalette")}</span>
+              <input value={palette} onChange={(e) => setPalette(e.target.value)} placeholder="#F28C28, #1B1D22" /></label>
+          </>
+        )}
+        <label className="stack" style={{ gap: 4 }}><span className="small muted">{t("productionTitleField")}</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        <div className="row wrap">
+          <span className="small muted">{t("reuseLabel")}:</span>
+          {(["song", "frames", "clips"] as const).map((k) => (
+            <label key={k} className="row small" style={{ gap: 5 }}>
+              <input type="checkbox" checked={reuse[k]} onChange={(e) => setReuse({ ...reuse, [k]: e.target.checked })} />
+              {t(k === "song" ? "reuseSong" : k === "frames" ? "reuseFrames" : "reuseClips")}
+            </label>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloadList: () => void; onStarted: (slug: string) => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
+  const [recast, setRecast] = useState(false);
+  const active = data && ["queued", "running"].includes(data.status);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(reload, 2500);
+    return () => clearInterval(id);
+  }, [active, reload]);
+
+  if (!data) return <p className="muted">{t("loading")}</p>;
+  const view = data.view;
+  const legacy = Boolean(view.legacy);
+  const act = async (fn: () => Promise<unknown>) => {
+    try { await fn(); reload(); reloadList(); app.refreshJobs(); } catch (e) { app.toast((e as Error).message, "bad"); }
+  };
+  const saveRecipe = () => act(async () => { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); });
+  const renders = view.renders || {};
+  const frames = (data.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
+  const clips = (data.done?.clips?.items || {}) as Record<string, string>;
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <h2>
+          <Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} />
+          <div className="card-actions">
+            {!legacy && ["failed", "cancelled", "awaiting_review"].includes(view.status) && (
+              <button className="btn sm primary" onClick={() => act(() => api.continueProduction(slug))}>
+                <RotateCcw size={13} /> {view.status === "awaiting_review" ? t("continueProduction") : t("resumeProduction")}
+              </button>
+            )}
+            {view.project_id && <button className="btn sm ghost" onClick={() => app.setProject(view.project_id!)}>{t("openProject")}</button>}
+            <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>
+            <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>
+          </div>
+        </h2>
+        {legacy && <p className="small muted">{t("legacyNote")}</p>}
+        {data.recipe && <p className="small muted">{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
+        {data.message && <p className={`small ${view.status === "failed" ? "err-text" : "muted"}`}>{data.message}</p>}
+        {view.stages && (
+          <div className="row wrap" style={{ gap: 6 }}>
+            {Object.entries(view.stages).map(([stage, st]) => (
+              <span key={stage} className={`pill ${STAGE_TONE[st] || ""}${data.stage === stage && active ? " accent" : ""}`}>
+                {t((`stage_${stage}`) as MessageKey)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {Object.keys(renders).length > 0 && (
+        <div className="card">
+          <h2>{t("finalCut")}</h2>
+          <div className="row wrap" style={{ alignItems: "flex-start" }}>
+            {Object.entries(renders).map(([aspect, byQuality]) => {
+              const id = byQuality.final || byQuality.preview;
+              return id ? (
+                <div key={aspect} className="stack" style={{ gap: 4 }}>
+                  <span className="small muted">{aspect}</span>
+                  <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
+                    <video src={fileUrl(id)} controls preload="metadata" />
+                  </div>
+                </div>
+              ) : null;
+            })}
+          </div>
+        </div>
+      )}
+      {!legacy && (data.spec.shots || []).length > 0 && (
+        <div className="card">
+          <h2>{t("shotsTitle")}</h2>
+          <div className="thumb-grid">
+            {(data.spec.shots || []).map((shot) => {
+              const best = frames[shot.key]?.best;
+              return (
+                <button key={shot.key} className="tile" title={shot.prompt} onClick={() => best && app.openAsset(best, frames[shot.key]?.variants || [best])}>
+                  {best ? <img src={`/api/assets/${best}/thumb`} alt="" loading="lazy" /> : <div className="media-icon"><Clapperboard size={22} /></div>}
+                  <div className="tile-badges">
+                    <span className="pill badge-dark">{shot.key}</span>
+                    {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
+                    {Object.keys(clips).some((k) => k === shot.key || k.startsWith(`${shot.key}v`)) && <span className="pill badge-dark">{t("clipBadge")}</span>}
+                  </div>
+                  <div className="tile-meta"><span className="ellipsis grow">{shot.prompt}</span></div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {!legacy && data.lineage?.length > 0 && (
+        <div className="card">
+          <h2>{t("lineageTitle")}</h2>
+          <ul className="small" style={{ margin: 0, paddingLeft: 18, maxHeight: 220, overflow: "auto" }}>
+            {data.lineage.slice(-40).reverse().map((e, i) => (
+              <li key={i}><span className="muted mono">{e.at.slice(11, 19)}</span> <strong>{e.stage}</strong> {e.event}
+                {e.key ? ` · ${String(e.key)}` : ""}{e.reason ? ` · ${String(e.reason)}` : ""}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recast && <RecastModal fromProduction={view} onClose={() => setRecast(false)} onStarted={(s) => { setRecast(false); onStarted(s); }} />}
+    </div>
+  );
+}
+
+function RecipesCard({ onStarted }: { onStarted: (slug: string) => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const { data } = useAsync(() => api.recipes(), [app.dataVersion]);
+  const [running, setRunning] = useState<RecipeSummary | null>(null);
+  const items = data?.items || [];
+  return (
+    <div className="card">
+      <h2><BookCopy size={16} /> {t("recipesTitle")}</h2>
+      <p className="small muted" style={{ marginTop: -6 }}>{t("recipesLead")}</p>
+      {items.length === 0 ? <p className="small muted">{t("noRecipes")}</p> : (
+        <div className="stack" style={{ gap: 8 }}>
+          {items.map((r) => (
+            <div key={r.name} className="row" style={{ justifyContent: "space-between" }}>
+              <div className="small">
+                <strong>{r.title || r.name}</strong> <span className="mono muted">{r.name}</span>
+                <div className="muted">{t("shotsCount", { n: r.shots, lead: r.lead_shots })} · {r.original_lead}
+                  {r.warnings > 0 && <> · {t("recipeWarnings", { n: r.warnings })}</>}</div>
+              </div>
+              <button className="btn sm" onClick={() => setRunning(r)}><Users size={13} /> {t("runWith")}</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {running && <RecastModal recipe={running} onClose={() => setRunning(null)} onStarted={(s) => { setRunning(null); onStarted(s); }} />}
+    </div>
+  );
+}
+
+export function ProductionsView() {
+  const { t, lang } = useT();
+  const app = useApp();
+  const { data, reload } = useAsync(() => api.productions(), [app.dataVersion]);
+  const items = useMemo(() => data?.items || [], [data]);
+  const selected = app.route.arg || items[0]?.slug;
+  const open = (slug: string) => { app.go("productions", slug); reload(); };
+
+  return (
+    <>
+      <div className="page-head">
+        <div><h1>{t("productionsTitle")}</h1><p>{t("productionsLead")}</p></div>
+      </div>
+      <div className="productions-grid">
+        <div className="stack">
+          <div className="card" style={{ padding: 6 }}>
+            {items.length === 0 ? <Empty icon={<Clapperboard size={30} />} text={t("noProductions")} /> : (
+              <table className="list">
+                <tbody>
+                  {items.map((p) => (
+                    <tr key={p.slug} onClick={() => open(p.slug)} style={{ cursor: "pointer" }} className={p.slug === selected ? "selected" : ""}>
+                      <td>
+                        <strong>{p.name}</strong>
+                        <div className="mono muted small">{p.slug}</div>
+                      </td>
+                      <td><StatusPill status={p.status} /></td>
+                      <td className="small muted nowrap">{timeAgo(p.updated_at, lang)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <RecipesCard onStarted={open} />
+        </div>
+        <div>
+          {selected ? <ProductionDetail key={selected} slug={selected} reloadList={reload} onStarted={open} />
+            : <p className="muted">{t("pickProduction")}</p>}
+        </div>
+      </div>
+    </>
+  );
+}

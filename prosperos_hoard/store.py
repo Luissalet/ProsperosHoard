@@ -761,11 +761,20 @@ class Store:
         row = self.conn.execute("SELECT cancel_requested, state FROM jobs WHERE id=?", (job_id,)).fetchone()
         return bool(row and (row["cancel_requested"] or row["state"] == "cancelled"))
 
-    def next_queued_job(self, lane: str) -> Optional[dict[str, Any]]:
-        row = self.conn.execute(
-            "SELECT id FROM jobs WHERE lane=? AND state='queued' ORDER BY created_at ASC, id ASC LIMIT 1",
-            (lane,),
-        ).fetchone()
+    def next_queued_job(self, lane: str, types: Optional[tuple[str, ...]] = None,
+                        exclude_types: Optional[tuple[str, ...]] = None) -> Optional[dict[str, Any]]:
+        """The oldest queued job of a lane; `types` keeps only those job
+        types, `exclude_types` skips them (the orchestrator worker takes
+        production jobs stored on the cpu lane, the cpu worker leaves them)."""
+        sql = "SELECT id FROM jobs WHERE lane=? AND state='queued'"
+        params: list[Any] = [lane]
+        if types:
+            sql += f" AND type IN ({','.join('?' * len(types))})"
+            params += list(types)
+        if exclude_types:
+            sql += f" AND type NOT IN ({','.join('?' * len(exclude_types))})"
+            params += list(exclude_types)
+        row = self.conn.execute(sql + " ORDER BY created_at ASC, id ASC LIMIT 1", params).fetchone()
         return self.get_job(row["id"]) if row else None
 
     # ------------------------------------------------------- studio voices
