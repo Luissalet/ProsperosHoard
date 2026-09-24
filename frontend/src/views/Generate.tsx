@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Columns2, Dices, ImagePlus, Loader2, Lock, LockOpen, Upload, Wand2, X } from "lucide-react";
-import { api, fileUrl, thumbUrl, type Asset, type Character, type Composed, type Job, type WorkflowSpec } from "../api";
+import { api, ENGINE_NAMES, fileUrl, IMAGE_ENGINES, thumbUrl, type Asset, type Character, type Composed, type ImageEngine, type Job, type WorkflowSpec } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
 
@@ -9,6 +9,21 @@ const ASPECTS: Record<string, [number, number]> = {
 };
 const SAMPLERS = ["dpmpp_2m", "dpmpp_2m_sde", "euler", "euler_ancestral", "dpmpp_sde", "heun", "uni_pc", "ddim"];
 const SCHEDULERS = ["karras", "normal", "exponential", "sgm_uniform", "simple"];
+// with a reference image, a txt2img template becomes its engine's edit template
+const TXT2IMG_TO_EDIT: Record<string, string> = {
+  sdxl_txt2img: "sdxl_img2img", qwen21_txt2img: "qwen21_edit", flux_schnell_txt2img: "flux_kontext_edit",
+};
+// built-in image templates that need more than a prompt (a mask, a source recipe) stay in the lightbox
+const NOT_FOR_GENERATE = new Set(["sdxl_inpaint", "sdxl_hires"]);
+// the sampler panel only means something for the classic Stable Diffusion workflows
+const CLASSIC_VRAM = new Set(["sdxl", "sd15"]);
+
+function readSession(key: string): string {
+  try { return sessionStorage.getItem(key) || ""; } catch { return ""; }
+}
+function writeSession(key: string, value: string) {
+  try { sessionStorage.setItem(key, value); } catch { /* storage disabled */ }
+}
 
 function highlight(text: string, names: string[], fragments: string[]) {
   // mark the inlined character fragments inside the final prompt
@@ -36,11 +51,15 @@ export function GenerateView() {
   const backend = useAsync(() => api.backend(), []);
   const workflows = useAsync(() => api.workflows(), []);
   const recent = useAsync(() => api.assets(pid, { source: "generated", kind: "image", limit: 24 }), [pid, app.dataVersion]);
+  const project = useAsync(() => api.project(pid), [pid]);
 
-  const [prompt, setPrompt] = useState(() => sessionStorage.getItem(`prospero.prompt.${pid}`) || "");
+  const [prompt, setPrompt] = useState(() => readSession(`prospero.prompt.${pid}`));
   const [negative, setNegative] = useState("");
   const [style, setStyle] = useState<string>("");
-  const [template, setTemplate] = useState("sdxl_txt2img");
+  // "" = let the server pick the template from the engine (the project's, or `engine` below)
+  const [template, setTemplate] = useState("");
+  const [engine, setEngine] = useState<"" | ImageEngine>("");
+  const [consistent, setConsistent] = useState(false);
   const [checkpoint, setCheckpoint] = useState("");
   const [aspect, setAspect] = useState("1:1");
   const [steps, setSteps] = useState(30);
@@ -62,14 +81,18 @@ export function GenerateView() {
   const [compare, setCompare] = useState<string[] | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { sessionStorage.setItem(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
+  useEffect(() => { writeSession(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
 
-  // live final-prompt preview
+  // live final-prompt preview (a slow answer for an older prompt never replaces a newer one)
   const dPrompt = useDebounced(prompt, 300);
   const dNegative = useDebounced(negative, 300);
   useEffect(() => {
     if (!dPrompt.trim()) { setComposed(null); return; }
-    api.compose(pid, dPrompt, dNegative, style || null).then(setComposed).catch(() => setComposed(null));
+    let alive = true;
+    api.compose(pid, dPrompt, dNegative, style || null)
+      .then((c) => { if (alive) setComposed(c); })
+      .catch(() => { if (alive) setComposed(null); });
+    return () => { alive = false; };
   }, [dPrompt, dNegative, style, pid]);
 
   // style preset defaults fill the parameter panel
@@ -111,21 +134,34 @@ export function GenerateView() {
     }, 0);
   };
 
+  const { trackJobs } = app;
+  useEffect(() => { trackJobs(queuedIds); }, [queuedIds, trackJobs]);
   const myJobs: Job[] = queuedIds.map((id) => app.jobs.find((j) => j.id === id)).filter(Boolean) as Job[];
   const comfy = backend.data?.comfy;
   const checkpoints = comfy?.checkpoints || [];
+  const builtins: WorkflowSpec[] = (workflows.data?.builtin || []).filter((w) => w.kind === "image" && !NOT_FOR_GENERATE.has(w.template));
   const customs: WorkflowSpec[] = workflows.data?.custom || [];
+  const projectEngine = (project.data?.image_engine || "auto") as ImageEngine;
+  const engineName = (e: ImageEngine) => (e === "auto" ? t("engineAuto") : ENGINE_NAMES[e]);
+  const spec = [...builtins, ...customs].find((w) => w.template === template);
+  // the sampler panel applies to an explicit SD workflow, or to "auto" with SDXL forced
+  const classic = template ? CLASSIC_VRAM.has(spec?.vram_class || "") : (engine || projectEngine) === "sdxl";
 
   const queue = async () => {
+    if (busy || !prompt.trim()) return;
     setBusy(true);
     const [w, h] = ASPECTS[aspect];
     try {
-      const r = await api.generate(pid, {
-        prompt, negative: negative || null, style: style || null, width: w, height: h, steps, cfg, sampler, scheduler,
-        seed, count, template: reference ? (template === "sdxl_txt2img" ? "sdxl_img2img" : template) : template,
-        checkpoint: checkpoint || null, reference_asset_id: reference?.id || null,
-        strength: reference || useCharRef ? strength : null, use_character_reference: useCharRef,
-      });
+      const body: Record<string, unknown> = {
+        prompt, negative: negative || null, style: style || null, width: w, height: h,
+        seed, count, checkpoint: checkpoint || null, reference_asset_id: reference?.id || null,
+        strength: reference || useCharRef ? strength : null, use_character_reference: useCharRef, consistent,
+      };
+      if (template) body.template = reference || consistent ? TXT2IMG_TO_EDIT[template] || template : template;
+      if (engine) body.engine = engine;
+      // tuned per engine on the server otherwise (Flux schnell wants 4 steps, not SDXL's 30)
+      if (classic) Object.assign(body, { steps, cfg, sampler, scheduler });
+      const r = await api.generate(pid, body);
       setQueuedIds((ids) => [r.job.id, ...ids].slice(0, 12));
       app.refreshJobs();
       if (!seedLocked) setSeed(Math.floor(Math.random() * 2 ** 31));
@@ -141,7 +177,7 @@ export function GenerateView() {
     e.preventDefault();
     setDragOver(false);
     const id = e.dataTransfer.getData("text/prospero-asset");
-    if (id) { setReference(await api.asset(id)); return; }
+    if (id) { api.asset(id).then(setReference).catch((err) => app.toast((err as Error).message, "bad")); return; }
     const file = e.dataTransfer.files?.[0];
     if (file) {
       try { setReference(await api.upload(pid, file)); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); }
@@ -176,7 +212,7 @@ export function GenerateView() {
                     if (e.key === "ArrowUp") { e.preventDefault(); setMenu({ ...menu, index: (menu.index - 1 + suggestions.length) % suggestions.length }); }
                     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(suggestions[menu.index]); }
                     if (e.key === "Escape") setMenu(null);
-                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) queue();
+                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); queue(); }
                 }} />
               {menu && suggestions.length > 0 && (
                 <div className="mention-menu">
@@ -253,11 +289,16 @@ export function GenerateView() {
 
         <aside className="card stack" style={{ position: "sticky", top: 0 }}>
           <div className="params">
+            <label className="field" style={{ gridColumn: "1 / -1" }}>{t("imageEngine")}
+              <select value={engine} onChange={(e) => setEngine(e.target.value as "" | ImageEngine)} disabled={Boolean(template)}>
+                <option value="">{t("engineDefault", { engine: engineName(projectEngine) })}</option>
+                {IMAGE_ENGINES.map((x) => <option key={x} value={x}>{engineName(x)}</option>)}
+              </select>
+            </label>
             <label className="field" style={{ gridColumn: "1 / -1" }}>{t("template")}
               <select value={template} onChange={(e) => setTemplate(e.target.value)}>
-                <option value="sdxl_txt2img">SDXL · txt2img</option>
-                <option value="sdxl_img2img">SDXL · img2img</option>
-                <option value="sd15_txt2img">SD 1.5 · txt2img (low VRAM)</option>
+                <option value="">{t("templateAuto")}</option>
+                {builtins.map((w) => <option key={w.template} value={w.template}>{w.name || w.template}</option>)}
                 {customs.map((w) => <option key={w.template} value={w.template}>{w.name || w.template}</option>)}
               </select>
             </label>
@@ -273,12 +314,16 @@ export function GenerateView() {
               </div>
               <span className="hint mono block">{ASPECTS[aspect][0]} x {ASPECTS[aspect][1]}</span>
             </div>
-            <label className="field">{t("steps")}<input type="number" min={1} max={150} value={steps} onChange={(e) => setSteps(Number(e.target.value))} /></label>
-            <label className="field">{t("cfg")}<input type="number" min={0} max={30} step={0.5} value={cfg} onChange={(e) => setCfg(Number(e.target.value))} /></label>
-            <label className="field">{t("sampler")}
-              <select value={sampler} onChange={(e) => setSampler(e.target.value)}>{SAMPLERS.map((s) => <option key={s}>{s}</option>)}</select></label>
-            <label className="field">{t("scheduler")}
-              <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>{SCHEDULERS.map((s) => <option key={s}>{s}</option>)}</select></label>
+            {classic ? (
+              <>
+                <label className="field">{t("steps")}<input type="number" min={1} max={150} value={steps} onChange={(e) => setSteps(Number(e.target.value))} /></label>
+                <label className="field">{t("cfg")}<input type="number" min={0} max={30} step={0.5} value={cfg} onChange={(e) => setCfg(Number(e.target.value))} /></label>
+                <label className="field">{t("sampler")}
+                  <select value={sampler} onChange={(e) => setSampler(e.target.value)}>{SAMPLERS.map((s) => <option key={s}>{s}</option>)}</select></label>
+                <label className="field">{t("scheduler")}
+                  <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>{SCHEDULERS.map((s) => <option key={s}>{s}</option>)}</select></label>
+              </>
+            ) : <span className="muted small" style={{ gridColumn: "1 / -1", fontSize: 12 }}>{t("samplerHint")}</span>}
             <div className="field" style={{ gridColumn: "1 / -1" }}>{t("seed")}
               <div className="seed-row">
                 <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} className="mono" />
@@ -295,11 +340,12 @@ export function GenerateView() {
               onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
               {reference ? <img src={thumbUrl(reference)} alt="" /> : <ImagePlus size={22} />}
               <span className="grow">{reference ? reference.name : t("referenceDrop")}</span>
-              {reference ? <button className="btn sm icon ghost" onClick={() => setReference(null)}><X size={14} /></button>
-                : <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
+              {reference ? <button className="btn sm icon ghost" onClick={() => setReference(null)} aria-label={t("removeReference")} title={t("removeReference")}><X size={14} /></button>
+                : <button className="btn sm" onClick={() => setPicking(true)} aria-label={t("pickImage")} title={t("pickImage")}><Upload size={14} /></button>}
             </div>
           </div>
-          <label className="check"><input type="checkbox" checked={useCharRef} onChange={(e) => setUseCharRef(e.target.checked)} /> {t("useCharacterRef")}</label>
+          <label className="check"><input type="checkbox" checked={consistent} onChange={(e) => setConsistent(e.target.checked)} /> {t("consistent")}</label>
+          {!consistent && <label className="check"><input type="checkbox" checked={useCharRef} onChange={(e) => setUseCharRef(e.target.checked)} /> {t("useCharacterRef")}</label>}
           {(reference || useCharRef) && (
             <label className="field">{t("strength")} <span className="mono">{strength.toFixed(2)}</span>
               <input type="range" min={0.1} max={1} step={0.05} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /></label>

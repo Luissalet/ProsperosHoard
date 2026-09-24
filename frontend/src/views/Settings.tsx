@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { Save, Upload } from "lucide-react";
-import { api, type WorkflowSpec } from "../api";
+import { api, type BackendStatus, type WorkflowSpec } from "../api";
 import { useT } from "../i18n";
 import { useApp, useAsync } from "../components/ui";
+
+// The configured folders, as saved. `import_roots` also holds the built-in ones
+// (home, data/inbox) resolved and deduplicated, so slicing it by position can
+// drop a user folder; servers that predate `import_roots_user` fall back to that.
+function userRoots(s: BackendStatus): string[] {
+  return s.overrides.import_roots_user ?? s.overrides.import_roots.slice(2);
+}
+function builtinRoots(s: BackendStatus): string[] {
+  if (!s.overrides.import_roots_user) return s.overrides.import_roots.slice(0, 2);
+  const mine = new Set(s.overrides.import_roots_user);
+  return s.overrides.import_roots.filter((r) => !mine.has(r));
+}
 
 export function SettingsView() {
   const { t } = useT();
@@ -20,7 +32,7 @@ export function SettingsView() {
     if (!s) return;
     setFaustusUrl(s.overrides.faustus_url || "");
     setComfyUrl(s.demo ? "" : s.overrides.comfy_url || "");
-    setRoots(s.overrides.import_roots.slice(2).join("\n"));
+    setRoots(userRoots(s).join("\n"));
   }, [status.data]);
 
   const save = async () => {
@@ -70,7 +82,7 @@ export function SettingsView() {
           <label className="field">{t("importRoots")}
             <textarea value={roots} onChange={(e) => setRoots(e.target.value)} rows={3} className="mono" placeholder="D:\\Music" />
             <span className="hint">{t("importRootsHint")}</span>
-            {s && <span className="hint mono">{s.overrides.import_roots.slice(0, 2).join(" · ")}</span>}</label>
+            {s && <span className="hint mono">{builtinRoots(s).join(" · ")}</span>}</label>
           <button className="btn primary" onClick={save} disabled={saving}><Save size={15} /> {t("save")}</button>
         </div>
         <div className="card stack">

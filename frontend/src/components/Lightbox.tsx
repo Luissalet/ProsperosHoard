@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Dices, Download, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Wand2, X } from "lucide-react";
 import { api, fileUrl, type Asset, type Board } from "../api";
 import { useT } from "../i18n";
-import { Stars, useApp, useAsync } from "./ui";
+import { Stars, useApp, useAsync, useDialogFocus } from "./ui";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
@@ -16,6 +16,8 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   const [editPrompt, setEditPrompt] = useState("");
   const [strength, setStrength] = useState(0.55);
   const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogFocus(ref);
   const boards = useAsync(() => (asset ? api.boards(asset.project_id) : Promise.resolve({ items: [] as Board[] })), [asset?.project_id]);
 
   useEffect(() => {
@@ -76,7 +78,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
     }
   };
 
-  if (!asset) return <div className="overlay" onClick={onClose} />;
+  if (!asset) return <div ref={ref} className="overlay" onClick={onClose} role="dialog" aria-modal="true" aria-busy="true" aria-label={t("loading")} tabIndex={-1} />;
   const recipe = asset.recipe;
   const params = (recipe?.params || {}) as Record<string, unknown>;
   const fromComfy = recipe?.backend === "comfyui";
@@ -88,7 +90,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   ];
 
   return (
-    <div className="overlay" role="dialog" aria-label={asset.name || asset.id}>
+    <div ref={ref} className="overlay" role="dialog" aria-modal="true" aria-label={asset.name || asset.id} tabIndex={-1}>
       <div className="lightbox-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="lightbox-tools">
           <button className="btn sm" onClick={onClose}><X size={15} /> {t("close")}</button>
@@ -98,8 +100,8 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
           <a className="btn sm" href={`${fileUrl(asset.id)}?download=true`}><Download size={15} /> {t("download")}</a>
         </div>
         {list.length > 1 && <>
-          <button className="btn icon lightbox-nav prev" onClick={() => move(-1)} aria-label="previous"><ChevronLeft size={18} /></button>
-          <button className="btn icon lightbox-nav next" onClick={() => move(1)} aria-label="next"><ChevronRight size={18} /></button>
+          <button className="btn icon lightbox-nav prev" onClick={() => move(-1)} aria-label={t("previous")} title={t("previous")}><ChevronLeft size={18} /></button>
+          <button className="btn icon lightbox-nav next" onClick={() => move(1)} aria-label={t("next")} title={t("next")}><ChevronRight size={18} /></button>
         </>}
         {asset.kind === "image" && <img src={fileUrl(asset.id)} alt={asset.name || ""} className={zoom ? "zoomed" : ""} onClick={() => setZoom(!zoom)} />}
         {asset.kind === "video" && <video src={fileUrl(asset.id)} controls autoPlay loop />}

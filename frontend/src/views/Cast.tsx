@@ -37,7 +37,8 @@ export function CastView() {
     const fields = {
       role: draft.role, bio: draft.bio, prompt: draft.prompt, negative: draft.negative,
       palette: draft.palette.split(/[\s,]+/).filter(Boolean),
-      canonical_asset_id: draft.canonical_asset_id || undefined,
+      // explicit null on an edit clears the canonical image; a new character just omits it
+      canonical_asset_id: draft.canonical_asset_id || (draft.id ? null : undefined),
       ...(draft.canonical_asset_id && draft.crop !== "full" ? { canonical_crop: draft.crop } : {}),
       voice: { backend: draft.voice_backend, voice_id: draft.voice_id, speed: draft.speed },
     } as Partial<Character> & { canonical_crop?: string };
@@ -80,7 +81,7 @@ export function CastView() {
     setRendering(g.id);
     try {
       const r = await api.photocardSet(pid, g.id);
-      app.toast(`${t("rendered", { name: `${r.front_ids.length * 2} photocards` })}${r.skipped_members?.length ? ` · ${r.skipped_members.join(", ")}?` : ""}`, "ok");
+      app.toast(`${t("rendered", { name: t("photocardsN", { n: r.front_ids.length * 2 }) })}${r.skipped_members?.length ? ` · ${r.skipped_members.join(", ")}?` : ""}`, "ok");
       app.bump();
       app.openAsset(r.contact_sheet_id, [r.contact_sheet_id, ...r.front_ids.flatMap((f, i) => [f, r.back_ids[i]])]);
     } catch (e) {
@@ -202,7 +203,7 @@ export function CastView() {
                   ? <img src={thumbUrl({ id: draft.canonical_asset_id, thumb_path: "x", kind: "image" })} alt="" />
                   : <ImagePlus size={22} />}
                 <button className="btn sm" onClick={() => setPicking(true)}>{t("pickReference")}</button>
-                {draft.canonical_asset_id && <button className="btn sm ghost" onClick={() => setDraft({ ...draft, canonical_asset_id: null })}><X size={14} /></button>}
+                {draft.canonical_asset_id && <button className="btn sm ghost" onClick={() => setDraft({ ...draft, canonical_asset_id: null })} aria-label={t("remove")} title={t("remove")}><X size={14} /></button>}
               </div>
               {draft.canonical_asset_id && (
                 <label className="field" style={{ marginTop: 8 }}>{t("canonicalCrop")} <span className="hint">{t("cropHint")}</span>

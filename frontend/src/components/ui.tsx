@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { AudioLines, FileText, Film, Heart, Star, Type, X } from "lucide-react";
+import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
+import { AudioLines, FileText, Film, Heart, RefreshCw, Star, Type, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type Job } from "../api";
 import { useT, type MessageKey } from "../i18n";
 
@@ -16,6 +16,8 @@ export interface AppCtx {
   openAsset: (assetId: string, list?: string[]) => void;
   jobs: Job[];
   refreshJobs: () => void;
+  /** Keep these jobs in `jobs` even once they fall out of the recent/active window. */
+  trackJobs: (ids: (string | null | undefined)[]) => void;
   demo: boolean;
   dataVersion: number;
   bump: () => void;
@@ -41,7 +43,74 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | 
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
-  return { data, error, loading, reload: () => setTick((x) => x + 1) };
+  // a stable identity, so effects and intervals that depend on it are not reset every render
+  const reload = useCallback(() => setTick((x) => x + 1), []);
+  return { data, error, loading, reload };
+}
+
+/** A job by id from the app-wide poll; the id is tracked so it stays there. */
+export function useTrackedJob(jobId: string | null | undefined): Job | null {
+  const app = useApp();
+  const { trackJobs, refreshJobs } = app;
+  useEffect(() => {
+    if (!jobId) return;
+    trackJobs([jobId]);
+    refreshJobs();
+  }, [jobId, trackJobs, refreshJobs]);
+  return (jobId && app.jobs.find((j) => j.id === jobId)) || null;
+}
+
+function readSession(key: string): string | null {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+function writeSession(key: string, value: string | null) {
+  try {
+    if (value === null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, value);
+  } catch { /* storage disabled */ }
+}
+
+/** useState mirrored to sessionStorage (survives tab switches and navigation; storage errors are ignored). */
+export function useSessionState(key: string, initial: string | null = null): [string | null, (v: string | null) => void] {
+  const [value, setValue] = useState<string | null>(() => readSession(key) ?? initial);
+  const set = useCallback((v: string | null) => { setValue(v); writeSession(key, v); }, [key]);
+  return [value, set];
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), video[controls], audio[controls], [tabindex]:not([tabindex="-1"])';
+
+// open dialogs, innermost last: only the top one traps Tab and answers Escape
+const dialogStack: RefObject<HTMLElement | null>[] = [];
+export const isTopDialog = (el: HTMLElement | null) => !dialogStack.length || dialogStack[dialogStack.length - 1].current === el;
+
+/** Dialog focus handling: move focus in on open, keep Tab inside, give it back on close. */
+export function useDialogFocus(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    dialogStack.push(ref);
+    const root = ref.current;
+    if (root && !root.contains(document.activeElement)) root.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      const el = ref.current;
+      if (e.key !== "Tab" || !el || dialogStack[dialogStack.length - 1] !== ref) return;
+      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((x) => x.offsetParent !== null || x === document.activeElement);
+      if (!items.length) { e.preventDefault(); el.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !el.contains(active) || active === el)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (active === last || !el.contains(active))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const at = dialogStack.indexOf(ref);
+      if (at >= 0) dialogStack.splice(at, 1);
+      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+    };
+    // mount/unmount only: the dialog keeps its focus while its content changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }
 
 export function useDebounced<T>(value: T, ms: number): T {
@@ -65,9 +134,56 @@ export function Empty({ icon, text, children }: { icon: ReactNode; text: string;
   );
 }
 
+/** A failed load with a way to try again (instead of "Loading..." forever). */
+export function ErrorNote({ error, onRetry }: { error: string; onRetry?: () => void }) {
+  const { t } = useT();
+  return (
+    <div className="row wrap" role="alert">
+      <span className="err-text">{t("loadError", { error })}</span>
+      {onRetry && <button className="btn sm" onClick={onRetry}><RefreshCw size={13} /> {t("retry")}</button>}
+    </div>
+  );
+}
+
+/** Loading / error / content for one useAsync result. */
+export function Loadable<T>({ state, children }: {
+  state: { data: T | null; error: string | null; reload: () => void }; children: (data: T) => ReactNode;
+}) {
+  const { t } = useT();
+  if (state.data !== null) return <>{children(state.data)}</>;
+  if (state.error) return <ErrorNote error={state.error} onRetry={state.reload} />;
+  return <p className="muted">{t("loading")}</p>;
+}
+
+function CrashNote({ error, onReset }: { error: Error; onReset: () => void }) {
+  const { t } = useT();
+  return (
+    <div className="card stack" role="alert">
+      <h2>{t("viewCrashed")}</h2>
+      <p className="err-text mono">{error.message}</p>
+      <div className="row">
+        <button className="btn primary sm" onClick={onReset}><RefreshCw size={13} /> {t("reloadView")}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Keeps one broken view from blanking the whole app. */
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error(error, info.componentStack); }
+  render() {
+    if (this.state.error) return <CrashNote error={this.state.error} onReset={() => this.setState({ error: null })} />;
+    return this.props.children;
+  }
+}
+
 /** Two-step confirmation: first click arms, second click acts (no window.confirm). */
-export function ConfirmButton({ onConfirm, children, className = "btn sm danger", armedLabel }: {
+export function ConfirmButton({ onConfirm, children, className = "btn sm danger", armedLabel, label }: {
   onConfirm: () => void; children: ReactNode; className?: string; armedLabel?: string;
+  /** accessible name, for icon-only buttons */
+  label?: string;
 }) {
   const { t } = useT();
   const [armed, setArmed] = useState(false);
@@ -79,6 +195,8 @@ export function ConfirmButton({ onConfirm, children, className = "btn sm danger"
   return (
     <button
       className={`${className}${armed ? " armed" : ""}`}
+      aria-label={armed ? undefined : label}
+      title={label}
       onClick={() => { if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}
     >
       {armed ? armedLabel || t("confirm") : children}
@@ -122,17 +240,20 @@ export function Progress({ value, waiting }: { value: number; waiting?: boolean 
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
 }) {
+  const { t } = useT();
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogFocus(ref);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && isTopDialog(ref.current)) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
     <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" style={wide ? { width: "min(980px, 100%)" } : undefined} role="dialog" aria-label={title}>
+      <div ref={ref} tabIndex={-1} className="modal" style={wide ? { width: "min(980px, 100%)" } : undefined} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="btn ghost icon" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="close"><X size={17} /></button>
+          <button className="btn ghost icon" style={{ marginLeft: "auto" }} onClick={onClose} aria-label={t("close")} title={t("close")}><X size={17} /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}

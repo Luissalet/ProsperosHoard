@@ -97,19 +97,35 @@ export function AudioView() {
   useEffect(() => { if (!songId && songList[0]) setSongId(songList[0].id); }, [songList, songId]);
   useEffect(() => {
     if (!songId) return;
-    api.asset(songId).then(setSong);
+    let alive = true;
+    api.asset(songId).then((a) => { if (alive) setSong(a); }).catch((e) => { if (alive) app.toast((e as Error).message, "bad"); });
     setPlaying(false);
     setTime(0);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songId]);
 
+  // `loadedLyricsId` says whose text the editor holds: until the chosen sheet has
+  // loaded, saving is off, so one sheet's text can never be written into another
+  const [loadedLyricsId, setLoadedLyricsId] = useState<string | null>("");
   useEffect(() => {
-    if (!lyricsId) { setLines([]); setRawText(""); return; }
+    setTiming(null);
+    if (!lyricsId) { setLines([]); setRawText(""); setLoadedLyricsId(""); return; }
+    let alive = true;
+    setLines([]);
+    setRawText("");
+    setLoadedLyricsId(null);
     api.lyrics(lyricsId).then((l) => {
+      if (!alive) return;
       setRawText(l.text);
       const timed = l.all_lines || l.lines;
       setLines(timed.length ? timed : l.text.split("\n").filter((x) => x.trim()).map((text) => ({ time_s: null, text })));
-    });
+      setLoadedLyricsId(lyricsId);
+    }).catch((e) => { if (alive) app.toast((e as Error).message, "bad"); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lyricsId]);
+  const lyricsReady = loadedLyricsId === lyricsId;
   useEffect(() => { if (!lyricsId && lyricsList.data?.items[0]) setLyricsId(lyricsList.data.items[0].id); }, [lyricsList.data, lyricsId]);
 
   const analyse = async (force: boolean) => {
@@ -264,7 +280,7 @@ export function AudioView() {
                 </select>
               </div>
               {timing === null ? (
-                <textarea value={lines.length && lines.some((l) => l.time_s !== null) ? lrc || rawText : rawText} rows={7} className="mono"
+                <textarea value={lines.length && lines.some((l) => l.time_s !== null) ? lrc || rawText : rawText} rows={7} className="mono" readOnly={!lyricsReady}
                   onChange={(e) => { setRawText(e.target.value); setLines(e.target.value.split("\n").filter((x) => x.trim()).map((text) => ({ time_s: null, text }))); }} />
               ) : (
                 <div className="stack">
@@ -285,7 +301,7 @@ export function AudioView() {
                   : <button className="btn" onClick={() => { setTiming(null); audio.current?.pause(); }}><Square size={14} /> {t("stop")}</button>}
                 {timing === null && <button className="btn" onClick={autoTime} disabled={!rawText.trim() || !song || autoTiming}
                   title={t("autoTimeHint")}>{autoTiming ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} {t("autoTime")}</button>}
-                <button className="btn primary" onClick={saveLyrics} disabled={!rawText.trim() && !lrc}><Save size={14} /> {t("saveLrc")}</button>
+                <button className="btn primary" onClick={saveLyrics} disabled={!lyricsReady || (!rawText.trim() && !lrc)}><Save size={14} /> {t("saveLrc")}</button>
                 {lrc && <a className="btn ghost" download="lyrics.lrc" href={`data:text/plain;charset=utf-8,${encodeURIComponent(lrc)}`}><Download size={14} /> {t("exportLrc")}</a>}
               </div>
             </div>
