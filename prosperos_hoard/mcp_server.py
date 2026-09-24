@@ -834,6 +834,39 @@ def studio_recipe_run(recipe: str, cast: dict[str, Any], name: Optional[str] = N
                 json={"recipe": recipe, "cast": cast, "name": name, "options": options or {}})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_qa_run(production: str, stage: str = "all", dry_run: bool = True, keys: Optional[list[str]] = None,
+                  wait_s: float = 120) -> dict[str, Any]:
+    """QA director: check a production's stills, clips, cards, renders, retry the bad ones / revisar produccion.
+
+    Model-free checks: flat or noisy pictures, black/red edge bands, exposure jumps inside a clip, motion
+    where stillness was asked (or a frozen clip), a photocard head touching the top edge, lyric coverage of
+    an aligned LRC, durations against the plan. With a vision model (Hoard Link) each output is also scored
+    0-10 against the bible, the shot prompt and the reference, with a one-line reason; without one those
+    checks say "no vision model" and never block. stage: all, character, song, frames, lyrics, animatic,
+    clips, photocards, timeline. keys limits it to some shots (e.g. ["11"] for "why is clip 11 wrong?").
+    dry_run=true only reports; dry_run=false regenerates failing stills/clips/cards with a new seed and a
+    targeted fix, up to the retry cap, logs why in the lineage and REPORT.md, and re-queues the production
+    to rebuild what depends on them. Returns the job and, when done, the scorecard (failures first).
+
+    Keywords: qa, quality check, review production, why is this clip wrong, revisa la produccion, control de calidad, por que esta mal
+    """
+    return _call("POST", "/api/agent/studio_qa_run",
+                json={"production": production, "stage": stage, "dry_run": dry_run, "keys": keys, "wait_s": wait_s})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_qa_report(production: str) -> dict[str, Any]:
+    """The last QA scorecard of a production and its retries / ultimo informe de calidad de una produccion.
+
+    Items (failures first) with stage, shot key, asset id, verdict, score and a one-line `why`; `retries`
+    lists what the QA director regenerated, with the reason and the fix it applied.
+
+    Keywords: qa report, scorecard, what failed, retries, informe de calidad, que fallo, reintentos
+    """
+    return _call("GET", "/api/agent/studio_qa_report", params={"production": production})
+
+
 def main() -> None:
     mcp.run()
 

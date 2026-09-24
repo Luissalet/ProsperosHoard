@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookCopy, Clapperboard, Play, RotateCcw, Save, Users } from "lucide-react";
+import { BookCopy, Clapperboard, Play, RotateCcw, Save, ShieldCheck, Users } from "lucide-react";
 import {
-  api, fileUrl, type Character, type Project, type ProductionSummary, type RecipeSummary,
+  api, fileUrl, type Character, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
@@ -34,6 +34,7 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
   const [palette, setPalette] = useState("");
   const [title, setTitle] = useState(recipe?.title || "");
   const [reuse, setReuse] = useState<Record<string, boolean>>({ song: true, frames: true, clips: true });
+  const [qaInline, setQaInline] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -56,7 +57,10 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
         : { name: name.trim(), look: look.trim(), palette: palette.split(",").map((c) => c.trim()).filter(Boolean) };
       const out = await api.runRecipe(recipeName, {
         cast: { lead },
-        options: { reuse: Object.entries(reuse).filter(([, v]) => v).map(([k]) => k), ...(title.trim() ? { title: title.trim() } : {}) },
+        options: {
+          reuse: Object.entries(reuse).filter(([, v]) => v).map(([k]) => k), ...(title.trim() ? { title: title.trim() } : {}),
+          settings: { qa: { enabled: qaInline } },
+        },
       });
       app.toast(t("productionQueued"), "ok");
       out.notes.forEach((n) => app.toast(n, "info"));
@@ -104,6 +108,9 @@ export function RecastModal({ recipe, fromProduction, onClose, onStarted }: {
             </label>
           ))}
         </div>
+        <label className="row small" style={{ gap: 5 }}>
+          <input type="checkbox" checked={qaInline} onChange={(e) => setQaInline(e.target.checked)} /> {t("qaInline")}
+        </label>
       </div>
     </Modal>
   );
@@ -200,6 +207,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         </div>
       )}
+      <QaCard state={data} onRan={reload} />
       {!legacy && data.lineage?.length > 0 && (
         <div className="card">
           <h2>{t("lineageTitle")}</h2>
@@ -212,6 +220,66 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
         </div>
       )}
       {recast && <RecastModal fromProduction={view} onClose={() => setRecast(false)} onStarted={(s) => { setRecast(false); onStarted(s); }} />}
+    </div>
+  );
+}
+
+function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const [busy, setBusy] = useState(false);
+  const card = state.qa?.last;
+  const legacy = Boolean(state.view.legacy);
+  const retries = (state.lineage || []).filter((e) => e.event === "qa_retry").length;
+  const run = async (dryRun: boolean) => {
+    setBusy(true);
+    try {
+      const out = await api.runQa(state.slug, { dry_run: dryRun });
+      if (out.job.state !== "done") app.toast(t("qaQueued"), "info");
+      app.refreshJobs();
+      setTimeout(onRan, 1500);
+      onRan();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const failing = (card?.items || []).filter((i) => i.verdict === "fail");
+  return (
+    <div className="card">
+      <h2>
+        <ShieldCheck size={16} /> {t("qaTitle")}
+        <div className="card-actions">
+          <button className="btn sm" disabled={busy} onClick={() => run(true)}>{t("qaCheck")}</button>
+          {!legacy && <button className="btn sm" disabled={busy} onClick={() => run(false)}>{t("qaFix")}</button>}
+        </div>
+      </h2>
+      {!card ? <p className="small muted">{t("qaNone")}</p> : (
+        <>
+          <p className="small">
+            <span className={`pill ${card.failed ? "bad" : "ok"}`}>{t("qaSummary", { passed: card.passed, failed: card.failed, skipped: card.skipped })}</span>
+            {" "}<span className="muted">{card.stage} · {t("qaVision", { name: card.vision })}{retries > 0 ? ` · ${t("qaRetries", { n: retries })}` : ""}</span>
+          </p>
+          {failing.length > 0 && (
+            <div className="stack" style={{ gap: 8 }}>
+              {failing.slice(0, 24).map((i) => (
+                <div key={`${i.stage}-${i.key}`} className="row" style={{ alignItems: "flex-start" }}>
+                  {i.asset_id && (
+                    <button className="tile" style={{ width: 64, flex: "none" }} onClick={() => app.openAsset(i.asset_id!)}>
+                      <img src={`/api/assets/${i.asset_id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
+                    </button>
+                  )}
+                  <div className="small">
+                    <strong>{i.stage} {i.key}</strong>{i.score != null && <span className="muted"> · {i.score}/10</span>}
+                    <div className="err-text">{i.reasons.join("; ")}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

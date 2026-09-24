@@ -50,6 +50,8 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_recipes_list` | - -> `{items:[recipe summary]}` |
 | GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
 | POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
+| POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
+| GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
 | GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
 | POST | `/api/agent/voice_create` | `{name, engine_id, source_path, language?, project?}` |
 | GET | `/api/agent/voice_list` | `?project` |
@@ -163,6 +165,8 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions/{slug}/recipe` | `{name?}` -> recipe summary |
 | GET | `/api/recipes` / `/api/recipes/{name}` | list / the whole recipe JSON |
 | POST | `/api/recipes/{name}/run` | `{cast, name?, options}` -> `{production, job, notes}` |
+| POST | `/api/productions/{slug}/qa` | `{stage, dry_run, keys?}` -> `{job, scorecard?}` |
+| GET | `/api/productions/{slug}/qa` | `{last: <full scorecard with every check's measurements>, history}` |
 
 A production's spec (all optional except `lead`):
 

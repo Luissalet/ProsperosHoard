@@ -97,6 +97,9 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_recipe_get` | yes | `recipe` | summary, `cast`, `placeholders`, song, world, `shot_list[{key, lead, prompt, seed, variants, clips, motion}]`, timeline, settings, warnings |
 | `studio_recipe_run` | no | `recipe, cast={"lead": <character id or {name, look, negative?, palette?, bio?}>}, name=None, options={reuse, title, project, settings, engine}` | `{production, job, notes}` |
 
+| `studio_qa_run` | no | `production, stage="all", dry_run=True, keys=None, wait_s=120` | `{job, scorecard?, requeued?}` - see [ARCHITECTURE.md](ARCHITECTURE.md#qa-director) for the checks |
+| `studio_qa_report` | yes | `production` | the last scorecard (failures first, one-line `why`) + `retries` |
+
 \* `studio_cast` with `action="list"` does not change anything; the tool as a
 whole is annotated as writing because create/update do.
 
@@ -299,3 +302,17 @@ A recipe keeps every stage, prompt, seed and setting of the production it
 came from; only the lead changes. Rewrite the prompts its `warnings` list
 (they describe the old lead's props) with `studio_production_shots` after
 the run starts, or edit the recipe JSON before running it.
+
+### QA
+
+```text
+studio_qa_run("afterglow_iris_volt", stage="clips", keys=["11"])     # "why is clip 11 wrong?"
+  -> {scorecard: {vision: "ollama:qwen2.5vl", failed: 1, items: [{stage: "clips", key: "11", verdict: "fail",
+      score: 4, why: "exposure jump of 62 at frame 58 (~2.4 s); scored 4/10 on bible: the lantern is blue"}]}}
+studio_qa_run("afterglow_iris_volt", stage="clips", keys=["11"], dry_run=false)
+  -> regenerated with a new seed and another sampler; the production runs again to rebuild the cut
+studio_qa_report("afterglow_iris_volt")                              -> scorecard + retries (reason, fix)
+```
+
+With `settings: {"qa": {"enabled": true, "max_retries": 2}}` the same
+checks run after every stage of the production itself.

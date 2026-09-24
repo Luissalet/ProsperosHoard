@@ -17,6 +17,8 @@ prosperos_hoard/
                    script's own state.json
   recipes.py       recipe export (lead -> {lead} casting slot), list/get, and
                    filling the slot to start a new production
+  qa.py            the QA director: model-free checks (numpy/Pillow/ffmpeg), vision
+                   scores through Hoard Link, the retry policy with targeted fixes
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
                    /object_info pre-flight, checkpoint resolution, template hash
   workflows/       API-format *.json + *.params.json per built-in template, plus
@@ -146,6 +148,44 @@ storyboard is read back from the timeline's clips per lyric section.
 canonical reference is copied into the new project - or an inline
 description) and creates the production; reused assets are copied into the
 new project with `copied_from` in their recipe.
+
+## QA director
+
+`qa.QA` checks one stage's outputs; `run_stage_with_policy` adds the
+policy; `inline_hook` runs it after each stage of a production with
+`settings.qa.enabled`; `run_qa` (`studio_qa_run`, a `production_qa`
+orchestrator job) runs it on demand, for one stage, all of them, or some
+shot keys.
+
+| Check | How | Default threshold (`settings.qa.thresholds`, flat or per stage) |
+| --- | --- | --- |
+| flat | luminance standard deviation on a 384 px grey copy | `flat_std` 6 |
+| noise | spread of neighbour differences / (sqrt 2 x spread): ~1 for white noise, far lower for shapes and gradients | `noise_ratio` 0.62 |
+| edge band | an 8 px strip along each edge vs the strip next to it, per row/column; flagged when the median difference is high on almost every row (a natural edge differs only in places) | `band_delta` 38, `band_rows` 0.9 |
+| exposure jump | mean luminance of every frame (160x90 grey via ffmpeg), largest change between consecutive frames | `exposure_jump` 30 |
+| motion vs plan | mean absolute frame difference against the shot's `motion` (`still`/`move`) | `still_motion_max` 10, `move_motion_min` 0.4 |
+| head cropped | photocard photos: background = median of the side borders, saliency = colour distance from it plus edges, the subject's top = the first row whose central band is salient | `headroom_min` 0.02 |
+| lyric coverage | written lines (section tags and parenthesised ad-libs left out) matched to an imported/aligned LRC with difflib | `lyric_coverage` 0.85 |
+| duration | song vs its plan, animatic and renders vs the song | `duration_tolerance` 6 % (at least 1 s) |
+| vision scores | `Link.chat(images=[output, reference], capability="vision")`, JSON `{bible, prompt, reference, reason}` | `model_min` 6 |
+
+A failing still first tries its other variants (the first that passes
+becomes the shot's best, no GPU time); otherwise, and for clips and
+photocard photos, it is regenerated through the stage's own function with
+`seed + 7919 x attempt` and a targeted fix (`qa.fix_for`): noise on a lead
+edit -> `strength` 1 (denoise 1, the "Qwen edits came out as noise" lesson);
+an exposure jump -> another sampler and cfg - 1; motion where stillness was
+asked -> the stillness negative and "stays perfectly still"; a frozen clip
+-> "clearly visible motion" and the stock negative; a cropped head -> the
+headroom framing. Up to `max_retries` (default 2); each attempt is a
+`qa_retry` lineage entry with the reason and the fix, each give-up a
+`qa_gave_up`, both in `REPORT.md`. On demand (`dry_run=false`) a change
+invalidates what depends on it and re-queues the production. Without a
+vision model (`Link.resolve("vision")` unresolved) every item's model check
+says `"no vision model"`; a failing vision call is a skipped check, never a
+failed production. A scripted production is checked read-only
+(`productions.state_from_legacy`), its scorecard saved in its own
+`state.json`.
 
 ## Threads and processes
 

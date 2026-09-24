@@ -145,10 +145,12 @@ def test_production_runs_end_to_end_and_exports_a_recipe(client):
     assert got["shot_list"][0]["lead"] is True and "{lead}" in json.dumps(got["cast"])
 
     # run it with a new lead: lead shots are made again, the rest is reused
+    # (with the QA director inline; no vision model here, so model checks skip)
+    app.state.qa_vision = (None, "no vision model")
     r = c.post("/api/agent/studio_recipe_run",
                json={"recipe": "night_walk", "cast": {"lead": {"name": "KOI", "look": "KOI, a paper koi kite with gold scales",
                                                                "palette": ["#3366FF"]}},
-                     "name": "Night Walk KOI", "options": {"settings": {"animatic": False}}})
+                     "name": "Night Walk KOI", "options": {"settings": {"animatic": False, "qa": {"enabled": True}}}})
     assert r.status_code == 200, r.text
     run = r.json()
     job = wait_job(c, run["job"]["id"])
@@ -164,6 +166,9 @@ def test_production_runs_end_to_end_and_exports_a_recipe(client):
     assert new["project_id"] != state["project_id"]
     cover = store.get_asset(new["done"]["album"]["designs"][0]["asset_id"])["recipe"]["fields"]
     assert cover["artist"] == "KOI" and cover["accent"] == "#3366FF"
+    checked = {h["stage"] for h in new["qa"]["history"]}
+    assert {"character", "frames", "clips", "timeline"} <= checked
+    assert new["qa"]["last"]["vision"] == "no vision model"
 
 
 def test_change_shots_invalidates_what_depends_on_them(data_dir):

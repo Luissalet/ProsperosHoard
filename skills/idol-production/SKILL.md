@@ -52,6 +52,12 @@ Whole productions and recipes:
   `studio_production_continue(production)`; `studio_production_shots` swaps
   a still (`best`), turns a clip on/off or rewrites a shot.
 
+- "Check the production" / "why is clip 11 wrong?": `studio_qa_run(production,
+  stage="clips", keys=["11"])` (dry run by default) or `studio_qa_report`;
+  explain each `why`; `dry_run=false` regenerates the failures with a new
+  seed and a targeted fix, up to the retry cap. Say so when the scorecard's
+  `vision` is "no vision model" (only the model-free checks ran).
+
 Traps:
 - `waiting_gpu` is normal on a shared GPU: keep polling, it has not failed.
 - Never describe an image you have not looked at with `studio_show`.
