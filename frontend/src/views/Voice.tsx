@@ -254,7 +254,11 @@ function TranscribeTab() {
     a.click();
   };
 
+  const recordingSupported = typeof window !== "undefined" && typeof window.MediaRecorder !== "undefined"
+    && !!navigator.mediaDevices?.getUserMedia;
+
   const startRecording = async () => {
+    if (!recordingSupported) { app.toast(t("recordingUnsupported"), "bad"); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunks.current = [];
@@ -304,13 +308,17 @@ function TranscribeTab() {
       </div>
       <div className="card stack">
         <h2><Mic size={16} /> {t("dictateTitle")}</h2>
-        <div className="row">
-          {!recording ? (
-            <button className="btn primary" onClick={startRecording}><Mic size={14} /> {t("recordButton")}</button>
-          ) : (
-            <button className="btn danger" onClick={stopRecording}><Square size={14} /> {t("stopRecording")}</button>
-          )}
-        </div>
+        {recordingSupported ? (
+          <div className="row">
+            {!recording ? (
+              <button className="btn primary" onClick={startRecording}><Mic size={14} /> {t("recordButton")}</button>
+            ) : (
+              <button className="btn danger" onClick={stopRecording}><Square size={14} /> {t("stopRecording")}</button>
+            )}
+          </div>
+        ) : (
+          <p className="muted small">{t("recordingUnsupported")}</p>
+        )}
         {dictated && <textarea readOnly rows={3} value={dictated} />}
       </div>
     </div>
