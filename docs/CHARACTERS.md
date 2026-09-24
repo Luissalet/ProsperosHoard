@@ -102,8 +102,10 @@ character (tagged for it or whose recipe matched its @mention), grouped into
 takes of the same shot (same template, view and prompt): take N of M, seed,
 adapters used. `score` rates identity 0-10 against the canonical and up to
 two references: with the vision model through Hoard Link (identity only -
-pose, framing, light and background are ignored), otherwise a rough colour
-signature of the subject area, reported as `rough`. Scores are cached per
+pose, framing, light and background are ignored), otherwise a rough check
+of whether the character's colours (its palette, or the dominant colours of
+its references) are present - a new background does not count against it -
+reported as `rough`. Scores are cached per
 asset and invalidated when the reference set changes. Actions: `canonical`,
 `reference`, `unreference`, `dataset`, `reject`, `unreject`.
 

@@ -118,7 +118,17 @@ def job_view(job: dict[str, Any]) -> dict[str, Any]:
         view["hint"] = "poll with studio_job(job_id, wait_s=30)"
     if job["state"] == "failed":
         view["error"] = job.get("message")
+    if job["state"] == "done" and job["type"] in _RESULT_JOB_TYPES:
+        # jobs whose answer is data, not assets (identity scores, captions,
+        # a trained adapter): the agent needs it in the job view itself
+        result = {k: v for k, v in outputs.items() if k not in ("asset_ids", "asset_id")}
+        if len(json.dumps(result, default=str)) > 4000:
+            result = {k: v for k, v in result.items() if not isinstance(v, list)} | {"truncated": True}
+        view["result"] = result
     return {k: v for k, v in view.items() if v is not None}
+
+
+_RESULT_JOB_TYPES = ("character_identity", "character_caption", "train_lora", "character_sheet")
 
 
 # ---------------------------------------------------------------- prompts
