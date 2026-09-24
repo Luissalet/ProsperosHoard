@@ -7,7 +7,9 @@ datasets, and nothing here trains or adapts a voice to a person.
 from __future__ import annotations
 
 import io
+import re
 import threading
+import uuid
 import wave
 from pathlib import Path
 from typing import Any, Optional
@@ -30,6 +32,9 @@ CURATED_VOICES = [
 
 _LOCK = threading.Lock()
 _LOADED: dict[str, Any] = {}
+_DOWNLOAD_LOCKS: dict[str, threading.Lock] = {}
+_DOWNLOAD_LOCKS_GUARD = threading.Lock()
+_VOICE_ID_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 
 
 class VoiceError(RuntimeError):
@@ -51,36 +56,67 @@ def _voice_by_id(voice_id: str) -> Optional[dict[str, Any]]:
     return next((v for v in CURATED_VOICES if v["id"] == voice_id), None)
 
 
+def validate_voice_id(voice_id: Any) -> str:
+    """A Piper voice id becomes a file name under `data/voices/`: only
+    letters, digits, `_`, `.` and `-` (no separators, nothing hidden)."""
+    if not isinstance(voice_id, str) or not _VOICE_ID_RE.fullmatch(voice_id):
+        raise VoiceError("unknown_voice", f"invalid Piper voice id {voice_id!r}: use letters, digits, '_', '.' or '-'")
+    return voice_id
+
+
 def voice_files_present(voices_dir: Path, voice_id: str) -> bool:
     return (voices_dir / f"{voice_id}.onnx").is_file() and (voices_dir / f"{voice_id}.onnx.json").is_file()
+
+
+def _download_lock(voice_id: str) -> threading.Lock:
+    with _DOWNLOAD_LOCKS_GUARD:
+        return _DOWNLOAD_LOCKS.setdefault(voice_id, threading.Lock())
 
 
 def download_voice(voices_dir: Path, voice_id: str, timeout_s: float = 300.0) -> Path:
     """Fetch a curated voice from Hugging Face into `data/voices/` (the only
     network access in the app, and only when the user asks for a voice that
-    is not on disk yet). Written to `.part` first so an interrupted download
-    never leaves a truncated model behind."""
+    is not on disk yet). Each file goes to its own uniquely named `.part`
+    first (removed on any failure) and is only renamed into place once its
+    size matches the server's Content-Length, so an interrupted or
+    concurrent download never leaves a truncated model behind; a per-voice
+    lock stops two jobs fetching the same voice at once."""
     voice = _voice_by_id(voice_id)
     if voice is None:
         known = ", ".join(v["id"] for v in CURATED_VOICES)
         raise VoiceError("unknown_voice", f"unknown voice '{voice_id}'; curated voices: {known}")
     voices_dir.mkdir(parents=True, exist_ok=True)
     onnx_path = voices_dir / f"{voice_id}.onnx"
-    try:
-        with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
-            for suffix in (".onnx.json", ".onnx"):
-                dest = voices_dir / f"{voice_id}{suffix}"
-                if dest.is_file():
-                    continue
-                part = dest.with_name(dest.name + ".part")
-                with client.stream("GET", f"{HF_VOICES_BASE}/{voice['path']}{suffix}") as resp:
-                    resp.raise_for_status()
-                    with part.open("wb") as fh:
-                        for chunk in resp.iter_bytes(1 << 20):
-                            fh.write(chunk)
-                part.replace(dest)
-    except httpx.HTTPError as exc:
-        raise VoiceError("voice_download_failed", f"could not download voice '{voice_id}' from Hugging Face: {exc}") from exc
+    with _download_lock(voice_id):
+        try:
+            with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
+                for suffix in (".onnx.json", ".onnx"):
+                    dest = voices_dir / f"{voice_id}{suffix}"
+                    if dest.is_file():
+                        continue
+                    part = dest.with_name(f"{dest.name}.{uuid.uuid4().hex[:12]}.part")
+                    try:
+                        with client.stream("GET", f"{HF_VOICES_BASE}/{voice['path']}{suffix}") as resp:
+                            resp.raise_for_status()
+                            # Content-Length counts bytes on the wire: only comparable
+                            # with what was written when the body is not compressed
+                            encoded = resp.headers.get("content-encoding", "identity").lower() not in ("", "identity")
+                            expected = None if encoded else resp.headers.get("content-length")
+                            written = 0
+                            with part.open("wb") as fh:
+                                for chunk in resp.iter_bytes(1 << 20):
+                                    fh.write(chunk)
+                                    written += len(chunk)
+                        if expected and expected.isdigit() and int(expected) != written:
+                            raise VoiceError("voice_download_failed",
+                                             f"download of voice '{voice_id}' was cut short ({written} of {expected} bytes)")
+                        part.replace(dest)
+                    finally:
+                        part.unlink(missing_ok=True)
+        except httpx.HTTPError as exc:
+            raise VoiceError("voice_download_failed", f"could not download voice '{voice_id}' from Hugging Face: {exc}") from exc
+        except OSError as exc:
+            raise VoiceError("voice_download_failed", f"could not save voice '{voice_id}': {exc}") from exc
     return onnx_path
 
 
@@ -98,6 +134,7 @@ def synthesize_piper(voices_dir: Path, voice_id: str, text: str, speed: Optional
     except ImportError as exc:
         raise VoiceError("piper_not_installed", "Piper is not installed in this environment: run "
                                                 "'pip install -r requirements-lock.txt' again") from exc
+    validate_voice_id(voice_id)
     if _voice_by_id(voice_id) is None and not voice_files_present(voices_dir, voice_id):
         known = ", ".join(v["id"] for v in CURATED_VOICES)
         raise VoiceError("unknown_voice", f"unknown voice '{voice_id}'; curated voices: {known}")

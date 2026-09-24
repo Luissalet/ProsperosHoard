@@ -10,6 +10,11 @@ sample (see `voice_engines.py`); this module only prepares and stores it.
 
 from __future__ import annotations
 
+import inspect
+import io
+import re
+import shutil
+import wave
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +29,9 @@ MIN_SAMPLE_S = 1.0
 RECOMMENDED_MAX_S = 5 * 60.0
 MIN_GOOD_SNR_DB = 15.0
 MAX_GOOD_CLIP_PCT = 0.1  # percent of samples at/near full scale
+MAX_PITCH_SEMITONES = 12.0
+LEXICON_PRESET = "_lexicon"  # reserved preset entry holding a voice's pronunciation lexicon
+MAX_LEXICON_ENTRIES = 500
 
 
 class VoiceLabError(RuntimeError):
@@ -165,6 +173,22 @@ def _rel(store: Store, path: Path) -> str:
     return path.relative_to(store.data_dir).as_posix()
 
 
+def delete_voice_files(store: Store, voice: dict[str, Any]) -> bool:
+    """Remove a library voice's own folder (its processed sample - a
+    recording of a person's voice - and anything next to it) when the voice
+    is deleted. Only ever a folder directly under
+    `data/voice_studio/voices/`; returns whether one was removed."""
+    rel = voice.get("sample_path")
+    if not rel:
+        return False
+    root = (store.data_dir / "voice_studio" / "voices").resolve()
+    folder = (store.data_dir / rel).resolve().parent
+    if folder.parent != root or not folder.is_dir():
+        return False
+    shutil.rmtree(folder, ignore_errors=True)
+    return not folder.exists()
+
+
 def sample_path(store: Store, voice: dict[str, Any]) -> Optional[Path]:
     if not voice.get("sample_path"):
         return None
@@ -181,12 +205,114 @@ class VoiceSpecError(VoiceLabError):
     pass
 
 
+# ------------------------------------------------------ pronunciation lexicon
+
+def normalize_lexicon(lexicon: Any) -> dict[str, str]:
+    """Validate a pronunciation lexicon: {"written word": "how to say it"}
+    (e.g. {"Prospero": "PROS-per-oh"}); raises VoiceSpecError otherwise."""
+    if lexicon is None:
+        return {}
+    if not isinstance(lexicon, dict):
+        raise VoiceSpecError("bad_lexicon", 'lexicon must be an object such as {"Prospero": "PROS-per-oh"}')
+    if len(lexicon) > MAX_LEXICON_ENTRIES:
+        raise VoiceSpecError("bad_lexicon", f"a lexicon holds at most {MAX_LEXICON_ENTRIES} entries")
+    out: dict[str, str] = {}
+    for term, say in lexicon.items():
+        if not isinstance(term, str) or not isinstance(say, str) or not term.strip() or len(term) > 100 or len(say) > 200:
+            raise VoiceSpecError("bad_lexicon", "each lexicon entry maps a word (<=100 chars) to its spoken form "
+                                                "(<=200 chars)")
+        out[term.strip()] = say.strip()
+    return out
+
+
+def apply_lexicon(text: str, lexicon: Optional[dict[str, str]]) -> str:
+    """Replace each lexicon term with its spoken form, whole words only and
+    case-insensitively ("prospero's" -> "PROS-per-oh's", "Prosperous" is
+    left alone); longer terms win over shorter ones they contain."""
+    if not lexicon or not text:
+        return text
+    terms = sorted((t for t in lexicon if t), key=len, reverse=True)
+    lookup = {t.lower(): lexicon[t] for t in terms}
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(t) for t in terms) + r")(?!\w)", re.IGNORECASE)
+    return pattern.sub(lambda m: lookup.get(m.group(0).lower(), m.group(0)), text)
+
+
+def voice_lexicon(voice: Optional[dict[str, Any]]) -> dict[str, str]:
+    """A library voice's own lexicon (kept as a reserved entry in its
+    presets list, so it needs no schema change)."""
+    for p in (voice or {}).get("presets") or []:
+        if p.get("name") == LEXICON_PRESET:
+            return dict(p.get("lexicon") or {})
+    return {}
+
+
+def set_voice_lexicon(store: Store, voice_id: str, lexicon: Any) -> dict[str, Any]:
+    """Replace a library voice's lexicon ({} clears it); returns the row."""
+    clean = normalize_lexicon(lexicon)
+    voice = store.get_studio_voice(voice_id)
+    presets = [p for p in voice.get("presets") or [] if p.get("name") != LEXICON_PRESET]
+    if clean:
+        presets.append({"name": LEXICON_PRESET, "lexicon": clean})
+    return store.update_studio_voice(voice_id, presets=presets)
+
+
+def user_presets(voice: dict[str, Any]) -> list[dict[str, Any]]:
+    return [p for p in voice.get("presets") or [] if not str(p.get("name") or "").startswith("_")]
+
+
+# ---------------------------------------------------------------- pitch
+
+def _atempo_stages(factor: float) -> list[float]:
+    """`factor` as `atempo` stages each within 0.5-2.0 (the range every
+    ffmpeg version accepts - newer ones allow more, 4.2 does not)."""
+    stages: list[float] = []
+    remaining = factor
+    while remaining > 2.0:
+        stages.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5:
+        stages.append(0.5)
+        remaining /= 0.5
+    if abs(remaining - 1.0) > 1e-6 or not stages:
+        stages.append(remaining)
+    return stages
+
+
+def apply_pitch(wav: bytes, semitones: Optional[float]) -> bytes:
+    """Shift a WAV's pitch by `semitones` (-12..12) keeping its duration:
+    `asetrate` (pitch and tempo up by 2^(n/12)) + `aresample` back to the
+    original rate + `atempo` to undo the tempo change. None/0 is a no-op."""
+    if not semitones:
+        return wav
+    try:
+        semitones = float(semitones)
+    except (TypeError, ValueError):
+        raise VoiceSpecError("bad_pitch", "pitch is a number of semitones between -12 and 12") from None
+    if abs(semitones) > MAX_PITCH_SEMITONES:
+        raise VoiceSpecError("bad_pitch", "pitch is a number of semitones between -12 and 12")
+    with wave.open(io.BytesIO(wav), "rb") as wf:
+        sr = wf.getframerate()
+    ratio = 2.0 ** (semitones / 12.0)
+    tempo = ",".join(f"atempo={s:.6f}" for s in _atempo_stages(1.0 / ratio))
+    filters = f"asetrate={int(round(sr * ratio))},aresample={sr},{tempo}"
+    cmd = [_ffmpeg(), "-nostdin", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-af", filters,
+           "-ac", "1", "-ar", str(sr), "-f", "f32le", "pipe:1"]
+    proc = procutil.run(cmd, input=wav, timeout=120)
+    if proc.returncode != 0:
+        raise VoiceLabError("pitch_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500] or "ffmpeg failed")
+    from .voice_engines import wav_bytes_mono16
+
+    return wav_bytes_mono16(np.frombuffer(proc.stdout, dtype="<f4"), sr)
+
+
 def resolve_voice_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any]) -> dict[str, Any]:
     """A `voice` request dict (from /api/voice/speak, the audiobook and dub
     pipelines) -> {"engine", "voice_ref", "sample_path", "speed", "pitch",
-    "style", "language"}, merging in a library voice's own settings and any
-    named preset. `spec`: {engine_id?, voice_id?, voice_ref?, preset?, speed?,
-    pitch?, style?, language?}. At least one of engine_id/voice_id is needed."""
+    "style", "language", "ref_text", "lexicon"}, merging in a library voice's
+    own settings, lexicon and reference transcript and any named preset.
+    `spec`: {engine_id?, voice_id?, voice_ref?, preset?, speed?, pitch?,
+    style?, language?, lexicon?}. At least one of engine_id/voice_id is
+    needed. Lexicons merge voice < preset < request."""
     from . import voice_engines as ve
 
     spec = dict(spec or {})
@@ -203,14 +329,18 @@ def resolve_voice_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any
         raise VoiceSpecError("unknown_engine", str(exc)) from None
 
     merged: dict[str, Any] = {}
+    lexicon: dict[str, str] = {}
     if library_voice:
+        lexicon.update(voice_lexicon(library_voice))
         preset_name = spec.get("preset")
         if preset_name:
-            preset = next((p for p in library_voice.get("presets") or [] if p.get("name") == preset_name), None)
+            preset = next((p for p in user_presets(library_voice) if p.get("name") == preset_name), None)
             if preset is None:
                 raise VoiceSpecError("unknown_preset", f"voice '{library_voice['name']}' has no preset '{preset_name}'")
-            merged.update({k: v for k, v in preset.items() if k != "name"})
+            merged.update({k: v for k, v in preset.items() if k not in ("name", "lexicon")})
+            lexicon.update(normalize_lexicon(preset.get("lexicon")))
         merged.setdefault("language", library_voice.get("language"))
+    lexicon.update(normalize_lexicon(spec.get("lexicon")))
 
     for key in ("speed", "pitch", "style", "language"):
         if spec.get(key) is not None:
@@ -221,23 +351,67 @@ def resolve_voice_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any
     if engine.capabilities.cloning and not sample and not voice_ref:
         raise VoiceSpecError("cloning_needs_sample", f"engine '{engine.id}' needs a cloning sample (voice_id with a "
                                                       "processed sample, or voice_ref for a pre-made speaker)")
+    # a sample-cloning engine uses the library voice's own transcript of
+    # its sample as the reference text (F5-TTS needs it; never the style)
+    ref_text = (library_voice.get("reference_transcript") or None) if library_voice and sample else None
     return {"engine": engine, "voice_ref": voice_ref, "sample_path": sample, "speed": merged.get("speed"),
-            "pitch": merged.get("pitch"), "style": merged.get("style"), "language": merged.get("language")}
+            "pitch": merged.get("pitch"), "style": merged.get("style"), "language": merged.get("language"),
+            "ref_text": ref_text, "lexicon": lexicon}
+
+
+def validate_voice_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any]) -> dict[str, Any]:
+    """Everything `synthesize_with_spec` would reject, checked up front (a
+    route calls this before queueing an audiobook or dub job so a bad voice
+    fails the request, not the job an hour later). Returns the resolved spec."""
+    from .voice_engines import UnsupportedLanguage
+
+    resolved = resolve_voice_spec(store, tts_engines, spec)
+    engine = resolved["engine"]
+    if not engine.is_installed():
+        raise VoiceSpecError("engine_not_installed", f"'{engine.id}' is not installed: {engine.install_hint()}")
+    if resolved.get("pitch"):
+        pitch = resolved["pitch"]
+        if not isinstance(pitch, (int, float)) or abs(pitch) > MAX_PITCH_SEMITONES:
+            raise VoiceSpecError("bad_pitch", "pitch is a number of semitones between -12 and 12")
+    try:
+        engine.check_language(resolved.get("language"))
+    except UnsupportedLanguage as exc:
+        raise VoiceSpecError("unsupported_language", str(exc)) from None
+    return resolved
+
+
+def _accepts(fn: Any, name: str) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def synthesize_with_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any], text: str) -> tuple[bytes, str]:
-    """Returns (wav_bytes, engine_id actually used)."""
-    from .voice_engines import EngineNotInstalled
+    """Returns (wav_bytes, engine_id actually used). Applies the merged
+    pronunciation lexicon to `text` first and the requested pitch shift to
+    the result (no engine here shifts pitch natively)."""
+    from .voice_engines import EngineNotInstalled, UnsupportedLanguage
 
     resolved = resolve_voice_spec(store, tts_engines, spec)
     engine = resolved.pop("engine")
+    lexicon = resolved.pop("lexicon", None)
+    ref_text = resolved.pop("ref_text", None)
+    pitch = resolved.get("pitch")
+    resolved["pitch"] = None
     if not engine.is_installed():
         raise VoiceSpecError("engine_not_installed", f"'{engine.id}' is not installed: {engine.install_hint()}")
+    kwargs = dict(resolved)
+    if ref_text and _accepts(engine.synthesize, "ref_text"):
+        kwargs["ref_text"] = ref_text
     try:
-        wav = engine.synthesize(text, **resolved)
+        wav = engine.synthesize(apply_lexicon(text, lexicon), **kwargs)
     except EngineNotInstalled as exc:
         raise VoiceSpecError("engine_not_installed", str(exc)) from exc
-    return wav, engine.id
+    except UnsupportedLanguage as exc:
+        raise VoiceSpecError("unsupported_language", str(exc)) from exc
+    return apply_pitch(wav, pitch), engine.id
 
 
 def voice_view(voice: dict[str, Any]) -> dict[str, Any]:
@@ -245,6 +419,6 @@ def voice_view(voice: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": voice["id"], "name": voice["name"], "engine_id": voice["engine_id"], "language": voice.get("language"),
         "cloned": voice["cloned"], "has_sample": bool(voice.get("sample_path")), "quality": voice.get("quality") or {},
-        "presets": [p.get("name") for p in voice.get("presets") or []], "tags": voice.get("tags") or [],
-        "project_id": voice.get("project_id"), "created_at": voice.get("created_at"),
+        "presets": [p.get("name") for p in user_presets(voice)], "lexicon": voice_lexicon(voice),
+        "tags": voice.get("tags") or [], "project_id": voice.get("project_id"), "created_at": voice.get("created_at"),
     }

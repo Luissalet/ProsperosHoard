@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import shutil
 import wave
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from prosperos_hoard.backend import ffmpeg_path
 from prosperos_hoard import voice_engines as ve
 from prosperos_hoard import voice_lab
 from prosperos_hoard.store import Store
 
-HAS_FFMPEG = shutil.which("ffmpeg") is not None
+HAS_FFMPEG = ffmpeg_path() is not None
 
 
 def _write_wav(path: Path, samples: np.ndarray, sr: int = 44100) -> None:
@@ -215,3 +215,141 @@ def test_synthesize_with_spec_not_installed(tmp_path):
     store = Store(tmp_path / "data")
     with pytest.raises(voice_lab.VoiceSpecError):
         voice_lab.synthesize_with_spec(store, [NotInstalled()], {"engine_id": "off"}, "hi")
+
+
+# ------------------------------------------------------------ regressions
+
+class _RecordingEngine(ve.TTSEngine):
+    id = "rec"
+    capabilities = ve.EngineCapabilities(cloning=False)
+    seen: list[dict] = []
+
+    def is_installed(self):
+        return True
+
+    def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
+        _RecordingEngine.seen.append({"text": text, "pitch": pitch, "language": language})
+        return ve.wav_bytes_mono16((0.2 * np.sin(np.linspace(0, 2000, 16000))).astype(np.float32), 16000)
+
+
+class _RefTextCloner(_FakeCloningEngine):
+    id = "ref-clone"
+    seen: list = []
+
+    def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None,
+                   ref_text=None):
+        _RefTextCloner.seen.append(ref_text)
+        return super().synthesize(text, voice_ref, speed, pitch, style, sample_path, language)
+
+
+def test_apply_lexicon_whole_words_case_insensitive():
+    lex = {"Prospero": "PROS-per-oh", "Hoard": "hord", "St. Ives": "Saint Ives"}
+    out = voice_lab.apply_lexicon("prospero's Hoard is not Prosperous; go to St. Ives.", lex)
+    assert out == "PROS-per-oh's hord is not Prosperous; go to Saint Ives."
+    assert voice_lab.apply_lexicon("nothing here", lex) == "nothing here"
+    assert voice_lab.apply_lexicon("Prospero", {}) == "Prospero"
+
+
+def test_normalize_lexicon_validates():
+    assert voice_lab.normalize_lexicon({" Iris ": "Eye-ris"}) == {"Iris": "Eye-ris"}
+    for bad in (["x"], {"": "y"}, {"x": 3}, {"x" * 101: "y"}):
+        with pytest.raises(voice_lab.VoiceSpecError):
+            voice_lab.normalize_lexicon(bad)
+
+
+def test_lexicon_merges_voice_preset_and_request(tmp_path):
+    store, voice = _store_with_voice(tmp_path, engine_id="rec", with_sample=False)
+    voice_lab.set_voice_lexicon(store, voice["id"], {"Prospero": "PROS-per-oh", "Iris": "EYE-ris"})
+    store.add_voice_preset(voice["id"], {"name": "show", "lexicon": {"Iris": "ee-REES"}})
+    _RecordingEngine.seen = []
+    voice_lab.synthesize_with_spec(store, [_RecordingEngine()], {"voice_id": voice["id"], "preset": "show",
+                                                                 "lexicon": {"Hoard": "hord"}},
+                                   "Prospero, Iris and the Hoard.")
+    assert _RecordingEngine.seen[-1]["text"] == "PROS-per-oh, ee-REES and the hord."
+    view = voice_lab.voice_view(store.get_studio_voice(voice["id"]))
+    assert view["presets"] == ["show"]  # the reserved lexicon entry is not a preset
+    assert view["lexicon"] == {"Prospero": "PROS-per-oh", "Iris": "EYE-ris"}
+    with pytest.raises(voice_lab.VoiceSpecError):
+        voice_lab.resolve_voice_spec(store, [_RecordingEngine()], {"voice_id": voice["id"], "preset": "_lexicon"})
+    voice_lab.set_voice_lexicon(store, voice["id"], {})
+    assert voice_lab.voice_lexicon(store.get_studio_voice(voice["id"])) == {}
+
+
+def test_reference_transcript_reaches_engines_that_take_it(tmp_path):
+    store, voice = _store_with_voice(tmp_path, engine_id="ref-clone")
+    store.update_studio_voice(voice["id"], reference_transcript="what the sample says", )
+    _RefTextCloner.seen = []
+    voice_lab.synthesize_with_spec(store, [_RefTextCloner()], {"voice_id": voice["id"], "style": "calm"}, "hi")
+    assert _RefTextCloner.seen == ["what the sample says"]
+    # an engine without a ref_text parameter is simply not given one
+    store2, voice2 = _store_with_voice(tmp_path / "b", engine_id="fake-clone")
+    store2.update_studio_voice(voice2["id"], reference_transcript="x")
+    voice_lab.synthesize_with_spec(store2, [_FakeCloningEngine()], {"voice_id": voice2["id"]}, "hi")
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_pitch_is_applied_and_keeps_duration(tmp_path):
+    store = Store(tmp_path / "data")
+    _RecordingEngine.seen = []
+    plain, _ = voice_lab.synthesize_with_spec(store, [_RecordingEngine()], {"engine_id": "rec"}, "a")
+    shifted, _ = voice_lab.synthesize_with_spec(store, [_RecordingEngine()], {"engine_id": "rec", "pitch": 12}, "a")
+    assert _RecordingEngine.seen[-1]["pitch"] is None  # applied here, not by the engine
+
+    def read(data):
+        import io
+
+        with wave.open(io.BytesIO(data), "rb") as wf:
+            return np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2").astype(np.float32), wf.getframerate()
+
+    a, sr_a = read(plain)
+    b, sr_b = read(shifted)
+    assert sr_a == sr_b == 16000
+    assert b.size == pytest.approx(a.size, rel=0.05)
+    peak = lambda x: np.argmax(np.abs(np.fft.rfft(x[2000:-2000])))  # noqa: E731
+    assert peak(b) == pytest.approx(2 * peak(a), rel=0.05)  # +12 semitones = an octave up
+
+
+def test_bad_pitch_rejected(tmp_path):
+    store = Store(tmp_path / "data")
+    with pytest.raises(voice_lab.VoiceSpecError) as err:
+        voice_lab.validate_voice_spec(store, [_RecordingEngine()], {"engine_id": "rec", "pitch": 30})
+    assert err.value.code == "bad_pitch"
+
+
+def test_validate_voice_spec_checks_install_and_language(tmp_path):
+    store = Store(tmp_path / "data")
+
+    class Off(_RecordingEngine):
+        id = "off"
+
+        def is_installed(self):
+            return False
+
+    class Kokoroish(_RecordingEngine):
+        id = "kok"
+
+        def check_language(self, language):
+            ve.KokoroEngine.lang_code(language)
+
+    with pytest.raises(voice_lab.VoiceSpecError) as err:
+        voice_lab.validate_voice_spec(store, [Off()], {"engine_id": "off"})
+    assert err.value.code == "engine_not_installed"
+    with pytest.raises(voice_lab.VoiceSpecError) as err:
+        voice_lab.validate_voice_spec(store, [Kokoroish()], {"engine_id": "kok", "language": "de"})
+    assert err.value.code == "unsupported_language"
+    assert voice_lab.validate_voice_spec(store, [Kokoroish()], {"engine_id": "kok", "language": "es"})
+
+
+def test_delete_voice_files_only_removes_the_voice_folder(tmp_path):
+    store, voice = _store_with_voice(tmp_path)
+    folder = store.data_dir / "voice_studio" / "voices" / "v1"
+    assert voice_lab.delete_voice_files(store, voice) is True
+    assert not folder.exists()
+    assert (store.data_dir / "voice_studio" / "voices").is_dir()
+    # a sample path pointing anywhere else is never followed
+    outside = store.data_dir / "other" / "sample.wav"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"x")
+    assert voice_lab.delete_voice_files(store, {"sample_path": "other/sample.wav"}) is False
+    assert voice_lab.delete_voice_files(store, {"sample_path": "voice_studio/voices/../../other/sample.wav"}) is False
+    assert outside.is_file()

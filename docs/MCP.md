@@ -116,13 +116,14 @@ behind Hoard Link and fails with a clear message without one.
 | --- | --- | --- | --- |
 | `voice_engines` | yes | - | `{tts[{id, label, installed, languages, cloning, install_hint, reason}], stt[...]}` |
 | `voice_create` | no | `name, engine_id, source_path, language=None, project=None` | the voice (id first) with its quality report (`duration_s, snr_db, clipping_pct, warnings, ok`) |
-| `voice_list` | yes | `project=None` | `items[{id, name, engine_id, language, cloned, has_sample, quality, presets, tags}]` |
-| `voice_speak` | no | `text, engine_id=None, voice_id=None, voice_ref=None, preset=None, speed=None, language=None, project=None` | with `project`: an audio asset summary; without: `{engine_id, bytes}` |
+| `voice_list` | yes | `project=None` | `items[{id, name, engine_id, language, cloned, has_sample, quality, presets, lexicon, tags}]` |
+| `voice_speak` | no | `text, engine_id=None, voice_id=None, voice_ref=None, preset=None, speed=None, language=None, project=None, pitch=None, lexicon=None` | with `project`: an audio asset summary; without: `{engine_id, bytes}` |
 | `voice_transcribe` | yes | `path=None, asset_id=None, language=None, engine_id=None` | `{engine_id, language, text, segment_count}` |
-| `voice_audiobook` | no | `text=None, source_path=None, title=None, engine_id=None, voice_id=None, voice_ref=None, speed=None, format="mp3"\|"m4b", project=None, wait_s=0` | `{job}`; done outputs: `{title, chapters[{index, title, start_s, end_s, duration_s}], format, duration_s, final_file, srt_file, lrc_file}` |
-| `voice_dub` | no | `target_language, source_path=None, video_asset_id=None, source_language=None, glossary=None, engine_id=None, voice_id=None, voice_ref=None, title=None, project=None, wait_s=0` | `{job}`; done outputs: `{title, final_video, subtitles, segments[{index, start_s, end_s, source_text, translated_text, fit}]}` |
-| `voice_resynthesize_segment` | no | `job_id, index, text=None, engine_id=None, voice_id=None, voice_ref=None, remix=True` | `{segment}` (the fixed row); with `remix=true` the mixed audio and final video are rebuilt |
-| `voice_job` | yes | `job_id, wait_s=0` | the job (state, progress, message, outputs) |
+| `voice_audiobook` | no | `text=None, source_path=None, title=None, engine_id=None, voice_id=None, voice_ref=None, speed=None, format="mp3"\|"m4b", project=None, wait_s=0, language=None, lexicon=None` | `{job}`; done `job.outputs`: `{title, format, duration_s, sentence_count, chapter_count, chapters[{index, title, start_s, duration_s}], asset_ids}` |
+| `voice_dub` | no | `target_language, source_path=None, video_asset_id=None, source_language=None, glossary=None, engine_id=None, voice_id=None, voice_ref=None, title=None, project=None, wait_s=0, lexicon=None` | `{job}`; done `job.outputs`: `{title, target_language, asset_ids, segments{total, items[{index, start_s, end_s, source_text, translated_text}], next_offset}}` (first 20 lines) |
+| `voice_dub_segments` | yes | `job_id, offset=0, limit=50` | `{job_id, total, offset, items[{index, start_s, end_s, source_text, translated_text}], next_offset}` |
+| `voice_resynthesize_segment` | no | `job_id, index, text=None, engine_id=None, voice_id=None, voice_ref=None, remix=True` | `{segment{index, start_s, end_s, source_text, translated_text, engine_id}, remixed, asset_id?}`; the new voice applies to that line only |
+| `voice_job` | yes | `job_id, wait_s=0` | the job (state, progress, message) and, when done, the compact `outputs` above - never file paths |
 
 - **Engines.** `piper` (curated voices, no cloning - the same engine
   `studio_voice` uses) plus optional cloning-capable engines (`xtts`,
@@ -134,7 +135,13 @@ behind Hoard Link and fails with a clear message without one.
   supplies its own engine, sample and language unless `engine_id`/`voice_ref`
   override them; a cloning engine without a `voice_id`'s sample or an
   explicit `voice_ref` fails with `cloning_needs_sample`. `preset` picks a
-  named speed/pitch/style preset saved on that voice.
+  named speed/pitch/style preset saved on that voice. Languages may be codes
+  or names (`es`, `Spanish`, `español`); `pitch` is in semitones (-12..12).
+  `voice_audiobook`/`voice_dub` check the voice and language before the job
+  is queued.
+- **Pronunciation.** `lexicon` (`{"Prospero": "PROS-per-oh"}`) replaces whole
+  words before synthesis, merged over the library voice's own lexicon
+  (`PATCH /api/voice/voices/{id}`), so it works for speak, audiobooks and dubs.
 - **Consent.** Only clone a voice from a sample the caller has the right to
   use; a cloned voice is stored and reused deliberately, never inferred.
 
