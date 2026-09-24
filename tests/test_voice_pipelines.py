@@ -203,6 +203,32 @@ def test_audiobook_job_resumes_without_resynthesizing(tmp_path, monkeypatch):
     assert len(outputs2["chapters"]) == 2
 
 
+def test_audiobook_job_resume_keeps_full_transcript(tmp_path, monkeypatch):
+    """A resumed run (a re-queued job with the exact same content, as after
+    a crash or a cancel) must reuse the already-rendered chapters' audio
+    *and* keep their transcript lines - not just skip re-synthesizing them
+    while silently dropping their SRT/LRC entries and undercounting
+    sentence_count."""
+    store = Store(tmp_path / "data")
+    monkeypatch.setattr(ve, "default_tts_engines", lambda **kw: [FakeTTS()])
+    params = {"text": "Chapter 1\nOne.\n\nChapter 2\nTwo.", "voice": {"engine_id": "fake"}, "format": "mp3"}
+
+    job1 = store.create_job("audiobook", "cpu", params)
+    outputs1 = vp.audiobook_job(store, None, job1, Progress(store, job1["id"]))
+    assert outputs1["sentence_count"] == 2
+
+    # simulate a crash/cancel and a fresh job re-queued with identical
+    # content: it reuses ch000.wav (already on disk) but must still count
+    # and transcribe that chapter's sentence(s)
+    job2 = store.create_job("audiobook", "cpu", params)
+    outputs2 = vp.audiobook_job(store, None, job2, Progress(store, job2["id"]))
+    assert outputs2["sentence_count"] == 2
+
+    srt = (tmp_path / "data" / outputs2["srt_file"]).read_text(encoding="utf-8")
+    assert "One." in srt
+    assert "Two." in srt
+
+
 def test_audiobook_job_rejects_oversized_text(tmp_path, monkeypatch):
     store = Store(tmp_path / "data")
     monkeypatch.setattr(vp, "MAX_TEXT_CHARS", 10)
