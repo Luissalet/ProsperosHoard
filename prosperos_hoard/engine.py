@@ -981,19 +981,25 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     values = dict(recipe.get("params") or {})
     if vary:
         values["seed"] = seed if seed is not None else random_seed()
-    inputs = recipe.get("input_asset_ids") or []
-    ref = inputs[0] if inputs else None
-    mask = inputs[1] if len(inputs) > 1 else None
+    inputs = list(recipe.get("input_asset_ids") or [])
     current = None
+    spec: dict[str, Any] = {}
     try:
         workflow, spec = comfy_driver.load_template(recipe["template"], store.data_dir)
         current = comfy_driver.template_hash(workflow, spec)
     except comfy_driver.WorkflowError:
         pass
+    ref_ids: Optional[list[str]] = None
+    if spec.get("reference_group"):
+        # a multi-reference edit (Qwen-Image 2.1): every input is a reference
+        ref, mask, ref_ids = (inputs[0] if inputs else None), None, inputs
+    else:
+        ref = inputs[0] if inputs else None
+        mask = inputs[1] if len(inputs) > 1 else None
     result = run_template(
         store, backend, job, progress, template_name=recipe["template"], values=values,
         operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
-        reference_asset_id=ref, mask_asset_id=mask,
+        reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",
