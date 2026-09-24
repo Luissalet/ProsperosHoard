@@ -66,7 +66,7 @@ with ids and pictures.
 | Productions and recipes | A whole music video as one resumable, checkpointed job (lead and its reference sheet, song, stills, lyric timing, Wan clips, photocards, album art, the cut and its renders, a `REPORT.md`) that queues its frames and clips as ordinary jobs, so a render pool spreads them over every card; "change shots" (another variant, clip on/off, a new prompt or seed) redoes only what depends on them. A finished production - made in the app or by the production script - becomes a **recipe** with the lead abstracted into a `{lead}` casting slot; "Recreate with..." runs it with another character from the studio or a new description, reusing the song and the stills and clips the lead is not in | The cut's pace (beats per shot) is not recorded by the production script, so a recipe exported from a scripted run uses the defaults; prompts that describe the old lead's props are flagged, not rewritten |
 | Animatic | Before the expensive clips (every 5 s Wan clip took ~9.5 min in the real run), the production cuts its stills exactly where the final cut will cut - the same auto-cut over the same song take, lyric/section marks and options - with a Ken Burns move and a crossfade per shot, captions and finishing, rendered at 720p in each target aspect, plus a `plan.json` (every cut, each shot's screen time and still, which shots become Wan clips, the estimated GPU minutes); the production pauses at `awaiting_review` until **Continue** (or goes on by itself with `animatic_autocontinue`), and **Change shots** swaps stills, turns clips on or off or rewrites a shot first | The animatic crossfades every cut (the final keeps its flashes and glitches); GPU minutes are estimates from the real run's timings (configurable) |
 | QA director | A pass over a production's outputs, per stage or all of them, inline after each stage (`settings.qa.enabled`) or on demand: flat or noisy stills, black/red bands along an edge (the ffmpeg 8 stripe), exposure jumps inside a clip, motion where stillness was asked (or a frozen clip), a photocard head touching the top edge, lyric coverage of an aligned LRC, durations against the plan; with a vision model behind Hoard Link each output is also scored 0-10 against the bible, the shot prompt and the reference, with a one-line reason. Failing stills, clips and photocards are regenerated with a new seed and a targeted fix (noise -> denoise 1, exposure jump -> another sampler, walking -> the stillness negative, a cropped head -> headroom), up to a retry cap, and every retry is written to the lineage and REPORT.md | The checks are heuristics with editable thresholds, not a trained critic; without a vision model only the model-free checks run (it never blocks); a scripted production is checked read-only |
-| Agent control | 43 MCP tools mirroring `/api/agent/*` (34 production tools plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Agent control | 48 MCP tools mirroring `/api/agent/*` (38 production tools plus 10 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
 | Interface | React studio: Overview, Cast, Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes), Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
@@ -368,8 +368,8 @@ never returned by the API.
 cd frontend; npm ci; npm run build
 ```
 
-On Linux/macOS the same with `.venv/bin/python`. **296 tests pass** in
-about two minutes on a shared 2-CPU Linux machine, offline, with no GPU and no
+On Linux/macOS the same with `.venv/bin/python`. **525 tests pass** in
+about three minutes on a shared 2-CPU Linux machine, offline, with no GPU and no
 model downloads (the demo backend stands in for ComfyUI, and the voice
 studio's own suite adds fake TTS/STT engines plus real, optional tests
 against Piper and faster-whisper when they are installed). The suite covers
@@ -413,7 +413,8 @@ Faustus manifest check.
 
 `npm run build` in `frontend/` passes with zero TypeScript errors.
 [CI](.github/workflows/ci.yml) runs the tests on Ubuntu and Windows with
-Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
+Python 3.11, 3.12 and 3.13, once more on Linux with only the bundled
+ffmpeg 4.2 (no system ffmpeg), and builds the interface with Node.js 22.
 
 ## Roadmap / known limits
 
