@@ -6,10 +6,10 @@ Two tiers, never mixed up in the output:
   images of the character and the candidate go to the model with a strict
   question about identity only (face, hair, silhouette, colours, signature
   outfit and props), ignoring pose, framing, lighting and background. 0-10.
-- **rough** (no model): a colour signature of the subject area (the middle
-  of the frame) compared with the references'. It catches the obvious
-  failures - wrong palette, wrong costume colour, a different creature -
-  and nothing subtle. The method is always reported next to the score.
+- **rough** (no model): whether the character's colours (its palette, or
+  the dominant colours of its references) are present in the candidate. A
+  new background does not count against it; a wrong costume or a different
+  creature does. Nothing subtle. The method is always reported.
 
 Scores are cached per asset and character in the asset's `analysis`
 (`analysis["identity"][character_id]`), keyed by a hash of the reference
@@ -69,32 +69,60 @@ def asset_image(store: Store, asset_id: str, side: int = 384) -> Optional[Image.
     return _open_rgb(path, side) if path.is_file() else None
 
 
-def signature(img: Image.Image) -> np.ndarray:
-    """Normalised HSV histogram (8 hue x 3 saturation x 3 value bins) of the
-    central 60 % of the frame, where the subject usually is. Low-saturation
-    pixels fall into their own hue bin 0 so greys do not smear across hues."""
+def _hex_to_rgb(value: str) -> Optional[tuple[int, int, int]]:
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", (value or "").strip())
+    if not m:
+        return None
+    v = m.group(1)
+    return int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
+
+
+def derived_palette(img: Image.Image, colours: int = 5) -> list[tuple[int, int, int]]:
+    """The dominant colours of the subject area (the middle of the frame)
+    of a reference, for characters without a palette of their own."""
     w, h = img.size
-    box = (int(w * 0.2), int(h * 0.15), int(w * 0.8), int(h * 0.95))
-    hsv = np.asarray(img.crop(box).convert("HSV"), dtype=np.float32) / 255.0
-    hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    hue_bin = np.where(sat < 0.15, 0, 1 + np.minimum((hue * 7).astype(int), 6))
-    sat_bin = np.minimum((sat * 3).astype(int), 2)
-    val_bin = np.minimum((val * 3).astype(int), 2)
-    idx = hue_bin * 9 + sat_bin * 3 + val_bin
-    hist = np.bincount(idx.ravel(), minlength=72).astype(np.float64)
-    total = hist.sum()
-    return hist / total if total else hist
+    crop = img.crop((int(w * 0.2), int(h * 0.1), int(w * 0.8), int(h * 0.95))).convert("RGB")
+    crop.thumbnail((160, 160))
+    q = crop.quantize(colors=colours, method=Image.Quantize.MEDIANCUT)
+    pal = q.getpalette() or []
+    counts = sorted(q.getcolors() or [], reverse=True)
+    out = []
+    for count, idx in counts:
+        if count < crop.width * crop.height * 0.03:
+            continue
+        out.append((pal[idx * 3], pal[idx * 3 + 1], pal[idx * 3 + 2]))
+    return out[:colours]
 
 
-def rough_score(candidate: Image.Image, references: list[Image.Image]) -> float:
-    """0-10: best histogram intersection against any reference, stretched
-    so that unrelated images land low (~0.35 intersection is typical for two
-    random photos) and near-copies land at 10."""
-    if not references:
+def palette_presence(candidate: Image.Image, palette: list[tuple[int, int, int]], radius: float = 60.0) -> float:
+    """0-10: how many of the character's colours show up in the candidate
+    (each counts fully once it covers ~1.5 % of the frame). Presence, not
+    proportion - so a new background does not count against the character,
+    only its missing colours do."""
+    if not palette:
         return 0.0
-    cand = signature(candidate)
-    best = max(float(np.minimum(cand, signature(r)).sum()) for r in references)
-    return round(max(0.0, min(10.0, (best - 0.35) / 0.5 * 10.0)), 1)
+    arr = np.asarray(candidate.convert("RGB").resize((192, 192)), dtype=np.float32).reshape(-1, 3)
+    parts = []
+    for colour in palette:
+        dist = np.sqrt(((arr - np.asarray(colour, dtype=np.float32)) ** 2).sum(axis=1))
+        share = float((dist < radius).mean())
+        parts.append(min(1.0, share / 0.015))
+    return round(10.0 * sum(parts) / len(parts), 1)
+
+
+def rough_score(candidate: Image.Image, references: list[Image.Image],
+                palette: Optional[list[str]] = None) -> float:
+    """0-10 without a model: are the character's colours there? Uses the
+    character's own palette when it has one, else the dominant colours of
+    its references. It catches a wrong costume or a different creature,
+    nothing subtle, and is always reported as `rough`."""
+    colours = [c for c in (_hex_to_rgb(p) for p in palette or []) if c]
+    if not colours:
+        for ref in references[:2]:
+            for c in derived_palette(ref):
+                if all(sum((a - b) ** 2 for a, b in zip(c, o)) > 900 for o in colours):
+                    colours.append(c)
+    return palette_presence(candidate, colours[:8])
 
 
 def vision_prompt(name: str, look: str, n_refs: int) -> str:
@@ -147,8 +175,12 @@ def reference_ids(character: dict[str, Any]) -> list[str]:
     return out[:MAX_REFS]
 
 
-def refs_hash(ref_ids: list[str]) -> str:
-    return hashlib.sha1("|".join(ref_ids).encode("utf-8")).hexdigest()[:12]
+SCORING_VERSION = "2"  # bump when a method changes, so cached scores are redone
+
+
+def refs_hash(ref_ids: list[str], palette: Optional[list[str]] = None) -> str:
+    basis = "|".join(ref_ids) + "#" + ",".join(palette or []) + "#v" + SCORING_VERSION
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 
 def score_asset(store: Store, character: dict[str, Any], asset_id: str, vision: Optional[VisionFn] = None,
@@ -159,7 +191,7 @@ def score_asset(store: Store, character: dict[str, Any], asset_id: str, vision: 
     refs = reference_ids(character)
     if not refs:
         return {"asset_id": asset_id, "skipped": "the character has no canonical or reference image"}
-    key = refs_hash(refs)
+    key = refs_hash(refs, character.get("palette"))
     asset = store.get_asset(asset_id)
     analysis = asset.get("analysis") or {}
     cached = ((analysis.get("identity") or {}).get(character["id"]) or {})
@@ -175,7 +207,7 @@ def score_asset(store: Store, character: dict[str, Any], asset_id: str, vision: 
         return {"asset_id": asset_id, "score": 10.0, "method": "self", "why": "this is the character's reference",
                 "cached": False}
     score: Optional[float] = None
-    method, why = "rough", "colour signature of the subject area (no vision model)"
+    method, why = "rough", "the character's colours are present or missing (no vision model)"
     if vision is not None:
         try:
             answer = vision([_jpeg(r) for r in ref_imgs] + [_jpeg(cand)],
@@ -187,7 +219,7 @@ def score_asset(store: Store, character: dict[str, Any], asset_id: str, vision: 
             score = None
     if score is None:
         method = "rough"
-        score = rough_score(cand, ref_imgs)
+        score = rough_score(cand, ref_imgs, character.get("palette"))
     entry = {"score": score, "method": method, "why": why, "refs": key, "at": now_iso(),
              **({"model": vision_name} if method == "vision" and vision_name else {})}
     ids = dict(analysis.get("identity") or {})

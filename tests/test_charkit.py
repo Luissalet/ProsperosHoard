@@ -91,6 +91,7 @@ def test_identity_rough_score_separates_colours():
     red2 = Image.new("RGB", (200, 200), (220, 50, 45))
     blue = Image.new("RGB", (200, 200), (40, 60, 230))
     assert identity.rough_score(red2, [red]) > 8
+    assert identity.rough_score(red2, [], ["#e62828"]) > 8 and identity.rough_score(blue, [], ["#e62828"]) < 1
     assert identity.rough_score(blue, [red]) < 2
     assert identity.parse_identity('sure {"identity": 7.5, "why": "same hat"}') == (7.5, "same hat")
 

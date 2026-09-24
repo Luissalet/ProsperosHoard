@@ -1076,7 +1076,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         progress(0.05, "scoring identity")
         out = charkit.score_takes(store, p["character_id"], p.get("asset_ids"), fn, name, bool(p.get("force")),
                                   int(p.get("limit") or 24))
-        return {**out, "model": name}
+        out["results"] = [{k: (engine._clip(v, 100) if k == "why" else v) for k, v in r.items() if k != "cached"}
+                          for r in out["results"]]
+        return {**out, "model": name if fn else None}
 
     queue.register("character_sheet", lambda job, p: charkit.sheet_job(store, backend, job, p))
     queue.register("train_lora", lambda job, p: charkit.train_job(store, backend, job, p))
