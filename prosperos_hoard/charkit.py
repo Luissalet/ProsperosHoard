@@ -812,8 +812,8 @@ def pick_trainer(cfg: dict[str, Any], name: Optional[str], arch: str) -> dict[st
         if st.get("ok") and arch in (st.get("archs") or []):
             return t
     if not entries:
-        raise KitError("no_trainer", "no LoRA trainer is configured; add one in Settings -> Training (backend.json "
-                                     "'training.trainers') - see docs/CHARACTERS.md")
+        raise KitError("no_trainer", "no LoRA trainer is configured; add one in Cast -> Kit -> Training -> Configure "
+                                     "(backend.json 'training.trainers') - see docs/CHARACTERS.md")
     reasons = "; ".join(f"{t['name']}: {(status.get(t['name']) or {}).get('reason') or 'does not train ' + arch}"
                         for t in candidates)
     raise KitError("trainer_unavailable", f"no configured trainer can train {arch} right now ({reasons})")
