@@ -127,6 +127,36 @@ def test_img2img_records_reference_and_strength(store, backend_with_comfy, proje
     assert isinstance(recipe["params"]["seed"], int)
 
 
+def test_img2img_of_a_flux_image_does_not_inherit_flux_sampling(store, backend_with_comfy, project):
+    base = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "idol on a rooftop", "positive_prompt": "idol on a rooftop", "width": 512, "height": 512,
+                     "seed": 1, "template": "flux_schnell_txt2img"}, project["id"])
+    assert base["state"] == "done", base
+    src = base["outputs"]["asset_ids"][0]
+    assert store.get_asset(src)["recipe"]["params"]["cfg"] == 1
+    edited = _run_job(store, backend_with_comfy, "edit_image", {"asset_id": src, "operation": "img2img"}, project["id"])
+    assert edited["state"] == "done", edited
+    params = store.get_asset(edited["outputs"]["asset_ids"][0])["recipe"]["params"]
+    assert params["cfg"] == 6.5 and params["steps"] == 30 and params["sampler"] == "dpmpp_2m"
+    assert "flux" not in str(params["checkpoint"]).lower()
+    assert params["positive_prompt"] == "idol on a rooftop"
+
+
+def test_img2img_of_an_instruction_edit_uses_the_users_words(store, backend_with_comfy, project):
+    base = _run_job(store, backend_with_comfy, "generate_image",
+                    {"positive_prompt": "idol", "width": 256, "height": 256, "seed": 1, "template": "sdxl_txt2img"}, project["id"])
+    ref = base["outputs"]["asset_ids"][0]
+    edit = _run_job(store, backend_with_comfy, "generate_image",
+                    {"prompt": "in the rain", "positive_prompt": "Keep the character in <image1> exactly the same, in the rain",
+                     "seed": 2, "template": "qwen21_edit", "reference_asset_ids": [ref]}, project["id"])
+    assert edit["state"] == "done", edit
+    again = _run_job(store, backend_with_comfy, "edit_image",
+                     {"asset_id": edit["outputs"]["asset_ids"][0], "operation": "img2img"}, project["id"])
+    assert again["state"] == "done", again
+    params = store.get_asset(again["outputs"]["asset_ids"][0])["recipe"]["params"]
+    assert params["positive_prompt"] == "in the rain" and params["cfg"] == 6.5
+
+
 def test_animate_produces_mp4_video_asset(store, backend_with_comfy, project):
     import shutil
 

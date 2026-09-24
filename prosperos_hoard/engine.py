@@ -942,6 +942,25 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
 
 
 _EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires"}
+_SD_TEMPLATES = {"sdxl_txt2img", "sdxl_img2img", "sdxl_inpaint", "sdxl_hires", "sd15_txt2img"}
+_INSTRUCTION_TEMPLATES = {"flux_kontext_edit", "qwen21_edit"}
+
+
+def _is_sd_family(store: Store, recipe: dict[str, Any]) -> bool:
+    """Was this recipe made with an SDXL/SD1.5 template (built-in, or an
+    imported workflow whose VRAM class says so)?"""
+    template = recipe.get("template")
+    if recipe.get("backend") != "comfyui" or not template:
+        return False
+    if template in _SD_TEMPLATES:
+        return True
+    if comfy_driver.CUSTOM_ID_RE.match(str(template)):
+        try:
+            _, spec = comfy_driver.load_template(template, store.data_dir)
+        except comfy_driver.WorkflowError:
+            return False
+        return spec.get("vram_class") in ("sdxl", "sd15")
+    return False
 
 
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
@@ -952,11 +971,22 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
         return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
                             count=params.get("count", 1))
     template = _EDIT_TEMPLATES[operation]
-    src_params = (src.get("recipe") or {}).get("params") or {}
+    src_recipe = src.get("recipe") or {}
+    all_src_params = src_recipe.get("params") or {}
+    # the SDXL edit templates only inherit sampling settings and the
+    # checkpoint from an SD-family source: a Flux/Qwen/Kontext recipe's
+    # cfg 1 / 4 steps / UNet name would wash out or break an SDXL pass
+    sd_source = _is_sd_family(store, src_recipe)
+    src_params = all_src_params if sd_source else {}
+    source_prompt = all_src_params.get("positive_prompt")
+    if src_recipe.get("template") in _INSTRUCTION_TEMPLATES or (not sd_source and src_recipe.get("prompt")):
+        # an edit template's positive_prompt is an instruction ("keep <image1>
+        # ..., now ..."), not a scene an img2img pass can use
+        source_prompt = src_recipe.get("prompt") or ""
     values = {
         "checkpoint": src_params.get("checkpoint"),
-        "positive_prompt": _first(params.get("prompt"), src_params.get("positive_prompt"), ""),
-        "negative_prompt": _first(params.get("negative_prompt"), src_params.get("negative_prompt"), ""),
+        "positive_prompt": _first(params.get("prompt"), source_prompt, ""),
+        "negative_prompt": _first(params.get("negative_prompt"), all_src_params.get("negative_prompt"), ""),
         "seed": params.get("seed"),
         "steps": _first(params.get("steps"), src_params.get("steps"), 30),
         "cfg": _first(params.get("cfg"), src_params.get("cfg"), 6.5),
