@@ -50,6 +50,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_recipes_list` | - -> `{items:[recipe summary]}` |
 | GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
 | POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
+| POST | `/api/agent/studio_animatic` | `{production, aspects?, wait_s=0}` -> `{job, animatic?: {renders{aspect: asset_id}, plan{cuts_total, clips_planned, gpu_minutes, cpu_minutes_renders, unused_shots, duration_s}}}` |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
 | GET | `/api/agent/voice_engines` | - -> `{tts:[...], stt:[...]}` engine status |
@@ -165,8 +166,14 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions/{slug}/recipe` | `{name?}` -> recipe summary |
 | GET | `/api/recipes` / `/api/recipes/{name}` | list / the whole recipe JSON |
 | POST | `/api/recipes/{name}/run` | `{cast, name?, options}` -> `{production, job, notes}` |
+| POST | `/api/productions/{slug}/animatic` | `{aspects?}` -> `{job}` (an `animatic` job on the cpu lane) |
+| GET | `/api/productions/{slug}/animatic` | `plan.json`: `{cuts[{index, start_s, duration_s, shot, still, section}], shots[{key, lead, still, screen_time_s, cuts, will_be_clip, clip_keys, clips_to_render}], unused_shots, clips_planned, gpu_minutes, minutes_per, renders}` |
 | POST | `/api/productions/{slug}/qa` | `{stage, dry_run, keys?}` -> `{job, scorecard?}` |
 | GET | `/api/productions/{slug}/qa` | `{last: <full scorecard with every check's measurements>, history}` |
+
+A production's settings: `{"animatic": true, "animatic_autocontinue": false,
+"qa": {"enabled": false, "thresholds": {}, "max_retries": 2},
+"gpu_minutes": {"clip": 9.5, "still": 1.19, "final_render": 1.75}}`.
 
 A production's spec (all optional except `lead`):
 

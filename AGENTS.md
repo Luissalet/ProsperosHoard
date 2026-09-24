@@ -57,3 +57,12 @@ Qué hacer cuando el usuario pide, con sus palabras:
   segundo X, se mueve cuando debía estar quieto, nota baja contra la
   biblia…) y ofrece `dry_run=false` o `studio_production_shots` para
   cambiarlo.
+- **«Enséñame el animático antes de renderizar»**: las producciones nuevas
+  ya lo hacen solas (`settings.animatic`, activo por defecto) y se paran en
+  `awaiting_review`; si no existe o hay que rehacerlo,
+  `studio_animatic(production)`. Muéstralo (`studio_show` del render da tres
+  fotogramas) y resume el plan: cortes, planos sin usar, cuántos clips de
+  Wan quedan y los minutos de GPU estimados. Después, o
+  `studio_production_shots` para cambiar planos (se rehace el animático y
+  vuelve a parar), o `studio_production_continue` para renderizar los clips.
+  No continúes sin que el usuario lo apruebe.

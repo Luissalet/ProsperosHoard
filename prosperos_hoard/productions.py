@@ -45,7 +45,7 @@ from .store import NotFound, Store
 from .util import now_iso
 
 FORMAT = "prospero.production/1"
-STAGES = ("character", "song", "frames", "lyrics", "clips", "photocards", "album", "timeline", "report")
+STAGES = ("character", "song", "frames", "lyrics", "animatic", "clips", "photocards", "album", "timeline", "report")
 ITEM_STAGES = ("frames", "clips", "photocards")  # checkpointed item by item
 STATUSES = ("queued", "running", "awaiting_review", "done", "failed", "cancelled")
 SUB_JOB_POLL_S = 0.5
@@ -592,14 +592,15 @@ class Run:
                 outcome = fn(self) if stage in self.stage_hooks else fn()
                 state.setdefault("timings", {})[stage] = round(state.get("timings", {}).get(stage, 0)
                                                                + time.monotonic() - started, 1)
+                self.save()
+                if self.qa_hook and (state.get("settings", {}).get("qa") or {}).get("enabled"):
+                    self.qa_hook(self, stage)
                 if outcome == "pause":
                     state["status"] = "awaiting_review"
                     state["message"] = f"paused after {stage} for review"
                     self.log("paused_for_review")
                     self.save()
                     return {"slug": self.slug, "status": "awaiting_review", "stage": stage}
-                if self.qa_hook and (state.get("settings", {}).get("qa") or {}).get("enabled"):
-                    self.qa_hook(self, stage)
                 self.save()
             state["status"] = "done"
             state["stage"] = None
@@ -807,6 +808,26 @@ class Run:
         self.state["done"]["lyrics"] = {"lyrics_asset_id": timed["id"], "source": "estimated", "sections": timed["sections"],
                                         "lines": timed["lines"]}
         self.log("timed_lyrics", asset_id=timed["id"], lines=timed["lines"])
+
+    def stage_animatic(self) -> Optional[str]:
+        """The cheap preview before the expensive clips: the stills cut like
+        the final (see animatic.py). Pauses the production for review unless
+        it was approved or `animatic_autocontinue` is on."""
+        settings = self.state.get("settings") or {}
+        if not settings.get("animatic", True):
+            self.state["done"]["animatic"] = {"skipped": True}
+            return None
+        from . import animatic as animatic_mod
+
+        entry = animatic_mod.make(self.store, self.state, None,
+                                  lambda frac, msg=None: self.tick(self.stage_fraction(frac), msg or "animatic"),
+                                  getattr(self.progress, "cancelled", None))
+        self.state["done"]["animatic"] = entry
+        self.log("animatic", renders=entry["renders"], gpu_minutes=entry["plan"]["gpu_minutes"],
+                 clips_planned=entry["plan"]["clips_planned"])
+        if settings.get("animatic_autocontinue") or (self.state.get("review") or {}).get("animatic_approved"):
+            return None
+        return "pause"
 
     def clip_body(self, shot: dict[str, Any], variant: int) -> dict[str, Any]:
         settings = self.spec.get("clip_settings") or {}

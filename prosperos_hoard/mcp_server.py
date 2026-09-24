@@ -867,6 +867,24 @@ def studio_qa_report(production: str) -> dict[str, Any]:
     return _call("GET", "/api/agent/studio_qa_report", params={"production": production})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_animatic(production: str, aspects: Optional[list[str]] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Animatic before the expensive render: stills cut like the final, 720p / animatico antes de renderizar.
+
+    Uses only what is cheap: the stills, the chosen song take and its lyric/section timing, each shot with a
+    Ken Burns move and a crossfade, cut exactly where the final cut will cut (same song, lyrics and
+    options), rendered with ffmpeg at 720p in each aspect the production targets (or `aspects`). Also writes
+    a plan: every cut, every shot's screen time and still, which shots become Wan clips and the estimated
+    GPU minutes of the clips still to render. A production with settings.animatic=true (the default) makes
+    one by itself and pauses at awaiting_review; studio_production_continue then renders the clips. Works on
+    productions made by the production script too. Returns the job; when done, the video asset ids per
+    aspect and the plan summary.
+
+    Keywords: animatic, preview cut, storyboard video, before rendering, animatico, previsualizacion, antes de renderizar
+    """
+    return _call("POST", "/api/agent/studio_animatic", json={"production": production, "aspects": aspects, "wait_s": wait_s})
+
+
 def main() -> None:
     mcp.run()
 
