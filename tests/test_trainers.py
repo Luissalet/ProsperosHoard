@@ -222,7 +222,7 @@ def test_build_command_ai_toolkit(tmp_path: Path) -> None:
 
     assert "job: extension" in yaml_text
     assert "type: sd_trainer" in yaml_text
-    assert f"training_folder: {str(output_dir)}" in yaml_text or str(output_dir) in yaml_text
+    assert output_dir.as_posix() in yaml_text  # forward slashes: no YAML escaping of Windows paths
     assert "trigger_word: " in yaml_text and "ohwx hero" in yaml_text
     assert "type: lora" in yaml_text
     assert f"linear: {plan['rank']}" in yaml_text
