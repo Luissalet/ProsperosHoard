@@ -140,19 +140,59 @@ def test_fit_audio_to_duration_hits_target(tmp_path):
     assert info["applied_factor"] == pytest.approx(2.0, rel=1e-2)
 
 
+def _probe_sample_rate(path: Path) -> int:
+    from prosperos_hoard import procutil
+    from prosperos_hoard.backend import ffprobe_path
+
+    proc = procutil.run([ffprobe_path(), "-v", "error", "-select_streams", "a:0", "-show_entries",
+                        "stream=sample_rate", "-of", "csv=p=0", str(path)], text=True, timeout=30)
+    return int(proc.stdout.strip())
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_mix_dub_audio_normalises_mismatched_sample_rates(tmp_path):
+    """The original track and each TTS engine's raw output can each be a
+    different sample rate (e.g. 44100 vs 24000); left to ffmpeg's default
+    filtergraph negotiation this does not fail but can silently resample
+    the whole mix to an unrelated, much higher rate. The mixed output must
+    land on the fixed, predictable MIX_SAMPLE_RATE instead."""
+    from prosperos_hoard import procutil
+    from prosperos_hoard.backend import ffmpeg_path
+
+    original = tmp_path / "original.wav"
+    clip = tmp_path / "clip.wav"
+    proc = procutil.run([ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=300:duration=2", "-ar", "44100", "-ac", "1", str(original)], timeout=30)
+    assert proc.returncode == 0
+    proc = procutil.run([ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=500:duration=2", "-ar", "24000", "-ac", "1", str(clip)], timeout=30)
+    assert proc.returncode == 0
+
+    out = tmp_path / "mixed.wav"
+    db.mix_dub_audio(original, [clip], [{"start_s": 0.0, "end_s": 2.0}], out)
+    assert out.is_file()
+    assert _probe_sample_rate(out) == db.MIX_SAMPLE_RATE
+
+
 # ------------------------------------------------------------ mix filter build
 
 def test_build_dub_mix_filter_shape():
     segments = [{"start_s": 1.0, "end_s": 2.0}, {"start_s": 3.0, "end_s": 4.5}]
     filt = db.build_dub_mix_filter(segments)
-    assert "[0:a]volume=enable=" in filt
-    assert "[1:a]adelay=1000|1000[d0]" in filt
-    assert "[2:a]adelay=3000|3000[d1]" in filt
+    assert "[0:a]aformat=sample_rates=44100:channel_layouts=mono,volume=enable=" in filt
+    assert "[1:a]aformat=sample_rates=44100:channel_layouts=mono,adelay=1000|1000[d0]" in filt
+    assert "[2:a]aformat=sample_rates=44100:channel_layouts=mono,adelay=3000|3000[d1]" in filt
     assert filt.endswith("amix=inputs=3:normalize=0[mixed]")
 
 
 def test_build_dub_mix_filter_no_segments():
-    assert db.build_dub_mix_filter([]) == "[0:a]anull[mixed]"
+    assert db.build_dub_mix_filter([]) == "[0:a]aformat=sample_rates=44100:channel_layouts=mono[mixed]"
+
+
+def test_build_dub_mix_filter_uses_given_sample_rate():
+    filt = db.build_dub_mix_filter([{"start_s": 0.0, "end_s": 1.0}], sample_rate=16000)
+    assert "sample_rates=16000" in filt
+    assert "sample_rates=44100" not in filt
 
 
 # ------------------------------------------------------------------ translation

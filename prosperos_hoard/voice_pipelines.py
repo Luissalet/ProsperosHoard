@@ -259,17 +259,28 @@ def _ffmetadata_chapters(chapters: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+FINAL_SAMPLE_RATE = 44100  # a safe, universally-supported rate for the mp3/m4b encoders below
+
+
 def encode_final(work_wav: Path, out_path: Path, chapters: Optional[list[dict[str, Any]]] = None) -> None:
     """`out_path`'s suffix picks the container: `.mp3` (plain, loudness
     normalised) or `.m4b` (AAC audiobook container with chapter markers,
-    when `chapters` is given)."""
+    when `chapters` is given).
+
+    Both explicitly resample to `FINAL_SAMPLE_RATE` after `loudnorm`: that
+    filter's single-pass true-peak limiting emits at 192kHz regardless of
+    the input rate, and left alone each encoder then picks its own nearest
+    supported rate from *that* (observed: 48kHz for libmp3lame, 96kHz for
+    aac) rather than a small, predictable, universally-compatible rate for
+    narrated speech.
+    """
     if out_path.suffix.lower() == ".m4b" and chapters:
         meta_path = out_path.with_suffix(".ffmetadata.txt")
         meta_path.write_text(_ffmetadata_chapters(chapters), encoding="utf-8")
         try:
             cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(work_wav), "-i", str(meta_path),
-                   "-map_metadata", "1", "-af", "loudnorm=I=-18:TP=-1.5:LRA=9", "-c:a", "aac", "-b:a", "128k",
-                   "-f", "mp4", str(out_path)]
+                   "-map_metadata", "1", "-af", "loudnorm=I=-18:TP=-1.5:LRA=9", "-ar", str(FINAL_SAMPLE_RATE),
+                   "-c:a", "aac", "-b:a", "128k", "-f", "mp4", str(out_path)]
             proc = procutil.run(cmd, timeout=1200)
             if proc.returncode != 0 or not out_path.is_file():
                 raise AudiobookError("encode_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500])
@@ -277,7 +288,8 @@ def encode_final(work_wav: Path, out_path: Path, chapters: Optional[list[dict[st
             meta_path.unlink(missing_ok=True)
         return
     cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(work_wav), "-af",
-           "loudnorm=I=-18:TP=-1.5:LRA=9", "-c:a", "libmp3lame", "-b:a", "192k", str(out_path)]
+           "loudnorm=I=-18:TP=-1.5:LRA=9", "-ar", str(FINAL_SAMPLE_RATE), "-c:a", "libmp3lame", "-b:a", "192k",
+           str(out_path)]
     proc = procutil.run(cmd, timeout=1200)
     if proc.returncode != 0 or not out_path.is_file():
         raise AudiobookError("encode_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500])
