@@ -430,7 +430,11 @@ class Store:
         for key in simple:
             if key in fields and fields[key] is not None:
                 cols.append(f"{key}=?")
-                params.append(fields[key])
+                params.append(fields[key] if key != "canonical_asset_id" else fields[key] or None)
+        if "canonical_asset_id" in fields and fields["canonical_asset_id"] is None:
+            # the other fields treat None as "unchanged"; an explicit canonical_asset_id=None
+            # clears the canonical reference (the UI's "remove image")
+            cols.append("canonical_asset_id=NULL")
         for key, col in (("palette", "palette_json"), ("reference_asset_ids", "reference_asset_ids_json")):
             if key in fields and fields[key] is not None:
                 cols.append(f"{col}=?")
