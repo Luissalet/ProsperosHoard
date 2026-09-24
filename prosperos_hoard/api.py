@@ -1014,7 +1014,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def _default_arch(project_id: str) -> str:
         proj = store.get_project(project_id)
-        name = engine.resolve_image_engine(engine._object_info(backend), proj.get("image_engine"))
+        try:
+            info = engine.object_info_live_or_cached(backend)
+        except (Unavailable, RuntimeError):
+            info = {}
+        name = engine.resolve_image_engine(info or {}, proj.get("image_engine"))
         return charkit.ENGINE_ARCH.get(name, "qwen_image")
 
     def op_char_adapters(body: CharAdaptersBody) -> dict[str, Any]:
@@ -1022,14 +1026,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.action == "list":
             return _kit_view(char)
         if body.action == "available":
-            info = engine._object_info(backend)
-            return {"loras": comfy_driver.lora_choices(info) if info else [], "comfy": bool(info)}
+            try:
+                info, live = engine._object_info(backend), True
+            except Unavailable:
+                try:
+                    info = engine.object_info_live_or_cached(backend)
+                except RuntimeError:
+                    info = {}
+                live = False
+            return {"loras": comfy_driver.lora_choices(info) if info else [], "comfy": live,
+                    **({} if live else {"note": "ComfyUI is off: this is the list from its last known state"})}
         if body.action == "settings":
             return _kit_view(charkit.update_settings(store, char["id"], body.settings))
         if body.action == "attach":
             if not body.lora_name or not body.arch:
                 raise engine.EngineError("bad_adapter", "attach needs lora_name (as ComfyUI lists it) and arch")
-            info = engine._object_info(backend)
+            try:
+                info = engine._object_info(backend)
+            except Unavailable:
+                info = None  # ComfyUI off: trust the name; renders check it again
             available = comfy_driver.lora_choices(info) if info else None
             a = charkit.attach_adapter(store, char["id"], lora_name=body.lora_name, arch=body.arch,
                                        strength=body.strength or 1.0, trigger=body.trigger,
