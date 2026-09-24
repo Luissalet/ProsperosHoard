@@ -171,11 +171,12 @@ loading anything of its own.
 | `studio_compose` | Compose a song with vocals (ACE-Step) | no |
 | `studio_voice` | Spoken line with a character's voice | no |
 | `studio_import` | Import a local file from an allowed folder | no |
-| `studio_analyze_audio` | Tempo, beats, sections | yes |
+| `studio_analyze_audio` / `studio_time_lyrics` | Tempo, beats, sections / time lyrics to a song's sections as LRC | yes / no |
 | `studio_design` / `studio_photocard_set` | Render a design / a whole photocard set | no |
 | `studio_timeline` / `studio_render` | Auto-cut, read, edit a timeline / render it | no |
-| `studio_jobs` / `studio_job` / `studio_cancel_job` | Queue, one job (with wait), cancel | yes / yes / no |
+| `studio_jobs` / `studio_job` / `studio_cancel_job` / `studio_retry_job` | Queue, one job (with wait), cancel, retry a failed one | yes / yes / no / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Find assets, look at them, their recipe | yes |
+| `studio_asset_update` / `studio_board` / `studio_project_update` | Rate, tag and favourite assets / build mood boards and storyboards / project settings and cover | no |
 | `studio_productions` / `studio_production` | List productions / one production's stages, renders and next step | yes |
 | `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Start a whole production from a spec / resume or approve it / change shots before the render | no |
 | `studio_recipe_export` / `studio_recipes_list` / `studio_recipe_get` | Turn a finished production into a recipe with a `{lead}` slot / list recipes / read one | no / yes / yes |

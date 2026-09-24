@@ -293,3 +293,25 @@ def test_mcp_server_refuses_non_loopback_url(monkeypatch):
     sys.modules.pop("prosperos_hoard.mcp_server", None)
     monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
     importlib.import_module("prosperos_hoard.mcp_server")
+
+
+def test_every_agent_route_has_an_mcp_tool_and_back(tmp_path, monkeypatch):
+    """AGENTS.md rule 4: /api/agent/<tool> and the MCP tool share a name, and
+    every tool's docstring carries a Keywords: line."""
+    import importlib
+
+    from prosperos_hoard.api import create_app
+
+    app = create_app(tmp_path / "data")
+    try:
+        routes = {r.path.rsplit("/", 1)[1] for r in app.routes
+                  if getattr(r, "path", "").startswith("/api/agent/") and "{" not in r.path}
+    finally:
+        app.state.queue.stop()
+    monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
+    sys.modules.pop("prosperos_hoard.mcp_server", None)
+    mod = importlib.import_module("prosperos_hoard.mcp_server")
+    tools = {t.name: t for t in mod.mcp._tool_manager.list_tools()}
+    assert routes == set(tools), (routes ^ set(tools))
+    for name, t in tools.items():
+        assert "Keywords:" in (t.description or ""), name

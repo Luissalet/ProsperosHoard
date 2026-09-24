@@ -176,11 +176,12 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_compose` | Componer una canción con voz (ACE-Step) | no |
 | `studio_voice` | Frase hablada con la voz de un personaje | no |
 | `studio_import` | Importar un archivo local de una carpeta permitida | no |
-| `studio_analyze_audio` | Tempo, pulsos y secciones | sí |
+| `studio_analyze_audio` / `studio_time_lyrics` | Tempo, pulsos y secciones / sincronizar la letra con las secciones de la canción (LRC) | sí / no |
 | `studio_design` / `studio_photocard_set` | Renderizar un diseño / un set de photocards | no |
 | `studio_timeline` / `studio_render` | Montaje automático, lectura y edición / renderizado | no |
-| `studio_jobs` / `studio_job` / `studio_cancel_job` | Cola, un trabajo (con espera), cancelar | sí / sí / no |
+| `studio_jobs` / `studio_job` / `studio_cancel_job` / `studio_retry_job` | Cola, un trabajo (con espera), cancelar, reintentar uno fallido | sí / sí / no / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Buscar recursos, verlos y su receta | sí |
+| `studio_asset_update` / `studio_board` / `studio_project_update` | Puntuar, etiquetar y marcar favoritos / tableros de ambiente y guiones gráficos / ajustes y portada del proyecto | no |
 | `studio_productions` / `studio_production` | Listar producciones / etapas, renders y siguiente paso de una producción | sí |
 | `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Lanzar una producción entera desde una especificación / reanudarla o aprobarla / cambiar planos antes del render | no |
 | `studio_recipe_export` / `studio_recipes_list` / `studio_recipe_get` | Convertir una producción terminada en receta con un hueco `{lead}` / listar recetas / leer una | no / sí / sí |

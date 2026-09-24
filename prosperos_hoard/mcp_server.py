@@ -528,6 +528,17 @@ def studio_cancel_job(job_id: str) -> dict[str, Any]:
     return _call("POST", "/api/agent/studio_cancel_job", params={"job_id": job_id})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_retry_job(job_id: str, new_seed: bool = False) -> dict[str, Any]:
+    """Queue a failed or cancelled job again with the same parameters and inputs (for example after
+    ComfyUI ran out of memory or was restarted). new_seed=true picks a new seed for a generation.
+    Productions are not retried here: studio_production_continue resumes them. Returns the new job.
+
+    Keywords: retry job, run again, try again, redo failed, reintentar trabajo, volver a intentar, repetir fallido
+    """
+    return _call("POST", "/api/agent/studio_retry_job", params={"job_id": job_id, "new_seed": new_seed})
+
+
 # ------------------------------------------------------------------ assets
 
 @tool(_ro(readOnlyHint=True))
@@ -565,6 +576,49 @@ def studio_show(asset_ids: list[str] | str, size: int = 768) -> list[Any]:
         fmt = "jpeg" if item["mime"] == "image/jpeg" else "png"
         out.append(Image(data=raw, format=fmt))
     return out
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_asset_update(asset_id: str, rating: Optional[int] = None, favourite: Optional[bool] = None,
+                        tags: Optional[list[str]] = None, notes: Optional[str] = None,
+                        name: Optional[str] = None) -> dict[str, Any]:
+    """Curate an asset: rating 0-5, favourite true/false, tags (replaces the list), notes, name.
+    Pass only what changes. studio_assets filters on tag and favourite, so this is how the best
+    takes are marked for later. Returns the asset.
+
+    Keywords: rate image, favourite, tag asset, rename, mark best take, puntuar, favorito, etiquetar, renombrar
+    """
+    body = {"rating": rating, "favourite": favourite, "tags": tags, "notes": notes, "name": name}
+    return _call("POST", "/api/agent/studio_asset_update", params={"asset_id": asset_id},
+                 json={k: v for k, v in body.items() if v is not None})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_board(project: str, action: str = "list", board_id: Optional[str] = None, name: Optional[str] = None,
+                 kind: Optional[str] = None, asset_ids: Optional[list[str]] = None,
+                 notes: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    """Mood boards and storyboards: ordered sets of a project's assets.
+    action: "list" (the project's boards) | "get" (board_id) | "create" (name, kind moodboard|storyboard|
+    shotlist, optional asset_ids) | "add" (append asset_ids to board_id) | "set" (replace board_id's items
+    with asset_ids, in order). notes maps an asset id to a short note. A board's order feeds
+    studio_timeline(board_id=...) for an auto-cut. Returns the board (id first) with its items.
+
+    Keywords: moodboard, storyboard, board, collect images, tablero, guion grafico, reunir imagenes
+    """
+    body = {"action": action, "board_id": board_id, "name": name, "kind": kind, "asset_ids": asset_ids, "notes": notes}
+    return _call("POST", "/api/agent/studio_board", params={"project": project}, json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_project_update(project: str, name: Optional[str] = None, brief: Optional[str] = None,
+                          cover_asset_id: Optional[str] = None, image_engine: Optional[str] = None) -> dict[str, Any]:
+    """Change a project's name, brief, cover image (an image asset id) or default image_engine
+    ("auto" | "qwen21" | "flux" | "sdxl"). Pass only what changes. Returns the project.
+
+    Keywords: rename project, project settings, cover image, image engine, renombrar proyecto, portada, motor de imagen
+    """
+    return _call("POST", "/api/agent/studio_project_update", params={"project": project},
+                 json={"name": name, "brief": brief, "cover_asset_id": cover_asset_id, "image_engine": image_engine})
 
 
 @tool(_ro(readOnlyHint=True))

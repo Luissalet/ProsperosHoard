@@ -68,6 +68,11 @@ Traps:
 - Never describe an image you have not looked at with `studio_show`.
 - `unknown_mentions` means a name matched no character: fix it, do not ignore it.
 - Choose the aspect before `studio_timeline`: it fixes the render size.
-- Voices are generic Piper voices (first use downloads ~60 MB); never imitate a
-  real person. Without a music model (see `studio_status`), ask the user for
-  an audio file.
+- `studio_voice` speaks with generic Piper voices (first use downloads ~60 MB)
+  or, for a character whose voice is `{"backend": "studio", "voice_id": ...}`,
+  a voice-studio library voice. Never imitate a real person without their
+  consent. Without a music model (see `studio_status`), ask the user for an
+  audio file.
+- A job that failed on a busy or restarted ComfyUI can be queued again with
+  `studio_retry_job`; mark the best takes with `studio_asset_update`
+  (favourite, rating, tags) and collect them on a board with `studio_board`.

@@ -3,13 +3,16 @@
 Base URL `http://127.0.0.1:8815`. JSON in and out. Errors are always
 `{"error": "<code>", "message": "<what to do>"}` with a 4xx status (404
 `not_found`, 400 for validation, 409 `<capability>_unavailable` when no
-backend resolves, 422 `invalid_arguments` for malformed bodies, 502
-`backend_error` when ComfyUI/Faustus failed a call).
+backend resolves, 413 `too_large` for an oversized body, 422
+`invalid_arguments` for malformed bodies, 502 `backend_error` when
+ComfyUI/Faustus failed a call, 503 `database_busy` when SQLite stayed locked).
 
 **Guard (every route):** the `Host` header must be `127.0.0.1:<port>`,
 `localhost:<port>` or `[::1]:<port>` (DNS rebinding); writes (not
 GET/HEAD/OPTIONS) with a foreign `Origin` or `Sec-Fetch-Site: cross-site` are
-refused. No CORS headers are sent. Unknown `/api/...` paths answer JSON 404;
+refused, and so is a write whose `Content-Length` is over the cap (the media
+cap for the upload routes, 64 MB for everything else) before its body is
+read. No CORS headers are sent. Unknown `/api/...` paths answer JSON 404;
 everything else serves `frontend/dist` with an SPA fallback that never leaves
 that folder.
 
@@ -26,7 +29,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, wait_s}` |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, wait_s}` |
 | POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
-| POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
+| POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, checkpoint?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
 | POST | `/api/agent/studio_voice?project=` | `{text, character_id?, voice?, speed?}` |
 | POST | `/api/agent/studio_import?project=` | `{path, kind?}` |
 | POST | `/api/agent/studio_analyze_audio?asset_id=` | - |
@@ -38,9 +41,13 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_jobs` | `?state&limit&offset` |
 | GET | `/api/agent/studio_job` | `?job_id&wait_s` |
 | POST | `/api/agent/studio_cancel_job?job_id=` | - |
+| POST | `/api/agent/studio_retry_job?job_id=&new_seed=false` | - -> the new job (copy of a failed/cancelled one, `params.retry_of`) |
 | GET | `/api/agent/studio_assets` | `?project&kind&query&tag&favourite&limit&offset` |
 | GET | `/api/agent/studio_show` | `?asset_ids=a,b,c&size=768` -> `{items:[{asset_id, kind, mime, base64, order?}]}` |
 | GET | `/api/agent/studio_lineage` | `?asset_id` |
+| POST | `/api/agent/studio_asset_update?asset_id=` | `{tags?, rating?, favourite?, notes?, name?}` |
+| POST | `/api/agent/studio_board?project=` | `{action: list\|get\|create\|add\|set, board_id?, name?, kind?, asset_ids?, notes?: {asset_id: note}}` |
+| POST | `/api/agent/studio_project_update?project=` | `{name?, brief?, cover_asset_id?, image_engine?}` |
 | GET | `/api/agent/studio_productions` | - -> `{items:[{slug, name, status, stage, project_id, recipe, legacy?}]}` |
 | GET | `/api/agent/studio_production` | `?production=<slug>` -> compact view: `{slug, status, stages{stage: done\|partial\|pending}, character_id, song_asset_id, renders, animatic?, qa?, next}` |
 | POST | `/api/agent/studio_production_create` | `{name, spec, settings?, project?}` -> `{production, job}` |
@@ -123,6 +130,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET | `/api/jobs?state&project&limit&offset` | full jobs (`state=active` for queued+waiting+running) |
 | GET | `/api/jobs/{id}` | one job |
 | POST | `/api/jobs/{id}/cancel` | cancel |
+| POST | `/api/jobs/{id}/retry?new_seed=false` | queue a copy of a failed or cancelled job |
 | GET | `/api/projects/{id}/assets` | `?kind&query&tag&favourite&source&min_rating&limit&offset` |
 | GET / PATCH | `/api/assets/{id}` | full asset (waveform, analysis, recipe) / `{tags?, rating?, favourite?, notes?, name?}` |
 | GET | `/api/assets/{id}/file?download=` | the file, resolved by id only |

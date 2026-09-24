@@ -65,13 +65,13 @@ Faustus reads the same information from `faustus-plugin.json`
 | Tool | Read-only | Arguments (defaults) | Returns |
 | --- | --- | --- | --- |
 | `studio_status` | yes | - | `demo_backend`, `capabilities{cap: state, provider, model, reason}`, `comfyui{reachable, url, checkpoints, vram_free_mb}`, `image_engine{available, auto_resolves_to}`, `ffmpeg`, `piper_tts`, `music_generation[]`, `vram_estimates_mb`, `queue{queued, waiting_gpu, running}`, `recent_jobs[5]` |
-| `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
+| `studio_projects` | yes | `query=None, limit=10, offset=0` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
 | `studio_create_project` | no | `name, brief=None, image_engine=None` | `{id, name, brief, image_engine}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |
 | `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, reference_asset_ids, strength, template, engine, checkpoint, consistent=False, wait_s=0, use_character_reference=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, engine, seed}` (+ picture only when `include_image=true`) |
-| `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
+| `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False, width=None, height=None` | `{job}` (+ picture only when `include_image=true`) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0, include_image=False` | `{job}`; the output is an mp4 video asset |
-| `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
+| `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0, checkpoint=None` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
 | `studio_voice` | no | `project, text, character_id, voice, speed` | audio asset summary + `provider` (`piper`, `faustus`, `piper_fallback`) |
 | `studio_import` | no | `project, path, kind=None` | asset summary |
 | `studio_analyze_audio` | yes | `asset_id` | `{duration_s, tempo_bpm, beat_count, beat_times[<=32], beats_truncated, downbeats[<=8], sections[{label, start_s, end_s, energy}], notes}` |
@@ -80,13 +80,16 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_photocard_set` | no | group: `project, group_id, template_front, template_back, image_asset_ids={char_id: asset_id}`; solo: `project, character_id, cards[{image_asset_id, role, message, accent}], set_name`; `include_image=False` | `{asset_ids, front_ids, back_ids, contact_sheet_id, skipped_members?}` (+ picture only when `include_image=true`) |
 | `studio_timeline` | no | `project, action="auto"|"get"|"update", song_asset_id, asset_ids, board_id, aspect="9:16", lyrics_asset_id, options, timeline_id, patch` | compact timeline: `{id, name, aspect, fps, width, height, audio_asset_id, duration_s, clips_total, lyrics_lines, finishing, clips[{index, asset_id, kind, start_s, duration_s, transition, ken_burns}], has_more, next_clip_offset}` |
 | `studio_render` | no | `timeline_id, quality="preview"|"final", wait_s=0` | `{job}`; when done `asset_ids` holds the mp4 |
-| `studio_jobs` | yes | `state=None ("active" = queued+waiting+running), limit=10` | `items[job]`, `has_more` |
+| `studio_jobs` | yes | `state=None ("active" = queued+waiting+running), limit=10, offset=0` | `items[job]`, `has_more`, `next_offset` |
 | `studio_job` | yes | `job_id, wait_s=0, include_image=False` | job (+ `assets`; + picture for a finished image job only when `include_image=true`) |
 | `studio_cancel_job` | no | `job_id` | job (queued/waiting ones are cancelled at once; running ones stop at the next checkpoint) |
+| `studio_retry_job` | no | `job_id, new_seed=False` | the new job (a copy of a failed or cancelled one, `params.retry_of` set); productions resume with `studio_production_continue` instead |
 | `studio_assets` | yes | `project, kind, query, tag, favourite, limit=12 (max 30), offset=0` | `items[asset summary]`, `has_more`, `next_offset` |
 | `studio_show` | yes | `asset_ids[1-24], size=768 (128-1024)` | pictures: up to 4 images, or one contact sheet with `contact_sheet_order`; video = 3-frame strip; audio = waveform with sections |
 | `studio_lineage` | yes | `asset_id` | `{asset_id, kind, source, recipe, reproduce?, inputs[{asset_id, operation, template, seed}]}` |
-
+| `studio_asset_update` | no | `asset_id, rating=None (0-5), favourite=None, tags=None, notes=None, name=None` | asset summary + `tags, rating, favourite` |
+| `studio_board` | no | `project, action="list"\|"get"\|"create"\|"add"\|"set", board_id=None, name=None, kind=None, asset_ids=None, notes=None` | list: `items[{id, name, kind, count}]`; otherwise `{id, name, kind, count, items[{asset_id, note?}]}` |
+| `studio_project_update` | no | `project, name=None, brief=None, cover_asset_id=None, image_engine=None` | `{id, name, brief, cover_asset_id, image_engine}` |
 | `studio_productions` | yes | - | `items[{slug, name, status, stage, project_id, recipe, legacy?}]` |
 | `studio_production` | yes | `production` | `{slug, status, stages{...}, lead, shots, character_id, song_asset_id, renders{aspect: {quality: asset_id}}, animatic?, qa?, next}` |
 | `studio_production_create` | no | `name, spec, settings=None, project=None` | `{production, job}` - see [API.md](API.md#productions-and-recipes-ui-routes) for the spec |
@@ -96,7 +99,6 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_recipes_list` | yes | - | `items[{name, title, original_lead, shots, lead_shots, clips, reusable{song, frames, clips}, warnings}]` |
 | `studio_recipe_get` | yes | `recipe` | summary, `cast`, `placeholders`, song, world, `shot_list[{key, lead, prompt, seed, variants, clips, motion}]`, timeline, settings, warnings |
 | `studio_recipe_run` | no | `recipe, cast={"lead": <character id or {name, look, negative?, palette?, bio?}>}, name=None, options={reuse, title, project, settings, engine}` | `{production, job, notes}` |
-
 | `studio_animatic` | no | `production, aspects=None, wait_s=0` | `{job, animatic?{renders, plan}}` - the stills cut like the final at 720p, with `plan.json` |
 | `studio_qa_run` | no | `production, stage="all", dry_run=True, keys=None, wait_s=120` | `{job, scorecard?, requeued?}` - see [ARCHITECTURE.md](ARCHITECTURE.md#qa-director) for the checks |
 | `studio_qa_report` | yes | `production` | the last scorecard (failures first, one-line `why`) + `retries` |
@@ -152,7 +154,7 @@ behind Hoard Link and fails with a clear message without one.
   `reuse`/`vary` need a ComfyUI recipe; `img2img` and `inpaint` work on any image.
 - **Image engine:** `engine="auto" | "qwen21" | "flux" | "sdxl"` (default
   `"auto"`, or the project's own `image_engine` set at
-  `studio_create_project` / `PATCH /api/projects/{id}`) picks which family
+  `studio_create_project` / `studio_project_update`) picks which family
   a call uses when `template` is not given explicitly: `"auto"` reaches for
   Qwen-Image 2.1 when it is installed (best prompt adherence, in-image
   typography, multi-reference identity), else Flux schnell (fastest
