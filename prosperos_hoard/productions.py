@@ -116,14 +116,26 @@ def lock_for(slug: str) -> threading.RLock:
         return _locks.setdefault(slug, threading.RLock())
 
 
+# On Windows a file another thread (or the UI's reader) has open cannot be
+# replaced or, for a moment, read: retry briefly instead of failing a run.
+FILE_RETRIES = 10
+FILE_RETRY_S = 0.05
+
+
 def load_state(data_dir: Path, slug: str) -> dict[str, Any]:
     path = production_dir(data_dir, slug) / "state.json"
     if not path.is_file():
         raise NotFound("production", slug)
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ProductionError("bad_production", f"production '{slug}' has an unreadable state.json: {exc}") from None
+    for attempt in range(FILE_RETRIES):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except PermissionError as exc:
+            if attempt == FILE_RETRIES - 1:
+                raise ProductionError("bad_production", f"production '{slug}' state.json is locked: {exc}") from None
+            time.sleep(FILE_RETRY_S)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ProductionError("bad_production", f"production '{slug}' has an unreadable state.json: {exc}") from None
     state.setdefault("slug", slug)
     return state
 
@@ -134,7 +146,15 @@ def save_state(data_dir: Path, state: dict[str, Any]) -> None:
     state["updated_at"] = now_iso()
     tmp = folder / f"state.{os.getpid()}.{threading.get_ident()}.tmp"
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(folder / "state.json")
+    for attempt in range(FILE_RETRIES):
+        try:
+            tmp.replace(folder / "state.json")
+            return
+        except PermissionError:
+            if attempt == FILE_RETRIES - 1:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(FILE_RETRY_S)
 
 
 def is_legacy(state: dict[str, Any]) -> bool:
@@ -142,7 +162,30 @@ def is_legacy(state: dict[str, Any]) -> bool:
     return state.get("format") != FORMAT and isinstance(state.get("done"), dict) and "1" in state["done"]
 
 
-def list_productions(data_dir: Path) -> list[dict[str, Any]]:
+JobLookup = Callable[[str], Optional[dict[str, Any]]]
+
+
+def reconcile(state: dict[str, Any], job_lookup: Optional[JobLookup]) -> dict[str, Any]:
+    """The state as it really is: a production whose state still says
+    queued/running while its job was cancelled or failed without the run
+    getting to write it (cancelled before it started, a crash) shows the
+    job's outcome. A view only; nothing is written."""
+    if job_lookup is None or state.get("status") not in ("queued", "running") or not state.get("job_id"):
+        return state
+    try:
+        job = job_lookup(state["job_id"])
+    except NotFound:
+        job = None
+    if not job or job.get("state") not in ("cancelled", "failed"):
+        return state
+    out = dict(state)
+    out["status"] = job["state"]
+    out["message"] = (f"the production job was {job['state']}"
+                      + (f": {job['message']}" if job.get("message") and job["message"] != job["state"] else ""))[:800]
+    return out
+
+
+def list_productions(data_dir: Path, job_lookup: Optional[JobLookup] = None) -> list[dict[str, Any]]:
     root = productions_dir(data_dir)
     out = []
     if not root.is_dir():
@@ -154,18 +197,30 @@ def list_productions(data_dir: Path) -> list[dict[str, Any]]:
             state = load_state(data_dir, folder.name)
         except (ProductionError, NotFound):
             continue
-        out.append(summary_view(state))
+        out.append(summary_view(reconcile(state, job_lookup)))
     out.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
     return out
 
 
-def unique_slug(data_dir: Path, name: str) -> str:
+def unique_slug(data_dir: Path, name: str, claim: bool = False) -> str:
+    """A free slug for `name`. With `claim`, its folder is created at once
+    (mkdir without exist_ok), so two productions created at the same moment
+    with the same name never share one."""
     base = slugify(name)
-    slug, n = base, 2
-    while (productions_dir(data_dir) / slug).exists():
-        slug = f"{base}_{n}"
+    root = productions_dir(data_dir)
+    n = 1
+    while True:
+        slug = base if n == 1 else f"{base}_{n}"
         n += 1
-    return slug
+        if claim:
+            root.mkdir(parents=True, exist_ok=True)
+            try:
+                (root / slug).mkdir(exist_ok=False)
+                return slug
+            except FileExistsError:
+                continue
+        if not (root / slug).exists():
+            return slug
 
 
 # ------------------------------------------------------------------- spec
@@ -353,9 +408,15 @@ def create_production(data_dir: Path, name: str, spec: dict[str, Any], settings:
         raise ProductionError("name_required", "a production needs a name")
     spec = normalise_spec(spec)
     settings = normalise_settings(settings)
-    slug = _check_slug(slug) if slug else unique_slug(data_dir, name)
-    if (productions_dir(data_dir) / slug).exists():
-        raise ProductionError("production_exists", f"a production called '{slug}' already exists")
+    if slug:
+        _check_slug(slug)
+        productions_dir(data_dir).mkdir(parents=True, exist_ok=True)
+        try:
+            (productions_dir(data_dir) / slug).mkdir(exist_ok=False)
+        except FileExistsError:
+            raise ProductionError("production_exists", f"a production called '{slug}' already exists") from None
+    else:
+        slug = unique_slug(data_dir, name, claim=True)
     state = new_state(slug, name.strip()[:120], spec, settings, project_id, recipe)
     save_state(data_dir, state)
     return state
@@ -367,6 +428,61 @@ def log(state: dict[str, Any], stage: str, event: str, **detail: Any) -> None:
     state.setdefault("lineage", []).append(entry)
     if len(state["lineage"]) > 2000:
         del state["lineage"][:-2000]
+
+
+# ---------------------------------------------------------------- review
+
+def animatic_approved(state: dict[str, Any]) -> bool:
+    """Whether the animatic in `done` was approved. An approval names the
+    animatic it approves (its `made_at`), so an animatic made again - after
+    a change of shots, a QA retry, a `studio_animatic` - is reviewed again.
+    (`True` is an approval written before approvals named the animatic.)"""
+    entry = (state.get("done") or {}).get("animatic") or {}
+    approved = (state.get("review") or {}).get("animatic_approved")
+    if approved is True:
+        return True
+    return bool(approved) and approved == entry.get("made_at")
+
+
+def animatic_review_pending(state: dict[str, Any]) -> bool:
+    """An animatic is waiting for the user's review: the production pauses
+    at it (even when it was made outside the run) until it is approved."""
+    settings = state.get("settings") or {}
+    if not settings.get("animatic", True) or settings.get("animatic_autocontinue"):
+        return False
+    entry = (state.get("done") or {}).get("animatic") or {}
+    if not entry.get("renders"):
+        return False
+    return not animatic_approved(state)
+
+
+def approve_animatic(state: dict[str, Any]) -> Optional[str]:
+    """Record the approval of the animatic in `done` (by its `made_at`)."""
+    made_at = ((state.get("done") or {}).get("animatic") or {}).get("made_at")
+    if not made_at:
+        return None
+    state.setdefault("review", {})["animatic_approved"] = made_at
+    return made_at
+
+
+def merge_qa(mine: Optional[dict[str, Any]], theirs: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Two `qa` records of one production (a run's and one a read-only QA
+    check wrote meanwhile): the history of both, and the later last pass."""
+    if not theirs:
+        return mine
+    if not mine:
+        return theirs
+    seen: dict[str, dict[str, Any]] = {}
+    for h in (theirs.get("history") or []) + (mine.get("history") or []):
+        seen.setdefault(json.dumps(h, sort_keys=True), h)
+    history = sorted(seen.values(), key=lambda h: h.get("at") or "")[-20:]
+    out = {**theirs, **mine, "history": history}
+    a, b = mine.get("last"), theirs.get("last")
+    if a and b:
+        out["last"] = b if (b.get("at") or "") > (a.get("at") or "") else a
+    else:
+        out["last"] = a or b
+    return out
 
 
 # ----------------------------------------------------------------- views
@@ -416,6 +532,14 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
     if animatic.get("renders"):
         view["animatic"] = {"renders": animatic["renders"], "gpu_minutes_estimate": (animatic.get("plan") or {}).get("gpu_minutes"),
                             "clips_planned": (animatic.get("plan") or {}).get("clips_planned")}
+        if animatic.get("contact_sheet_id"):
+            view["animatic"]["contact_sheet_id"] = animatic["contact_sheet_id"]
+        view["animatic"]["approved"] = animatic_approved(state)
+    elif (state.get("animatic_preview") or {}).get("renders"):
+        preview = state["animatic_preview"]
+        view["animatic_preview"] = {"renders": preview["renders"], "contact_sheet_id": preview.get("contact_sheet_id"),
+                                    "note": "made before every still existed; the production makes (and pauses at) "
+                                            "its own animatic once the frames are done"}
     timeline = done.get("timeline") or {}
     if timeline.get("timelines"):
         view["renders"] = {aspect: info.get("renders") for aspect, info in timeline["timelines"].items()}
@@ -431,6 +555,8 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
                         "or studio_production_shots(...) to change shots first")
     elif state.get("status") == "failed":
         view["next"] = "fix the cause in the message, then studio_production_continue(production) resumes where it stopped"
+    elif state.get("status") == "cancelled":
+        view["next"] = "studio_production_continue(production) resumes where it stopped (finished work is kept)"
     return view
 
 
@@ -495,15 +621,25 @@ class Run:
                                                        "a recipe (studio_recipe_export, then studio_recipe_run)")
         self.spec = self.state["spec"]
         self.stage = ""
+        # the item keys each stage (re)made in this run (inline QA checks those)
+        self.made: dict[str, set[str]] = {}
 
     # -- bookkeeping
     def save(self) -> None:
         with lock_for(self.slug):
-            # a concurrent change from the API (change shots) is merged by
-            # re-reading only what the API may touch: review flags and settings
+            # what others may write while a run is on is merged by re-reading
+            # it: the review flags (continue), an animatic preview
+            # (studio_animatic) and read-only QA checks (studio_qa_run dry run)
             try:
                 current = load_state(self.store.data_dir, self.slug)
                 self.state["review"] = current.get("review", self.state.get("review", {}))
+                if current.get("animatic_preview") is not None:
+                    self.state["animatic_preview"] = current["animatic_preview"]
+                else:
+                    self.state.pop("animatic_preview", None)
+                merged = merge_qa(self.state.get("qa"), current.get("qa"))
+                if merged is not None:
+                    self.state["qa"] = merged
             except (NotFound, ProductionError):
                 pass
             save_state(self.store.data_dir, self.state)
@@ -580,16 +716,29 @@ class Run:
 
     # -- pipeline
     def run(self) -> dict[str, Any]:
+        with lock_for(self.slug):
+            # what was written between the constructor's read and now (an
+            # approval, an animatic made on demand) is not lost
+            try:
+                fresh = load_state(self.store.data_dir, self.slug)
+                if not is_legacy(fresh):
+                    self.state, self.spec = fresh, fresh["spec"]
+            except (NotFound, ProductionError):
+                pass
+            self.state["status"] = "running"
+            self.state["message"] = None
+            self.save()
         state = self.state
-        state["status"] = "running"
-        state["message"] = None
-        self.save()
         try:
             self._ensure_project()
             for stage in stages_for(state):
                 self.stage = stage
                 state["stage"] = stage
                 if stage_status(state, stage) == "done":
+                    if stage == "animatic" and animatic_review_pending(state):
+                        # an animatic made outside this run (studio_animatic)
+                        # or never approved: the review gate holds all the same
+                        return self._pause(stage)
                     continue
                 fn = self.stage_hooks.get(stage) or getattr(self, f"stage_{stage}", None)
                 if fn is None:
@@ -603,11 +752,7 @@ class Run:
                 if self.qa_hook and (state.get("settings", {}).get("qa") or {}).get("enabled"):
                     self.qa_hook(self, stage)
                 if outcome == "pause":
-                    state["status"] = "awaiting_review"
-                    state["message"] = f"paused after {stage} for review"
-                    self.log("paused_for_review")
-                    self.save()
-                    return {"slug": self.slug, "status": "awaiting_review", "stage": stage}
+                    return self._pause(stage)
                 self.save()
             state["status"] = "done"
             state["stage"] = None
@@ -625,6 +770,13 @@ class Run:
             self.log("failed", message=str(exc)[:400])
             self.save()
             raise
+
+    def _pause(self, stage: str) -> dict[str, Any]:
+        self.state["status"] = "awaiting_review"
+        self.state["message"] = f"paused after {stage} for review"
+        self.log("paused_for_review")
+        self.save()
+        return {"slug": self.slug, "status": "awaiting_review", "stage": stage}
 
     def _ensure_project(self) -> None:
         if self.state.get("project_id"):
@@ -764,6 +916,7 @@ class Run:
         pid = self.project_id
         items = self.items("frames")
         pending = self.pending("frames")
+        made = self.made.setdefault("frames", set())
         for shot in self.spec.get("shots") or []:
             key = shot["key"]
             if key in items or key in pending:
@@ -772,6 +925,7 @@ class Run:
             if reuse:
                 copies = [copy_asset(self.store, a, pid)["id"] for a in reuse]
                 items[key] = {"variants": copies, "best": copies[min(shot.get("best", 0), len(copies) - 1)], "reused": True}
+                made.add(key)
                 self.log("reused_frame", key=key, asset_ids=copies)
                 continue
             pending[key] = self.studio.generate(pid, self.shot_prompt(shot))["id"]
@@ -782,6 +936,7 @@ class Run:
             shot = next((s for s in self.spec["shots"] if s["key"] == key), {})
             items[key] = {"variants": ids, "best": ids[min(shot.get("best", 0), len(ids) - 1)] if ids else None,
                           "seed": shot.get("seed")}
+            made.add(key)
             self.log("frame", key=key, asset_ids=ids)
 
         self.wait_jobs("frames", done, "frames")
@@ -831,8 +986,9 @@ class Run:
                                   getattr(self.progress, "cancelled", None))
         self.state["done"]["animatic"] = entry
         self.log("animatic", renders=entry["renders"], gpu_minutes=entry["plan"]["gpu_minutes"],
-                 clips_planned=entry["plan"]["clips_planned"])
-        if settings.get("animatic_autocontinue") or (self.state.get("review") or {}).get("animatic_approved"):
+                 clips_planned=entry["plan"]["clips_planned"], contact_sheet_id=entry.get("contact_sheet_id"))
+        # a new animatic is never covered by an earlier approval
+        if settings.get("animatic_autocontinue"):
             return None
         return "pause"
 
@@ -854,6 +1010,7 @@ class Run:
         pid = self.project_id
         items = self.items("clips")
         pending = self.pending("clips")
+        made = self.made.setdefault("clips", set())
         for shot in self.spec.get("shots") or []:
             for variant in shot.get("clips") or []:
                 key = shot_key(shot["key"], variant)
@@ -862,6 +1019,7 @@ class Run:
                 reuse = (shot.get("reuse_clips") or {}).get(key)
                 if reuse and _asset_ok(self.store, reuse):
                     items[key] = copy_asset(self.store, reuse, pid)["id"]
+                    made.add(key)
                     self.log("reused_clip", key=key, asset_id=items[key])
                     continue
                 body = self.clip_body(shot, variant)
@@ -874,6 +1032,7 @@ class Run:
             ids = _asset_ids(job)
             if ids:
                 items[key] = ids[0]
+                made.add(key)
                 self.log("clip", key=key, asset_id=ids[0])
 
         self.wait_jobs("clips", done, "clips")
@@ -889,6 +1048,7 @@ class Run:
         lead = self.spec["lead"]
         items = self.items("photocards")
         pending = self.pending("photocards")
+        made = self.made.setdefault("photocards", set())
         for i, look in enumerate(looks, start=1):
             key = str(i)
             if key in items or key in pending:
@@ -903,6 +1063,7 @@ class Run:
             ids = _asset_ids(job)
             if ids:
                 items[key] = ids[0]
+                made.add(key)
 
         self.wait_jobs("photocards", done, "photocards")
         char_id = self.state["done"]["character"]["character_id"]
@@ -1010,13 +1171,16 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
 
 # ----------------------------------------------------------- change shots
 
-def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
+def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]], requeue: bool = True) -> dict[str, Any]:
     """"Change shots": per shot key, pick another variant as the best still
     (`best`: a variant index or one of its asset ids), turn its clip on or
     off (`clip`), rewrite it (`prompt`, `motion_prompt`, `seed`) or just
     `regenerate` it with a new seed. Whatever depends on a changed shot is
     invalidated (its clip, the animatic, the cut, the report) so the next
-    run rebuilds exactly that. Returns what changed."""
+    run rebuilds exactly that; a shot reused from a recipe stops being
+    reused where it changed. `requeue=False` (the caller queues no run)
+    leaves the production stopped rather than "queued". Returns what
+    changed."""
     if not isinstance(changes, list) or not changes or len(changes) > 80:
         raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|seed|regenerate}")
     with lock_for(slug):
@@ -1030,6 +1194,14 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
         frames = (state["done"].get("frames") or {}).get("items") or {}
         clips = (state["done"].get("clips") or {}).get("items") or {}
         changed: list[str] = []
+
+        def drop_clips(key: str, shot: dict[str, Any]) -> None:
+            # its clips start on the old still or motion: made again, never
+            # copied again from a recipe's source production
+            for ck in [k for k in clips if split_key(k)[0] == key]:
+                clips.pop(ck, None)
+            shot.pop("reuse_clips", None)
+
         for change in changes:
             if not isinstance(change, dict) or str(change.get("key")) not in shots:
                 raise ProductionError("bad_changes", f"unknown shot key '{(change or {}).get('key') if isinstance(change, dict) else change}'")
@@ -1042,6 +1214,8 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                         raise ProductionError("bad_changes", f"shot {key}: {field} cannot be empty")
                     shot[field] = str(change[field])[:2000]
                     regenerate = regenerate or field == "prompt"
+                    if field == "motion_prompt":
+                        drop_clips(key, shot)
             if change.get("seed") is not None:
                 shot["seed"] = _int(change["seed"], f"shot {key} seed", 0, 2**31 - 2)
                 regenerate = True
@@ -1049,14 +1223,13 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 if change["motion"] not in ("still", "move"):
                     raise ProductionError("bad_changes", f"shot {key}: motion must be 'still' or 'move'")
                 shot["motion"] = change["motion"]
-                for ck in [k for k in clips if split_key(k)[0] == key]:
-                    clips.pop(ck, None)
+                drop_clips(key, shot)
             if regenerate and change.get("seed") is None:
                 shot["seed"] = int(shot["seed"]) + 1000
             if regenerate:
                 frames.pop(key, None)
-                for ck in [k for k in clips if split_key(k)[0] == key]:
-                    clips.pop(ck, None)
+                shot.pop("reuse_asset_ids", None)
+                drop_clips(key, shot)
             elif change.get("best") is not None and key in frames:
                 variants = frames[key].get("variants") or []
                 best = change["best"]
@@ -1065,13 +1238,11 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                     raise ProductionError("bad_changes", f"shot {key}: best must be a variant index or one of {variants}")
                 if pick != frames[key].get("best"):
                     frames[key]["best"] = pick
-                    for ck in [k for k in clips if split_key(k)[0] == key]:
-                        clips.pop(ck, None)
+                    drop_clips(key, shot)
             if change.get("clip") is not None:
                 shot["clips"] = [0] if change["clip"] else []
                 if not change["clip"]:
-                    for ck in [k for k in clips if split_key(k)[0] == key]:
-                        clips.pop(ck, None)
+                    drop_clips(key, shot)
             changed.append(key)
             log(state, "review", "changed_shot", key=key, change={k: v for k, v in change.items() if k != "key"})
         if changed:
@@ -1083,8 +1254,14 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 state["done"].pop(stage, None)
             state.get("partial", {}).pop("timeline", None)
             state["review"] = {}
-            state["status"] = "queued"
-            state["message"] = f"changed shot(s) {', '.join(changed)}"
+            if requeue:
+                state["status"] = "queued"
+                state["message"] = f"changed shot(s) {', '.join(changed)}"
+            else:
+                if state.get("status") in ("done", "awaiting_review"):
+                    state["status"] = "cancelled"  # stopped with work to redo; continue rebuilds it
+                state["message"] = (f"changed shot(s) {', '.join(changed)}; not queued - "
+                                    "studio_production_continue(production) rebuilds what they invalidated")
         save_state(data_dir, state)
         return {"slug": slug, "changed": changed, "status": state["status"]}
 

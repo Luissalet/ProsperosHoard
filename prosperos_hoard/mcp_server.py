@@ -726,8 +726,9 @@ def studio_production(production: str) -> dict[str, Any]:
     """One production's state: stages, ids, animatic, QA summary, next step / estado de una produccion.
 
     stages maps each stage (character, song, frames, lyrics, animatic, clips, photocards, album,
-    timeline, report) to done/partial/pending; renders lists the final cut's video asset ids per
-    aspect; `next` says what to do (e.g. continue after reviewing the animatic).
+    timeline, report) to done/partial/pending; animatic has its renders, contact_sheet_id (every shot's
+    still in one image, for studio_show) and whether it was approved; renders lists the final cut's video
+    asset ids per aspect; `next` says what to do (e.g. continue after reviewing the animatic).
 
     Keywords: production status, stages, renders, animatic, estado de la produccion, etapas, animatico
     """
@@ -782,18 +783,22 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
                 json={"changes": changes, "run": run})
 
 
-@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
-def studio_recipe_export(production: str, name: Optional[str] = None) -> dict[str, Any]:
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_recipe_export(production: str, name: Optional[str] = None, overwrite: bool = False) -> dict[str, Any]:
     """Turn a finished production into a reusable recipe with a {lead} casting slot / exportar receta.
 
     Every stage, prompt, seed, template and setting is kept; the lead's name, look, negative and
     palette become placeholders ({lead}, {lead.look}, {lead.negative}, {lead.palette[0]}), described in
     the `cast` block. warnings list shot prompts that still repeat words of the old lead's look. Works
-    on productions made in the app and by the production script. Saved as data/recipes/<name>.json.
+    on productions made in the app and by the production script. Exporting the same production again
+    refreshes its recipe; a recipe of that name made from another production is never replaced
+    silently: the call fails with recipe_exists - pick another name, or overwrite=true (only when the
+    user wants that recipe replaced).
 
     Keywords: recipe, export recipe, template production, recreate, receta, exportar receta, plantilla
     """
-    return _call("POST", "/api/agent/studio_recipe_export", json={"production": production, "name": name})
+    return _call("POST", "/api/agent/studio_recipe_export",
+                 json={"production": production, "name": name, "overwrite": overwrite})
 
 
 @tool(_ro(readOnlyHint=True))
@@ -826,7 +831,10 @@ def studio_recipe_run(recipe: str, cast: dict[str, Any], name: Optional[str] = N
     {"name", "look", "negative"?, "palette"?, "bio"?}} (a reference sheet is made first). options:
     {"reuse": ["song", "frames", "clips"] (default all: the song unless its lyrics name the old lead,
     and the stills/clips of shots without the lead), "title", "project" (default a new project),
-    "settings": {"animatic", "qa"}}. Queues the production job; poll with studio_production.
+    "settings": {"animatic", "qa"}, "dry_run": true}. Queues the production job; poll with
+    studio_production. With "dry_run": true nothing is created: it returns the plan instead - each
+    shot's still reused or generated and its clips reused or to render, whether the song is reused,
+    the recipe's warnings and the estimated GPU minutes - to show the user before running for real.
 
     Keywords: recreate with, recast, run recipe, new lead, recrea esto con, ejecutar receta, otro protagonista
     """
@@ -845,9 +853,11 @@ def studio_qa_run(production: str, stage: str = "all", dry_run: bool = True, key
     0-10 against the bible, the shot prompt and the reference, with a one-line reason; without one those
     checks say "no vision model" and never block. stage: all, character, song, frames, lyrics, animatic,
     clips, photocards, timeline. keys limits it to some shots (e.g. ["11"] for "why is clip 11 wrong?").
-    dry_run=true only reports; dry_run=false regenerates failing stills/clips/cards with a new seed and a
-    targeted fix, up to the retry cap, logs why in the lineage and REPORT.md, and re-queues the production
-    to rebuild what depends on them. Returns the job and, when done, the scorecard (failures first).
+    dry_run=true only reports (it also works while the production is running, on what is made so far);
+    dry_run=false regenerates failing stills/clips/cards with a new seed and a targeted fix, up to the
+    retry cap per item (earlier passes count), logs why in the lineage and REPORT.md, and re-queues the
+    production to rebuild what depends on them. Returns the job and, when done, the scorecard (failures
+    first).
 
     Keywords: qa, quality check, review production, why is this clip wrong, revisa la produccion, control de calidad, por que esta mal
     """
@@ -875,10 +885,13 @@ def studio_animatic(production: str, aspects: Optional[list[str]] = None, wait_s
     Ken Burns move and a crossfade, cut exactly where the final cut will cut (same song, lyrics and
     options), rendered with ffmpeg at 720p in each aspect the production targets (or `aspects`). Also writes
     a plan: every cut, every shot's screen time and still, which shots become Wan clips and the estimated
-    GPU minutes of the clips still to render. A production with settings.animatic=true (the default) makes
-    one by itself and pauses at awaiting_review; studio_production_continue then renders the clips. Works on
+    GPU minutes of the clips still to render, and a contact sheet of every shot's best still labelled with
+    its key ("clip" marks the shots that become Wan clips): studio_show(contact_sheet_id) shows the whole
+    shot list at once. A production with settings.animatic=true (the default) makes one by itself and pauses
+    at awaiting_review; studio_production_continue then renders the clips. Made before every shot has its
+    still, it is only a preview (preview=true): the production still makes and pauses at its own. Works on
     productions made by the production script too. Returns the job; when done, the video asset ids per
-    aspect and the plan summary.
+    aspect, the contact sheet id and the plan summary.
 
     Keywords: animatic, preview cut, storyboard video, before rendering, animatico, previsualizacion, antes de renderizar
     """

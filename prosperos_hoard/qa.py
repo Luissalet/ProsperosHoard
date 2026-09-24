@@ -42,6 +42,7 @@ import io
 import json
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -53,7 +54,6 @@ from . import procutil
 from . import productions as prod
 from .backend import ffmpeg_path
 from .store import NotFound, Store
-from .util import now_iso
 
 VisionFn = Callable[[list[bytes], str], str]
 
@@ -554,8 +554,14 @@ def _duration(item: dict[str, Any], actual: Optional[float], expected: Optional[
         _fail(item, "duration", f"{float(actual):.1f} s instead of the planned {float(expected):.1f} s")
 
 
+def _stamp() -> str:
+    # to the microsecond: a run's pass and a read-only check made meanwhile
+    # are merged by time (productions.merge_qa), within one second too
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
 def scorecard(slug: str, stage: str, items: list[dict[str, Any]], vision_name: str, dry_run: bool) -> dict[str, Any]:
-    return {"production": slug, "stage": stage, "at": now_iso(), "dry_run": dry_run, "vision": vision_name,
+    return {"production": slug, "stage": stage, "at": _stamp(), "dry_run": dry_run, "vision": vision_name,
             "passed": sum(1 for i in items if i["verdict"] == "pass"),
             "failed": sum(1 for i in items if i["verdict"] == "fail"),
             "skipped": sum(1 for i in items if i["verdict"] == "skip"), "items": items}
@@ -619,35 +625,57 @@ def _apply(target: dict[str, Any], fix: dict[str, Any]) -> None:
             target[k] = v
 
 
-def _retry_targets(run: "prod.Run", stage: str, failures: list[dict[str, Any]], attempt: int) -> list[str]:
+def prior_retries(state: dict[str, Any], stage: str, key: str) -> int:
+    """How many times QA already regenerated this item: the `qa_retry`
+    lineage entries for (stage, key) since the user last changed that shot
+    (a change of shots starts the count again)."""
+    base = prod.split_key(key)[0]
+    n = 0
+    for entry in reversed(state.get("lineage") or []):
+        event = entry.get("event")
+        if event == "changed_shot" and stage != "photocards" and str(entry.get("key")) == base:
+            break
+        if event == "qa_retry" and entry.get("stage") == stage and str(entry.get("key")) == key:
+            n += 1
+    return n
+
+
+def _retry_targets(run: "prod.Run", stage: str, failures: list[dict[str, Any]], attempt: Any) -> list[str]:
     """Apply the fix of each failure to the spec and drop the failed item so
-    the stage makes it again. Returns the keys retried."""
+    the stage makes it again. `attempt`: the attempt number, or a mapping
+    key -> attempt number. Returns the keys retried."""
     done = run.state["done"].get(stage) or {}
     items = done.get("items") or {}
     retried = []
     for failure in failures:
         key = failure["key"]
+        n = int(attempt.get(key, 1)) if isinstance(attempt, dict) else int(attempt)
         if stage == "photocards":
             looks = (run.spec.get("photocards") or {}).get("looks") or []
             if not key.isdigit() or not 0 < int(key) <= len(looks):
                 continue
             target = looks[int(key) - 1]
-            fix = fix_for(stage, failure["codes"], target, attempt)
+            fix = fix_for(stage, failure["codes"], target, n)
         else:
             base, _ = prod.split_key(key)
             target = next((s for s in run.spec.get("shots") or [] if s["key"] == base), None)
             if target is None:
                 continue
-            fix = fix_for(stage, failure["codes"], target, attempt)
+            fix = fix_for(stage, failure["codes"], target, n)
         _apply(target, fix)
         items.pop(key, None)
         if stage == "frames":
-            # a new still means new clips from it
+            # a new still means new clips from it; a shot reused from a
+            # recipe is made here now (the stage would copy the old one again)
+            target.pop("reuse_asset_ids", None)
+            target.pop("reuse_clips", None)
             for ck in [k for k in ((run.state["done"].get("clips") or {}).get("items") or {}) if prod.split_key(k)[0] == key]:
                 run.state["done"]["clips"]["items"].pop(ck, None)
+        elif stage == "clips":
+            (target.get("reuse_clips") or {}).pop(key, None)
         done["complete"] = False
         run.state.setdefault("done", {})[stage] = done
-        prod.log(run.state, stage, "qa_retry", key=key, attempt=attempt, reason="; ".join(failure["reasons"])[:300],
+        prod.log(run.state, stage, "qa_retry", key=key, attempt=n, reason="; ".join(failure["reasons"])[:300],
                  fix={k: v for k, v in fix.items() if k not in ("clip_negative",)} | ({"clip_negative": "stillness"} if fix.get("clip_negative") else {}))
         retried.append(key)
     return retried
@@ -656,8 +684,10 @@ def _retry_targets(run: "prod.Run", stage: str, failures: list[dict[str, Any]], 
 def run_stage_with_policy(run: "prod.Run", stage: str, qa: QA, dry_run: bool = False,
                           keys: Optional[set[str]] = None) -> dict[str, Any]:
     """Check a stage; unless `dry_run`, regenerate what fails (up to the
-    retry cap) through the stage's own function. Returns the scorecard of
-    the final state."""
+    retry cap) through the stage's own function. The cap is per item and
+    counts the retries of earlier QA passes too (see `prior_retries`), so
+    running QA again never regenerates an item past it. Returns the
+    scorecard of the final state."""
     settings = (run.state.get("settings") or {}).get("qa") or {}
     max_retries = int(settings.get("max_retries", 2))
     qa.state = run.state
@@ -668,12 +698,20 @@ def run_stage_with_policy(run: "prod.Run", stage: str, qa: QA, dry_run: bool = F
     failures = [i for i in items if i["verdict"] == "fail" and "missing" not in i["codes"]]
     if stage == "frames":
         failures = _swap_variants(run, qa, failures, final)
-    attempt = 0
-    while failures and attempt < max_retries:
-        attempt += 1
-        retried = _retry_targets(run, stage, failures, attempt)
-        if not retried:
+    retries = {f["key"]: prior_retries(run.state, stage, f["key"]) for f in failures}
+    gave_up: list[dict[str, Any]] = []
+    while failures:
+        eligible = [f for f in failures if retries.get(f["key"], 0) < max_retries]
+        gave_up += [f for f in failures if retries.get(f["key"], 0) >= max_retries]
+        if not eligible:
             break
+        retried = _retry_targets(run, stage, eligible, {f["key"]: retries.get(f["key"], 0) + 1 for f in eligible})
+        if not retried:
+            gave_up += eligible
+            break
+        for key in retried:
+            retries[key] = retries.get(key, 0) + 1
+        gave_up += [f for f in eligible if f["key"] not in retried]
         run.save()
         previous_stage = run.stage
         run.stage = stage
@@ -683,12 +721,13 @@ def run_stage_with_policy(run: "prod.Run", stage: str, qa: QA, dry_run: bool = F
         qa.state = run.state
         rechecked = qa.stage_items(stage, set(retried))
         for item in rechecked:
-            item["retries"] = attempt
+            item["retries"] = retries.get(item["key"], 0)
             final[item["key"]] = item
         failures = [i for i in rechecked if i["verdict"] == "fail" and "missing" not in i["codes"]]
-    for failure in failures:
+    for failure in gave_up:
+        final[failure["key"]].setdefault("retries", retries.get(failure["key"], 0))
         prod.log(run.state, stage, "qa_gave_up", key=failure["key"], reason="; ".join(failure["reasons"])[:300],
-                 retries=attempt)
+                 retries=retries.get(failure["key"], 0))
     run.save()
     return scorecard(run.slug, stage, list(final.values()), qa.vision_name, dry_run)
 
@@ -716,6 +755,9 @@ def _swap_variants(run: "prod.Run", qa: QA, failures: list[dict[str, Any]], fina
             clips = (run.state["done"].get("clips") or {}).get("items") or {}
             for ck in [k for k in clips if prod.split_key(k)[0] == failure["key"]]:
                 clips.pop(ck, None)  # made from the old still
+            target = next((s for s in run.spec.get("shots") or [] if s["key"] == failure["key"]), None)
+            if target is not None:
+                target.pop("reuse_clips", None)  # a recipe's clip starts on the old still too
             swapped["swapped_from"] = failure["asset_id"]
             final[failure["key"]] = swapped
             prod.log(run.state, "frames", "qa_swap_variant", key=failure["key"], asset_id=swapped["asset_id"],
@@ -740,11 +782,21 @@ def merge_cards(slug: str, cards: list[dict[str, Any]], vision_name: str, dry_ru
 
 
 def inline_hook(run: "prod.Run", stage: str, vision: Optional[VisionFn], vision_name: Optional[str] = None) -> None:
-    """Called by the pipeline after each stage when `settings.qa.enabled`."""
+    """Called by the pipeline after each stage when `settings.qa.enabled`.
+    For the item stages only what the stage (re)made in this run is
+    checked: the rest was checked when it was made (or chosen by the user),
+    and must not be regenerated each time the stage runs again."""
     if stage not in CHECKED_STAGES:
         return
+    keys: Optional[set[str]] = None
+    if stage in RETRYABLE_STAGES:
+        made = getattr(run, "made", {}).get(stage)
+        if made is not None:
+            if not made:
+                return
+            keys = set(made)
     qa = QA(run.store, run.state, vision, vision_name)
-    card = run_stage_with_policy(run, stage, qa, dry_run=False)
+    card = run_stage_with_policy(run, stage, qa, dry_run=False, keys=keys)
     record(run.state, card)
     run.save()
 
@@ -790,6 +842,38 @@ def run_qa(store: Store, studio: prod.Studio, slug: str, stage: str = "all", dry
     if prod.stage_status(run.state, "report") == "done" or changed:
         prod.write_report(store, run.state)
     return {"scorecard": card, "requeue": changed}
+
+
+def check_production(store: Store, slug: str, stage: str = "all", keys: Optional[list[str]] = None,
+                     vision: Optional[VisionFn] = None, vision_name: Optional[str] = None,
+                     progress: Optional[Callable[..., None]] = None) -> dict[str, Any]:
+    """A read-only QA pass (`studio_qa_run` with dry_run=true): it checks a
+    snapshot of the production's state, builds no run and regenerates
+    nothing, so it may run on the cpu lane while the production itself is
+    running. The scorecard is recorded under the production's lock; a
+    running production's own saves merge it (`productions.merge_qa`)."""
+    if stage != "all" and stage not in CHECKED_STAGES:
+        raise QAError("bad_stage", f"stage must be 'all' or one of {', '.join(CHECKED_STAGES)}")
+    progress = progress or (lambda *_a, **_k: None)
+    raw = prod.load_state(store.data_dir, slug)
+    if prod.is_legacy(raw):
+        return _run_legacy(store, slug, raw, stage, True, keys, vision, vision_name)
+    snapshot = json.loads(json.dumps(raw))
+    qa = QA(store, snapshot, vision, vision_name)
+    stages = [s for s in CHECKED_STAGES if stage in ("all", s)]
+    key_set = {str(k) for k in keys} if keys else None
+    cards = []
+    for i, st in enumerate(stages):
+        if prod.stage_status(snapshot, st) == "pending" and st not in RETRYABLE_STAGES:
+            continue
+        progress(i / max(1, len(stages)), f"checking {st}")
+        cards.append(scorecard(slug, st, qa.stage_items(st, key_set), qa.vision_name, True))
+    card = merge_cards(slug, cards, qa.vision_name, True) if cards else scorecard(slug, stage, [], qa.vision_name, True)
+    with prod.lock_for(slug):
+        current = prod.load_state(store.data_dir, slug)
+        record(current, card)
+        prod.save_state(store.data_dir, current)
+    return {"scorecard": card, "requeue": False}
 
 
 def _invalidate_after(state: dict[str, Any], stage: str) -> None:

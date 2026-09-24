@@ -166,3 +166,132 @@ def test_the_pipeline_pauses_after_the_animatic_until_continued(store, productio
     # changing a shot throws the animatic away (it is remade and reviewed again)
     prod.update_shots(store.data_dir, production["slug"], [{"key": "1", "best": 1}])
     assert "animatic" not in prod.load_state(store.data_dir, production["slug"])["done"]
+
+
+# ------------------------------------------------------- the review gate
+
+class StillStudio:
+    """Makes a still at once for any generate call; no clips expected."""
+
+    def __init__(self, store):
+        self.store, self.calls, self.jobs = store, [], {}
+
+    def generate(self, project_id, body):
+        if body.get("reference_asset_id"):
+            raise AssertionError("no clip may be rendered before the animatic is approved")
+        self.calls.append(body)
+        ids = [_image(self.store, project_id, (30 + 20 * i, 90, 140)) for i in range(body.get("count") or 1)]
+        job = {"id": f"job_{len(self.jobs) + 1}", "state": "done", "outputs": {"asset_ids": ids}}
+        self.jobs[job["id"]] = job
+        return job
+
+    def job(self, job_id):
+        return self.jobs[job_id]
+
+    def cancel(self, job_id):
+        pass
+
+
+AFTER = {"clips": lambda run: None, "photocards": lambda run: None, "album": lambda run: None,
+         "timeline": lambda run: None, "report": lambda run: None}
+
+
+def _quiet(*_a, **_k):
+    pass
+
+
+def test_an_animatic_made_on_demand_before_every_still_is_only_a_preview(store, production, fake_ffmpeg):
+    """The auditor's case: frames failed with shot 2 missing, studio_animatic
+    was called (shot 1 and 3 only), then continue. The run must make shot 2,
+    make its own animatic and pause - never render the clips unreviewed."""
+    slug = production["slug"]
+    state = prod.load_state(store.data_dir, slug)
+    state["done"]["character"] = {"character_id": None}
+    state["done"]["frames"]["items"].pop("2")
+    state["done"]["frames"]["complete"] = False
+    state["status"] = "failed"
+    prod.save_state(store.data_dir, state)
+    entry = animatic.make_for_production(store, slug)
+    after = prod.load_state(store.data_dir, slug)
+    assert entry["preview"] is True and "animatic" not in after["done"]
+    assert after["animatic_preview"]["renders"] and prod.compact_view(after)["animatic_preview"]["renders"]
+    studio = StillStudio(store)
+    out = prod.run_production(store, studio, slug, _quiet, stage_hooks=dict(AFTER))
+    assert out["status"] == "awaiting_review" and out["stage"] == "animatic"
+    assert [c["prompt"].startswith("an empty street") for c in studio.calls] == [True]
+    final = prod.load_state(store.data_dir, slug)
+    assert "2" in final["done"]["frames"]["items"] and final["done"]["animatic"]["renders"]
+    assert "clips" not in final["done"]
+
+
+def test_the_gate_holds_for_an_animatic_made_outside_the_run(store, production, fake_ffmpeg):
+    slug = production["slug"]
+    state = prod.load_state(store.data_dir, slug)
+    state["done"]["character"] = {"character_id": None}
+    state["status"] = "failed"
+    prod.save_state(store.data_dir, state)
+    entry = animatic.make_for_production(store, slug)  # every still exists: it becomes the production's animatic
+    assert "preview" not in entry
+    reached: list[str] = []
+    hooks = {k: (lambda run, k=k: reached.append(k)) for k in AFTER}
+    # continue from "failed" records no approval: the run stops at the gate
+    out = prod.run_production(store, StillStudio(store), slug, _quiet, stage_hooks=hooks)
+    assert out["status"] == "awaiting_review" and reached == []
+    state = prod.load_state(store.data_dir, slug)
+    assert prod.animatic_review_pending(state) and state["done"]["animatic"]["made_at"] == entry["made_at"]
+    # approved (what studio_production_continue does from awaiting_review): on to the clips
+    assert prod.approve_animatic(state) == entry["made_at"]
+    prod.save_state(store.data_dir, state)
+    out = prod.run_production(store, StillStudio(store), slug, _quiet, stage_hooks=hooks)
+    assert out["status"] == "done" and reached[0] == "clips"
+
+
+def test_an_animatic_remade_after_qa_is_reviewed_again(store, production, fake_ffmpeg):
+    from prosperos_hoard import qa
+
+    slug = production["slug"]
+    state = prod.load_state(store.data_dir, slug)
+    state["done"]["character"] = {"character_id": None}
+    state["done"]["animatic"] = animatic.make(store, state)
+    prod.approve_animatic(state)
+    old = state["done"]["animatic"]["made_at"]
+    qa._invalidate_after(state, "frames")  # QA regenerated a still
+    assert "animatic" not in state["done"] and state["review"]["animatic_approved"] == old
+    state["status"] = "queued"
+    prod.save_state(store.data_dir, state)
+    out = prod.run_production(store, StillStudio(store), slug, _quiet, stage_hooks=dict(AFTER))
+    assert out["status"] == "awaiting_review"
+    after = prod.load_state(store.data_dir, slug)
+    assert after["done"]["animatic"]["made_at"] != old and not prod.animatic_approved(after)
+
+
+def test_an_animatic_finished_while_a_run_started_stays_a_preview(store, production, monkeypatch):
+    slug = production["slug"]
+    real = {"renders": {"9:16": "a_fake"}, "plan": {"gpu_minutes": 0, "clips_planned": 0}, "made_at": "t"}
+
+    def make_while_a_run_starts(store_, state, aspects=None, progress=None, should_cancel=None):
+        with prod.lock_for(slug):
+            current = prod.load_state(store.data_dir, slug)
+            current["status"] = "running"
+            prod.save_state(store.data_dir, current)
+        return dict(real)
+
+    monkeypatch.setattr(animatic, "make", make_while_a_run_starts)
+    entry = animatic.make_for_production(store, slug)
+    after = prod.load_state(store.data_dir, slug)
+    assert entry["preview"] is True and "animatic" not in after["done"] and after["animatic_preview"]["made_at"] == "t"
+
+
+def test_the_shot_contact_sheet_labels_every_shot(store, production, fake_ffmpeg):
+    entry = animatic.make(store, production)
+    sheet = store.get_asset(entry["contact_sheet_id"])
+    assert sheet["kind"] == "image" and "contact_sheet" in sheet["tags"]
+    assert sheet["recipe"]["labels"] == ["1 - clip - lead", "2 - clip", "3"]
+    frames = production["done"]["frames"]["items"]
+    assert sheet["recipe"]["input_asset_ids"] == [frames[k]["best"] for k in ("1", "2", "3")]
+    with Image.open(store.data_dir / sheet["file_path"]) as img:
+        assert img.width == 3 * 320
+    state = json.loads(json.dumps(production))
+    state["done"]["animatic"] = entry
+    view = prod.compact_view(state)
+    assert view["animatic"]["contact_sheet_id"] == entry["contact_sheet_id"] and view["animatic"]["approved"] is False

@@ -128,7 +128,7 @@ def test_production_runs_end_to_end_and_exports_a_recipe(client):
     assert done["character"]["canonical_asset_id"] and done["character"]["sheet_asset_id"]
     assert len(done["frames"]["items"]["1"]["variants"]) == 2
     assert set(done["clips"]["items"]) == {"1", "2"}
-    assert state["review"]["animatic_approved"] is True
+    assert state["review"]["animatic_approved"] == done["animatic"]["made_at"]
     # a still subject gets the stillness negative (no walking), a moving one the stock negative
     still_clip = store.get_asset(done["clips"]["items"]["1"])["recipe"]["params"]["negative_prompt"]
     moving_clip = store.get_asset(done["clips"]["items"]["2"])["recipe"]["params"]["negative_prompt"]
@@ -353,3 +353,206 @@ def test_cancelling_a_production_cancels_its_sub_jobs(store, project):
     after = prod.load_state(store.data_dir, state["slug"])
     assert sorted(studio.cancelled) == ["job_slow_1", "job_slow_2"]  # both frame jobs it had queued
     assert after["status"] == "cancelled" and after["partial"]["frames"]["pending"] == {}
+
+
+# ------------------------------------------------------ fixes and features
+
+def test_changing_a_reused_shot_stops_reusing_it(data_dir):
+    spec = tiny_spec()
+    spec["shots"][1].update({"reuse_asset_ids": ["a_src1"], "reuse_clips": {"2": "a_srcclip"}})
+    spec["shots"].append({"key": "3", "prompt": "a door", "clips": [0], "reuse_asset_ids": ["a_src3"],
+                          "reuse_clips": {"3": "a_srcclip3"}})
+    spec["shots"].append({"key": "4", "prompt": "a window", "clips": [0], "variants": 2,
+                          "reuse_asset_ids": ["a_s4", "a_s4b"], "reuse_clips": {"4": "a_srcclip4"}})
+    state = prod.create_production(data_dir, "Reused", prod.normalise_spec(spec), {"animatic": False})
+    state["status"] = "done"
+    state["done"] = {"frames": {"complete": True, "items": {k: {"variants": [f"a_{k}"], "best": f"a_{k}"} for k in "123"}
+                                | {"4": {"variants": ["a_4", "a_4b"], "best": "a_4"}}},
+                     "clips": {"complete": True, "items": {"2": "c_2", "3": "c_3", "4": "c_4"}}}
+    prod.save_state(data_dir, state)
+    prod.update_shots(data_dir, state["slug"], [{"key": "2", "regenerate": True}, {"key": "3", "motion": "still"},
+                                                {"key": "4", "best": 1}])
+    shots = {s["key"]: s for s in prod.load_state(data_dir, state["slug"])["spec"]["shots"]}
+    # a regenerated shot is made, not copied from the recipe's source again
+    assert "reuse_asset_ids" not in shots["2"] and "reuse_clips" not in shots["2"]
+    # a new motion or a new best still: the still stays, the clip is made again
+    assert shots["3"]["reuse_asset_ids"] == ["a_src3"] and "reuse_clips" not in shots["3"]
+    assert "reuse_clips" not in shots["4"]
+    after = prod.load_state(data_dir, state["slug"])
+    assert after["done"]["clips"]["items"] == {}
+    prod.update_shots(data_dir, state["slug"], [{"key": "1", "motion_prompt": "the lamp sways"}])
+    assert prod.load_state(data_dir, state["slug"])["done"]["clips"]["items"] == {}
+
+
+def test_change_shots_without_a_run_does_not_claim_to_be_queued(data_dir):
+    state = prod.create_production(data_dir, "No Run", prod.normalise_spec(tiny_spec()), {"animatic": False})
+    state["status"] = "done"
+    state["done"] = {"frames": {"complete": True, "items": {"1": {"variants": ["a_1", "a_2"], "best": "a_1"},
+                                                            "2": {"variants": ["a_3"], "best": "a_3"}}}}
+    prod.save_state(data_dir, state)
+    out = prod.update_shots(data_dir, state["slug"], [{"key": "1", "best": 1}], requeue=False)
+    after = prod.load_state(data_dir, state["slug"])
+    assert out["status"] == "cancelled" and after["status"] == "cancelled" and "continue" in after["message"]
+    assert prod.compact_view(after)["next"].startswith("studio_production_continue")
+    assert prod.update_shots(data_dir, state["slug"], [{"key": "1", "best": 0}])["status"] == "queued"
+
+
+def test_slugs_are_claimed_and_a_cancelled_job_shows(data_dir):
+    a = prod.create_production(data_dir, "Twin", prod.normalise_spec(tiny_spec()))
+    b = prod.create_production(data_dir, "Twin", prod.normalise_spec(tiny_spec()))
+    assert (a["slug"], b["slug"]) == ("twin", "twin_2")
+    claimed = prod.unique_slug(data_dir, "Twin", claim=True)
+    assert claimed == "twin_3" and (prod.productions_dir(data_dir) / "twin_3").is_dir()
+    assert prod.unique_slug(data_dir, "Twin", claim=True) == "twin_4"
+    with pytest.raises(prod.ProductionError, match="already exists"):
+        prod.create_production(data_dir, "Twin", prod.normalise_spec(tiny_spec()), slug="twin")
+    # a production whose job was cancelled while still queued
+    a["job_id"] = "job_x"
+    prod.save_state(data_dir, a)
+    jobs = {"job_x": {"id": "job_x", "state": "cancelled", "message": "cancelled"}}
+    listed = {p["slug"]: p for p in prod.list_productions(data_dir, jobs.get)}
+    assert listed["twin"]["status"] == "cancelled" and listed["twin_2"]["status"] == "queued"
+    view = prod.compact_view(prod.reconcile(prod.load_state(data_dir, "twin"), jobs.get))
+    assert view["status"] == "cancelled" and view["next"].startswith("studio_production_continue")
+    assert prod.load_state(data_dir, "twin")["status"] == "queued"  # a view, nothing written
+
+
+def test_saving_state_retries_while_a_reader_holds_the_file(data_dir, monkeypatch):
+    state = prod.create_production(data_dir, "Locked", prod.normalise_spec(tiny_spec()))
+    real = Path.replace
+    calls = {"n": 0}
+
+    def flaky(self, target):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise PermissionError("the file is open in another process")
+        return real(self, target)
+
+    monkeypatch.setattr(prod, "FILE_RETRY_S", 0.001)
+    monkeypatch.setattr(Path, "replace", flaky)
+    state["message"] = "saved"
+    prod.save_state(data_dir, state)
+    monkeypatch.setattr(Path, "replace", real)
+    assert calls["n"] == 4 and prod.load_state(data_dir, state["slug"])["message"] == "saved"
+    assert not list(prod.production_dir(data_dir, state["slug"]).glob("*.tmp"))
+
+
+def _audio(store, pid) -> str:
+    path = store.data_dir / "assets" / f"song{time.monotonic_ns()}.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"RIFF")
+    return store.create_asset(project_id=pid, kind="audio", file_path=path.relative_to(store.data_dir).as_posix(),
+                              duration_s=8.0, source="generated")["id"]
+
+
+def _finished(store, project, title="Rain", lyrics="[Verse]\nRain on the Rainbow road\nRain again"):
+    pid = project["id"]
+    spec = tiny_spec(title=title, song={"tags": f"synth, {title}", "lyrics": lyrics, "duration": 8})
+    spec["shots"][1]["prompt"] = "a Rainbow over the empty street called Rain"
+    state = prod.create_production(store.data_dir, title, prod.normalise_spec(spec), {"animatic": True}, project_id=pid)
+    state["status"] = "done"
+    state["done"] = {"song": {"song_asset_id": _audio(store, pid)},
+                     "frames": {"complete": True, "items": {"1": {"variants": [_asset(store, pid)] * 1, "best": None},
+                                                            "2": {"variants": [s2 := _asset(store, pid)], "best": s2}}},
+                     "clips": {"complete": True, "items": {"2": _asset(store, pid, kind="video")}}}
+    state["done"]["frames"]["items"]["1"]["best"] = state["done"]["frames"]["items"]["1"]["variants"][0]
+    prod.save_state(store.data_dir, state)
+    return state
+
+
+def test_title_placeholder_is_word_bounded_and_a_reused_song_keeps_its_words(store, project):
+    state = _finished(store, project)
+    recipe = recipes.export_recipe(store, state["slug"], "rain")
+    shot2 = next(s for s in recipe["spec"]["shots"] if s["key"] == "2")
+    assert shot2["prompt"] == "a Rainbow over the empty street called {title}"
+    assert recipe["spec"]["song"]["lyrics"] == "[Verse]\n{title} on the Rainbow road\n{title} again"
+    assert recipe["reusable"]["song"]["lyrics"].startswith("[Verse]\nRain on")
+    spec, _, meta = recipes.plan_run(store, recipe, {"lead": {"name": "KOI", "look": "KOI, a kite"}}, {"title": "Snow"})
+    # the old audio is reused: the karaoke must show what it sings
+    assert spec["song"]["asset_id"] and spec["song"]["lyrics"] == "[Verse]\nRain on the Rainbow road\nRain again"
+    assert spec["song"]["tags"] == "synth, Rain"
+    assert any("keeps its own words" in n for n in meta["notes"])
+    assert next(s for s in spec["shots"] if s["key"] == "2")["prompt"].endswith("called Snow")
+    # a new song (not reused) sings the new title
+    spec2, _, _ = recipes.plan_run(store, recipe, {"lead": {"name": "KOI", "look": "KOI, a kite"}},
+                                   {"title": "Snow", "reuse": ["frames"]})
+    assert "asset_id" not in spec2["song"] and spec2["song"]["lyrics"].startswith("[Verse]\nSnow on the Rainbow")
+
+
+def test_exporting_over_another_productions_recipe_needs_overwrite(store, project):
+    state = _finished(store, project)
+    other = _finished(store, project, title="Hail")
+    recipes.export_recipe(store, state["slug"], "mine")
+    recipes.export_recipe(store, state["slug"], "mine")  # the same production refreshes its own recipe
+    with pytest.raises(recipes.RecipeError) as err:
+        recipes.export_recipe(store, other["slug"], "Mine")
+    assert err.value.code == "recipe_exists"
+    assert recipes.get_recipe(store.data_dir, "mine")["source"]["production"] == state["slug"]
+    replaced = recipes.export_recipe(store, other["slug"], "mine", overwrite=True)
+    assert replaced["name"] == "mine" and replaced["source"]["production"] == other["slug"]
+
+
+def test_recipe_run_preview_creates_nothing(store, project):
+    state = _finished(store, project)
+    recipes.export_recipe(store, state["slug"], "preview me")
+    before = {p["slug"] for p in prod.list_productions(store.data_dir)}
+    out = recipes.preview_run(store, "preview_me", {"lead": {"name": "KOI", "look": "KOI, a kite"}}, {"dry_run": True})
+    assert {p["slug"] for p in prod.list_productions(store.data_dir)} == before
+    shots = {s["key"]: s for s in out["shots"]}
+    assert shots["1"]["still"] == "generate x2" and shots["1"]["clips_to_render"] == ["1"]
+    assert shots["2"]["still"] == "reused" and shots["2"]["clips_reused"] == ["2"] and "clips_to_render" not in shots["2"]
+    assert out["song"] == "reused" and out["reused_frames"] == ["2"] and out["lead"] == "KOI"
+    # 2 variants of the lead shot + a 1-image reference sheet, and one clip
+    assert out["stills_to_generate"] == 3 and out["clips_to_render"] == 1
+    assert out["gpu_minutes_estimate"] == pytest.approx(round(3 * 57 / 48 + 9.5, 1), abs=0.1)
+    assert out["animatic_review"] is True
+
+
+def test_a_scripted_production_reuses_its_chosen_still_first(store, project):
+    pid = project["id"]
+    char = store.create_character(pid, "FAROL", prompt="FAROL, a lantern creature")
+    first, chosen = _asset(store, pid, prompt="a phone", params={"seed": 1}), _asset(store, pid, prompt="a phone", params={"seed": 2})
+    folder = store.data_dir / "productions" / "farol_best"
+    folder.mkdir(parents=True)
+    (folder / "state.json").write_text(json.dumps({"done": {
+        "1": {"project_id": pid}, "2": {"character_id": char["id"]},
+        "4": {"stills": {"4": {"aspect_16_9": [first, chosen], "best": chosen}}}}}), encoding="utf-8")
+    recipe = recipes.export_recipe(store, "farol_best", "farol best")
+    assert recipe["reusable"]["frames"]["4"] == [chosen, first]
+    spec, _, _ = recipes.plan_run(store, recipe, {"lead": {"name": "KOI", "look": "KOI, a kite"}})
+    shot = next(s for s in spec["shots"] if s["key"] == "4")
+    assert shot["reuse_asset_ids"][shot["best"]] == chosen
+
+
+def test_api_recipe_preview_export_conflict_and_qa_while_running(client):
+    c, app, _ = client
+    store = app.state.store
+    project = store.create_project("API fixes")
+    state = _finished(store, project)
+    other = _finished(store, project, title="Hail")
+    r = c.post("/api/agent/studio_recipe_export", json={"production": other["slug"], "name": "api rain"})
+    assert r.status_code == 200, r.text
+    r = c.post("/api/agent/studio_recipe_export", json={"production": state["slug"], "name": "api rain"})
+    assert r.status_code == 400 and r.json()["error"] == "recipe_exists"
+    assert c.post("/api/agent/studio_recipe_export",
+                  json={"production": state["slug"], "name": "api rain", "overwrite": True}).status_code == 200
+    r = c.post("/api/agent/studio_recipe_run", json={"recipe": "api_rain", "cast": {"lead": {"name": "KOI", "look": "KOI"}},
+                                                     "options": {"dry_run": True}})
+    assert r.status_code == 200, r.text
+    assert r.json()["dry_run"] is True and "gpu_minutes_estimate" in r.json()
+    assert len(c.get("/api/productions").json()["items"]) == 2  # the preview created none
+    # a read-only QA check runs on the cpu lane even while the production runs
+    running = prod.load_state(store.data_dir, state["slug"])
+    running["status"] = "running"
+    prod.save_state(store.data_dir, running)
+    app.state.qa_vision = (None, "no vision model")
+    r = c.post("/api/agent/studio_qa_run", json={"production": state["slug"], "stage": "frames", "wait_s": 30})
+    assert r.status_code == 200, r.text
+    assert r.json()["job"]["state"] == "done" and r.json()["scorecard"]["stage"] == "frames"
+    assert prod.load_state(store.data_dir, state["slug"])["qa"]["last"]["dry_run"] is True
+    # a queued production whose job was cancelled before it started shows as cancelled
+    queued = prod.load_state(store.data_dir, state["slug"])
+    job = store.create_job("production", "cpu", {"slug": "not_run"}, None, None, state="cancelled")  # never claimed
+    queued.update(status="queued", job_id=job["id"])
+    prod.save_state(store.data_dir, queued)
+    assert c.get(f"/api/agent/studio_production?production={state['slug']}").json()["status"] == "cancelled"
