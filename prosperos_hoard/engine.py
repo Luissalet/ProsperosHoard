@@ -1041,11 +1041,11 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     if vary:
         values["seed"] = seed if seed is not None else random_seed()
     inputs = list(recipe.get("input_asset_ids") or [])
-    current = None
+    unchanged = True
     spec: dict[str, Any] = {}
     try:
         workflow, spec = comfy_driver.load_template(recipe["template"], store.data_dir)
-        current = comfy_driver.template_hash(workflow, spec)
+        unchanged = comfy_driver.template_hash_matches(recipe.get("template_hash"), workflow, spec)
     except comfy_driver.WorkflowError:
         pass
     ref_ids: Optional[list[str]] = None
@@ -1063,7 +1063,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",
     )
-    if current and recipe.get("template_hash") and current != recipe["template_hash"]:
+    if not unchanged:
         result["note"] = "the workflow template changed since this asset was made; the result may differ"
     return result
 

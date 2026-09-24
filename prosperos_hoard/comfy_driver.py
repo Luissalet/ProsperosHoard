@@ -78,12 +78,35 @@ def _looks_like_ui_format(workflow: Any) -> bool:
     return isinstance(workflow, dict) and (isinstance(workflow.get("nodes"), list) or isinstance(workflow.get("links"), list))
 
 
+_HASHED_SPEC_KEYS = ("linked_params", "reference_group", "output_node")
+
+
 def template_hash(workflow: dict[str, Any], spec: dict[str, Any]) -> str:
     """Version hash recorded in every recipe: changes whenever the workflow
-    graph or its parameter map changes."""
+    graph or anything that decides how values land in it changes (the
+    parameter map, linked seeds/params, the reference group, the output
+    node)."""
+    payload = {"workflow": workflow, "map": spec.get("map", {}), "linked_seeds": spec.get("linked_seeds", []),
+               "v": 2, **{k: spec.get(k) for k in _HASHED_SPEC_KEYS}}
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _template_hash_v1(workflow: dict[str, Any], spec: dict[str, Any]) -> str:
+    """The hash recipes recorded before linked params, reference groups and
+    the output node were part of it."""
     blob = json.dumps({"workflow": workflow, "map": spec.get("map", {}), "linked_seeds": spec.get("linked_seeds", [])},
                       sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def template_hash_matches(recorded: Optional[str], workflow: dict[str, Any], spec: dict[str, Any]) -> bool:
+    """Does a recipe's recorded hash still describe this template? Either
+    hash version counts, so assets made before the hash grew are not all
+    reported as changed."""
+    if not recorded:
+        return True
+    return recorded in (template_hash(workflow, spec), _template_hash_v1(workflow, spec))
 
 
 # ---------------------------------------------------------------- templates
