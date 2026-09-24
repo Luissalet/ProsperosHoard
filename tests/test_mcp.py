@@ -282,8 +282,13 @@ def test_mcp_server_refuses_non_loopback_url(monkeypatch):
 
     sys.modules.pop("prosperos_hoard.mcp_server", None)
     monkeypatch.setenv("PROSPERO_URL", "http://example.com:8815")
-    with pytest.raises(RuntimeError):
-        importlib.import_module("prosperos_hoard.mcp_server")
+    # the adapter still starts (a crash at import is only a failed handshake
+    # for the MCP host) but never sends a request there: every tool says why
+    mod = importlib.import_module("prosperos_hoard.mcp_server")
+    assert mod.APP_URL == mod.DEFAULT_URL
+    from mcp.server.fastmcp.exceptions import ToolError
+    with pytest.raises(ToolError, match="bad_url"):
+        mod._call("GET", "/api/agent/studio_status")
 
     sys.modules.pop("prosperos_hoard.mcp_server", None)
     monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
