@@ -131,3 +131,52 @@ def test_steady_loop_is_one_section_and_silence_has_no_beats():
     assert len(steady["sections"]) == 1
     silent = audio.analyze_samples(np.zeros(44100 * 3, dtype=np.float32))
     assert silent["beat_times"] == [] and silent["tempo_bpm"] is None
+
+
+def test_tempo_estimate_stays_in_range_on_awkward_envelopes():
+    """The parabolic refinement used to run on whatever lag the prior
+    picked, even on a slope, and extrapolate to a negative or huge BPM."""
+    for seed in range(60):
+        rng = np.random.default_rng(seed)
+        env = np.cumsum(rng.standard_normal(int(rng.integers(300, 3000))))  # drifting, slope-heavy
+        env -= env.min()
+        bpm, period = audio.estimate_tempo(env, bpm_range=(50.0, 220.0))
+        assert 50.0 <= bpm <= 220.0 and period > 0, (seed, bpm)
+        assert bpm == pytest.approx(60.0 * audio.SAMPLE_RATE / audio.HOP / period)
+
+
+def test_sound_already_playing_at_t0_is_not_an_onset():
+    """Frame 0 used to be compared with silence, so a noise bed playing from
+    the first sample was the loudest onset in the song and dragged the
+    beat grid onto t=0. A real hit at t=0 must still be found (see the
+    backbeat test above)."""
+    sr = 44100
+    clicks = _click_track(120.0, 10.0)
+    shift = int(0.25 * sr)
+    sig = np.zeros_like(clicks)
+    sig[shift:] = clicks[:-shift]
+    sig = (sig + 0.05 * np.random.default_rng(1).standard_normal(len(sig))).astype(np.float32)
+    env = audio.onset_envelope(sig)
+    assert env[0] < 0.5
+    beats = audio.analyze_samples(sig)["beat_times"]
+    assert abs(beats[0] - 0.25) <= 0.05
+
+
+def test_frame_features_match_the_full_spectrogram():
+    """The block-wise features (no whole-song spectrogram kept in memory)
+    are the same numbers the full spectrogram gives."""
+    sig = _drum_pattern(120.0, duration_s=4.0)
+    mags = audio._stft_mags(sig)
+    bands, low, power = audio._frame_features(sig)
+    assert len(bands) == len(mags) == 1 + len(sig) // audio.HOP
+    assert np.allclose(bands, mags @ audio._band_matrix(mags.shape[1]).T, rtol=1e-4, atol=1e-4)
+    assert np.allclose(low, mags[:, :audio._band_bins(audio.SAMPLE_RATE, audio.FRAME_SIZE, 200.0)])
+    lo_b = audio._band_bins(audio.SAMPLE_RATE, audio.FRAME_SIZE, 250.0)
+    assert np.allclose(power[:, 0], (mags[:, :lo_b].astype(np.float64) ** 2).sum(axis=1))
+
+
+@pytest.mark.parametrize("t,expected", [(59.996, "[01:00.00]"), (59.994, "[00:59.99]"), (119.999, "[02:00.00]"),
+                                        (0.0, "[00:00.00]"), (-0.3, "[00:00.00]"), (3599.999, "[60:00.00]")])
+def test_lrc_time_carries_instead_of_printing_sixty_seconds(t, expected):
+    assert audio.to_lrc([{"time_s": t, "text": "x"}]) == f"{expected}x"
+    assert audio.parse_lrc(f"{expected}x")[0]["time_s"] == pytest.approx(max(0.0, round(t, 2)), abs=0.006)

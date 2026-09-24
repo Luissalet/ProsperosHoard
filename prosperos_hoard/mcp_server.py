@@ -463,7 +463,9 @@ def studio_timeline(
     action="update": patch timeline_id with {"clip_updates": [{"index": 3, "duration_s": 2.0,
     "transition_in": {"type": "crossfade", "duration_s": 0.3}}, {"index": 5, "asset_id": "a_..."},
     {"index": 7, "delete": true}, {"index": 2, "move_to": 0}], "name", "aspect", "fps",
-    "lyrics_asset_id", "karaoke", "finishing"}. Transitions: cut, crossfade, dip_black, flash_white.
+    "lyrics_asset_id", "karaoke", "finishing"}. Every index in one clip_updates batch means the clip list
+    as it was before the batch (edits, then deletes, then moves; move_to is a position in the result).
+    Transitions: cut, crossfade, dip_black, flash_white.
     finishing (applied once at render, all optional): {"color_grade": "teal_orange"|"sodium_night"|
     "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
     "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)}.
@@ -480,14 +482,20 @@ def studio_timeline(
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def studio_render(timeline_id: str, quality: str = "preview", wait_s: float = 0) -> dict[str, Any]:
+def studio_render(timeline_id: str, quality: str = "preview", wait_s: float = 0,
+                  range: Optional[list[float]] = None) -> dict[str, Any]:
     """Render a timeline to an mp4 with ffmpeg (Ken Burns moves, transitions, burned-in lyrics, the
-    song as audio). quality "preview" (540p, fast) or "final" (1080p, CRF 18, AAC 192k, slower). CPU job:
-    returns the job; poll studio_job, whose finished result holds the video asset id.
+    song as audio). quality "preview" (540p, fast) or "final" (1080p, CRF 18, AAC 192k, slower).
+    range=[start_s, end_s] renders only that stretch of the edit (e.g. just the chorus: the clips
+    overlapping it, trimmed, with the lyrics and the song from that point). CPU job: returns the job;
+    poll studio_job, whose finished result holds the video asset id.
 
-    Keywords: render video, export mp4, final render, make the video, renderizar video, exportar video, hacer el video
+    Keywords: render video, export mp4, final render, make the video, render a section, render the chorus, renderizar video, exportar video, hacer el video, renderizar un fragmento, renderizar el estribillo
     """
-    return _call("POST", "/api/agent/studio_render", json={"timeline_id": timeline_id, "quality": quality, "wait_s": wait_s})
+    body: dict[str, Any] = {"timeline_id": timeline_id, "quality": quality, "wait_s": wait_s}
+    if range is not None:
+        body["range"] = range
+    return _call("POST", "/api/agent/studio_render", json=body)
 
 
 # -------------------------------------------------------------------- jobs
