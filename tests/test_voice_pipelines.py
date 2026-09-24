@@ -203,6 +203,26 @@ def test_audiobook_job_resumes_without_resynthesizing(tmp_path, monkeypatch):
     assert len(outputs2["chapters"]) == 2
 
 
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_concat_wavs_handles_apostrophe_in_path(tmp_path):
+    # the real Windows install folder is named "Prospero's Hoard": the
+    # audiobook work directory (and so its chapter wavs) can live under a
+    # path containing an apostrophe, which the ffmpeg concat demuxer's own
+    # quoting must not choke on.
+    work_dir = tmp_path / "Prospero's Hoard" / "data"
+    work_dir.mkdir(parents=True)
+    a = work_dir / "ch000.wav"
+    b = work_dir / "ch001.wav"
+    vp._write_wav(a, np.ones(1600, dtype=np.float32) * 0.1, 16000)
+    vp._write_wav(b, np.ones(1600, dtype=np.float32) * 0.1, 16000)
+    out = work_dir / "final.wav"
+    vp._concat_wavs([a, b], out)
+    assert out.is_file() and out.stat().st_size > 0
+    from prosperos_hoard import audio as audio_mod
+
+    assert audio_mod.probe_duration_s(out) == pytest.approx(0.2, abs=0.02)
+
+
 def test_audiobook_job_resume_keeps_full_transcript(tmp_path, monkeypatch):
     """A resumed run (a re-queued job with the exact same content, as after
     a crash or a cancel) must reuse the already-rendered chapters' audio
