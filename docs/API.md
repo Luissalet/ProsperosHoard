@@ -131,6 +131,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET | `/api/jobs/{id}` | one job |
 | POST | `/api/jobs/{id}/cancel` | cancel |
 | POST | `/api/jobs/{id}/retry?new_seed=false` | queue a copy of a failed or cancelled job |
+| POST | `/api/projects/{id}/lyrics/time` | `{song_asset_id, lyrics, name?}` - the UI twin of `studio_time_lyrics` (not logged as assistant activity) |
 | GET | `/api/projects/{id}/assets` | `?kind&query&tag&favourite&source&min_rating&limit&offset` |
 | GET / PATCH | `/api/assets/{id}` | full asset (waveform, analysis, recipe) / `{tags?, rating?, favourite?, notes?, name?}` |
 | GET | `/api/assets/{id}/file?download=` | the file, resolved by id only |

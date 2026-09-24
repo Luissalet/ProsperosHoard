@@ -1298,6 +1298,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_time_lyrics", body.song_asset_id,
                      lambda: engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name))
 
+    @app.post("/api/projects/{project_id}/lyrics/time")
+    def ui_time_lyrics(project_id: str, body: TimeLyricsBody):
+        # the UI's "Auto-time" button: same operation, not logged as assistant activity
+        return engine.time_lyrics(store, project_id, body.song_asset_id, body.lyrics, body.name)
+
     @app.post("/api/agent/studio_analyze_audio")
     def agent_analyze_audio(asset_id: str):
         return agent("studio_analyze_audio", asset_id,
