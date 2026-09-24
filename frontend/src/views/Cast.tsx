@@ -1,8 +1,12 @@
 import { useState } from "react";
-import { ArrowDown, ArrowUp, IdCard, ImagePlus, Loader2, Pencil, UserPlus, Users, Volume2, X } from "lucide-react";
-import { api, fileUrl, thumbUrl, type Character, type Group } from "../api";
+import {
+  ArrowDown, ArrowUp, Clock, IdCard, ImagePlus, Layers, Loader2, Pencil, Sparkles, Trash2, UploadCloud, UserPlus, Users,
+  Volume2, X,
+} from "lucide-react";
+import { api, fileUrl, thumbUrl, type Character, type Group, type LibraryEntry, type PackInspect } from "../api";
 import { useT } from "../i18n";
-import { AssetPicker, Empty, Modal, useApp, useAsync } from "../components/ui";
+import { AssetPicker, ConfirmButton, Empty, Modal, useApp, useAsync } from "../components/ui";
+import { CharacterKitModal } from "./CharacterKit";
 
 type Draft = { id?: string; name: string; role: string; bio: string; prompt: string; negative: string; palette: string;
   canonical_asset_id: string | null; crop: string; voice_backend: string; voice_id: string; speed: number };
@@ -22,6 +26,10 @@ export function CastView() {
   const [speaking, setSpeaking] = useState<string | null>(null);
   const [groupDraft, setGroupDraft] = useState<{ id?: string; name: string; concept: string; members: string[] } | null>(null);
   const [rendering, setRendering] = useState<string | null>(null);
+  const [kitCharId, setKitCharId] = useState<string | null>(null);
+  const [importing, setImporting] = useState<{ file: File; inspect: PackInspect; rename: string } | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [library, setLibrary] = useState(false);
 
   const list = chars.data?.items || [];
   const byId = Object.fromEntries(list.map((c) => [c.id, c]));
@@ -90,6 +98,30 @@ export function CastView() {
     }
   };
 
+  const pickPackFile = async (file: File) => {
+    setInspecting(true);
+    try {
+      const inspect = await api.charPackInspect(file);
+      setImporting({ file, inspect, rename: "" });
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setInspecting(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importing) return;
+    try {
+      const r = await api.charPackImport(pid, importing.file, importing.rename.trim() || undefined);
+      app.toast(t("kitPackImported", { name: r.name }), "ok");
+      setImporting(null);
+      app.bump();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
+
   const moveMember = (i: number, d: number) => {
     if (!groupDraft) return;
     const m = [...groupDraft.members];
@@ -107,6 +139,12 @@ export function CastView() {
           <p>{t("castLead")}</p>
         </div>
         <div className="actions">
+          <label className="btn" style={{ cursor: inspecting ? "default" : "pointer" }}>
+            {inspecting ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {t("kitImportPack")}
+            <input type="file" accept=".hoardchar" hidden disabled={inspecting}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) pickPackFile(f); e.target.value = ""; }} />
+          </label>
+          <button className="btn" onClick={() => setLibrary(true)}><Layers size={16} /> {t("kitLibraryTitle")}</button>
           <button className="btn" onClick={() => setGroupDraft({ name: "", concept: "", members: list.map((c) => c.id) })}><Users size={16} /> {t("newGroup")}</button>
           <button className="btn primary" onClick={() => setDraft({ ...emptyDraft })}><UserPlus size={16} /> {t("newCharacter")}</button>
         </div>
@@ -137,11 +175,18 @@ export function CastView() {
                 </div>
                 {c.prompt && <div className="fragment">{c.prompt}</div>}
                 {c.bio && <div className="muted small">{c.bio}</div>}
+                {(c.kit?.adapters?.length ?? 0) > 0 && (
+                  <div className="row wrap" style={{ gap: 5 }}>
+                    {c.kit!.adapters!.filter((a) => a.enabled).map((a) => (
+                      <span key={a.id} className="pill accent">{t("kitAdaptersPill", { arch: a.arch })}</span>
+                    ))}
+                  </div>
+                )}
                 <div className="row">
                   <button className="btn sm" onClick={() => speak(c)} disabled={speaking === c.id}>
                     {speaking === c.id ? <Loader2 size={14} className="spin" /> : <Volume2 size={14} />} {t("voiceTest")}
                   </button>
-                  <span className="muted small ellipsis grow">{c.voice?.voice_id}</span>
+                  <button className="btn sm ghost" onClick={() => setKitCharId(c.id)}><Sparkles size={14} /> {t("kitButton")}</button>
                   <button className="btn sm ghost" onClick={() => edit(c)}><Pencil size={14} /> {t("edit")}</button>
                 </div>
               </div>
@@ -259,6 +304,103 @@ export function CastView() {
           </div>
         </Modal>
       )}
+
+      {kitCharId && byId[kitCharId] && <CharacterKitModal character={byId[kitCharId]} onClose={() => setKitCharId(null)} />}
+
+      {importing && (
+        <Modal title={t("kitImportPreview")} onClose={() => setImporting(null)}
+          footer={<><button className="btn ghost" onClick={() => setImporting(null)}>{t("cancel")}</button>
+            <button className="btn primary" onClick={confirmImport}>{t("kitConfirmImportBtn")}</button></>}>
+          <div className="stack">
+            <div className="row">
+              <strong className="grow">{importing.inspect.name}</strong>
+              {importing.inspect.role && <span className="pill">{importing.inspect.role}</span>}
+            </div>
+            {importing.inspect.look && <div className="fragment">{importing.inspect.look}</div>}
+            <div className="row wrap small muted">
+              {importing.inspect.canonical && <span>{t("canonical")}</span>}
+              <span>{t("reference")}: {importing.inspect.references}</span>
+              <span>{t("kitTabDataset")}: {importing.inspect.dataset}</span>
+              {importing.inspect.adapters.length > 0 && <span>{t("kitAdaptersTitle")}: {importing.inspect.adapters.map((a) => a.arch).join(", ")}</span>}
+            </div>
+            <label className="field">{t("kitRenameField")}
+              <input value={importing.rename} placeholder={importing.inspect.name}
+                onChange={(e) => setImporting({ ...importing, rename: e.target.value })} /></label>
+          </div>
+        </Modal>
+      )}
+
+      {library && <LibraryModal projectId={pid} onClose={() => setLibrary(false)} onUsed={() => app.bump()} />}
     </>
+  );
+}
+
+function LibraryModal({ projectId, onClose, onUsed }: { projectId: string; onClose: () => void; onUsed: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const lib = useAsync(() => api.libraryList(projectId), [projectId]);
+  const [historyOf, setHistoryOf] = useState<string | null>(null);
+  const [history, setHistory] = useState<Awaited<ReturnType<typeof api.libraryHistory>> | null>(null);
+  const [casting, setCasting] = useState<LibraryEntry | null>(null);
+  const [version, setVersion] = useState<number | undefined>(undefined);
+
+  const openHistory = async (e: LibraryEntry) => {
+    setHistoryOf(e.id);
+    try { setHistory(await api.libraryHistory(projectId, e.id)); } catch (err) { app.toast((err as Error).message, "bad"); }
+  };
+
+  const use = async (e: LibraryEntry) => {
+    try {
+      const r = await api.libraryUse(projectId, e.id, version);
+      app.toast(t("kitLibraryUsed", { name: r.name }), "ok");
+      onUsed();
+      setCasting(null);
+    } catch (err) { app.toast((err as Error).message, "bad"); }
+  };
+
+  const del = async (e: LibraryEntry) => {
+    try { await api.libraryDelete(projectId, e.id); lib.reload(); } catch (err) { app.toast((err as Error).message, "bad"); }
+  };
+
+  const items = lib.data?.items || [];
+  return (
+    <Modal title={t("kitLibraryTitle")} onClose={onClose} wide>
+      <p className="small muted" style={{ marginTop: -6 }}>{t("kitLibraryLead")}</p>
+      {items.length === 0 ? <Empty icon={<Layers size={30} />} text={t("kitNoLibraryEntries")} /> : (
+        <div className="stack">
+          {items.map((e) => (
+            <div key={e.id} className="row" style={{ background: "var(--surface-2)", borderRadius: 9, padding: 10, alignItems: "flex-start", gap: 10 }}>
+              {e.has_preview ? <img src={api.libraryPreviewUrl(e.id)} alt="" style={{ width: 64, height: 64, borderRadius: 8, objectFit: "cover", flex: "none" }} />
+                : <div className="media-icon" style={{ width: 64, height: 64, flex: "none" }}><Layers size={20} /></div>}
+              <div className="stack grow" style={{ gap: 4 }}>
+                <div className="row"><strong className="grow">{e.name}</strong>{e.role && <span className="pill">{e.role}</span>}</div>
+                <span className="small muted">{t("kitLibraryVersionsCount", { n: e.versions })} · v{e.version}
+                  {e.adapters.length > 0 && ` · ${e.adapters.join(", ")}`}</span>
+                {historyOf === e.id && history && (
+                  <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+                    {[...history.versions].reverse().map((v) => (
+                      <li key={v.v}>v{v.v} · {v.at.slice(0, 10)} · {v.changes.join(", ")}{v.note ? ` · ${v.note}` : ""}</li>
+                    ))}
+                  </ul>
+                )}
+                {casting?.id === e.id && (
+                  <div className="row small" style={{ gap: 6 }}>
+                    <select value={version ?? ""} onChange={(ev) => setVersion(ev.target.value ? Number(ev.target.value) : undefined)}>
+                      <option value="">{t("kitLibraryVersion", { v: e.version })}</option>
+                    </select>
+                    <button className="btn sm primary" onClick={() => use(e)}>{t("kitCastIntoProject")}</button>
+                  </div>
+                )}
+              </div>
+              <div className="row wrap" style={{ gap: 6, flex: "none" }}>
+                <button className="btn sm" onClick={() => setCasting(casting?.id === e.id ? null : e)}><UploadCloud size={14} /> {t("kitCastIntoProject")}</button>
+                <button className="btn sm ghost" onClick={() => openHistory(e)}><Clock size={14} /> {t("kitViewHistory")}</button>
+                <ConfirmButton onConfirm={() => del(e)} className="btn sm ghost danger"><Trash2 size={14} /></ConfirmButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }

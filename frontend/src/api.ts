@@ -98,6 +98,255 @@ export interface Character {
   canonical_asset_id: string | null;
   voice: Voice | null;
   notes: string | null;
+  /** Raw stored kit (as `store.get_character` returns it, not the summarized `/kit` view): `{}` until the
+   * character's first kit action. Adapters here match `Adapter`; use for badges (e.g. "LoRA · qwen_image"). */
+  kit?: {
+    trigger?: string;
+    use_adapters?: boolean;
+    adapters?: Adapter[];
+    dataset?: unknown[];
+    sheet?: { asset_ids?: string[]; contact_sheet_id?: string; views?: string[] };
+    identity?: { threshold?: number };
+    library?: { id: string; version: number };
+  };
+}
+
+// ------------------------------------------------------------ character kit
+
+export interface AdapterTrained {
+  steps: number;
+  rank: number;
+  images: number;
+  resolution: number;
+  trainer: string | null;
+}
+
+export interface Adapter {
+  id: string;
+  arch: string;
+  lora_name: string;
+  strength: number;
+  trigger: string;
+  enabled: boolean;
+  installed: boolean;
+  source: "trained" | "imported" | "pack";
+  created_at: string;
+  trained?: AdapterTrained;
+  eval?: { identity: number; samples: string[] };
+}
+
+export interface KitSummary {
+  trigger: string;
+  use_adapters: boolean;
+  adapters: Adapter[];
+  dataset: { items: number; included: number };
+  sheet: { views: number; contact_sheet_id: string | null };
+  references: number;
+  identity_threshold: number;
+  library: { id: string; version: number } | null;
+  last_change: { at?: string; event?: string; detail?: string };
+}
+
+export interface CharKitView extends KitSummary {
+  character_id: string;
+  name: string;
+  history: { at: string; event: string; detail?: string }[];
+  sheet_asset_ids: string[];
+  views: string[];
+  default_views: string[];
+}
+
+export interface DatasetItem {
+  asset_id: string;
+  caption: string;
+  include: boolean;
+  view?: string;
+  source: "canonical" | "reference" | "sheet" | "take" | "import" | "pack";
+  width?: number | null;
+  height?: number | null;
+  thumb?: string | null;
+  identity?: number | null;
+  identity_method?: string | null;
+}
+
+export interface DatasetReport {
+  images: number;
+  excluded: number;
+  small: string[];
+  blurry: string[];
+  duplicates: string[][];
+  captions_without_trigger: string[];
+  warnings: string[];
+  ready: boolean;
+}
+
+export interface DatasetView {
+  character_id: string;
+  trigger: string;
+  items: DatasetItem[];
+  report: DatasetReport;
+}
+
+export interface TrainPlan {
+  arch: string;
+  plan: {
+    steps: number; rank: number; lr: number; resolution: number; batch_size: number;
+    save_every: number; sample_every: number; est_vram_mb: number; est_minutes: number; warnings: string[];
+  };
+  dataset: DatasetReport;
+  trainer: string | null;
+  trainer_problem: string | null;
+  base_model: string | null;
+  base_hint: string | null;
+  lora_dir: string | null;
+  ready: boolean;
+}
+
+export interface TrainerStatus {
+  name: string;
+  kind: "ai_toolkit" | "musubi" | "custom" | "fake";
+  ok: boolean;
+  reason: string;
+  archs: string[];
+  dir: string;
+}
+
+export interface TrainerEntry {
+  kind: "ai_toolkit" | "musubi" | "custom" | "fake";
+  name: string;
+  dir: string;
+  python?: string;
+  command?: string[];
+}
+
+export interface TrainingSettings {
+  lora_dir?: string;
+  gpu?: string | number;
+  trainers?: TrainerEntry[];
+  base_models?: Record<string, string>;
+}
+
+export interface TrainersInfo {
+  trainers: TrainerStatus[];
+  lora_dir: string | null;
+  lora_dir_ok: boolean;
+  gpu: string | number;
+  base_models: Record<string, string>;
+  archs: Record<string, { label: string; est_vram_mb: number; sec_per_step: number; base_hint: string; trainers: string[] }>;
+}
+
+export interface TrainStatus {
+  character_id: string;
+  runs: (Job & { run_id?: string | null; arch?: string | null })[];
+  adapters: Adapter[];
+}
+
+export interface Take {
+  asset_id: string;
+  kind: "image" | "video";
+  name: string | null;
+  created_at: string;
+  take: number;
+  takes_in_shot: number;
+  take_key: string;
+  seed?: number;
+  prompt?: string | null;
+  adapters: string[];
+  identity: number | null;
+  identity_method: string | null;
+  is_reference: boolean;
+  is_canonical: boolean;
+  in_dataset: boolean;
+  rejected: boolean;
+  is_sheet: boolean;
+  rating: number;
+  favourite?: boolean;
+}
+
+export interface TakesList {
+  character_id: string;
+  name: string;
+  total: number;
+  shots: number;
+  items: Take[];
+}
+
+export interface PackExport {
+  file: string;
+  bytes: number;
+  download: string;
+  name: string;
+  images: number;
+  dataset: number;
+  adapters: number;
+  adapters_without_weights: string[];
+}
+
+export interface PackInspect {
+  name: string;
+  role: string | null;
+  look: string | null;
+  exported_at?: string;
+  app?: string;
+  trigger?: string;
+  canonical: boolean;
+  references: number;
+  sheet_views: string[];
+  dataset: number;
+  adapters: { arch: string; lora_name: string; strength: number; weights: boolean }[];
+  bytes: number;
+}
+
+export interface PackImportResult {
+  character_id: string;
+  name: string;
+  canonical_asset_id: string | null;
+  references: number;
+  sheet: number;
+  dataset: number;
+  adapters: number;
+  adapters_installed: number;
+  notes: string[];
+}
+
+export interface LibraryEntry {
+  id: string;
+  name: string;
+  role: string | null;
+  look: string | null;
+  version: number;
+  versions: number;
+  updated_at: string;
+  adapters: string[];
+  has_preview: boolean;
+  origin?: { project_id: string; character_id: string };
+}
+
+export interface LibraryVersion {
+  v: number;
+  at: string;
+  note: string;
+  bytes: number;
+  adapters: string[];
+  look: string | null;
+  canonical: boolean;
+  dataset: number;
+  changes: string[];
+}
+
+export interface LibraryHistory {
+  id: string;
+  name: string;
+  versions: LibraryVersion[];
+  origin?: { project_id: string; character_id: string };
+}
+
+export interface LibrarySaveResult {
+  id: string;
+  version: number;
+  bytes: number;
+  changes: string[];
+  adapters_without_weights: string[];
 }
 
 export interface Group {
@@ -666,4 +915,79 @@ export const api = {
     request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/api/recipes/${name}/run`, body),
   resynthesizeDubSegment: (jobId: string, index: number, opts: { text?: string; voice?: VoiceSpec; remix?: boolean } = {}) =>
     request<{ segment: DubSegment }>("POST", `/api/voice/dub/${jobId}/segments/${index}/resynthesize`, opts),
+
+  // -------------------------------------------------------------- character kit
+  charKit: (charId: string) => request<CharKitView>("GET", `/api/characters/${charId}/kit`),
+  charSettings: (charId: string, settings: { trigger?: string; use_adapters?: boolean; identity_threshold?: number }) =>
+    request<CharKitView>("POST", `/api/characters/${charId}/adapters`, { action: "settings", settings }),
+
+  charSheet: (charId: string, body: { views?: string[]; engine?: string; seed?: number; width?: number; height?: number }) =>
+    request<{ job: Job; views: string[] }>("POST", `/api/characters/${charId}/sheet`, body),
+
+  datasetGet: (charId: string) => request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "get" }),
+  datasetReport: (charId: string) => request<{ character_id: string; trigger: string; items: DatasetItem[]; report: DatasetReport }>(
+    "POST", `/api/characters/${charId}/dataset`, { action: "report" }),
+  datasetBuild: (charId: string, sources: string[], minIdentity?: number, replace = false) =>
+    request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "build", sources, min_identity: minIdentity, replace }),
+  datasetUpdate: (charId: string, items: { asset_id: string; caption?: string; include?: boolean; remove?: boolean }[]) =>
+    request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "update", items }),
+  datasetCaption: (charId: string, onlyMissing = false) =>
+    request<{ job: Job }>("POST", `/api/characters/${charId}/dataset`, { action: "caption", only_missing: onlyMissing }),
+
+  trainers: () => request<TrainersInfo>("POST", "/api/training", { action: "trainers" }),
+  trainingSettings: (settings: TrainingSettings) => request<TrainingSettings>("POST", "/api/training", { action: "settings", training: settings }),
+  trainingLog: (runId: string) => request<{ run_id: string; lines: string[] }>("POST", "/api/training", { action: "log", run_id: runId }),
+
+  trainPlan: (charId: string, arch: string, overrides: Record<string, unknown> = {}, trainer?: string) =>
+    request<TrainPlan>("POST", `/api/characters/${charId}/train`, { action: "plan", arch, overrides, trainer }),
+  trainStart: (charId: string, arch: string, overrides: Record<string, unknown> = {}, trainer?: string) =>
+    request<{ job: Job; plan: TrainPlan["plan"]; trainer: string | null }>(
+      "POST", `/api/characters/${charId}/train`, { action: "start", arch, overrides, trainer }),
+  trainStatus: (charId: string) => request<TrainStatus>("POST", `/api/characters/${charId}/train`, { action: "status" }),
+
+  adaptersList: (charId: string) => request<CharKitView>("POST", `/api/characters/${charId}/adapters`, { action: "list" }),
+  adaptersAvailable: (charId: string) => request<{ loras: string[]; comfy: boolean }>(
+    "POST", `/api/characters/${charId}/adapters`, { action: "available" }),
+  adapterAttach: (charId: string, loraName: string, arch: string, strength = 1, trigger?: string) =>
+    request<{ adapter: Adapter; note?: string }>("POST", `/api/characters/${charId}/adapters`,
+      { action: "attach", lora_name: loraName, arch, strength, trigger }),
+  adapterUpdate: (charId: string, adapterId: string, patch: { strength?: number; trigger?: string; enabled?: boolean }) =>
+    request<{ adapter: Adapter }>("POST", `/api/characters/${charId}/adapters`, { action: "update", adapter_id: adapterId, ...patch }),
+  adapterRemove: (charId: string, adapterId: string) =>
+    request<{ removed: string }>("POST", `/api/characters/${charId}/adapters`, { action: "remove", adapter_id: adapterId }),
+
+  takesList: (charId: string, sort: "recent" | "identity" = "recent", limit = 60) =>
+    request<TakesList>("POST", `/api/characters/${charId}/takes`, { action: "list", sort, limit }),
+  takesScore: (charId: string, force = false, limit = 24) =>
+    request<{ job: Job }>("POST", `/api/characters/${charId}/takes`, { action: "score", force, limit }),
+  takeAction: (charId: string, assetId: string, takeAction: "reference" | "unreference" | "canonical" | "dataset" | "reject" | "unreject") =>
+    request<{ asset_id: string; action: string }>("POST", `/api/characters/${charId}/takes`, { action: "act", asset_id: assetId, take_action: takeAction }),
+
+  charPackExport: (charId: string, includeDataset = true, includeAdapters = true) =>
+    request<PackExport>("POST", `/api/characters/${charId}/pack`, { include_dataset: includeDataset, include_adapters: includeAdapters }),
+  charPackDownloadUrl: (file: string) => `/api/character-packs/${file}`,
+  charPackInspect: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<PackInspect>("POST", "/api/character-packs/inspect", fd);
+  },
+  charPackImport: (projectId: string, file: File, rename?: string) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<PackImportResult>("POST", `/api/projects/${projectId}/character-packs${q({ rename })}`, fd);
+  },
+
+  libraryList: (projectId: string, query?: string) =>
+    request<{ items: LibraryEntry[] }>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "list", query }),
+  librarySave: (projectId: string, charId: string, note?: string, includeAdapters = true) =>
+    request<LibrarySaveResult>("POST", `/api/library/characters${q({ project: projectId })}`,
+      { action: "save", character_id: charId, note, include_adapters: includeAdapters }),
+  libraryUse: (projectId: string, libId: string, version?: number, rename?: string) =>
+    request<PackImportResult>("POST", `/api/library/characters${q({ project: projectId })}`,
+      { action: "use", id: libId, version, rename }),
+  libraryHistory: (projectId: string, libId: string) =>
+    request<LibraryHistory>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "history", id: libId }),
+  libraryDelete: (projectId: string, libId: string) =>
+    request<{ deleted: string }>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "delete", id: libId }),
+  libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
 };
