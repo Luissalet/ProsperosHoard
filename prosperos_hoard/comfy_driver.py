@@ -36,8 +36,9 @@ OUTPUT_CLASSES = {"SaveImage": "image", "SaveImageAdvanced": "image", "SaveAnima
 VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace", "qwen21")
 
 # Inputs we know how to recognise when importing a custom workflow, and the
-# friendly parameter each maps to. CLIPTextEncode prompts are resolved to
-# positive/negative by following the sampler's links (see propose_param_map).
+# friendly parameter each maps to. Text-encoder prompts are resolved to
+# positive/negative by following the sampler's/guider's conditioning links
+# upstream (see propose_param_map).
 _KNOWN_INPUTS: dict[str, dict[str, str]] = {
     "CheckpointLoaderSimple": {"ckpt_name": "checkpoint"},
     "ImageOnlyCheckpointLoader": {"ckpt_name": "checkpoint"},
@@ -49,7 +50,13 @@ _KNOWN_INPUTS: dict[str, dict[str, str]] = {
         "noise_seed": "seed", "steps": "steps", "cfg": "cfg",
         "sampler_name": "sampler", "scheduler": "scheduler",
     },
+    "SamplerCustom": {"noise_seed": "seed", "cfg": "cfg"},
+    "RandomNoise": {"noise_seed": "seed"},
+    "CFGGuider": {"cfg": "cfg"},
+    "KSamplerSelect": {"sampler_name": "sampler"},
+    "BasicScheduler": {"scheduler": "scheduler", "steps": "steps", "denoise": "denoise"},
     "EmptyLatentImage": {"width": "width", "height": "height", "batch_size": "batch_size"},
+    "EmptySD3LatentImage": {"width": "width", "height": "height", "batch_size": "batch_size"},
     "LoadImage": {"image": "reference_image"},
     "SaveAnimatedWEBP": {"fps": "fps"},
     "VHS_VideoCombine": {"frame_rate": "fps"},
@@ -184,27 +191,94 @@ def _link_target(value: Any) -> Optional[str]:
     return None
 
 
+# Nodes whose conditioning inputs decide which prompt is positive and which
+# negative: input name -> role.
+_CONDITIONING_ROLES: dict[str, dict[str, str]] = {
+    "KSampler": {"positive": "positive", "negative": "negative"},
+    "KSamplerAdvanced": {"positive": "positive", "negative": "negative"},
+    "SamplerCustom": {"positive": "positive", "negative": "negative"},
+    "CFGGuider": {"positive": "positive", "negative": "negative"},
+    "DualCFGGuider": {"cond1": "positive", "cond2": "positive", "negative": "negative"},
+    "BasicGuider": {"conditioning": "positive"},
+}
+# The prompt-bearing input of a text encoder, in order of preference; the
+# others listed for the same encoder get the same text (linked_params).
+_PROMPT_INPUTS = ("text", "prompt", "t5xxl", "text_g", "clip_l", "text_l")
+
+
+def _is_text_encoder(class_type: str) -> bool:
+    return class_type.startswith("CLIPTextEncode") or class_type.startswith("TextEncode")
+
+
+def _prompt_inputs(node: dict[str, Any]) -> list[str]:
+    inputs = node.get("inputs") or {}
+    return [name for name in _PROMPT_INPUTS if isinstance(inputs.get(name), str)]
+
+
+def _encoders_upstream(workflow: dict[str, Any], start: Optional[str], limit: int = 200) -> list[str]:
+    """Text encoders feeding `start` through any chain of nodes
+    (FluxGuidance, ConditioningCombine, ReferenceLatent, ...), nearest
+    first; the walk stops at each encoder."""
+    found: list[str] = []
+    queue = [start] if start else []
+    seen: set[str] = set()
+    while queue and len(seen) < limit:
+        node_id = queue.pop(0)
+        if node_id in seen or node_id not in workflow:
+            continue
+        seen.add(node_id)
+        node = workflow[node_id]
+        if _is_text_encoder(str(node.get("class_type"))) and _prompt_inputs(node):
+            found.append(node_id)
+            continue
+        for value in (node.get("inputs") or {}).values():
+            target = _link_target(value)
+            if target:
+                queue.append(target)
+    return found
+
+
+def _vram_class_for(workflow: dict[str, Any]) -> Optional[str]:
+    """The VRAM class a model file name implies (UNet or checkpoint)."""
+    names = []
+    for node in workflow.values():
+        inputs = node.get("inputs") or {}
+        for key in ("unet_name", "ckpt_name"):
+            if isinstance(inputs.get(key), str):
+                names.append(inputs[key].lower())
+    for tag, vram_class in (("kontext", "kontext"), ("wan", "wan"), ("qwen", "qwen21"), ("flux", "flux"),
+                            ("ace_step", "ace"), ("svd", "svd")):
+        if any(tag in name for name in names):
+            return vram_class
+    return None
+
+
 def propose_param_map(workflow: dict[str, Any]) -> dict[str, Any]:
     """Best-effort friendly-parameter map for an imported API workflow. The
-    prompt nodes are classified by following the sampler's `positive` and
-    `negative` links, so the same `positive_prompt`/`negative_prompt` names
-    work as for the built-in templates. The user can edit the map."""
+    prompt nodes are classified by walking upstream from every sampler's or
+    guider's `positive`/`negative` conditioning to the text encoder that
+    produces it, so the same `positive_prompt`/`negative_prompt` names work
+    as for the built-in templates. A text encoder neither side reaches is
+    offered as `text_1`, `text_2`... Extra seeds (a second sampler pass)
+    follow the main one (`linked_seeds`), so "vary" varies every pass. The
+    user can edit the map."""
     validate_api_workflow(workflow)
     friendly_map: dict[str, str] = {}
+    linked_params: dict[str, list[str]] = {}
+    linked_seeds: list[str] = []
     output_node = None
     kind = "image"
     checkpoint_node = None
     vram_class = "sdxl"
     reference_node = None
 
-    sampler_ids = [nid for nid, n in workflow.items() if n["class_type"] in ("KSampler", "KSamplerAdvanced")]
-    pos_ids, neg_ids = set(), set()
-    for sid in sampler_ids:
-        inputs = workflow[sid]["inputs"]
-        if _link_target(inputs.get("positive")):
-            pos_ids.add(_link_target(inputs["positive"]))
-        if _link_target(inputs.get("negative")):
-            neg_ids.add(_link_target(inputs["negative"]))
+    roles: dict[str, str] = {}
+    for sid in sorted(workflow, key=lambda k: (len(k), k)):
+        node = workflow[sid]
+        for input_name, role in _CONDITIONING_ROLES.get(node["class_type"], {}).items():
+            for enc in _encoders_upstream(workflow, _link_target(node["inputs"].get(input_name))):
+                if roles.get(enc) != "positive":  # used on both sides: it is the prompt
+                    roles[enc] = role
 
     def put(friendly: str, target: str) -> None:
         key = friendly
@@ -214,6 +288,18 @@ def propose_param_map(workflow: dict[str, Any]) -> dict[str, Any]:
             n += 1
         friendly_map[key] = target
 
+    def put_prompt(friendly: str, node_id: str) -> None:
+        names = _prompt_inputs(workflow[node_id])
+        targets = [f"{node_id}.{name}" for name in names]
+        if friendly not in friendly_map:
+            friendly_map[friendly] = targets[0]
+            rest = targets[1:]
+        else:
+            rest = targets
+        if rest:
+            linked_params.setdefault(friendly, []).extend(rest)
+
+    text_n = 0
     for node_id in sorted(workflow, key=lambda k: (len(k), k)):
         node = workflow[node_id]
         class_type = node["class_type"]
@@ -228,25 +314,34 @@ def propose_param_map(workflow: dict[str, Any]) -> dict[str, Any]:
                 vram_class = "svd"
             elif "xl" not in ckpt and ("1-5" in ckpt or "1.5" in ckpt or "v1" in ckpt or "sd15" in ckpt):
                 vram_class = "sd15"
-        if class_type == "CLIPTextEncode" and "text" in inputs and not _link_target(inputs["text"]):
-            if node_id in pos_ids:
-                put("positive_prompt", f"{node_id}.text")
-            elif node_id in neg_ids:
-                put("negative_prompt", f"{node_id}.text")
+        if _is_text_encoder(class_type) and _prompt_inputs(node):
+            role = roles.get(node_id)
+            if role == "positive":
+                put_prompt("positive_prompt", node_id)
+            elif role == "negative":
+                put_prompt("negative_prompt", node_id)
             else:
-                put("prompt", f"{node_id}.text")
+                for name in _prompt_inputs(node):
+                    text_n += 1
+                    friendly_map[f"text_{text_n}"] = f"{node_id}.{name}"
             continue
         if class_type == "LoadImage" and reference_node is None and "image" in inputs:
             reference_node = f"{node_id}.image"
             continue
         for input_name, friendly in _KNOWN_INPUTS.get(class_type, {}).items():
             if input_name in inputs and not _link_target(inputs[input_name]):
+                if friendly == "seed" and "seed" in friendly_map:
+                    linked_seeds.append(f"{node_id}.{input_name}")
+                    continue
                 put(friendly, f"{node_id}.{input_name}")
     if output_node is None:
         raise WorkflowError(
             "the workflow has no output node ComfyUI would save (SaveImage, SaveAnimatedWEBP, VHS_VideoCombine); "
             "add one in ComfyUI and export again"
         )
+    # a model family named in a UNet/checkpoint file (Wan, Flux, Kontext,
+    # Qwen-Image, ACE-Step) beats the SD-version guess from the name above
+    vram_class = _vram_class_for(workflow) or vram_class
     spec: dict[str, Any] = {
         "kind": kind,
         "vram_class": vram_class,
@@ -255,6 +350,10 @@ def propose_param_map(workflow: dict[str, Any]) -> dict[str, Any]:
         "checkpoint_node": checkpoint_node,
         "auto_detected": True,
     }
+    if linked_seeds:
+        spec["linked_seeds"] = linked_seeds
+    if linked_params:
+        spec["linked_params"] = linked_params
     if reference_node:
         spec["requires_reference"] = True
         spec["reference_node"] = reference_node
@@ -277,8 +376,8 @@ def validate_param_map(workflow: dict[str, Any], spec: dict[str, Any]) -> None:
             raise WorkflowError(f"node '{node_id}' has no input '{input_name[:40]}' (parameter '{friendly}')")
     if spec.get("vram_class") not in VRAM_CLASSES:
         raise WorkflowError(f"vram_class must be one of {', '.join(VRAM_CLASSES)}")
-    if spec.get("kind") not in ("image", "video"):
-        raise WorkflowError("kind must be 'image' or 'video'")
+    if spec.get("kind") not in ("image", "video", "audio"):
+        raise WorkflowError("kind must be 'image', 'video' or 'audio'")
     if spec.get("output_node") not in workflow:
         raise WorkflowError("output_node must be a node id of the workflow")
     ref = spec.get("reference_node")
