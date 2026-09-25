@@ -56,6 +56,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_animatic` | `{production, aspects?, wait_s=0}` -> `{job, animatic?: {renders{aspect: asset_id}, plan{cuts_total, clips_planned, gpu_minutes, cpu_minutes_renders, unused_shots, duration_s}}}` |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
+| POST | `/api/agent/studio_short_create` | `{topic?, script?, name?, options{language, duration_s, tone, seed, engine, voice, visuals, music, captions, timeline}, settings?{script_review}, count=1, project?}` -> `{production, job}` (or `{items:[...]}` for count > 1) |
+| POST | `/api/agent/studio_production_script` | `{production, script?, run=true}` -> without `script` `{production, script}`; with it `{production, job?}` (narration, pictures, mix and render redone) |
+| POST | `/api/agent/studio_stock_search` | `{query, kind="video"\|"image", aspect?\|orientation?, providers?, per_page=12, page=1, min_duration_s=0, project?, take=0, refs?}` -> `{query, providers, errors?, items:[{ref, kind, width, height, duration_s, author, page_url, preview_url, tags}], imported?:[asset]}` |
 | POST | `/api/agent/studio_character_sheet` | `{character_id, views?, engine?, seed?, wait_s}` -> `{job, views}`; done job outputs `{asset_ids, contact_sheet_id, views, engine}` |
 | POST | `/api/agent/studio_character_dataset` | `{character_id, action="get"\|"report"\|"build"\|"update"\|"caption", sources?, min_identity?, replace, items?, only_missing, wait_s}` -> get/build/update: `{character_id, trigger, items[], report}`; report: the report alone; caption: `{job}` (done outputs add `captioned, method, model`) |
 | POST | `/api/agent/studio_character_train` | `{action="plan"\|"trainers"\|"settings"\|"start"\|"status"\|"log", character_id?, arch?, trainer?, overrides, run_id?, training?, wait_s}` -> action-dependent, see [MCP.md](MCP.md#character-kit-tools) |
@@ -193,6 +196,11 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions/{slug}/animatic` | `{aspects?}` -> `{job}` (an `animatic` job on the cpu lane) |
 | GET | `/api/productions/{slug}/animatic` | `plan.json`: `{cuts[{index, start_s, duration_s, shot, still, section}], shots[{key, lead, still, screen_time_s, cuts, will_be_clip, clip_keys, clips_to_render}], unused_shots, clips_planned, gpu_minutes, minutes_per, renders}` |
 | POST | `/api/productions/{slug}/qa` | `{stage, dry_run, keys?}` -> `{job, scorecard?}` |
+| POST | `/api/shorts` | the same body as `studio_short_create` |
+| PUT | `/api/productions/{slug}/script` | `{script?, run}`: read (no script) or replace a short's script |
+| GET | `/api/productions/{slug}/publish` | a short's `publish.txt` (title, description, hashtags, footage credits) |
+| POST | `/api/stock/search` | the same body as `studio_stock_search` |
+| GET / PUT | `/api/backend/stock` | `{providers{pexels, pixabay: {configured, key_hint, get_key}}}` / `{pexels?, pixabay?}` ("" removes a key) |
 | GET | `/api/productions/{slug}/qa` | `{last: <full scorecard with every check's measurements>, history}` |
 
 A production's settings: `{"animatic": true, "animatic_autocontinue": false,
@@ -257,9 +265,14 @@ each line's own text so a re-render is byte-identical.
   "vram_estimates_mb": {"sdxl": 7000, "sd15": 3500, "svd": 10000,
                         "flux": 13000, "kontext": 13000, "wan": 12000, "ace": 8000},
   "import_roots": ["D:\\Music", "E:\\Photos"],
-  "render_pool": ["http://127.0.0.1:8189", "http://127.0.0.1:8190"]
+  "render_pool": ["http://127.0.0.1:8189", "http://127.0.0.1:8190"],
+  "stock": {"pexels": "<api key>", "pixabay": "<api key>"}
 }
 ```
+
+`stock` holds the free Pexels / Pixabay API keys narrated shorts and
+`studio_stock_search` use (also read from `PEXELS_API_KEY` /
+`PIXABAY_API_KEY`); the API only ever shows their last four characters.
 
 `render_pool` lists extra ComfyUI servers, one per GPU (the same ComfyUI
 install started again with `--cuda-device N --port P`). Each gets its own

@@ -4,7 +4,9 @@ Reglas para agentes de código que trabajen en este repositorio.
 
 1. **Nada de FastAPI fuera de `api.py`.** `engine.py`, `store.py`, `db.py`,
    `comfy_driver.py`, `design.py`, `audio.py`, `video.py`, `timeline.py`,
-   `voices.py` y `backend.py` son lógica pura y se prueban sin servidor.
+   `voices.py`, `backend.py`, `shorts.py`, `stock.py` y `soundtrack.py` son
+   lógica pura y se prueban sin servidor (lo externo de un short pasa por el
+   `Studio`; en los tests, `app.state.short_hooks`).
 2. **`mcp_server.py` es un script independiente**: solo stdlib, `httpx` y
    `mcp`. Nunca `from . import ...`. Se lanza por ruta absoluta.
 3. **No edites `prosperos_hoard/hoard_link/*`** (copia exacta, ver
@@ -83,3 +85,18 @@ Qué hacer cuando el usuario pide, con sus palabras:
 - **«Guárdalo para otros proyectos» / "save this character"**:
   `studio_character_library(action="save")`; para llevarlo a otro proyecto,
   `action="use"`; para un fichero, `studio_character_pack(action="export")`.
+- **«Hazme un short / vídeo corto / TikTok sobre X»**: `studio_short_create(topic=X,
+  options={"language": ..., "duration_s": ...})`. Si el usuario quiere revisar
+  el texto o el tema es delicado (datos, salud, dinero), pasa
+  `settings={"script_review": true}`: se para tras el guion; enséñaselo
+  (`studio_production_script(production)`), aplica sus cambios con
+  `studio_production_script(production, script=...)` o sigue con
+  `studio_production_continue`. Si trae su propio guion, pásalo en `script`.
+  Para las imágenes, `visuals.source` «auto» usa vídeo de archivo si hay clave
+  de Pexels/Pixabay; si `studio_production` dice que no hay clave y el
+  usuario quiere metraje real, dile que la añada en Ajustes. Al terminar,
+  enséñale el render (`studio_show`) y dale el `publish` tal cual (título,
+  descripción, hashtags y créditos): los créditos del metraje no se quitan.
+- **«Hazme tres versiones»**: `count=3` en `studio_short_create`.
+- **«Busca b-roll de X»**: `studio_stock_search(query en inglés, aspect, project,
+  take=N)`; cuenta de quién es cada clip (`author`).

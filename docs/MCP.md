@@ -100,6 +100,9 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_animatic` | no | `production, aspects=None, wait_s=0` | `{job, animatic?{renders, plan}}` - the stills cut like the final at 720p, with `plan.json` |
 | `studio_qa_run` | no | `production, stage="all", dry_run=True, keys=None, wait_s=120` | `{job, scorecard?, requeued?}` - see [ARCHITECTURE.md](ARCHITECTURE.md#qa-director) for the checks |
 | `studio_qa_report` | yes | `production` | the last scorecard (failures first, one-line `why`) + `retries` |
+| `studio_short_create` | no | `topic=None, script=None, name=None, options=None, settings=None, count=1, project=None` | `{production, job}` (or `{items}` for variants) - a narrated short, see [ARCHITECTURE.md](ARCHITECTURE.md#narrated-shorts) |
+| `studio_production_script` | no | `production, script=None, run=True` | the script, or (with `script`) the production requeued with the new one |
+| `studio_stock_search` | no | `query, kind="video", aspect="9:16", providers=None, per_page=12, project=None, take=0, refs=None` | refs with author/size/duration/preview; `imported` assets when `take`/`refs` and `project` are given |
 
 \* `studio_cast` with `action="list"` does not change anything; the tool as a
 whole is annotated as writing because create/update do.
@@ -433,4 +436,19 @@ studio_production("night_walk")                    -> status "awaiting_review",
 studio_production_shots("night_walk", [{"key": "7", "best": 2}, {"key": "9", "clip": false}])   # remade, paused again
 studio_production_continue("night_walk")           # renders the clips, then the final cut
 studio_animatic("dont_look_back", aspects=["9:16"])  # on demand, also for a scripted production
+```
+
+### Narrated shorts
+
+```text
+studio_short_create(topic="why the sea glows at night",
+    options={"language": "en", "duration_s": 40, "visuals": {"source": "auto"},
+             "music": {"mode": "compose", "tags": "calm ambient, soft piano"}},
+    settings={"script_review": true})              -> {production {slug: "why_the_sea_glows_at_night"}, job}
+studio_production("why_the_sea_glows_at_night")    -> status "awaiting_review", title, segments 6, next: read the script
+studio_production_script("why_the_sea_glows_at_night")          # read it
+studio_production_script("why_the_sea_glows_at_night", script="Have you ever... (one paragraph per segment)")
+studio_production_continue("why_the_sea_glows_at_night")         # voice it, pictures, mix, render
+studio_production(...)  -> status "done", renders {"9:16": {"preview": a_...}}, publish "Why the sea glows\n\n...#ocean\n\nFootage:\n- Video by ... on Pexels"
+studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by hand for anything else
 ```
