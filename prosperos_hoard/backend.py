@@ -400,6 +400,36 @@ class Backend:
         self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
         return clean
 
+    def stock_keys(self) -> dict[str, str]:
+        """Pexels/Pixabay API keys (`backend.json -> stock`, else the
+        PEXELS_API_KEY / PIXABAY_API_KEY environment variables)."""
+        from . import stock
+
+        return stock.configured_keys(self._raw_config().get("stock"))
+
+    def set_stock_keys(self, keys: dict[str, Any]) -> None:
+        """Store or clear (empty string) a provider's key."""
+        from . import stock
+
+        if not isinstance(keys, dict):
+            raise ValueError("stock keys must be an object {pexels?, pixabay?}")
+        unknown = set(keys) - set(stock.PROVIDERS)
+        if unknown:
+            raise ValueError(f"unknown stock provider(s): {', '.join(sorted(unknown))}; use {', '.join(stock.PROVIDERS)}")
+        raw = self._raw_config()
+        block = raw.get("stock") if isinstance(raw.get("stock"), dict) else {}
+        for provider, key in keys.items():
+            key = str(key or "").strip()
+            if key:
+                if len(key) > 200 or any(ch.isspace() for ch in key):
+                    raise ValueError(f"the {provider} key does not look like an API key")
+                block[provider] = key
+            else:
+                block.pop(provider, None)
+        raw["stock"] = block
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
     def vram_estimates_mb(self) -> dict[str, int]:
         raw = self._raw_config()
         return {**DEFAULT_VRAM_ESTIMATES_MB, **(raw.get("vram_estimates_mb") or {})}

@@ -396,7 +396,8 @@ def summary_view(state: dict[str, Any]) -> dict[str, Any]:
     return {"slug": state["slug"], "name": state.get("name"), "status": state.get("status"), "stage": state.get("stage"),
             "project_id": state.get("project_id"), "updated_at": state.get("updated_at"),
             "recipe": (state.get("recipe") or {}).get("name"), "message": state.get("message"),
-            "animatic": bool((state.get("done", {}).get("animatic") or {}).get("renders"))}
+            "animatic": bool((state.get("done", {}).get("animatic") or {}).get("renders")),
+            "kind": state.get("kind") or "music_video"}
 
 
 def compact_view(state: dict[str, Any]) -> dict[str, Any]:
@@ -409,6 +410,20 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
     spec = state.get("spec") or {}
     done = state.get("done", {})
     view["stages"] = {s: stage_status(state, s) for s in stages_for(state)}
+    if state.get("kind") == "short":
+        from .shorts import compact_extras
+
+        view.update(compact_extras(state))
+        timeline = done.get("timeline") or {}
+        if timeline.get("timelines"):
+            view["renders"] = {aspect: info.get("renders") for aspect, info in timeline["timelines"].items()}
+        animatic = done.get("animatic") or {}
+        if animatic.get("renders"):
+            view["animatic"] = {"renders": animatic["renders"], "clips_planned": (animatic.get("plan") or {}).get("clips_planned"),
+                                "gpu_minutes_estimate": (animatic.get("plan") or {}).get("gpu_minutes")}
+        if state.get("status") == "failed":
+            view["next"] = "fix the cause in the message, then studio_production_continue(production) resumes where it stopped"
+        return view
     view["lead"] = (spec.get("lead") or {}).get("name")
     view["shots"] = len(spec.get("shots") or [])
     if done.get("character"):
@@ -1024,6 +1039,10 @@ def _asset_ids(job: dict[str, Any]) -> list[str]:
 def run_production(store: Store, studio: Studio, slug: str, progress: Callable[..., None],
                    qa_hook: Optional[Callable[[Run, str], None]] = None,
                    stage_hooks: Optional[dict[str, Callable[[Run], Any]]] = None) -> dict[str, Any]:
+    if load_state(store.data_dir, slug).get("kind") == "short":
+        from .shorts import ShortRun  # a narrated short (shorts.py)
+
+        return ShortRun(store, studio, slug, progress, qa_hook=None, stage_hooks=stage_hooks).run()
     return Run(store, studio, slug, progress, qa_hook=qa_hook, stage_hooks=stage_hooks).run()
 
 
@@ -1042,6 +1061,8 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
         state = load_state(data_dir, slug)
         if is_legacy(state):
             raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
+        if state.get("kind") == "short":
+            raise ProductionError("not_for_shorts", "a narrated short changes through its script (studio_production_script)")
         if state.get("status") == "running":
             raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
         spec = state["spec"]
@@ -1116,6 +1137,10 @@ def _clip_text(text: Any, n: int = 90) -> str:
 
 
 def write_report(store: Store, state: dict[str, Any]) -> Path:
+    if state.get("kind") == "short":
+        from .shorts import write_report as short_report
+
+        return short_report(store, state)
     spec = state.get("spec") or {}
     done = state.get("done") or {}
     lead = spec.get("lead") or {}

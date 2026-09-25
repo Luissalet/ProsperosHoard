@@ -60,7 +60,7 @@ COLOR_GRADE_PRESETS = {
     "bleach_bypass": "format=rgb24,curves=preset=strong_contrast,format=yuv420p,eq=saturation=0.35:contrast=1.18",
 }
 FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style"}
-LYRIC_STYLES = ("default", "horror")
+LYRIC_STYLES = ("default", "horror", "bold")
 
 
 def validate_finishing(finishing: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -334,7 +334,15 @@ _LYRIC_STYLE_ASS = {
                 "back": "&H80000000", "bold": 1, "border": 2, "shadow": 1, "spacing": 0},
     "horror": {"fontname": "Bebas Neue", "primary": "&H00DAE6ED", "secondary": "&H5099908A", "outline": "&H00100C0B",
                "back": "&H90000000", "bold": 0, "border": 3, "shadow": 1, "spacing": 2},
+    # "bold": short-form captions (a narrated short) - two or three words at
+    # a time, heavy white type with a thick black outline in the middle of
+    # the lower half, the word being said in yellow and a touch bigger
+    "bold": {"fontname": "Inter", "primary": "&H00FFFFFF", "secondary": "&H00FFFFFF", "outline": "&H00000000",
+             "back": "&H99000000", "bold": 1, "border": 7, "shadow": 3, "spacing": 0},
 }
+
+# the highlighted word of a "bold" caption: ASS colour &HBBGGRR (yellow #FFD400)
+BOLD_ACTIVE = "\\c&H00D4FF&\\fscx112\\fscy112"
 
 
 def _horror_jitter(seed_text: str) -> tuple[float, float]:
@@ -393,6 +401,12 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
         # 8% side margins: a long line wraps onto two instead of touching
         # the edges of a phone screen
         margin_h = int(width * 0.08)
+    elif style == "bold":
+        # big: a phone is held at arm's length; centred in the lower half,
+        # above where the apps draw their own buttons and captions
+        fontsize = max(30, min(width, height) // 10)
+        margin_v = int(height * (0.26 if height > width else 0.12))
+        margin_h = int(width * 0.07)
     else:
         fontsize = max(28, height // 24)
         margin_v, margin_h = 80, 60
@@ -405,6 +419,9 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
             continue
         if style == "horror":
             text = text.upper()
+        if style == "bold":
+            lines.extend(_bold_events(clip, start, end, text))
+            continue
         if clip.get("karaoke"):
             words = text.split() or [text]
             if style == "horror":
@@ -429,6 +446,49 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
             text_out = f"{{\\frz{frz}\\fax{fax}\\blur1.2\\fad(90,{fade_out})}}{text_out}"
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Lyrics,,0,0,0,,{text_out}")
     return "\n".join(lines) + "\n"
+
+
+def estimate_word_times(text: str, start: float, end: float) -> list[dict[str, Any]]:
+    """Spread the words of a line over [start, end] by rough syllable count
+    (the same weights the horror karaoke uses) - the fallback when no
+    speech-to-text gave real word timestamps."""
+    words = text.split()
+    if not words or end <= start:
+        return []
+    weights = [_word_weight(w) for w in words]
+    total = sum(weights)
+    out, t = [], start
+    for w, wt in zip(words, weights):
+        dur = (end - start) * wt / total
+        out.append({"text": w, "start_s": round(t, 3), "end_s": round(t + dur, 3)})
+        t += dur
+    out[-1]["end_s"] = round(end, 3)
+    return out
+
+
+def _bold_events(clip: dict[str, Any], start: float, end: float, text: str) -> list[str]:
+    """One Dialogue per spoken word of a "bold" caption: the whole caption
+    on screen, the current word highlighted. Word times come from the clip's
+    `words` (speech-to-text or the narration's own timing) or, when absent
+    and the clip is karaoke, an estimate; a plain clip is one event."""
+    words = clip.get("words") or (estimate_word_times(text, start, end) if clip.get("karaoke") else [])
+    words = [w for w in words if str(w.get("text", "")).strip()]
+    if not words:
+        return [f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Lyrics,,0,0,0,,{{\\fad(60,60)}}{ass_escape(text)}"]
+    shown = [ass_escape(str(w["text"]).strip()) for w in words]
+    events = []
+    first = max(start, min(float(words[0]["start_s"]), end))
+    if first - start >= 0.05:
+        events.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(first)},Lyrics,,0,0,0,,{' '.join(shown)}")
+    for i, w in enumerate(words):
+        w_start = max(start, float(w["start_s"]))
+        w_end = float(words[i + 1]["start_s"]) if i + 1 < len(words) else end
+        w_end = min(end, max(w_end, w_start + 0.04))
+        if w_end <= w_start:
+            continue
+        parts = [f"{{{BOLD_ACTIVE}}}{shown[k]}{{\\r}}" if k == i else shown[k] for k in range(len(shown))]
+        events.append(f"Dialogue: 0,{_ass_time(w_start)},{_ass_time(w_end)},Lyrics,,0,0,0,,{' '.join(parts)}")
+    return events
 
 
 # ------------------------------------------------------------ execution --

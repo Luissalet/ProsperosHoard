@@ -46,7 +46,7 @@ mcp = FastMCP(
     APP_NAME,
     instructions=(
         "Prospero's Hoard is a media studio you direct: a cast of characters, generated images, "
-        "photocards and covers, songs, and beat-cut music videos. Generation is slow and shares the GPU "
+        "photocards and covers, songs, beat-cut music videos and narrated shorts (studio_short_create). Generation is slow and shares the GPU "
         "with other models: queue jobs, then poll studio_job. Mention characters as @Name so their look "
         "stays consistent. Look at studio_show before describing an image. Every asset records how it "
         "was made (studio_lineage). Pass the ids from one result into the next call. Tool results are "
@@ -761,12 +761,76 @@ def studio_production_create(name: str, spec: dict[str, Any], settings: Optional
                 json={"name": name, "spec": spec, "settings": settings, "project": project})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = None, name: Optional[str] = None,
+                        options: Optional[dict[str, Any]] = None, settings: Optional[dict[str, Any]] = None,
+                        count: int = 1, project: Optional[str] = None) -> dict[str, Any]:
+    """Narrated short from a topic or a script: voice-over, captions, music, pictures / crear un short narrado.
+
+    Give a topic (the family's language model writes the script: hook, 5-9 segments, title, description,
+    hashtags) or your own script (plain text, or {"title", "segments": [{"text", "visual", "query"}]}).
+    The production voices it, times every word, picks the pictures (stock footage from Pexels/Pixabay when a
+    key is set, else generated stills; `visuals.source` auto|stock|generate|mix), mixes a music bed that ducks
+    under the voice (-14 LUFS), burns word-highlighted captions and renders. options (all optional):
+    {"language": "es"|"en"|..., "duration_s": 45, "tone": "...", "seed": 0, "engine": "auto",
+    "voice": {"voice_id": "voice_..."} (a voice-studio voice) or {"backend": "piper", "voice_id": "es_ES-davefx-medium", "speed": 1.05},
+    "visuals": {"source": "auto", "shot_s": 3, "clips": 0 (stills to animate with Wan), "look": "...", "stock_kind": "video"|"image"},
+    "music": {"mode": "none"|"compose"|"asset"|"library", "tags": "...", "asset_id": "...", "volume_db": -16, "duck": "normal"},
+    "captions": {"style": "bold"|"default"|"horror"|"none", "max_words": 3},
+    "timeline": {"aspects": ["9:16"], "qualities": ["preview"], "transitions": "cut"|"crossfade", "finishing": {...}}}.
+    settings: {"script_review": true} pauses after the script (read it, change it with studio_production_script,
+    then studio_production_continue). count 2-8 makes variants (other seeds: other footage and script).
+    Poll with studio_production; when done it holds the render ids and `publish` (title, description,
+    hashtags and the stock credits to paste).
+
+    Keywords: short video, tiktok, reels, youtube shorts, faceless video, narrated video, topic to video, voice over,
+    subtitles, video corto, short narrado, guion, locucion, subtitulos, video vertical
+    """
+    return _call("POST", "/api/agent/studio_short_create",
+                 json={"topic": topic, "script": script, "name": name, "options": options or {}, "settings": settings,
+                       "count": count, "project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_script(production: str, script: Optional[Any] = None, run: bool = True) -> dict[str, Any]:
+    """Read or replace the script of a narrated short / ver o cambiar el guion de un short.
+
+    Without `script`: returns the current script (segments with their narration, image prompt, stock query and,
+    once voiced, their start/end seconds). With `script` (plain text, or {"title"?, "segments": [{"text",
+    "visual"?, "query"?}]}): it replaces the script and redoes the narration, pictures, mix and render (the
+    music is kept) - and with run=true queues that right away.
+
+    Keywords: edit script, change narration, rewrite short, script review, cambiar guion, editar guion, revisar guion
+    """
+    return _call("POST", "/api/agent/studio_production_script", json={"production": production, "script": script, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def studio_stock_search(query: str, kind: str = "video", aspect: Optional[str] = "9:16", providers: Optional[list[str]] = None,
+                        per_page: int = 12, project: Optional[str] = None, take: int = 0,
+                        refs: Optional[list[str]] = None) -> dict[str, Any]:
+    """Search free stock footage (Pexels, Pixabay) and import it with its credit / buscar video de archivo.
+
+    query: a few English keywords. kind: "video" or "image". aspect 9:16|16:9|1:1 filters the orientation.
+    Returns results as refs ("pexels:123") with author, size, duration and a preview URL. With `project` and
+    `take` N, the first N are downloaded into the project; or pass `refs` from an earlier search to import
+    exactly those. Imported assets keep the provider, author, page and licence in their recipe. Needs a free
+    API key in Settings > Stock footage (or PEXELS_API_KEY / PIXABAY_API_KEY).
+
+    Keywords: stock footage, b-roll, pexels, pixabay, free video, video de archivo, recursos, metraje, imagenes libres
+    """
+    return _call("POST", "/api/agent/studio_stock_search",
+                 json={"query": query, "kind": kind, "aspect": aspect, "providers": providers, "per_page": per_page,
+                       "project": project, "take": take, "refs": refs})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_production_continue(production: str) -> dict[str, Any]:
     """Resume or approve a production (after the animatic review, a failure or a cancel) / continuar produccion.
 
-    From awaiting_review it approves the animatic and goes on to the clips and the final cut; from
-    failed/cancelled it resumes where it stopped (finished stills, clips and renders are kept).
+    From awaiting_review it approves the animatic and goes on to the clips and the final cut (for a narrated
+    short paused after its script, it approves the script and voices it); from failed/cancelled it resumes
+    where it stopped (finished stills, clips and renders are kept).
 
     Keywords: continue production, approve animatic, resume, continuar, aprobar animatico, reanudar
     """

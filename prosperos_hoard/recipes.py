@@ -211,6 +211,9 @@ def _spec_of(store: Store, state: dict[str, Any]) -> tuple[dict[str, Any], list[
 
 def export_recipe(store: Store, slug: str, name: Optional[str] = None) -> dict[str, Any]:
     state = prod.load_state(store.data_dir, slug)
+    if state.get("kind") == "short":
+        raise prod.ProductionError("not_for_shorts", "recipes are for music videos; make variants of a short with "
+                                                     "studio_short_create(count=...)")
     spec, notes, source = _spec_of(store, state)
     name = name or (spec.get("title") or slug)
     path = _recipe_path(store.data_dir, name)
