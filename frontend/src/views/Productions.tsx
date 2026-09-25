@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookCopy, Clapperboard, Film, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users } from "lucide-react";
+import { BookCopy, Clapperboard, Film, Megaphone, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users } from "lucide-react";
 import {
   api, fileUrl, type Character, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
+import { ShortDetail, ShortModal } from "./Shorts";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -135,6 +136,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
   if (!data) return <p className="muted">{t("loading")}</p>;
   const view = data.view;
   const legacy = Boolean(view.legacy);
+  const isShort = data.kind === "short";
   const act = async (fn: () => Promise<unknown>) => {
     try { await fn(); reload(); reloadList(); app.refreshJobs(); } catch (e) { app.toast((e as Error).message, "bad"); }
   };
@@ -153,8 +155,8 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
               <RotateCcw size={13} /> {t("resumeProduction")}
             </button>
           )}
-          <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>
-          <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>
+          {!isShort && <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>}
+          {!isShort && <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>}
           {view.project_id && <button className="btn sm ghost" onClick={() => app.setProject(view.project_id!)}>{t("openProject")}</button>}
         </div>
         {legacy && <p className="small muted">{t("legacyNote")}</p>}
@@ -170,8 +172,9 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         )}
       </div>
-      {view.status !== "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {Object.keys(renders).length > 0 && (
+      {isShort && <ShortDetail state={data} onChanged={() => { reload(); reloadList(); }} />}
+      {!isShort && view.status !== "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
+      {!isShort && Object.keys(renders).length > 0 && (
         <div className="card">
           <h2>{t("finalCut")}</h2>
           <div className="row wrap" style={{ alignItems: "flex-start" }}>
@@ -189,7 +192,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         </div>
       )}
-      {view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
+      {!isShort && view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {!legacy && (data.spec.shots || []).length > 0 && (
         <div className="card">
           <h2>{t("shotsTitle")}</h2>
@@ -211,7 +214,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
           </div>
         </div>
       )}
-      <QaCard state={data} onRan={reload} />
+      {!isShort && <QaCard state={data} onRan={reload} />}
       {!legacy && data.lineage?.length > 0 && (
         <div className="card">
           <h2>{t("lineageTitle")}</h2>
@@ -444,12 +447,15 @@ export function ProductionsView() {
   const items = useMemo(() => data?.items || [], [data]);
   const selected = app.route.arg || items[0]?.slug;
   const open = (slug: string) => { app.go("productions", slug); reload(); };
+  const [newShort, setNewShort] = useState(false);
 
   return (
     <>
       <div className="page-head">
         <div><h1>{t("productionsTitle")}</h1><p>{t("productionsLead")}</p></div>
+        <button className="btn primary" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
       </div>
+      {newShort && <ShortModal onClose={() => setNewShort(false)} onStarted={(s) => { setNewShort(false); open(s); }} />}
       <div className="productions-grid">
         <div className="stack">
           <div className="card" style={{ padding: 6 }}>
@@ -459,7 +465,7 @@ export function ProductionsView() {
                   {items.map((p) => (
                     <tr key={p.slug} onClick={() => open(p.slug)} style={{ cursor: "pointer" }} className={p.slug === selected ? "selected" : ""}>
                       <td>
-                        <strong>{p.name}</strong>
+                        <strong>{p.name}</strong>{p.kind === "short" && <span className="pill info" style={{ marginLeft: 6 }}>{t("shortBadge")}</span>}
                         <div className="mono muted small">{p.slug}</div>
                       </td>
                       <td><StatusPill status={p.status} /></td>
