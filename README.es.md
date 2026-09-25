@@ -46,6 +46,12 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
   single» llama a `studio_generate_image`, `studio_timeline` y
   `studio_render`, recibe identificadores cortos, solo mira una imagen cuando
   la pide y cada llamada que hace queda en **Actividad del asistente**.
+- **Quien divulga para ganarse la vida** escribe un tema («por qué brilla
+  el mar de noche») y recibe un short vertical narrado: un guion con gancho
+  que escribe el modelo local, la locución, subtítulos que se encienden
+  palabra a palabra, vídeo de archivo o imágenes generadas cortadas a lo que
+  se dice, una música que se aparta bajo la voz y el título, los hashtags y
+  los créditos listos para pegar.
 - **Quien ya usa ComfyUI con sus propios flujos** importa la exportación en
   formato de interfaz, la ve convertida, comprobada contra la lista de nodos
   en vivo y con sus parámetros con nombre, y a partir de ahí genera con ella
@@ -69,8 +75,10 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Animático | Antes de los clips caros (cada clip de Wan de 5 s tardó unos 9,5 min en la ejecución real), la producción corta sus fotogramas justo donde cortará el montaje final - el mismo montaje automático sobre la misma toma de la canción, las mismas marcas de letra y sección y las mismas opciones - con un movimiento Ken Burns y un fundido por plano, subtítulos y acabado, renderizado a 720p en cada formato previsto, más un `plan.json` (cada corte, el tiempo en pantalla y el fotograma de cada plano, qué planos serán clips de Wan, los minutos de GPU estimados); la producción se detiene en `awaiting_review` hasta **Continuar** (o sigue sola con `animatic_autocontinue`), y **Cambiar planos** cambia fotogramas, activa o quita clips o reescribe un plano antes | El animático funde todos los cortes (el final conserva sus destellos y glitches); los minutos de GPU son estimaciones con los tiempos de la ejecución real (configurables) |
 | Director de calidad | Una revisión de las salidas de una producción, por etapa o de todas, durante la producción tras cada etapa (`settings.qa.enabled`) o cuando se pida: fotogramas planos o con ruido, bandas negras o rojas en un borde (la franja de ffmpeg 8), saltos de exposición dentro de un clip, movimiento donde se pidió quietud (o un clip congelado), una cabeza de photocard que toca el borde superior, cobertura de la letra de un LRC alineado, duraciones frente a lo previsto; con un modelo de visión detrás de Hoard Link cada salida recibe además una nota de 0 a 10 contra la biblia, el prompt del plano y la referencia, con una línea de motivo. Los fotogramas, clips y photocards que fallan se regeneran con otra semilla y un arreglo concreto (ruido -> denoise 1, salto de exposición -> otro sampler, caminar -> el negativo de quietud, cabeza cortada -> aire arriba), hasta un límite de reintentos, y cada reintento queda en el historial y en REPORT.md | Las comprobaciones son heurísticas con umbrales editables, no un crítico entrenado; sin modelo de visión solo corren las comprobaciones sin modelo (nunca bloquea); una producción hecha con el script se revisa en solo lectura |
 | Kit de personaje | Cada personaje lleva un kit: **hoja de modelo** (la canónica redibujada por el motor de edición desde hasta 12 vistas fijas - frente, tres cuartos, perfil, espalda, primer plano, expresiones, acción, sentado, noche - etiquetadas por vista y con hoja de contacto rotulada); **dataset** formado por la canónica, las referencias, la hoja y las buenas tomas, con descripciones que nombran una palabra disparadora y solo describen lo que cambia, un informe de preparación (pocas imágenes, borrosas, casi duplicadas, descripciones sin la palabra, vistas que faltan) y descripciones automáticas con el modelo de visión; **entrenamiento LoRA local** con un entrenador configurable (`ai_toolkit`, `musubi`, un comando propio o el entrenador de demostración), un plan ajustado al dataset (pasos, rango, lr, 512 px por defecto, VRAM y minutos estimados), la GPU más libre, registro en vivo y el resultado instalado en la carpeta de loras de ComfyUI; **adaptadores** por arquitectura (Qwen-Image, Flux, SDXL, SD 1.5, Wan 2.2 5B, Z-Image) que se cargan solos - con la palabra disparadora - cada vez que se menciona al personaje con un motor compatible, guardados en la receta para que reutilizar y variar los reproduzcan, y `prefer_adapter` para posturas libres en vez de editar la canónica; **tomas**: cada render del personaje agrupado por plano (toma N de M), con una nota de parecido 0-10 contra las referencias (modelo de visión o, si no hay, una comprobación aproximada por color que lo dice), que se puede ascender a canónica, referencia o dataset, o descartar; un paquete portátil **`.hoardchar`** (aspecto, voz, paleta, imágenes, hoja, dataset con descripciones, pesos LoRA) y una **biblioteca de reparto** global con versiones, que sirve como protagonista de una receta | Entrenar requiere un entrenador instalado y el modelo base de la arquitectura; VRAM y tiempo son estimaciones; la comprobación aproximada solo detecta derivas de color o vestuario |
-| Control por agentes | 50 herramientas MCP equivalentes a `/api/agent/*` (41 del estudio, 7 de ellas para el kit de personaje, más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
-| Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas), Voz, Trabajos, Backends, Actividad del asistente y Ajustes; tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+| Shorts narrados | Un tema (el guion - gancho, 5-9 bloques con un prompt de imagen y palabras de búsqueda en inglés cada uno, título, descripción, hashtags - lo escribe el modelo local a través de Hoard Link) o tu propio guion se convierte en un vídeo vertical como una producción reanudable: cada frase locutada (una voz del estudio de voz, Piper o el TTS de Faustus) con sus tiempos exactos, los tiempos de cada palabra desde el reconocimiento de voz alineados sobre las palabras del propio guion (o una estimación por sílabas), un plan de planos sobre el reloj de la locución relleno con vídeo de archivo o imágenes generadas (`auto`/`stock`/`generate`/`mix`, generando cuando no encuentra nada), clips de Wan opcionales tras revisar un animático, una música (ninguna, un recurso, una instrumental de ACE-Step o una pista de `data/music/`) que se aparta bajo la voz con un compresor sidechain, -14 LUFS, subtítulos «bold» con la palabra dicha resaltada, cada formato renderizado y un `publish.txt` con título, descripción, hashtags y los créditos del metraje; pausa opcional para leer el guion, edición del guion que rehace solo lo que depende de él (la música se conserva) y de 2 a 8 variantes en una llamada | Los datos del guion son del modelo: léelo (`settings.script_review`) antes de publicar; sin reconocimiento de voz el tiempo de cada palabra es una estimación; no sube nada a las plataformas |
+| Vídeo de archivo | Búsqueda en Pexels y Pixabay (vídeos o fotos, filtrados por orientación y duración) con una clave gratuita por proveedor, el fichero más pequeño que alcanza la resolución del render, importado con proveedor, autor, página y licencia en su receta, y las líneas de crédito a partir de ahí | Necesita clave (Ajustes > Vídeo de archivo); los resultados dependen de palabras clave en inglés |
+| Control por agentes | 53 herramientas MCP equivalentes a `/api/agent/*` (44 del estudio, 7 de ellas para el kit de personaje y 3 para shorts y vídeo de archivo, más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
+| Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas y Nuevo short), Voz, Trabajos, Backends, Actividad del asistente y Ajustes (con las claves de vídeo de archivo); tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
 *Aplicación real, datos de demostración sintéticos: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
@@ -188,6 +196,8 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_recipe_run` | «Recrea esto con X»: una producción nueva a partir de una receta con otro protagonista | no |
 | `studio_animatic` | Los fotogramas cortados como el final, a 720p, con plan y estimación de GPU, antes de renderizar ningún clip | no |
 | `studio_qa_run` / `studio_qa_report` | Revisión de calidad de una producción (revisar, o revisar y regenerar lo que falla) / su última hoja de resultados y reintentos | no / sí |
+| `studio_short_create` / `studio_production_script` | Un short narrado (o de 2 a 8 variantes) desde un tema o un guion / leer o cambiar el guion de un short | no |
+| `studio_stock_search` | Buscar metraje en Pexels/Pixabay e importar resultados con su crédito | no |
 | `studio_character_sheet` | Hoja de modelo: la canónica redibujada desde vistas fijas, añadida al dataset | no |
 | `studio_character_dataset` | Imágenes y descripciones de entrenamiento: crear, editar, describir automáticamente, informe | no (get/report solo lectura) |
 | `studio_character_train` | Entrenadores y ajustes, plan de entrenamiento, lanzar un LoRA local, estado y registro | no (plan/status solo lectura) |
@@ -297,6 +307,41 @@ existente conserva su referencia canónica, uno nuevo recibe antes una hoja de
 referencia, y se reutilizan la canción (salvo que su letra nombre al
 protagonista anterior) y los fotogramas y clips de los planos en los que no
 sale (`options.reuse: ["song", "frames", "clips"]`).
+
+### Shorts narrados
+
+`studio_short_create(topic="por qué brilla el mar de noche", options={"language":
+"es", "visuals": {"source": "auto"}, "music": {"mode": "compose"}})` (o
+**Nuevo short** en la pantalla Producciones) convierte un tema en un vídeo
+vertical, como una producción de su propio tipo (`kind: "short"`) con la
+misma reanudación, trabajos y linaje:
+
+1. **guion** - el modelo local escribe un gancho y de 5 a 9 bloques, cada
+   uno con la locución, un prompt de imagen en inglés y palabras de búsqueda
+   en inglés, además de título, descripción y hashtags; o pasa tu propio
+   guion (texto con un párrafo por bloque, o bloques). Con
+   `settings.script_review` se para aquí para que lo leas.
+2. **locución** - cada frase locutada y colocada en un mismo reloj (tiempos
+   exactos de frase y bloque); con faster-whisper instalado, los tiempos de
+   las palabras que oye se alinean sobre las palabras del guion, así que los
+   subtítulos conservan tu ortografía.
+3. **música** - ninguna, un recurso existente, una instrumental de ACE-Step
+   o una pista elegida de `data/music/`.
+4. **imágenes** - cada bloque partido en planos de unos 3 s, rellenos con
+   vídeo de archivo (Pexels/Pixabay, con una clave gratuita en Ajustes) o
+   imágenes generadas con el motor del proyecto; `visuals.clips` anima con
+   Wan las más largas tras revisar un animático.
+5. **mezcla** - la voz sobre la música, que un compresor sidechain baja
+   mientras se habla, normalizada a -14 LUFS.
+6. **montaje y render** - los planos sobre el reloj de la locución,
+   subtítulos de dos o tres palabras con la palabra dicha resaltada, en cada
+   formato pedido; después `REPORT.md` y `publish.txt` (título, descripción,
+   hashtags y créditos del metraje).
+
+`studio_production_script(production, script)` cambia el guion y rehace la
+locución, las imágenes, la mezcla y el render (la música se conserva);
+`count=3` hace tres variantes con otras semillas (otro metraje, otras
+imágenes generadas y, desde un tema, otro guion).
 
 ### La ejecución real
 
@@ -508,6 +553,9 @@ Con `--demo` se configura un entrenador falso para probar el flujo entero sin GP
   dirección de desplazamiento y las gradaciones de color son aproximaciones
   con filtros, no LUT 3D.
 - La capa QR del diseñador dibuja un recuadro de relleno.
+- El guion de un short lo escribe el modelo local que encuentre Hoard Link:
+  comprueba los datos antes de publicar (`settings.script_review` se para
+  para eso). No se sube nada a las plataformas; `publish.txt` es para pegar.
 
 ## Licencia
 

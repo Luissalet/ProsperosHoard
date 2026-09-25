@@ -21,6 +21,11 @@ prosperos_hoard/
                    Ken Burns + crossfades, 720p renders per aspect, plan.json
   qa.py            the QA director: model-free checks (numpy/Pillow/ffmpeg), vision
                    scores through Hoard Link, the retry policy with targeted fixes
+  shorts.py        narrated shorts: a production kind of its own (script by the LLM or
+                   given, narration with word times, music, stock/generated pictures,
+                   optional Wan clips, mix, captions, renders, publish text)
+  stock.py         Pexels/Pixabay search, file choice, download and import with credits
+  soundtrack.py    voice + music bed with sidechain ducking, -14 LUFS (ffmpeg)
   comfy_driver.py  workflow templates, custom workflow import/validation, parameter map,
                    /object_info pre-flight, checkpoint resolution, template hash
   workflows/       API-format *.json + *.params.json per built-in template, plus
@@ -215,6 +220,89 @@ says `"no vision model"`; a failing vision call is a skipped check, never a
 failed production. A scripted production is checked read-only
 (`productions.state_from_legacy`), its scorecard saved in its own
 `state.json`.
+
+## Narrated shorts
+
+A short is a production with `kind: "short"` and its own stage list
+(`state["stages"]`: script, narration, music, visuals, animatic, clips,
+mix, timeline, report); `productions.run_production` hands it to
+`shorts.ShortRun`, a `Run` subclass, so resuming, sub-jobs, cancelling,
+lineage and the review pause are the same code. Everything outside the
+app goes through the `Studio` facade, which for shorts adds `chat`
+(Hoard Link's LLM), `synthesize` (a voice-studio spec through
+`voice_lab`, or Piper/Faustus TTS through `voices`), `transcribe` (the
+best installed STT with word timestamps, or `None`), `stock_keys` and
+`stock_client`; `app.state.short_hooks` swaps any of them in tests.
+
+- **Script**: the LLM is asked for one JSON object (title, description,
+  hashtags, 5-9 segments of `{text, visual, query}` with the image prompt
+  and stock keywords in English, the narration in the chosen language,
+  about `duration_s` x 2.5-2.7 words); `parse_script_reply` tolerates code
+  fences, `<think>` blocks and trailing commas. A given script is plain
+  text (split with the audiobook sentence splitter into segments of one or
+  two sentences, at most 28 words) or segments; missing prompts fall back
+  to the narration and its longest words. `settings.script_review` pauses
+  after this stage; `studio_production_continue` sets
+  `review.script_approved`.
+- **Narration**: one TTS call per sentence, resampled to 24 kHz and laid
+  on one clock: 0.15 s lead-in, 0.22 s between sentences, 0.38 s between
+  segments. Sentence and segment times are exact (where the audio went);
+  word times start as a syllable-weighted estimate inside each sentence
+  (`video.estimate_word_times`) and, when speech-to-text is installed, are
+  replaced by `align_words`: `difflib` over accent- and punctuation-free
+  words maps the heard timestamps onto the script's words (so the captions
+  keep the script's spelling), and unmatched runs are spread between their
+  matched neighbours; used when at least half the words matched.
+- **Pictures**: `plan_shots` splits each segment's screen time (from its
+  narration start to the next segment's, the first from 0 and the last to
+  the end plus a 0.6 s tail) into shots of about `visuals.shot_s` (3 s, at
+  least 1 s each). `shot_source` decides stock or generated per shot
+  (`auto` = stock when a key is set; `mix` alternates; a segment may force
+  one); stock searches once per segment (the variant seed rotates the
+  results, a ref is never used twice, videos at least as long as the shot
+  are preferred) and falls back to generating when nothing is found or a
+  download fails. Generated stills are txt2img in the spec's look and
+  negative with a framing that changes shot to shot (wide, medium,
+  close-up...). `visuals.clips` animates the longest generated stills with
+  Wan; only then is there an animatic (the stills on the same plan, 720p)
+  and a review pause.
+- **Mix**: `soundtrack.build_mix_filter` - the voice padded to the end, the
+  music looped (`-stream_loop -1`), trimmed, `volume_db` down, faded in
+  and out, then `sidechaincompress` keyed on the voice (`duck`
+  light/normal/strong, or off), `amix`, `loudnorm` to -14 LUFS / -1.5 dBTP,
+  44.1 kHz stereo AAC.
+- **Cut**: the visual track follows the plan (cuts, or a 0.3 s crossfade at
+  segment changes with `timeline.transitions: "crossfade"`), a stock video
+  starts at a seeded offset, a Wan clip skips its still-frame opening, a
+  still gets a Ken Burns move; `caption_clips` groups the words into
+  captions of `captions.max_words` (3) and at most 22 characters, breaking
+  after sentence punctuation and at pauses over 0.3 s, each with its
+  `words`. The **`bold`** caption style (`video.build_ass`) writes one
+  Dialogue per spoken word: the whole caption, the current word in yellow
+  and 12 % bigger, Inter bold with a thick outline in the middle of the
+  lower half. Lyric clips may now carry `words` (validated by
+  `timeline.normalise_tracks`); without them, a karaoke `bold` caption
+  estimates them.
+- **Report**: `REPORT.md` (script with times, shots with their source and
+  ref, sound, renders, stock credits, timings) and `publish.txt` (title,
+  description, hashtags, `Footage:` credits), also in the compact view as
+  `publish`.
+
+`shorts.replace_script` (`studio_production_script`) swaps the script and
+drops every stage after it except the music. `create_batch` makes
+`count` productions of one brief with seeds `seed + 101 k`. Recipes, the QA
+director, "change shots" and `studio_animatic` refuse a short with
+`not_for_shorts`.
+
+**Stock footage** (`stock.py`): `search` asks each configured provider
+(Pexels `videos/search` / `v1/search` with the key as `Authorization`;
+Pixabay `api/videos` / `api` with `key`), drops results whose shape does not
+match the orientation, and reports a failing provider in `errors` while the
+other still answers. `pick_file` takes the smallest file whose short side
+reaches the render's (720 for previews, 1080 with a final), `fetch` streams
+it (400 MB cap) into `data/tmp` and imports it with `recipe.operation =
+"stock"` (provider, id, author and page, licence, query). The HTTP client is
+injectable; the tests use `httpx.MockTransport`.
 
 ## Threads and processes
 

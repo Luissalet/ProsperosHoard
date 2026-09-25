@@ -44,6 +44,12 @@ with ids and pictures.
   `studio_generate_image`, `studio_timeline` and `studio_render`, gets short
   ids back, looks at a picture only when it asks for one, and every call it
   made is listed under **Assistant activity**.
+- **Someone who explains things for a living** types a topic ("why the sea
+  glows at night") and gets a narrated vertical short: a script with a hook
+  written by the local model, a voice-over, captions that light up word by
+  word, stock footage or generated pictures cut to what is being said, a
+  music bed that ducks under the voice, and the title, hashtags and credits
+  ready to paste.
 - **A ComfyUI user with their own workflows** imports the UI-format export,
   gets it converted, checked against the live node list and mapped to
   named parameters, and from then on generates with it from the studio or
@@ -67,8 +73,10 @@ with ids and pictures.
 | Animatic | Before the expensive clips (every 5 s Wan clip took ~9.5 min in the real run), the production cuts its stills exactly where the final cut will cut - the same auto-cut over the same song take, lyric/section marks and options - with a Ken Burns move and a crossfade per shot, captions and finishing, rendered at 720p in each target aspect, plus a `plan.json` (every cut, each shot's screen time and still, which shots become Wan clips, the estimated GPU minutes); the production pauses at `awaiting_review` until **Continue** (or goes on by itself with `animatic_autocontinue`), and **Change shots** swaps stills, turns clips on or off or rewrites a shot first | The animatic crossfades every cut (the final keeps its flashes and glitches); GPU minutes are estimates from the real run's timings (configurable) |
 | QA director | A pass over a production's outputs, per stage or all of them, inline after each stage (`settings.qa.enabled`) or on demand: flat or noisy stills, black/red bands along an edge (the ffmpeg 8 stripe), exposure jumps inside a clip, motion where stillness was asked (or a frozen clip), a photocard head touching the top edge, lyric coverage of an aligned LRC, durations against the plan; with a vision model behind Hoard Link each output is also scored 0-10 against the bible, the shot prompt and the reference, with a one-line reason. Failing stills, clips and photocards are regenerated with a new seed and a targeted fix (noise -> denoise 1, exposure jump -> another sampler, walking -> the stillness negative, a cropped head -> headroom), up to a retry cap, and every retry is written to the lineage and REPORT.md | The checks are heuristics with editable thresholds, not a trained critic; without a vision model only the model-free checks run (it never blocks); a scripted production is checked read-only |
 | Character kit | Each character carries a kit: a **model sheet** (the canonical redrawn by the edit engine from up to 12 set views - front, three-quarter, profile, back, close-up, expressions, action, sitting, night - tagged per view, with a labelled contact sheet); a **dataset** built from the canonical, references, sheet and good takes, with captions that name a trigger word and describe only what changes, a readiness report (too few images, blurry, near duplicates, captions without the trigger, missing views) and auto-captions from the vision model; **local LoRA training** through a configurable trainer (`ai_toolkit`, `musubi`, a custom command, or the demo trainer) with a plan sized to the dataset (steps, rank, lr, 512 px by default, VRAM and minutes estimate), the freest GPU picked, a live log, and the result installed in ComfyUI's loras folder; **adapters** per architecture (Qwen-Image, Flux, SDXL, SD 1.5, Wan 2.2 5B, Z-Image) injected automatically - with the trigger word - whenever the character is mentioned and the engine matches, recorded in the recipe so reuse and vary reproduce them, and `prefer_adapter` for free poses instead of an edit of the canonical; **takes**: every render of the character grouped by shot (take N of M), scored 0-10 for identity against the references (vision model, else a rough colour check that says so), promotable to canonical, reference or dataset, or rejected; a portable **`.hoardchar`** pack (look, voice, palette, images, sheet, dataset with captions, LoRA weights) and a global **casting library** with versions, usable as a recipe's lead | Training needs a trainer installed and the base model for the architecture; VRAM and time are estimates; the rough identity check only catches colour/costume drift |
-| Agent control | 50 MCP tools mirroring `/api/agent/*` (41 studio tools, 7 of them for the character kit, plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
-| Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes), Voice, Jobs, Backends, Assistant activity, Settings; dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
+| Narrated shorts | A topic (the script - hook, 5-9 segments with an English image prompt and stock keywords each, title, description, hashtags - is written by the local model through Hoard Link) or your own script becomes a vertical video as one resumable production: every sentence voiced (a voice-studio voice, Piper or Faustus TTS) with exact sentence times, word times from speech-to-text aligned back onto the script's own words (or a syllable-weighted estimate), a shot plan on the narration's clock filled with stock footage or generated stills (`auto`/`stock`/`generate`/`mix`, falling back to generation when nothing is found), optional Wan clips behind an animatic review, a music bed (none, an asset, ACE-Step instrumental, or a track from `data/music/`) that ducks under the voice with a sidechain compressor, -14 LUFS, word-highlighted "bold" captions, every aspect rendered, and a `publish.txt` with title, description, hashtags and the footage credits; an optional pause to read the script first, a script edit that redoes only what depends on it (the music is kept), and 2-8 variants in one call | The script's facts are the model's: read it (`settings.script_review`) before publishing; word timing without speech-to-text is an estimate; no uploading to the platforms |
+| Stock footage | Pexels and Pixabay search (videos or photos, filtered by orientation and length) with a free API key per provider, the smallest file that reaches the render's resolution, imported with provider, author, page and licence in its recipe, and credit lines built from them | Needs a key (Settings > Stock footage); results depend on English keywords |
+| Agent control | 53 MCP tools mirroring `/api/agent/*` (44 studio tools, 7 of them for the character kit and 3 for shorts and stock footage, plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes and New short), Voice, Jobs, Backends, Assistant activity, Settings (with the stock footage keys); dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, synthetic demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
@@ -183,6 +191,8 @@ loading anything of its own.
 | `studio_recipe_run` | "Recreate this with X": a new production from a recipe with another lead | no |
 | `studio_animatic` | The stills cut like the final, 720p, with a plan and GPU estimate, before any clip is rendered | no |
 | `studio_qa_run` / `studio_qa_report` | QA pass over a production (check, or check and regenerate the failures) / its last scorecard and retries | no / yes |
+| `studio_short_create` / `studio_production_script` | A narrated short (or 2-8 variants) from a topic or a script / read or replace a short's script | no |
+| `studio_stock_search` | Search Pexels/Pixabay footage and import results with their credit | no |
 | `studio_character_sheet` | Model sheet: the canonical redrawn from set views, added to the dataset | no |
 | `studio_character_dataset` | Training images and captions: build, edit, auto-caption, readiness report | no (get/report read-only) |
 | `studio_character_train` | Trainers and settings, a training plan, start a local LoRA run, status and log | no (plan/status read-only) |
@@ -286,6 +296,41 @@ character keeps its canonical reference, a new one gets a reference sheet
 first, and the song (unless its lyrics name the old lead) and the stills
 and clips of the shots the lead is not in are reused
 (`options.reuse: ["song", "frames", "clips"]`).
+
+### Narrated shorts
+
+`studio_short_create(topic="why the sea glows at night", options={"language":
+"en", "visuals": {"source": "auto"}, "music": {"mode": "compose"}})` (or
+**New short** on the Productions screen) makes a vertical video out of a
+topic, as a production of its own kind (`kind: "short"`) with the same
+resume, jobs and lineage:
+
+1. **script** - the local model writes a hook and 5-9 segments, each with
+   the narration, an English image prompt and English stock keywords, plus
+   a title, a description and hashtags; or pass your own script (plain
+   text, one paragraph per segment, or segments). With
+   `settings.script_review` it stops here for you to read it.
+2. **narration** - each sentence voiced and placed on one clock (exact
+   sentence and segment times); with faster-whisper installed, the word
+   times it hears are aligned onto the script's own words, so the captions
+   keep your spelling.
+3. **music** - none, an existing asset, an ACE-Step instrumental, or a
+   track picked from `data/music/`.
+4. **pictures** - each segment split into ~3 s shots, filled with stock
+   footage (Pexels/Pixabay, needs a free key in Settings) or generated
+   stills in the project's image engine; `visuals.clips` animates the
+   longest stills with Wan after an animatic review.
+5. **mix** - the voice over the music, which a sidechain compressor pushes
+   down while someone speaks, normalised to -14 LUFS.
+6. **cut and render** - the shots on the narration's clock, captions two
+   or three words at a time with the spoken word highlighted, every aspect
+   you asked for; then `REPORT.md` and `publish.txt` (title, description,
+   hashtags and the footage credits).
+
+`studio_production_script(production, script)` replaces the script and
+redoes the narration, pictures, mix and render (the music is kept);
+`count=3` makes three variants with other seeds (other footage, other
+generated pictures and, from a topic, another script).
 
 ### The real run
 
@@ -478,6 +523,9 @@ Configure (or `training` in `data/backend.json`):
 - Timeline editing is clip-level, Ken Burns is a zoom range plus a pan
   direction, and colour grades are filter approximations, not 3D LUTs.
 - The QR layer of the designer draws a placeholder box.
+- A short's script is written by whatever local model Hoard Link finds:
+  check its facts before publishing (`settings.script_review` pauses for
+  that). Nothing is uploaded to the platforms; `publish.txt` is for pasting.
 
 ## License
 
