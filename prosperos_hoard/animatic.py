@@ -231,6 +231,8 @@ def make_for_production(store: Store, slug: str, aspects: Optional[list[str]] = 
     in the app (its stills so far) or by the production script (read
     through `state_from_legacy`) - and record it in its state."""
     raw = prod.load_state(store.data_dir, slug)
+    if raw.get("kind") == "short":
+        raise prod.ProductionError("not_for_shorts", "a narrated short makes its animatic itself when it has clips to render")
     legacy = prod.is_legacy(raw)
     view = prod.state_from_legacy(store, raw) if legacy else raw
     if not legacy and raw.get("status") == "running":

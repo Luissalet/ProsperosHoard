@@ -30,6 +30,8 @@ from . import dubbing as dubbing_mod
 from . import productions as productions_mod
 from . import qa as qa_mod
 from . import recipes as recipes_mod
+from . import shorts as shorts_mod
+from . import stock as stock_mod
 from . import templates as design_templates
 from . import trainers as trainers_mod
 from . import timeline as timeline_mod
@@ -357,6 +359,41 @@ class ProductionCreateBody(BaseModel):
     spec: dict[str, Any]
     settings: Optional[dict[str, Any]] = None
     project: Optional[str] = None
+
+
+class ShortCreateBody(BaseModel):
+    name: Optional[str] = None
+    topic: Optional[str] = None
+    script: Optional[Any] = None
+    options: dict[str, Any] = Field(default_factory=dict)
+    settings: Optional[dict[str, Any]] = None
+    count: int = 1
+    project: Optional[str] = None
+
+
+class ShortScriptBody(BaseModel):
+    production: Optional[str] = None
+    script: Optional[Any] = None
+    run: bool = True
+
+
+class StockSearchBody(BaseModel):
+    query: str
+    kind: str = "video"
+    aspect: Optional[str] = None
+    orientation: Optional[str] = None
+    providers: Optional[list[str]] = None
+    per_page: int = 12
+    page: int = 1
+    min_duration_s: float = 0
+    project: Optional[str] = None
+    take: int = 0
+    refs: Optional[list[str]] = None
+
+
+class StockKeysBody(BaseModel):
+    pexels: Optional[str] = None
+    pixabay: Optional[str] = None
 
 
 class ProductionShotsBody(BaseModel):
@@ -1970,6 +2007,51 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def cancel(self, job_id: str) -> None:
             queue.cancel(job_id)
 
+        # -- narrated shorts (shorts.py); tests swap these through
+        # app.state.short_hooks = {"chat", "synthesize", "transcribe", "stock_client", "stock_keys"}
+        def _hook(self, name: str) -> Any:
+            return (getattr(app.state, "short_hooks", None) or {}).get(name)
+
+        def chat(self, messages: list[dict[str, Any]], max_tokens: int, temperature: float) -> str:
+            hook = self._hook("chat")
+            if hook:
+                return hook(messages, max_tokens, temperature)
+            return backend.link.sync.chat(messages=messages, max_tokens=max_tokens, temperature=temperature).text
+
+        def synthesize(self, voice: dict[str, Any], text: str) -> tuple[bytes, str]:
+            hook = self._hook("synthesize")
+            if hook:
+                return hook(voice, text)
+            if voice.get("engine_id") or str(voice.get("voice_id") or "").startswith("voice_"):  # a voice-studio voice
+                try:
+                    return voice_lab.synthesize_with_spec(store, _tts_engines(), voice, text)
+                except VoiceLabError as exc:
+                    raise shorts_mod.ShortError(getattr(exc, "code", "tts_failed"), str(exc)) from None
+            try:
+                return voices_mod.synthesize(backend, store.data_dir / "voices", text,
+                                             {k: voice[k] for k in ("backend", "voice_id", "speed") if voice.get(k)})
+            except voices_mod.VoiceError as exc:
+                raise shorts_mod.ShortError(exc.code, str(exc)) from None
+
+        def transcribe(self, path: Path, language: Optional[str]) -> Optional[list[dict[str, Any]]]:
+            hook = self._hook("transcribe")
+            if hook:
+                return hook(path, language)
+            stt = ve.best_installed_stt(_stt_engines())
+            if stt is None:
+                return None
+            result = stt.transcribe(path, language=language, word_timestamps=True)
+            return [{"text": w.get("word") or w.get("text") or "", "start_s": w["start_s"], "end_s": w["end_s"]}
+                    for seg in result.get("segments") or [] for w in seg.get("words") or []]
+
+        def stock_keys(self) -> dict[str, str]:
+            hook = self._hook("stock_keys")
+            return hook() if hook else backend.stock_keys()
+
+        def stock_client(self) -> Any:
+            hook = self._hook("stock_client")
+            return hook() if hook else None
+
     studio = AppStudio()
     app.state.studio = studio
     production_hooks: dict[str, Any] = {"qa_hook": None, "stage_hooks": {}}
@@ -2040,8 +2122,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         with productions_mod.lock_for(slug):
             state = productions_mod.load_state(store.data_dir, slug)
             if state.get("status") == "awaiting_review":
-                state.setdefault("review", {})["animatic_approved"] = True
-                productions_mod.log(state, "review", "approved")
+                what = "script_approved" if state.get("stage") == "script" else "animatic_approved"
+                state.setdefault("review", {})[what] = True
+                productions_mod.log(state, "review", "approved", what=what)
                 productions_mod.save_state(store.data_dir, state)
         job = queue_production(slug)
         return {"production": production_view(slug), "job": engine.job_view(job)}
@@ -2221,6 +2304,111 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_shots")
     def agent_production_shots(production: str, body: ProductionShotsBody):
         return agent("studio_production_shots", production, lambda: op_production_shots(production, body))
+
+    # ------------------------------------------------------ narrated shorts
+    def op_short_create(body: ShortCreateBody) -> dict[str, Any]:
+        spec = dict(body.options or {})
+        if body.topic:
+            spec["topic"] = body.topic
+        if body.script is not None:
+            spec["script"] = body.script
+        if body.project:
+            store.get_project(body.project)
+        name = (body.name or spec.get("title") or spec.get("topic") or "Short").strip()[:80] or "Short"
+        states = shorts_mod.create_batch(store.data_dir, name, spec, body.settings, project_id=body.project, count=body.count)
+        out = []
+        for state in states:
+            job = queue_production(state["slug"])
+            out.append({"production": production_view(state["slug"]), "job": engine.job_view(job)})
+        return out[0] if len(out) == 1 else {"items": out}
+
+    def op_short_script(slug: str, body: ShortScriptBody) -> dict[str, Any]:
+        if body.script is None:
+            state = productions_mod.load_state(store.data_dir, slug)
+            if not shorts_mod.is_short(state):
+                raise engine.EngineError("not_a_short", f"'{slug}' is not a narrated short")
+            script = (state.get("done") or {}).get("script") or state["spec"].get("script")
+            return {"production": slug, "script": script}
+        shorts_mod.replace_script(store.data_dir, slug, body.script)
+        out: dict[str, Any] = {"production": production_view(slug)}
+        if body.run:
+            out["job"] = engine.job_view(queue_production(slug))
+        return out
+
+    @app.post("/api/agent/studio_short_create")
+    def agent_short_create(body: ShortCreateBody):
+        return agent("studio_short_create", (body.topic or body.name or "script")[:80], lambda: op_short_create(body))
+
+    @app.post("/api/shorts")
+    def short_create(body: ShortCreateBody):
+        return op_short_create(body)
+
+    @app.post("/api/agent/studio_production_script")
+    def agent_short_script(body: ShortScriptBody):
+        if not body.production:
+            raise engine.EngineError("production_required", "give the short's production slug (studio_productions)")
+        return agent("studio_production_script", body.production, lambda: op_short_script(body.production, body))
+
+    @app.put("/api/productions/{slug}/script")
+    def short_script_put(slug: str, body: ShortScriptBody):
+        return op_short_script(slug, body)
+
+    @app.get("/api/productions/{slug}/publish")
+    def short_publish(slug: str):
+        state = productions_mod.load_state(store.data_dir, slug)
+        if not shorts_mod.is_short(state):
+            raise engine.EngineError("not_a_short", f"'{slug}' is not a narrated short")
+        return Response(shorts_mod.publish_text(store, state), media_type="text/plain; charset=utf-8")
+
+    # ---------------------------------------------------------- stock
+    _stock_cache: dict[str, dict[str, Any]] = {}
+
+    def op_stock_search(body: StockSearchBody) -> dict[str, Any]:
+        keys = studio.stock_keys()
+        client = studio.stock_client()
+        orientation = body.orientation or stock_mod.aspect_orientation(body.aspect)
+        out: dict[str, Any] = {}
+        if body.refs:
+            if not body.project:
+                raise engine.EngineError("project_required", "importing stock needs a project")
+            missing = [r for r in body.refs if r not in _stock_cache]
+            if missing:
+                raise engine.EngineError("unknown_ref", f"search first; unknown ref(s): {', '.join(missing[:5])}")
+            items = [_stock_cache[r] for r in body.refs[:10]]
+        else:
+            found = stock_mod.search(keys, body.query, body.kind, orientation, body.providers, body.per_page, body.page,
+                                     body.min_duration_s, client=client)
+            for it in found["items"]:
+                _stock_cache[it["ref"]] = it
+            while len(_stock_cache) > 600:
+                _stock_cache.pop(next(iter(_stock_cache)))
+            out = {"query": found["query"], "providers": found["providers"], "errors": found["errors"] or None,
+                   "items": [stock_mod.compact_item(it) for it in found["items"]]}
+            items = found["items"][:max(0, min(10, body.take))] if body.project else []
+        if items:
+            imported = [engine.asset_view(stock_mod.fetch(store, body.project, it, query=body.query, client=client)) for it in items]
+            out["imported"] = imported
+        return out
+
+    @app.post("/api/agent/studio_stock_search")
+    def agent_stock_search(body: StockSearchBody):
+        return agent("studio_stock_search", body.query[:80], lambda: op_stock_search(body))
+
+    @app.post("/api/stock/search")
+    def stock_search(body: StockSearchBody):
+        return op_stock_search(body)
+
+    @app.get("/api/backend/stock")
+    def stock_status():
+        return stock_mod.status(studio.stock_keys())
+
+    @app.put("/api/backend/stock")
+    def stock_set(body: StockKeysBody):
+        try:
+            backend.set_stock_keys(body.model_dump(exclude_none=True))
+        except ValueError as exc:
+            raise engine.EngineError("bad_stock_keys", str(exc)) from None
+        return stock_mod.status(backend.stock_keys())
 
     @app.post("/api/agent/studio_recipe_export")
     def agent_recipe_export(body: RecipeExportBody):

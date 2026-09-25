@@ -354,12 +354,34 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                     raise TimelineError(f"lyrics clip {i} needs numeric start_s and end_s") from None
                 if start < 0 or end <= start:
                     raise TimelineError(f"lyrics clip {i}: end_s must be after start_s")
-                clean.append({"text": clip["text"][:300], "start_s": round(start, 3), "end_s": round(end, 3),
-                              "karaoke": bool(clip.get("karaoke", False))})
+                entry = {"text": clip["text"][:300], "start_s": round(start, 3), "end_s": round(end, 3),
+                         "karaoke": bool(clip.get("karaoke", False))}
+                words = clip.get("words")
+                if words:
+                    entry["words"] = _clean_words(words, i)
+                clean.append(entry)
             out.append({"type": "lyrics", "clips": sorted(clean, key=lambda c: c["start_s"])})
     if "visual" not in seen_types:
         raise TimelineError("a timeline needs a visual track")
     return out
+
+
+def _clean_words(words: Any, i: int) -> list[dict[str, Any]]:
+    """A caption's word timings (a narrated short): [{text, start_s, end_s}]
+    in song time, at most 40, in order."""
+    if not isinstance(words, list) or len(words) > 40:
+        raise TimelineError(f"lyrics clip {i}: words must be a list of at most 40 {{text, start_s, end_s}}")
+    out = []
+    for w in words:
+        try:
+            ws, we = float(w["start_s"]), float(w["end_s"])
+            text = str(w["text"])[:60]
+        except (KeyError, TypeError, ValueError):
+            raise TimelineError(f"lyrics clip {i}: each word needs text, start_s and end_s") from None
+        if we < ws or ws < 0:
+            raise TimelineError(f"lyrics clip {i}: a word ends before it starts")
+        out.append({"text": text, "start_s": round(ws, 3), "end_s": round(we, 3)})
+    return sorted(out, key=lambda w: w["start_s"])
 
 
 def apply_clip_updates(tracks: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:

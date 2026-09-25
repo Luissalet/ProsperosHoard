@@ -741,7 +741,7 @@ def merge_cards(slug: str, cards: list[dict[str, Any]], vision_name: str, dry_ru
 
 def inline_hook(run: "prod.Run", stage: str, vision: Optional[VisionFn], vision_name: Optional[str] = None) -> None:
     """Called by the pipeline after each stage when `settings.qa.enabled`."""
-    if stage not in CHECKED_STAGES:
+    if stage not in CHECKED_STAGES or run.state.get("kind") == "short":
         return
     qa = QA(run.store, run.state, vision, vision_name)
     card = run_stage_with_policy(run, stage, qa, dry_run=False)
@@ -761,6 +761,8 @@ def run_qa(store: Store, studio: prod.Studio, slug: str, stage: str = "all", dry
         raise QAError("bad_stage", f"stage must be 'all' or one of {', '.join(CHECKED_STAGES)}")
     progress = progress or (lambda *_a, **_k: None)
     raw = prod.load_state(store.data_dir, slug)
+    if raw.get("kind") == "short":
+        raise QAError("not_for_shorts", "the QA director checks music videos; watch a short's render with studio_show")
     if prod.is_legacy(raw):
         return _run_legacy(store, slug, raw, stage, dry_run, keys, vision, vision_name)
     run = prod.Run(store, studio, slug, progress)

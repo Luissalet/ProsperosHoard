@@ -1120,9 +1120,12 @@ _MIME = {"image": None, "audio": None, "video": None, "lyrics": "text/plain; cha
 
 
 def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
-                 original_name: Optional[str] = None) -> dict[str, Any]:
+                 original_name: Optional[str] = None, recipe: Optional[dict[str, Any]] = None,
+                 tags: Optional[list[str]] = None, source: str = "import") -> dict[str, Any]:
     """Copy an already-authorised local file (see resolve_import_path) or a
-    finished upload into the library."""
+    finished upload into the library. `recipe`/`tags`/`source` let a
+    pipeline that fetched the file itself (stock footage, a mixed
+    soundtrack) record where it came from."""
     store.get_project(project_id)
     name = Path(original_name or source_path.name).name
     ext = Path(name).suffix.lower()
@@ -1154,7 +1157,7 @@ def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Op
     asset = store.create_asset(
         project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
         width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
-        source="import", asset_id=asset_id, name=name,
+        source=source, asset_id=asset_id, name=name, recipe=recipe, tags=tags,
     )
     if kind == "audio":
         try:
