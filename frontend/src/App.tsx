@@ -184,7 +184,6 @@ export default function App() {
               <div className="brand-mark"><img src="/favicon-192.png" alt="" width={28} height={28} /></div>
               <div>
                 <div className="brand-name">{t("appName")}</div>
-                <div className="brand-sub">{t("tagline")}</div>
               </div>
             </div>
             <div className="project-switch">
