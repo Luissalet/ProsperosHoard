@@ -630,6 +630,7 @@ export interface ProductionSummary {
   message?: string | null;
   legacy?: boolean;
   animatic?: boolean;
+  kind?: "music_video" | "short";
 }
 
 export interface ProductionShot {
@@ -646,6 +647,13 @@ export interface ProductionShot {
 
 export interface ProductionView extends ProductionSummary {
   stages?: Record<string, "done" | "partial" | "pending">;
+  title?: string;
+  topic?: string | null;
+  segments?: number;
+  publish?: string;
+  shots?: number | Record<string, number>;
+  narration?: { asset_id: string; duration_s: number; timing: string };
+  soundtrack_asset_id?: string;
   lead?: string;
   renders?: Record<string, Record<string, string>>;
   animatic?: boolean;
@@ -653,7 +661,31 @@ export interface ProductionView extends ProductionSummary {
   note?: string;
 }
 
+export interface ShortSegment {
+  text: string;
+  visual?: string;
+  query?: string;
+  source?: "stock" | "generate";
+  start_s?: number;
+  end_s?: number;
+}
+
+export interface ShortScript {
+  title?: string;
+  description?: string;
+  hashtags?: string[];
+  source?: string;
+  segments: ShortSegment[];
+}
+
+export interface ShortShot { key: string; segment: number; index: number; start_s: number; duration_s: number }
+
+export interface StockStatus {
+  providers: Record<string, { configured: boolean; key_hint: string | null; get_key: string }>;
+}
+
 export interface ProductionState {
+  kind?: "short";
   slug: string;
   name: string;
   status: ProductionStatus;
@@ -910,6 +942,13 @@ export const api = {
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
     request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
+  createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;
+                        settings?: Record<string, unknown>; count?: number; project?: string }) =>
+    request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/api/shorts", body),
+  shortScript: (slug: string, script?: unknown, run = true) =>
+    request<{ production?: ProductionView; job?: Job; script?: ShortScript }>("PUT", `/api/productions/${slug}/script`, { production: slug, script, run }),
+  stockStatus: () => request<StockStatus>("GET", "/api/backend/stock"),
+  setStockKeys: (keys: { pexels?: string; pixabay?: string }) => request<StockStatus>("PUT", "/api/backend/stock", keys),
   recipes: () => request<{ items: RecipeSummary[] }>("GET", "/api/recipes"),
   runRecipe: (name: string, body: { cast: Record<string, unknown>; name?: string; options?: Record<string, unknown> }) =>
     request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/api/recipes/${name}/run`, body),

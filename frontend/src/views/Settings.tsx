@@ -3,6 +3,7 @@ import { Save, Upload } from "lucide-react";
 import { api, type WorkflowSpec } from "../api";
 import { useT } from "../i18n";
 import { useApp, useAsync } from "../components/ui";
+import { StockKeysCard } from "./Shorts";
 
 export function SettingsView() {
   const { t } = useT();
@@ -85,6 +86,7 @@ export function SettingsView() {
             <div key={w.template} className="row small"><span className="mono">{w.template}</span><span className="pill">{w.kind}</span><span className="pill">{w.vram_class}</span></div>
           ))}
         </div>
+        <StockKeysCard />
       </div>
     </>
   );
