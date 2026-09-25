@@ -4,7 +4,6 @@ import { createContext, useContext } from "react";
 // (the type checker enforces it). Spanish from Spain.
 const en = {
   appName: "Prospero's Hoard",
-  tagline: "A media studio an agent can direct",
   demoBadge: "Demo backend",
   demoHint: "Images come from a procedural demo backend, not a model.",
   // nav
@@ -569,7 +568,6 @@ export type MessageKey = keyof typeof en;
 
 const es: Record<MessageKey, string> = {
   appName: "Prospero's Hoard",
-  tagline: "Un estudio multimedia que un agente puede dirigir",
   demoBadge: "Backend de demostración",
   demoHint: "Las imágenes salen de un backend procedural de demostración, no de un modelo.",
   navProjects: "Proyectos",
