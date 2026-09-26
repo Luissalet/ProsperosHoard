@@ -70,7 +70,8 @@ SEGMENT_GAP_S = 0.38
 TAIL_S = 0.6
 WORDS_PER_SECOND = {"es": 2.7, "en": 2.5}
 LANGUAGE_NAMES = {"es": "Spanish (Spain)", "en": "English", "fr": "French", "it": "Italian", "pt": "Portuguese", "de": "German"}
-DEFAULT_VOICES = {"es": "es_ES-davefx-medium", "en": "en_US-lessac-medium"}
+DEFAULT_VOICES = {"es": "es_ES-davefx-medium", "en": "en_US-lessac-medium", "fr": "fr_FR-siwis-medium",
+                  "it": "it_IT-paola-medium", "pt": "pt_BR-faber-medium", "de": "de_DE-thorsten-medium"}
 DEFAULT_LOOK = "cinematic photograph, natural light, shallow depth of field, rich detail"
 DEFAULT_NEGATIVE = "text, letters, watermark, logo, subtitles, caption, frame, border, blurry, deformed"
 FRAMINGS = ("wide establishing shot", "medium shot", "close-up detail shot", "low angle shot", "high angle shot",

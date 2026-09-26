@@ -278,3 +278,11 @@ def test_short_without_a_language_model_fails_clearly(client, tmp_path):
     assert job["state"] == "failed"
     view = c.get(f"/api/agent/studio_production?production={r.json()['production']['slug']}").json()
     assert view["status"] == "failed" and "spec.script" in view["message"] and "resumes" in view["next"]
+
+
+def test_every_default_voice_is_a_curated_piper_voice():
+    from prosperos_hoard import voices
+
+    curated = {v["id"]: v["lang"] for v in voices.CURATED_VOICES}
+    for lang, voice_id in shorts.DEFAULT_VOICES.items():
+        assert curated[voice_id].startswith(lang), (lang, voice_id)

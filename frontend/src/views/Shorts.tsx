@@ -99,6 +99,7 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
             <select value={language} onChange={(e) => { setLanguage(e.target.value); setVoice(""); }}>
               <option value="es">Español</option><option value="en">English</option>
               <option value="fr">Français</option><option value="it">Italiano</option><option value="pt">Português</option>
+              <option value="de">Deutsch</option>
             </select></label>
           <label className="field">{t("shortDuration")}
             <input type="number" min={10} max={180} step={5} value={duration} onChange={(e) => setDuration(Number(e.target.value) || 45)} /></label>
