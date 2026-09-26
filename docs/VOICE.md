@@ -34,7 +34,7 @@ when asked.
 
 | Engine | id | Cloning | Languages | Install |
 | --- | --- | --- | --- | --- |
-| Piper | `piper` | no (curated voices) | the 6 curated es/en voices | already used by `studio_voice`; `pip install piper-tts` |
+| Piper | `piper` | no (curated voices) | the 10 curated voices (es, en, fr, it, pt, de) | already used by `studio_voice`; `pip install piper-tts` |
 | Coqui XTTS-v2 | `xtts` | yes, from a 6-30s sample | 17 languages | `pip install TTS` |
 | F5-TTS | `f5-tts` | yes, from a sample + its transcript | en, zh | `pip install f5-tts` (GPU recommended) |
 | Kokoro | `kokoro` | no (named voice packs), streaming | en, es, fr, it, pt, ja, zh, hi | `pip install kokoro>=0.9.4 soundfile` |

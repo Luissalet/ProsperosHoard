@@ -26,6 +26,10 @@ CURATED_VOICES = [
     {"id": "en_US-amy-medium", "lang": "en_US", "label": "English (US) - Amy", "path": "en/en_US/amy/medium/en_US-amy-medium", "size_mb": 63},
     {"id": "en_US-lessac-medium", "lang": "en_US", "label": "English (US) - Lessac", "path": "en/en_US/lessac/medium/en_US-lessac-medium", "size_mb": 63},
     {"id": "en_GB-alba-medium", "lang": "en_GB", "label": "English (UK) - Alba", "path": "en/en_GB/alba/medium/en_GB-alba-medium", "size_mb": 63},
+    {"id": "fr_FR-siwis-medium", "lang": "fr_FR", "label": "Français - Siwis", "path": "fr/fr_FR/siwis/medium/fr_FR-siwis-medium", "size_mb": 60},
+    {"id": "it_IT-paola-medium", "lang": "it_IT", "label": "Italiano - Paola", "path": "it/it_IT/paola/medium/it_IT-paola-medium", "size_mb": 60},
+    {"id": "pt_BR-faber-medium", "lang": "pt_BR", "label": "Português (Brasil) - Faber", "path": "pt/pt_BR/faber/medium/pt_BR-faber-medium", "size_mb": 60},
+    {"id": "de_DE-thorsten-medium", "lang": "de_DE", "label": "Deutsch - Thorsten", "path": "de/de_DE/thorsten/medium/de_DE-thorsten-medium", "size_mb": 60},
 ]
 
 _LOCK = threading.Lock()
