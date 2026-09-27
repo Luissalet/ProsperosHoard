@@ -118,6 +118,11 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
     spec["language"] = lang
     spec["duration_s"] = _num(spec.get("duration_s", 45), "spec.duration_s", 10, 180)
     spec["tone"] = str(spec.get("tone") or "")[:200]
+    spec["use_project_memory"] = bool(spec.get("use_project_memory", False))
+    notes = spec.get("continuity_notes") or []
+    if not isinstance(notes, list) or any(not isinstance(note, str) for note in notes):
+        raise ShortError("bad_spec", "spec.continuity_notes must be a list of strings")
+    spec["continuity_notes"] = [note.strip()[:300] for note in notes[:8] if note.strip()]
     spec["seed"] = int(_num(spec.get("seed", 0), "spec.seed", 0, 2**31 - 2))
     spec.setdefault("title", None)
     spec.setdefault("engine", "auto")
@@ -249,7 +254,31 @@ def segments_from_text(text: str, max_words: int = 28) -> list[dict[str, Any]]:
 
 # --------------------------------------------------------- script (LLM)
 
-def script_messages(topic: str, language: str, duration_s: float, tone: str) -> list[dict[str, Any]]:
+def project_memory(data_dir: Path, project_id: str, current_slug: str) -> list[dict[str, str]]:
+    """Recent creative context from scripts in the same project only."""
+    memories: list[dict[str, str]] = []
+    for item in prod.list_productions(data_dir):
+        if item["slug"] == current_slug or item.get("project_id") != project_id or item.get("kind") != KIND:
+            continue
+        state = prod.load_state(data_dir, item["slug"])
+        script = (state.get("done") or {}).get("script") or {}
+        if not script.get("segments"):
+            continue
+        spec = state.get("spec") or {}
+        notes = [str(note).strip()[:300] for note in spec.get("continuity_notes") or [] if isinstance(note, str) and note.strip()]
+        if notes:
+            detail = "; ".join(notes[:3])
+        else:
+            detail = f"Previous episode: {str(script.get('title') or spec.get('topic') or '')[:100]}"
+        memories.append({"production": item["slug"], "detail": detail[:900]})
+        if len(memories) == 3:
+            break
+    return memories
+
+
+def script_messages(topic: str, language: str, duration_s: float, tone: str,
+                    memory: Optional[list[dict[str, str]]] = None,
+                    continuity_notes: Optional[list[str]] = None) -> list[dict[str, Any]]:
     words = int(duration_s * WORDS_PER_SECOND.get(language, 2.5))
     lang = LANGUAGE_NAMES.get(language, language)
     system = ("You write scripts for vertical short videos (TikTok, Reels, YouTube Shorts). You answer with one JSON "
@@ -259,6 +288,10 @@ def script_messages(topic: str, language: str, duration_s: float, tone: str) -> 
         f"Narration language: {lang}\n"
         f"Length: about {words} words of narration (~{int(duration_s)} seconds spoken).\n"
         + (f"Tone: {tone}\n" if tone else "")
+        + ("Creative decisions for this episode:\n" + "".join(f"- {note}\n" for note in continuity_notes)
+           if continuity_notes else "")
+        + ("Project continuity (earlier productions; keep stated creative decisions, but make this a fresh episode):\n"
+           + "".join(f"- {item['detail']}\n" for item in memory) if memory else "")
         + "Open with a hook that makes people stay; one idea per segment; end with a short closing line. "
         "Facts must be correct - leave out anything you are unsure of. No emojis, no stage directions.\n"
         "Split it into 5 to 9 segments of one or two sentences each. For every segment give:\n"
@@ -462,8 +495,11 @@ class ShortRun(prod.Run):
             chat = getattr(self.studio, "chat", None)
             if chat is None:
                 raise ShortError("no_llm", "no language model to write the script; pass spec.script")
+            memory = (project_memory(self.store.data_dir, self.state["project_id"], self.slug)
+                      if spec.get("use_project_memory") else [])
             try:
-                reply = chat(script_messages(spec["topic"], spec["language"], spec["duration_s"], spec.get("tone") or ""),
+                reply = chat(script_messages(spec["topic"], spec["language"], spec["duration_s"], spec.get("tone") or "",
+                                             memory, spec.get("continuity_notes")),
                              1600, 0.8)
             except prod.ProductionError:
                 raise
@@ -472,6 +508,8 @@ class ShortRun(prod.Run):
                                            f"{str(exc)[:200]}); start one in Faustus or pass spec.script") from None
             script = parse_script_reply(reply)
             source = "llm"
+            if memory:
+                script["memory_sources"] = [item["production"] for item in memory]
             for seg in script["segments"]:
                 seg.setdefault("visual", seg["text"])
                 seg.setdefault("query", keywords(seg.get("visual") or seg["text"]))

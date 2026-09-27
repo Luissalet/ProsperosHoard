@@ -98,5 +98,9 @@ Qué hacer cuando el usuario pide, con sus palabras:
   enséñale el render (`studio_show`) y dale el `publish` tal cual (título,
   descripción, hashtags y créditos): los créditos del metraje no se quitan.
 - **«Hazme tres versiones»**: `count=3` en `studio_short_create`.
+- **«Sigue esta serie / respeta lo que decidimos en los episodios anteriores»**:
+  reutiliza el mismo `project` en `studio_short_create` y añade
+  `options={"use_project_memory": true, "continuity_notes": [...]}` si hay
+  decisiones nuevas. El guion indica los slugs consultados en `memory_sources`.
 - **«Busca b-roll de X»**: `studio_stock_search(query en inglés, aspect, project,
   take=N)`; cuenta de quién es cada clip (`author`).

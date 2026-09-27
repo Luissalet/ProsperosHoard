@@ -773,6 +773,8 @@ def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = Non
     key is set, else generated stills; `visuals.source` auto|stock|generate|mix), mixes a music bed that ducks
     under the voice (-14 LUFS), burns word-highlighted captions and renders. options (all optional):
     {"language": "es"|"en"|..., "duration_s": 45, "tone": "...", "seed": 0, "engine": "auto",
+    "continuity_notes": ["Keep the recurring narrator dry and curious"], "use_project_memory": true
+    (reuse creative decisions from up to three earlier shorts in the same project),
     "voice": {"voice_id": "voice_..."} (a voice-studio voice) or {"backend": "piper", "voice_id": "es_ES-davefx-medium", "speed": 1.05},
     "visuals": {"source": "auto", "shot_s": 3, "clips": 0 (stills to animate with Wan), "look": "...", "stock_kind": "video"|"image"},
     "music": {"mode": "none"|"compose"|"asset"|"library", "tags": "...", "asset_id": "...", "volume_db": -16, "duck": "normal"},

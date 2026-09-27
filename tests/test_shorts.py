@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 import pytest
 
-from prosperos_hoard import shorts, soundtrack, video
+from prosperos_hoard import productions, shorts, soundtrack, video
 from prosperos_hoard import timeline as timeline_mod
 from prosperos_hoard.backend import ffmpeg_path
 from test_stock import make_mp4, transport
@@ -80,6 +80,39 @@ def test_script_from_text_and_from_a_chatty_reply():
         shorts.parse_script_reply("I cannot help with that")
     msgs = shorts.script_messages("the sea", "es", 40, "curious")
     assert "Spanish (Spain)" in msgs[1]["content"] and "108 words" in msgs[1]["content"]
+
+
+def test_project_memory_stays_within_project_and_reaches_short_script(client):
+    c, app, _ = client
+    store = app.state.store
+    home = store.create_project("Series A")
+    foreign = store.create_project("Series B")
+    for project, note in ((home, "Narrator speaks in second person; never use a mascot"),
+                          (foreign, "Secret alien mascot in every shot")):
+        prior = shorts.create_short(store.data_dir, "Episode one", {"topic": "seed episode",
+            "continuity_notes": [note]}, project_id=project["id"])
+        prior["done"]["script"] = {"title": "Opening", "segments": [{"text": "A completed episode."}]}
+        productions.save_state(store.data_dir, prior)
+
+    captured = []
+    app.state.short_hooks = {"chat": lambda messages, *_: (captured.append(messages), SCRIPT_REPLY)[1]}
+    r = c.post("/api/agent/studio_short_create", json={"topic": "episode two", "project": home["id"],
+        "options": {"use_project_memory": True, "continuity_notes": ["Keep the blue palette"]},
+        "settings": {"script_review": True}})
+    assert r.status_code == 200, r.text
+    slug = r.json()["production"]["slug"]
+    assert wait_job(c, r.json()["job"]["id"])["state"] == "done"
+    state = productions.load_state(store.data_dir, slug)
+    assert state["status"] == "awaiting_review"
+    assert len(state["done"]["script"]["memory_sources"]) == 1
+    prompt = captured[0][1]["content"]
+    assert "never use a mascot" in prompt and "Keep the blue palette" in prompt
+    assert "Secret alien mascot" not in prompt
+
+    r = c.post("/api/agent/studio_short_create", json={"topic": "standalone", "project": home["id"],
+        "settings": {"script_review": True}})
+    assert wait_job(c, r.json()["job"]["id"])["state"] == "done"
+    assert "Project continuity" not in captured[-1][1]["content"]
 
 
 def test_align_words_keeps_script_spelling_and_fills_gaps():
