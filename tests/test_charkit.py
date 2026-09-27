@@ -145,6 +145,7 @@ def test_adapters_attach_resolve_and_inject(client, data_dir):
 
 def test_sheet_dataset_takes_training_end_to_end(client, data_dir):
     c, app, _ = client
+    app.state.qa_vision = (None, "no vision model")
     store = app.state.store
     pid = _project(c)
     cid, canonical = _character(c, pid)
