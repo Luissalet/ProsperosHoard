@@ -292,8 +292,11 @@ def script_messages(topic: str, language: str, duration_s: float, tone: str,
            if continuity_notes else "")
         + ("Project continuity (earlier productions; keep stated creative decisions, but make this a fresh episode):\n"
            + "".join(f"- {item['detail']}\n" for item in memory) if memory else "")
-        + "Open with a hook that makes people stay; one idea per segment; end with a short closing line. "
-        "Facts must be correct - leave out anything you are unsure of. No emojis, no stage directions.\n"
+        + "Treat the creative decisions and project continuity as requirements for the narration. "
+        "If they request a closing question, the final sentence of the final segment must end with a question mark. "
+        "Open with a hook that makes people stay; one idea per segment; end with a short closing line. "
+        "Facts must be correct - leave out anything you are unsure of, and avoid unjustified absolute claims. "
+        "No emojis, no stage directions.\n"
         "Split it into 5 to 9 segments of one or two sentences each. For every segment give:\n"
         f"- \"text\": the narration, in {lang};\n"
         "- \"visual\": an English prompt for an image generator: one concrete, filmable shot that illustrates the "
