@@ -998,10 +998,37 @@ def _edit_with_model(store: Store, backend: Backend, job: dict[str, Any], progre
                             operation="edit_image:upscale", count=1, reference_asset_id=src["id"],
                             extra_recipe={"derived_from": src["id"]}, name=f"upscaled x{scale}: {label}")
     model = require_model_file(backend, operation, backend.bg_removal_model())
-    return run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation],
-                        values={"bg_model": model, "seed": params.get("seed")},
-                        operation="edit_image:remove_background", count=1, reference_asset_id=src["id"],
-                        extra_recipe={"derived_from": src["id"]}, name=f"background removed: {label}")
+    result = run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation],
+                          values={"bg_model": model, "seed": params.get("seed")},
+                          operation="edit_image:remove_background", count=1, reference_asset_id=src["id"],
+                          extra_recipe={"derived_from": src["id"]}, name=f"background removed: {label}")
+    # A scene with no clear subject comes back fully transparent. Say so
+    # instead of handing back an empty picture as if the cut-out worked.
+    coverage = _opaque_share(store, result["asset_ids"][0]) if result.get("asset_ids") else None
+    if coverage is not None:
+        result["foreground_share"] = round(coverage, 4)
+        if coverage < MIN_FOREGROUND_SHARE:
+            result["warning"] = ("no_subject_found: the background-removal model kept almost nothing "
+                                 f"({coverage * 100:.1f} % of the pixels); the image may have no clear subject")
+    return result
+
+
+MIN_FOREGROUND_SHARE = 0.01
+
+
+def _opaque_share(store: Store, asset_id: str) -> Optional[float]:
+    """Share of pixels whose alpha is at least half opaque, or None if unreadable."""
+    try:
+        asset = store.get_asset(asset_id)
+        with Image.open(store.data_dir / asset["file_path"]) as img:
+            if "A" not in img.getbands():
+                return 1.0
+            alpha = img.getchannel("A")
+            histogram = alpha.histogram()
+            total = sum(histogram)
+            return sum(histogram[128:]) / total if total else None
+    except (OSError, KeyError, ValueError):
+        return None
 
 
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
