@@ -249,7 +249,9 @@ other tool error (code + message).
   (`too_large`, the message gives the source size and the maximum); `model`
   may name another file installed in ComfyUI's `upscale_models` folder
   (default `RealESRGAN_x4plus.safetensors`). `remove_background` imports a PNG
-  with an alpha channel. Model files (not bundled):
+  with an alpha channel; the job outputs carry `foreground_share` (share of
+  pixels kept) and, when the model kept under 1 %, a `warning` starting with
+  `no_subject_found` (a scene with no clear subject comes back fully transparent). Model files (not bundled):
   `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors`
   (https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged) and
   `ComfyUI/models/background_removal/birefnet.safetensors`

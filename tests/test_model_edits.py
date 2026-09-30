@@ -196,6 +196,7 @@ def test_remove_background_wiring_and_alpha_kept(store, backend_with_comfy, fake
         assert alpha.getpixel((2, 2)) == 0           # the background is transparent
     assert (store.data_dir / out["thumb_path"]).is_file()
     assert out["mime"] == "image/png"
+    assert 0.2 < done["outputs"]["foreground_share"] < 0.6 and "warning" not in done["outputs"]
 
 
 def test_remove_background_accepts_an_rgba_source(store, backend_with_comfy, project):
@@ -371,3 +372,17 @@ def test_an_older_comfyui_without_the_nodes_is_reported_not_crashed(store, backe
         _edit(store, backend_with_comfy, project, src, operation="remove_background")
     assert exc.value.code == "comfy_validation"
     assert "LoadBackgroundRemovalModel" in exc.value.message and "RemoveBackground" in exc.value.message
+
+
+def test_remove_background_says_when_nothing_was_kept(store, backend_with_comfy, fake_comfy, project):
+    """Seen on a real street scene: the model kept no pixel, and a fully transparent picture looked like a result."""
+    fake, _ = fake_comfy
+    fake.cutout_empty = True
+    try:
+        src = _source(store, project, size=(128, 96))
+        done = _run_job(store, backend_with_comfy, {"asset_id": src["id"], "operation": "remove_background"}, project["id"])
+    finally:
+        fake.cutout_empty = False
+    assert done["state"] == "done", done
+    assert done["outputs"]["foreground_share"] == 0
+    assert done["outputs"]["warning"].startswith("no_subject_found")

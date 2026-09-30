@@ -514,7 +514,8 @@ class FakeComfyServer:
             link = workflow[link[0]]["inputs"].get("mask")
         w, h = reference.size
         mask = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(mask).ellipse([w * 0.25, h * 0.2, w * 0.75, h * 0.9], fill=255)  # the foreground
+        if not getattr(self, "cutout_empty", False):  # tests set it for a scene with no subject
+            ImageDraw.Draw(mask).ellipse([w * 0.25, h * 0.2, w * 0.75, h * 0.9], fill=255)  # the foreground
         if inverted % 2:
             mask = mask.point(lambda v: 255 - v)
         alpha = mask.point(lambda v: 255 - v)  # JoinImageWithAlpha: alpha = 1 - mask
