@@ -124,6 +124,59 @@ def test_upscale_seed_is_unmapped_and_harmless(store, backend_with_comfy, fake_c
     assert "seed" not in json.dumps(_graph(fake))
 
 
+def _cutout_source(store, project, size=(160, 100)):
+    """An RGBA image: an opaque square in the middle, transparent around it,
+    with a bright green hidden under the transparent part."""
+    path = store.data_dir / "inbox" / "cutout.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGBA", size, (0, 255, 0, 0))
+    w, h = size
+    for x in range(w // 4, 3 * w // 4):
+        for y in range(h // 4, 3 * h // 4):
+            img.putpixel((x, y), (200, 60, 90, 255))
+    img.save(path)
+    return engine.import_asset(store, project["id"], path)
+
+
+def test_upscale_of_a_cut_out_keeps_its_transparency(store, backend_with_comfy, fake_comfy, project):
+    fake, _ = fake_comfy
+    src = _cutout_source(store, project)
+    done = _run_job(store, backend_with_comfy, {"asset_id": src["id"], "operation": "upscale", "scale": 2}, project["id"])
+    assert done["state"] == "done", done
+    graph = _graph(fake)
+    join_id, join = _node(graph, "JoinImageWithAlpha")
+    load_id, _ = _node(graph, "LoadImage")
+    assert join["inputs"]["alpha"] == [load_id, 1]  # LoadImage's MASK, not an image
+    assert join["inputs"]["image"] == [_node(graph, "ImageScaleBy")[0], 0]
+    assert _node(graph, "SaveImage")[1]["inputs"]["images"] == [join_id, 0]
+    out = store.get_asset(done["outputs"]["asset_ids"][0])
+    assert out["recipe"]["template"] == "esrgan_upscale_alpha"
+    assert (out["width"], out["height"]) == (320, 200)
+    with _asset_image(store, out["id"]) as img:
+        assert "A" in img.getbands()
+        assert img.getpixel((5, 5))[3] == 0  # the corner stays transparent
+        assert img.getpixel((160, 100))[3] == 255  # the subject stays opaque
+
+
+def test_upscale_of_an_opaque_rgba_image_uses_the_plain_graph(store, backend_with_comfy, fake_comfy, project):
+    fake, _ = fake_comfy
+    src = _source(store, project, mode="RGBA", name="opaque.png")
+    done = _run_job(store, backend_with_comfy, {"asset_id": src["id"], "operation": "upscale"}, project["id"])
+    assert done["state"] == "done", done
+    assert "JoinImageWithAlpha" not in {n["class_type"] for n in _graph(fake).values()}
+    assert store.get_asset(done["outputs"]["asset_ids"][0])["recipe"]["template"] == "esrgan_upscale"
+
+
+def test_alpha_upscale_template_is_consistent():
+    workflow, spec = comfy_driver.load_template("esrgan_upscale_alpha")
+    comfy_driver.validate_api_workflow(workflow)
+    comfy_driver.validate_param_map(workflow, spec)
+    plain, plain_spec = comfy_driver.load_template("esrgan_upscale")
+    assert spec["map"] == plain_spec["map"] and spec["vram_class"] == "esrgan"
+    assert spec["reference_node"] == "1.image" and spec["output_node"] == "5"
+    assert {k: v for k, v in workflow.items() if k not in ("5", "6")} == {k: v for k, v in plain.items() if k != "5"}
+
+
 def test_upscale_reuse_reproduces_the_same_pixels(store, backend_with_comfy, project):
     src = _source(store, project)
     first = _run_job(store, backend_with_comfy, {"asset_id": src["id"], "operation": "upscale", "scale": 4}, project["id"])

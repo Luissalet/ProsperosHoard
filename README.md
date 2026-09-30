@@ -116,6 +116,8 @@ no prompt, and work on any image asset:
   and so is a result larger than 8192 px on a side (`too_large`; the message
   gives the source size and the maximum). `model` may name another file that
   is installed in `upscale_models`; the default is `RealESRGAN_x4plus.safetensors`.
+  A source with transparency (a cut-out) runs `esrgan_upscale_alpha`, which
+  puts the source alpha back at the new size, so it stays a cut-out.
 - `remove_background` cuts out the subject with BiRefNet (template
   `birefnet_remove_background`, the same graph as ComfyUI's own "Remove
   Background (BiRefNet)" blueprint) and imports a PNG that keeps its alpha
