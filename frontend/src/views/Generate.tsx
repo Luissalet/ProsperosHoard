@@ -77,7 +77,8 @@ export function GenerateView() {
   const [composed, setComposed] = useState<Composed | null>(null);
   const [queuedIds, setQueuedIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState<{ query: string; start: number; index: number } | null>(null);
+  // "@" suggests cast members, "<" the reference images as <image1>, <image2>...
+  const [menu, setMenu] = useState<{ kind: "@" | "<"; query: string; start: number; index: number } | null>(null);
   const [compare, setCompare] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<string[] | null>(null);
   const del = useDeleteAssets();
@@ -130,16 +131,25 @@ export function GenerateView() {
 
   const characters = chars.data?.items || [];
   const suggestions = useMemo(() => {
-    if (!menu) return [] as Character[];
+    if (!menu || menu.kind !== "@") return [] as Character[];
     const q = menu.query.toLowerCase();
     return characters.filter((c) => c.name.toLowerCase().startsWith(q) || c.name.toLowerCase().replace(/\s+/g, "").startsWith(q)).slice(0, 6);
   }, [menu, characters]);
+  const refSuggestions = useMemo(() => {
+    if (!menu || menu.kind !== "<") return [] as { tag: string; asset: Asset }[];
+    const q = menu.query.toLowerCase();
+    return refs.map((asset, i) => ({ tag: `<image${i + 1}>`, asset, n: String(i + 1) }))
+      .filter((r) => r.tag.slice(1).startsWith(q) || r.n.startsWith(q));
+  }, [menu, refs]);
+  const menuSize = menu?.kind === "<" ? refSuggestions.length : suggestions.length;
 
   const onPromptChange = (value: string, caret: number) => {
     setPrompt(value);
     const before = value.slice(0, caret);
     const m = before.match(/(^|[^\w])@([\w\- ]{0,24})$/u);
-    if (m && !m[2].includes("  ")) setMenu({ query: m[2], start: caret - m[2].length - 1, index: 0 });
+    const r = refs.length ? before.match(/<(\w{0,6})$/u) : null;
+    if (m && !m[2].includes("  ")) setMenu({ kind: "@", query: m[2], start: caret - m[2].length - 1, index: 0 });
+    else if (r) setMenu({ kind: "<", query: r[1], start: caret - r[1].length - 1, index: 0 });
     else setMenu(null);
   };
 
@@ -154,6 +164,27 @@ export function GenerateView() {
       textRef.current?.focus();
       textRef.current?.setSelectionRange(pos, pos);
     }, 0);
+  };
+
+  const insertRefTag = (tag: string) => {
+    if (!menu) return;
+    const caret = textRef.current?.selectionStart ?? prompt.length;
+    let rest = prompt.slice(caret);
+    // typing "<image1" and completing must not leave a stray ">"
+    if (rest.startsWith(">")) rest = rest.slice(1);
+    const glue = rest.startsWith(" ") || rest.startsWith(",") || rest.startsWith(".") ? "" : " ";
+    setPrompt(`${prompt.slice(0, menu.start)}${tag}${glue}${rest}`);
+    setMenu(null);
+    setTimeout(() => {
+      const pos = menu.start + tag.length + glue.length;
+      textRef.current?.focus();
+      textRef.current?.setSelectionRange(pos, pos);
+    }, 0);
+  };
+  const pickMenu = (index: number) => {
+    if (!menu) return;
+    if (menu.kind === "<") insertRefTag(refSuggestions[index].tag);
+    else insertMention(suggestions[index]);
   };
 
   const myJobs: Job[] = queuedIds.map((id) => app.jobs.find((j) => j.id === id)).filter(Boolean) as Job[];
@@ -249,14 +280,25 @@ export function GenerateView() {
               <textarea ref={textRef} value={prompt} placeholder={t("promptPlaceholder")} aria-label={t("prompt")}
                 onChange={(e) => onPromptChange(e.target.value, e.target.selectionStart)}
                 onKeyDown={(e) => {
-                  if (menu && suggestions.length) {
-                    if (e.key === "ArrowDown") { e.preventDefault(); setMenu({ ...menu, index: (menu.index + 1) % suggestions.length }); }
-                    if (e.key === "ArrowUp") { e.preventDefault(); setMenu({ ...menu, index: (menu.index - 1 + suggestions.length) % suggestions.length }); }
-                    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(suggestions[menu.index]); }
+                  if (menu && menuSize) {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setMenu({ ...menu, index: (menu.index + 1) % menuSize }); }
+                    if (e.key === "ArrowUp") { e.preventDefault(); setMenu({ ...menu, index: (menu.index - 1 + menuSize) % menuSize }); }
+                    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMenu(Math.min(menu.index, menuSize - 1)); }
                     if (e.key === "Escape") setMenu(null);
                   } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) queue();
                 }} />
-              {menu && suggestions.length > 0 && (
+              {menu?.kind === "<" && refSuggestions.length > 0 && (
+                <div className="mention-menu">
+                  {refSuggestions.map((r, i) => (
+                    <button key={r.tag} className={i === menu.index ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); insertRefTag(r.tag); }}>
+                      <img src={thumbUrl(r.asset)} alt="" style={{ borderRadius: 6 }} />
+                      <span><strong className="mono">{r.tag}</strong> <span className="muted small" style={{ display: "inline-block", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{r.asset.name || ""}</span></span>
+                    </button>
+                  ))}
+                  <div className="muted small" style={{ padding: "4px 9px" }}>{t("refTagHint")}</div>
+                </div>
+              )}
+              {menu?.kind === "@" && suggestions.length > 0 && (
                 <div className="mention-menu">
                   {suggestions.map((c, i) => (
                     <button key={c.id} className={i === menu.index ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); insertMention(c); }}>
