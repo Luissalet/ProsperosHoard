@@ -77,3 +77,32 @@ def test_cancelled_workflow_uses_the_scoped_cancel(monkeypatch):
     with pytest.raises(JobCancelled):
         engine._run_comfy_workflow(Backend(), {"1": {}}, [], progress, 5.0, None)
     assert calls == ["ours"]
+
+
+def test_a_timed_out_render_is_stopped_not_left_on_the_card(monkeypatch):
+    calls = []
+
+    class Comfy:
+        url = "http://127.0.0.1:8189"
+
+        async def queue(self, workflow, client_id):
+            return "ours"
+
+        async def wait(self, prompt_id, timeout_s, poll_interval_s):
+            raise TimeoutError
+
+    async def scoped(comfy, prompt_id):
+        calls.append(prompt_id)
+        return "interrupted"
+
+    class Backend:
+        def run_async(self, coro):
+            return asyncio.run(coro)
+
+    progress = lambda *a, **k: None
+    monkeypatch.setattr(engine, "_comfy", lambda backend: Comfy())
+    monkeypatch.setattr(engine, "_cancel_comfy_prompt", scoped)
+    with pytest.raises(engine.EngineError) as err:
+        engine._run_comfy_workflow(Backend(), {"1": {}}, [], progress, 0.0, None)
+    assert err.value.code == "comfy_timeout" and "stopped it there" in err.value.message
+    assert calls == ["ours"]

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { api, thumbUrl, type Asset, type Character, type Project, type VideoDraft, type VideoShot } from "../api";
 import { useT } from "../i18n";
@@ -34,6 +34,15 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
   const [takes, setTakes] = useState(2);
   const [draft, setDraft] = useState<VideoDraft | null>(null);
   const [busy, setBusy] = useState<"" | "plan" | "create">("");
+  // how long the plan has been writing, and the way to stop waiting for it
+  const [elapsed, setElapsed] = useState(0);
+  const planAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (busy !== "plan") { setElapsed(0); return; }
+    const started = Date.now();
+    const h = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(h);
+  }, [busy]);
 
   useEffect(() => {
     api.projects().then(async (r) => {
@@ -56,16 +65,19 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
   const leadBody = () => (charId ? { character_id: charId } : { lead_name: newName, lead_look: newLook });
   const plan = async () => {
     setBusy("plan");
+    const ctl = new AbortController();
+    planAbort.current = ctl;
     try {
       const r = await api.planVideo({
         concept, ...leadBody(), shots, language, genre: genre || null, duration_s: duration,
         song_asset_id: songMode === "asset" ? songId || null : null, lyrics: songMode === "asset" ? lyrics || null : null,
-      });
+      }, ctl.signal);
       setDraft(r.draft);
       if (!name && r.draft.title) setName(r.draft.title);
     } catch (e) {
-      app.toast((e as Error).message, "bad");
+      if (!ctl.signal.aborted) app.toast((e as Error).message, "bad");
     } finally {
+      planAbort.current = null;
       setBusy("");
     }
   };
@@ -97,10 +109,14 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
     <Modal title={t("newVideo")} onClose={onClose} wide footer={
       !draft ? (
         <>
-          <button className="btn ghost" onClick={onClose}>{t("cancel")}</button>
-          <button className="btn" disabled={!leadOk || !songOk} onClick={writeMyself}>{t("videoWriteMyself")}</button>
+          {busy === "plan" && elapsed >= 45 && <span className="hint grow" style={{ maxWidth: 360 }}>{t("videoPlanSlow")}</span>}
+          {busy === "plan"
+            ? <button className="btn ghost" onClick={() => planAbort.current?.abort()}>{t("videoPlanStop")}</button>
+            : <button className="btn ghost" onClick={onClose}>{t("cancel")}</button>}
+          <button className="btn" disabled={!leadOk || !songOk} onClick={() => { planAbort.current?.abort(); writeMyself(); }}>{t("videoWriteMyself")}</button>
           <button className="btn primary" disabled={!leadOk || !songOk || !concept.trim() || busy !== ""} onClick={plan}>
-            {busy === "plan" ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {busy === "plan" ? t("videoPlanning") : t("videoPlan")}</button>
+            {busy === "plan" ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {busy === "plan"
+              ? `${t("videoPlanning")} ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}` : t("videoPlan")}</button>
         </>
       ) : (
         <>

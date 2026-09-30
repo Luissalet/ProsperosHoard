@@ -512,9 +512,18 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
             break
         except TimeoutError:
             if time.monotonic() > deadline:
-                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s "
-                                  "(it may still be running there - check ComfyUI's queue; on a shared or busy "
-                                  "GPU raise PROSPERO_COMFY_TIMEOUT_S)") from None
+                # a render given up on must not stay on the card: it would
+                # keep the GPU (and any language model sharing it) busy for
+                # an output nobody collects
+                try:
+                    stopped = backend.run_async(_cancel_comfy_prompt(comfy, prompt_id))
+                except Exception:  # noqa: BLE001 - best effort
+                    stopped = "unknown"
+                what = {"interrupted": "stopped it there", "dequeued": "took it out of ComfyUI's queue"}.get(
+                    stopped, "it may still be running there - check ComfyUI's queue")
+                raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s; "
+                                  f"{what}. On a shared or busy GPU free it first (the header shows who holds it) "
+                                  "or raise PROSPERO_COMFY_TIMEOUT_S") from None
     outputs = backend.run_async(comfy.outputs(prompt_id))
     saved = [o for o in outputs if o.type == "output"]
     if output_node:
