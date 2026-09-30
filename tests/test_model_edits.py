@@ -282,7 +282,6 @@ def test_upscale_model_can_be_chosen_among_the_installed_ones(store, backend_wit
 
 
 def test_a_non_image_source_is_refused(store, backend_with_comfy, project):
-    from prosperos_hoard import audio as audio_mod  # noqa: F401  (only to make the intent explicit)
     import wave
 
     path = store.data_dir / "inbox" / "tone.wav"
@@ -361,3 +360,14 @@ def test_existing_operations_keep_their_validation(client, tmp_path):
     # a scale sent with another operation is ignored, not an error
     r = c.post(f"/api/assets/{asset_id}/edit", json={"asset_id": asset_id, "operation": "img2img", "scale": 7, "wait_s": 30})
     assert r.status_code == 200 and r.json()["job"]["state"] == "done", r.text
+
+
+def test_an_older_comfyui_without_the_nodes_is_reported_not_crashed(store, backend_with_comfy, project, monkeypatch):
+    real = engine._object_info(backend_with_comfy)
+    old = {k: v for k, v in real.items() if k not in ("LoadBackgroundRemovalModel", "RemoveBackground")}
+    monkeypatch.setattr(engine, "_object_info", lambda backend: old)
+    src = _source(store, project)
+    with pytest.raises(engine.EngineError) as exc:
+        _edit(store, backend_with_comfy, project, src, operation="remove_background")
+    assert exc.value.code == "comfy_validation"
+    assert "LoadBackgroundRemovalModel" in exc.value.message and "RemoveBackground" in exc.value.message
