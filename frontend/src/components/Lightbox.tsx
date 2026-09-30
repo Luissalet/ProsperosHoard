@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Dices, Download, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Wand2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Wand2, X, ZoomIn } from "lucide-react";
 import { api, fileUrl, type Asset, type Board } from "../api";
 import { useT } from "../i18n";
 import { Stars, useApp, useAsync } from "./ui";
@@ -167,6 +167,9 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               <button className="btn sm" disabled={!fromComfy || busy} onClick={() => run(t("varySeed"), () => api.edit(asset.id, { operation: "vary", count: 2 }))}><Dices size={14} /> {t("varySeed")}</button>
               <button className="btn sm" disabled={busy || recipe?.template !== "sdxl_txt2img"} onClick={() => run(t("hires"), () => api.edit(asset.id, { operation: "hires" }))}><Sparkles size={14} /> {t("hires")}</button>
               <button className="btn sm" disabled={busy} onClick={() => run(t("animate"), () => api.animate(asset.id, { frames: 14, fps: 7, motion: 127 }))}><Film size={14} /> {t("animate")}</button>
+              <button className="btn sm" disabled={busy} onClick={() => run(t("upscaleX2"), () => api.edit(asset.id, { operation: "upscale", scale: 2 }))}><ZoomIn size={14} /> {t("upscaleX2")}</button>
+              <button className="btn sm" disabled={busy} onClick={() => run(t("upscaleX4"), () => api.edit(asset.id, { operation: "upscale", scale: 4 }))}><ZoomIn size={14} /> {t("upscaleX4")}</button>
+              <button className="btn sm" disabled={busy} onClick={() => run(t("removeBackground"), () => api.edit(asset.id, { operation: "remove_background" }))}><Eraser size={14} /> {t("removeBackground")}</button>
             </div>
             <label className="field">{t("editPrompt")}
               <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={3} />
