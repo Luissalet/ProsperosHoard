@@ -13,6 +13,14 @@ from prosperos_hoard.devtools.fake_comfy import FakeComfyServer
 from prosperos_hoard.store import Store
 
 
+@pytest.fixture(autouse=True)
+def _private_hoard_home(tmp_path: Path, monkeypatch):
+    """The launcher's family-wide files (~/.hoard/backends.json, the pids it
+    started) go to a temp folder in every test, never the real one."""
+    monkeypatch.setenv("HOARD_HOME", str(tmp_path / "hoard-home"))
+    monkeypatch.delenv("COMFYUI_DIR", raising=False)
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     d = tmp_path / "data"

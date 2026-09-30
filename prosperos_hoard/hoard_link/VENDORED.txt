@@ -1,4 +1,6 @@
-Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.1.1
+Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.1.1,
+plus launch.py from HoardLink 0.4 (starting ComfyUI/Ollama/configured
+servers without Faustus; stdlib only, imports nothing else from the package).
 
 This is a byte-for-byte copy of every hoard_link/*.py file from that
 release. License: MIT (same as this repository).
