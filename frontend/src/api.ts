@@ -842,8 +842,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method, headers: {} };
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const init: RequestInit = { method, headers: {}, signal };
   if (body instanceof FormData) {
     init.body = body;
   } else if (body !== undefined) {
@@ -1047,7 +1047,7 @@ export const api = {
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
     request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
-  planVideo: (body: Record<string, unknown>) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/api/productions/plan", body),
+  planVideo: (body: Record<string, unknown>, signal?: AbortSignal) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/api/productions/plan", body, signal),
   videoFromPlan: (body: Record<string, unknown>) => request<{ production: ProductionView; job: Job }>("POST", "/api/productions/from-plan", body),
   createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;
                         settings?: Record<string, unknown>; count?: number; project?: string }) =>

@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import httpx
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -2349,9 +2350,32 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise ValueError("pick a lead from the cast (character_id) or give lead_name and lead_look")
         return {"name": name.strip(), "look": look.strip()}
 
+    def _renders_on_llm_gpus() -> str:
+        """Which ComfyUI servers are rendering on a GPU the language model
+        also uses: the usual reason it stops answering on this machine."""
+        mem = backend.memory()
+        services = mem.get("services") or []
+        llm_gpus = {g for s in services if s.get("kind") in ("command", "ollama") for g in (s.get("gpus") or [])}
+        notes = []
+        for s in services:
+            sid = str(s.get("id") or "")
+            if not sid.startswith("comfyui@"):
+                continue
+            try:
+                q = httpx.get(f"http://127.0.0.1:{sid.split('@', 1)[1]}/queue", timeout=2.0).json()
+            except (httpx.HTTPError, ValueError):
+                continue
+            if not q.get("queue_running"):
+                continue
+            shared = sorted(set(s.get("gpus") or []) & llm_gpus)
+            notes.append(f"ComfyUI :{sid.split('@', 1)[1]} is rendering"
+                         + (f" on GPU {', '.join(str(g) for g in shared)}, which the language model shares" if shared else ""))
+        return ("; ".join(notes) + ".") if notes else ""
+
     def op_video_plan(body: VideoPlanBody) -> dict[str, Any]:
         lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
-        chat = (getattr(app.state, "short_hooks", None) or {}).get("chat") or mv_planner.writer_chat(backend)
+        chat = ((getattr(app.state, "short_hooks", None) or {}).get("chat")
+                or mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus))
         draft = mv_planner.plan(chat, concept=body.concept, lead_name=lead["name"], lead_look=lead.get("look") or "",
                                 n_shots=body.shots, language=body.language, compose_song=not body.song_asset_id,
                                 duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre)

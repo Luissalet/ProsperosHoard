@@ -291,8 +291,14 @@ los formatos. **Planificar con el modelo local** escribe los planos, la
 estética común y, si se compone, el sonido y la letra - en el idioma
 elegido (si responde en otro, se le pide una vez más y si no, se avisa) -
 sin razonamiento y con un tiempo de espera largo, así que un 27B repartido en
-cuatro tarjetas responde en uno o dos minutos. Todo se edita antes de
-renderizar; **Escribo yo los planos** se salta el modelo. **Crear la
+cuatro tarjetas responde en uno o dos minutos. El botón cuenta el tiempo y
+**Dejar de esperar** lo abandona. La respuesta llega en streaming: si el
+modelo no empieza a escribir, o se calla, durante cuatro minutos
+(normalmente porque un render ha llenado las GPU que comparte), el plan se
+para con un mensaje que dice qué render estorba en vez de quedarse colgado.
+Un render que se queda sin tiempo también se para en ComfyUI, para que no
+siga ocupando la tarjeta con una imagen que nadie recoge. Todo se edita
+antes de renderizar; **Escribo yo los planos** se salta el modelo. **Crear la
 producción** lanza lo de siempre: el protagonista, las tomas de la canción
 (si hay más de una, se para para que las escuches y pulses **Usar esta
 toma**), los fotogramas con Qwen-Image desde la imagen canónica, el animático para

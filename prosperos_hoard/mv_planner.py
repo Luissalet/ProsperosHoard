@@ -24,11 +24,60 @@ from .productions import ProductionError
 WRITER_TIMEOUT_S = 900.0
 
 
-def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S) -> Callable[[list[dict[str, Any]], int, float], str]:
+# A healthy server starts answering a ~1.5k-token prompt in seconds and then
+# never goes quiet for long. When a render has filled the cards the model
+# lives on, prompt processing crawls to a halt instead: the call would sit
+# there for the whole timeout. Streaming lets the planner notice.
+WRITER_FIRST_TOKEN_S = 240.0
+WRITER_STALL_S = 120.0
+
+
+class WriterStalled(ProductionError):
+    """The language model accepted the request and then stopped making progress."""
+
+
+def _stream_text(lines: Any, api: str) -> Any:
+    """The text pieces of a streamed chat reply (Ollama NDJSON or OpenAI SSE);
+    yields "" for keep-alive lines so the caller's clock still sees traffic."""
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if api == "ollama":
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            yield str((obj.get("message") or {}).get("content") or "")
+            if obj.get("done"):
+                return
+            continue
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            continue
+        delta = ((obj.get("choices") or [{}])[0].get("delta") or {})
+        # content only: a reasoning model's thinking must not pass for progress on the JSON
+        yield str(delta.get("content") or "")
+
+
+def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S, first_token_s: float = WRITER_FIRST_TOKEN_S,
+                stall_s: float = WRITER_STALL_S, busy: Optional[Callable[[], str]] = None
+                ) -> Callable[[list[dict[str, Any]], int, float], str]:
     """A chat call for long structured writing: the language model Hoard Link
     resolves, asked directly with thinking off (a reasoning model would
-    otherwise spend the whole token budget thinking before the JSON) and a
-    long timeout."""
+    otherwise spend the whole token budget thinking before the JSON), a long
+    overall timeout, and a stall watchdog: no first word within
+    ``first_token_s`` or silence for ``stall_s`` ends the call with
+    `WriterStalled` (closing the stream also frees the server's slot).
+    ``busy()`` may name what is holding the GPUs, for the message."""
+    import time
+
     import httpx
 
     from .hoard_link.errors import Unavailable
@@ -39,17 +88,52 @@ def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S) -> Callable[[
         if not res.resolved or not res.url:
             raise Unavailable("llm", (res.details or {}).get("reasons") or [res.reason or "no language model"])
         if res.api == "ollama":
-            payload = {"model": res.model, "messages": messages, "stream": False, "think": False,
-                       "options": {"temperature": temperature, "num_predict": max_tokens}}
-            r = httpx.post(_ollama_endpoint(res.url, "/api/chat"), json=payload, timeout=timeout_s)
-            r.raise_for_status()
-            return str((r.json().get("message") or {}).get("content") or "")
-        payload = {"model": res.model, "messages": messages, "stream": False, "max_tokens": max_tokens,
-                   "temperature": temperature, "chat_template_kwargs": {"enable_thinking": False}, "reasoning_budget": 0}
-        r = httpx.post(_openai_endpoint(res.url, "/chat/completions"), json=payload, timeout=timeout_s)
-        r.raise_for_status()
-        message = (r.json().get("choices") or [{}])[0].get("message") or {}
-        return str(message.get("content") or "")
+            url = _ollama_endpoint(res.url, "/api/chat")
+            payload: dict[str, Any] = {"model": res.model, "messages": messages, "stream": True, "think": False,
+                                       "options": {"temperature": temperature, "num_predict": max_tokens}}
+        else:
+            url = _openai_endpoint(res.url, "/chat/completions")
+            payload = {"model": res.model, "messages": messages, "stream": True, "max_tokens": max_tokens,
+                       "temperature": temperature, "chat_template_kwargs": {"enable_thinking": False},
+                       "reasoning_budget": 0}
+        started = time.monotonic()
+        last = None  # time of the last piece of text
+        parts: list[str] = []
+
+        def stalled(waited: float, first: bool) -> WriterStalled:
+            why = ""
+            try:
+                why = busy() if busy else ""
+            except Exception:  # noqa: BLE001 - the diagnosis is a nicety
+                why = ""
+            what = (f"did not start answering within {int(waited)} s" if first
+                    else f"stopped writing for {int(waited)} s")
+            return WriterStalled("llm_stalled", f"The language model ({res.model}) {what}. " + (
+                why or "Its GPUs are probably busy with a render or another request.") +
+                " Wait for that to finish (or stop it) and try again, or write the shots yourself.")
+
+        # the read timeout is the watchdog: a server that sends nothing at all
+        # (prompt processing stuck) trips it without a byte arriving
+        read_timeout = max(5.0, first_token_s, stall_s)
+        try:
+            with httpx.stream("POST", url, json=payload,
+                              timeout=httpx.Timeout(timeout_s, connect=10.0, read=read_timeout)) as r:
+                r.raise_for_status()
+                for piece in _stream_text(r.iter_lines(), res.api):
+                    now = time.monotonic()
+                    if piece:
+                        parts.append(piece)
+                        last = now
+                    if last is None and now - started > first_token_s:
+                        raise stalled(now - started, True)
+                    if last is not None and now - last > stall_s:
+                        raise stalled(now - last, False)
+                    if now - started > timeout_s:
+                        raise WriterStalled("llm_timeout", f"The language model took more than {int(timeout_s)} s.")
+        except httpx.ReadTimeout:
+            now = time.monotonic()
+            raise stalled(now - (last or started), last is None) from None
+        return "".join(parts)
 
     return chat
 
