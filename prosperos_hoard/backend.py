@@ -467,10 +467,9 @@ class Backend:
         ComfyUI's own `/system_stats` comes first: it describes the card
         ComfyUI really runs on (a `--cuda-device` pick on a multi-GPU
         machine, not whichever card happens to be freest), and its
-        `vram_free` already counts the models it keeps cached as evictable.
-        Memory its allocator has reserved is added back too - ComfyUI frees
-        both itself when the next job needs room, so treating them as used
-        would make a job wait for memory its own renderer is keeping warm.
+        `vram_free` includes unused PyTorch reservation, but not all warm
+        DynamicVRAM allocations. Active PyTorch reservation is added back;
+        the result remains a conservative estimate for DynamicVRAM.
         nvidia-smi through Hoard Link (the freest card) is the fallback when
         ComfyUI does not report devices.
 
@@ -495,13 +494,73 @@ class Backend:
             stats = self.run_async(comfy.system_stats())
         except Exception:
             return None
-        frees: list[int] = []
-        for dev in stats.get("devices") or []:
-            if dev.get("vram_free") is None or str(dev.get("type") or "").lower() == "cpu":
+        dev = self._primary_comfy_device(stats)
+        if dev is None:
+            return None
+        free = dev.get("vram_free")
+        if not self._memory_bytes(free):
+            return None
+        total, unused = dev.get("torch_vram_total", 0), dev.get("torch_vram_free", 0)
+        reserved_in_use = max(0, total - unused) if self._memory_bytes(total) and self._memory_bytes(unused) else 0
+        return (free + reserved_in_use) // (1024 * 1024)
+
+    @staticmethod
+    def _memory_bytes(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2**63 - 1
+
+    @staticmethod
+    def _primary_comfy_device(stats: Any) -> Optional[dict]:
+        devices = stats.get("devices") if isinstance(stats, dict) else None
+        if not isinstance(devices, list):
+            return None
+        # ComfyUI reports its primary first. Never pick a later GPU merely
+        # because it has more free memory (nor skip a malformed primary).
+        for dev in devices:
+            if not isinstance(dev, dict):
+                return None
+            kind = str(dev.get("type") or "").lower()
+            if kind == "cpu":
                 continue
-            reserved_in_use = int(dev.get("torch_vram_total") or 0) - int(dev.get("torch_vram_free") or 0)
-            frees.append((int(dev["vram_free"]) + max(0, reserved_in_use)) // (1024 * 1024))
-        return max(frees) if frees else None
+            return dev if kind in ("cuda", "xpu", "mps", "npu", "mlu", "privateuseone") else None
+        return None
+
+    def comfy_manages_memory(self, needed_mb: int) -> bool:
+        """Opt-in for one explicitly pinned dedicated endpoint, while idle.
+
+        No freeing/unloading request is made. ComfyUI handles its own cache
+        as part of the already requested render; this is not a reservation.
+        """
+        raw = self._raw_config().get("comfy")
+        if self.demo or not isinstance(raw, dict) or raw.get("manage_memory") is not True:
+            return False
+        pinned = raw.get("url")
+        if not isinstance(pinned, str) or not pinned.strip():
+            return False
+        pinned = pinned.strip().rstrip("/")
+        try:
+            comfy = self.comfy()
+            if comfy is None or comfy.url.rstrip("/") != pinned:
+                return False
+            dev = self._primary_comfy_device(self.run_async(comfy.system_stats()))
+            total = dev.get("vram_total") if dev else None
+            if (not self._memory_bytes(total) or not self._memory_bytes(dev.get("vram_free")) or
+                    dev["vram_free"] > total or total // (1024 * 1024) < needed_mb):
+                return False
+
+            async def queue_snapshot():
+                # Reuse this exact client's transport/endpoint; vendor stays intact.
+                response = await comfy._client.get(comfy.url + "/queue", timeout=5.0)
+                response.raise_for_status()
+                return response.json()
+
+            queue = self.run_async(queue_snapshot())
+            current = self._raw_config().get("comfy")
+            return (isinstance(queue, dict) and queue.get("queue_running") == [] and
+                    queue.get("queue_pending") == [] and isinstance(current, dict) and
+                    current.get("manage_memory") is True and
+                    str(current.get("url") or "").strip().rstrip("/") == pinned)
+        except Exception:
+            return False
 
     def free_comfy_memory(self) -> dict[str, Any]:
         comfy = self.comfy()
