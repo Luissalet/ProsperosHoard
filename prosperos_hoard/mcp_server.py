@@ -169,6 +169,72 @@ def studio_services() -> dict[str, Any]:
     return _call("GET", "/api/agent/studio_services")
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_video_plan(
+    concept: str, character_id: Optional[str] = None, lead_name: Optional[str] = None, lead_look: Optional[str] = None,
+    shots: int = 10, language: str = "en", song_asset_id: Optional[str] = None, lyrics: Optional[str] = None,
+    genre: Optional[str] = None, duration_s: float = 120,
+) -> dict[str, Any]:
+    """Draft a music video: the local model plans the shot list (and song tags + lyrics) from a concept.
+
+    Nothing is queued: show the draft to the user, let them change it, then studio_video_from_plan.
+    character_id: the lead from studio_cast (its canonical image keeps the look), or lead_name + lead_look.
+    language: the lyrics' language - ask the user, do not assume. song_asset_id: use an existing song
+    (pass its lyrics to follow them) instead of composing one. genre: the sound (e.g. "80s disco-funk").
+
+    Keywords: music video, videoclip, plan shots, storyboard, write lyrics, planificar videoclip, guion de planos, letra
+    """
+    return _call("POST", "/api/agent/studio_video_plan", json={
+        "concept": concept, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look, "shots": shots,
+        "language": language, "song_asset_id": song_asset_id, "lyrics": lyrics, "genre": genre, "duration_s": duration_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_video_from_plan(
+    name: str, draft: dict[str, Any], character_id: Optional[str] = None, lead_name: Optional[str] = None,
+    lead_look: Optional[str] = None, song_asset_id: Optional[str] = None, clips: str = "all",
+    aspects: Optional[list[str]] = None, song_takes: int = 2, engine: str = "auto", project: Optional[str] = None,
+) -> dict[str, Any]:
+    """Start a music video production from a (possibly edited) studio_video_plan draft.
+
+    Runs character -> song -> stills -> animatic (pauses for review: studio_production_continue) ->
+    clips -> cut, resumable. clips: "all" moving shots get a Wan clip, "lead" only shots with the lead,
+    "none" (a still-image cut). aspects: ["16:9"] by default, "9:16" for vertical. Poll studio_production.
+
+    Keywords: create music video, start videoclip, produce, crear videoclip, empezar produccion, montar videoclip
+    """
+    return _call("POST", "/api/agent/studio_video_from_plan", json={
+        "name": name, "draft": draft, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look,
+        "song_asset_id": song_asset_id, "clips": clips, "aspects": aspects, "song_takes": song_takes, "engine": engine,
+        "project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_delete_assets(ids: list[str], force: bool = False) -> dict[str, Any]:
+    """Delete bad results: move assets to the studio trash (restorable with studio_trash until emptied).
+
+    ids: asset ids (up to 200). An asset used as a project cover, a character's canonical or
+    reference image, a group logo or on a board is refused unless force=true, which detaches it
+    first (a restore puts it back); one used in a timeline is always refused. Only delete what the
+    user asked for.
+
+    Keywords: delete, remove, discard, trash, bad result, borrar, eliminar, descartar, papelera, resultado malo
+    """
+    return _call("POST", "/api/agent/studio_delete_assets", json={"ids": ids, "force": force})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def studio_trash(action: str = "list", ids: Optional[list[str]] = None, project: Optional[str] = None) -> dict[str, Any]:
+    """The studio trash: list deleted assets, restore them, or empty it for good (files deleted).
+
+    action: "list" | "restore" (needs ids) | "empty" (ids or everything; a project limits it).
+    Empty only when the user asks: it cannot be undone.
+
+    Keywords: trash, restore, undo delete, empty trash, papelera, recuperar, deshacer borrado, vaciar papelera
+    """
+    return _call("POST", "/api/agent/studio_trash", json={"action": action, "ids": ids, "project": project})
+
+
 @tool(_ro(readOnlyHint=True, idempotentHint=True))
 def studio_gpu_memory() -> dict[str, Any]:
     """What each GPU holds and which server holds it (llama.cpp, ComfyUI, Ollama) vs what image engines need.
@@ -350,16 +416,18 @@ def studio_edit_image(
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def studio_animate(asset_id: str, frames: int = 14, fps: int = 7, motion: int = 127,
-                    seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False) -> Any:
-    """Turn a still image into a short video clip (SVD image-to-video on ComfyUI, about 10 GB VRAM).
-    frames 4-50 (14 = 2 s at 7 fps), motion 1-255 (higher moves more but can distort). The output is
-    an mp4 video asset usable in timelines. Returns the job; poll studio_job (animation is slow).
-    include_image=true also returns a picture of a finished job (default false).
+def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "auto", frames: int = 14, fps: int = 7,
+                   motion: int = 127, seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False) -> Any:
+    """Turn a still image into a short video clip: Wan 2.2 (5 s, follows prompt) when installed, else SVD.
+    prompt: what moves (camera and subject), Wan only. engine: "auto" | "wan" | "svd" (frames 4-50, fps and
+    motion 1-255 are SVD settings). The output is an mp4 video asset usable in timelines. Returns the job
+    and which engine ran; poll studio_job (a Wan clip takes ~10 min on a free 16 GB card, much longer when
+    a language model holds the GPU). include_image=true also returns a picture of a finished job.
 
-    Keywords: animate image, image to video, make it move, svd, animar imagen, imagen a video, dar movimiento
+    Keywords: animate image, image to video, make it move, wan, svd, animar imagen, imagen a video, dar movimiento
     """
-    body = {"asset_id": asset_id, "frames": frames, "fps": fps, "motion": motion, "seed": seed, "wait_s": wait_s}
+    body = {"asset_id": asset_id, "prompt": prompt, "engine": engine, "frames": frames, "fps": fps, "motion": motion,
+            "seed": seed, "wait_s": wait_s}
     return _with_preview(_call("POST", "/api/agent/studio_animate", json=body), include_image)
 
 
@@ -889,16 +957,18 @@ def studio_stock_search(query: str, kind: str = "video", aspect: Optional[str] =
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
-def studio_production_continue(production: str) -> dict[str, Any]:
+def studio_production_continue(production: str, take: Optional[int] = None) -> dict[str, Any]:
     """Resume or approve a production (after the animatic review, a failure or a cancel) / continuar produccion.
 
     From awaiting_review it approves the animatic and goes on to the clips and the final cut (for a narrated
-    short paused after its script, it approves the script and voices it); from failed/cancelled it resumes
-    where it stopped (finished stills, clips and renders are kept).
+    short paused after its script, it approves the script and voices it; paused after its song takes, `take`
+    picks one - 1-based - and it goes on to the stills); from failed/cancelled it resumes where it stopped
+    (finished stills, clips and renders are kept).
 
     Keywords: continue production, approve animatic, resume, continuar, aprobar animatico, reanudar
     """
-    return _call("POST", "/api/agent/studio_production_continue", params={"production": production})
+    return _call("POST", "/api/agent/studio_production_continue",
+                 params={"production": production, **({"take": take} if take is not None else {})})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

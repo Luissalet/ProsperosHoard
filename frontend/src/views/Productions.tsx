@@ -6,6 +6,7 @@ import {
 import { useT, type MessageKey } from "../i18n";
 import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
+import { VideoModal } from "./VideoModal";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -173,6 +174,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
         )}
       </div>
       {isShort && <ShortDetail state={data} onChanged={() => { reload(); reloadList(); }} />}
+      {!isShort && <SongTakesCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {!isShort && view.status !== "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {!isShort && Object.keys(renders).length > 0 && (
         <div className="card">
@@ -281,6 +283,36 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
         </div>
       )}
       {editing && <ShotsModal state={state} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
+    </div>
+  );
+}
+
+// Paused after the song: listen to the takes and pick one before any still
+// is cut to it. Once chosen, the takes stay listed with the one in use.
+function SongTakesCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const partial = ((state as unknown as { partial?: Record<string, any> }).partial || {}).song || {};
+  const done = state.done?.song as { song_asset_ids?: string[]; song_asset_id?: string } | undefined;
+  const takes: string[] = done?.song_asset_ids || partial.song_asset_ids || [];
+  const choosing = state.status === "awaiting_review" && state.stage === "song";
+  if (takes.length < 2 && !choosing) return null;
+  return (
+    <div className="card stack">
+      <h2>{t("songTakesTitle")}</h2>
+      {choosing && <p className="small">{t("songTakesLead")}</p>}
+      {takes.map((id, i) => (
+        <div key={id} className="row" style={{ gap: 10 }}>
+          <strong className="mono small">{t("takeN", { n: i + 1 })}</strong>
+          <audio src={fileUrl(id)} controls preload="none" style={{ flex: 1 }} />
+          {choosing ? (
+            <button className="btn sm primary" onClick={async () => {
+              try { await api.continueProduction(state.slug, i + 1); app.toast(t("takeChosen", { n: i + 1 }), "ok"); onChanged(); }
+              catch (e) { app.toast((e as Error).message, "bad"); }
+            }}>{t("useThisTake")}</button>
+          ) : done?.song_asset_id === id ? <span className="pill ok">{t("takeInUse")}</span> : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -448,13 +480,18 @@ export function ProductionsView() {
   const selected = app.route.arg || items[0]?.slug;
   const open = (slug: string) => { app.go("productions", slug); reload(); };
   const [newShort, setNewShort] = useState(false);
+  const [newVideo, setNewVideo] = useState(false);
 
   return (
     <>
       <div className="page-head">
         <div><h1>{t("productionsTitle")}</h1><p>{t("productionsLead")}</p></div>
-        <button className="btn primary" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
+        <div className="actions">
+          <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
+          <button className="btn" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
+        </div>
       </div>
+      {newVideo && <VideoModal onClose={() => setNewVideo(false)} onStarted={(s) => { setNewVideo(false); open(s); }} />}
       {newShort && <ShortModal onClose={() => setNewShort(false)} onStarted={(s) => { setNewShort(false); open(s); }} />}
       <div className="productions-grid">
         <div className="stack">

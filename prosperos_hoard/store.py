@@ -9,6 +9,7 @@ contract's "compact tool outputs" rule.
 from __future__ import annotations
 
 import re
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -29,6 +30,18 @@ class NotFound(KeyError):
 
     def __str__(self) -> str:  # KeyError would wrap the message in quotes
         return f"{self.kind} not found: {self.id}"
+
+
+class AssetInUse(ValueError):
+    """The asset is used somewhere; `references` says where."""
+
+    def __init__(self, asset_id: str, references: list[dict[str, Any]]):
+        where = ", ".join(f"{r['kind'].replace('_', ' ')} '{r.get('name') or r['id']}'" for r in references[:6])
+        timeline = any(r["kind"] == "timeline" for r in references)
+        super().__init__(f"asset {asset_id} is in use ({where}); "
+                         + ("take it out of the timeline first" if timeline else "pass force=true to detach it and delete"))
+        self.asset_id = asset_id
+        self.references = references
 
 
 BUILTIN_STYLE_PRESETS = [
@@ -306,6 +319,155 @@ class Store:
             self.conn.execute(f"UPDATE assets SET {', '.join(cols)} WHERE id=?", params)
             self.conn.commit()
         return self.get_asset(asset_id)
+
+    # --------------------------------------------------------------- trash
+    def asset_references(self, asset_id: str) -> list[dict[str, Any]]:
+        """Where an asset is in use: a project cover, a character's canonical
+        or reference image, a group logo, a board, a timeline."""
+        like = f'%"{asset_id}"%'
+        refs: list[dict[str, Any]] = []
+        for row in self.conn.execute("SELECT id, name FROM projects WHERE cover_asset_id=?", (asset_id,)):
+            refs.append({"kind": "project_cover", "id": row["id"], "name": row["name"]})
+        for row in self.conn.execute(
+                "SELECT id, name, canonical_asset_id FROM characters WHERE canonical_asset_id=? OR reference_asset_ids_json LIKE ?",
+                (asset_id, like)):
+            refs.append({"kind": "character_canonical" if row["canonical_asset_id"] == asset_id else "character_reference",
+                         "id": row["id"], "name": row["name"]})
+        for row in self.conn.execute("SELECT id, name FROM groups WHERE logo_asset_id=?", (asset_id,)):
+            refs.append({"kind": "group_logo", "id": row["id"], "name": row["name"]})
+        for row in self.conn.execute("SELECT id, name FROM boards WHERE items_json LIKE ?", (f"%{asset_id}%",)):
+            refs.append({"kind": "board", "id": row["id"], "name": row["name"]})
+        for row in self.conn.execute("SELECT id, name FROM timelines WHERE audio_asset_id=? OR tracks_json LIKE ?",
+                                     (asset_id, f"%{asset_id}%")):
+            refs.append({"kind": "timeline", "id": row["id"], "name": row["name"]})
+        return refs
+
+    def trash_asset(self, asset_id: str, force: bool = False) -> dict[str, Any]:
+        """Move an asset to the trash: its row goes to `asset_trash`, its file
+        and thumbnail to data/trash/<id>/. An asset a timeline uses is never
+        deleted; one used as a cover, canonical/reference image, logo or on a
+        board needs `force`, which detaches it from those (and restore puts it
+        back). Raises AssetInUse with the references otherwise."""
+        asset = self.get_asset(asset_id)
+        refs = self.asset_references(asset_id)
+        blocking = [r for r in refs if r["kind"] == "timeline" or not force]
+        if blocking:
+            raise AssetInUse(asset_id, blocking)
+        detached = []
+        for ref in refs:
+            if ref["kind"] == "project_cover":
+                self.conn.execute("UPDATE projects SET cover_asset_id=NULL WHERE id=?", (ref["id"],))
+            elif ref["kind"] == "character_canonical":
+                self.conn.execute("UPDATE characters SET canonical_asset_id=NULL WHERE id=?", (ref["id"],))
+            elif ref["kind"] == "character_reference":
+                row = self.conn.execute("SELECT reference_asset_ids_json FROM characters WHERE id=?", (ref["id"],)).fetchone()
+                ids = [x for x in loads(row["reference_asset_ids_json"], []) if x != asset_id]
+                self.conn.execute("UPDATE characters SET reference_asset_ids_json=? WHERE id=?", (dumps(ids), ref["id"]))
+            elif ref["kind"] == "group_logo":
+                self.conn.execute("UPDATE groups SET logo_asset_id=NULL WHERE id=?", (ref["id"],))
+            elif ref["kind"] == "board":
+                row = self.conn.execute("SELECT items_json FROM boards WHERE id=?", (ref["id"],)).fetchone()
+                items = [it for it in loads(row["items_json"], []) if asset_id not in dumps(it)]
+                self.conn.execute("UPDATE boards SET items_json=? WHERE id=?", (dumps(items), ref["id"]))
+                ref["items"] = [it for it in loads(row["items_json"], []) if asset_id in dumps(it)]
+            detached.append(ref)
+        moved: dict[str, str] = {}
+        dest = self.data_dir / "trash" / asset_id
+        for key in ("file_path", "thumb_path"):
+            rel = asset.get(key)
+            if not rel:
+                continue
+            src = self.data_dir / rel
+            if src.is_file():
+                dest.mkdir(parents=True, exist_ok=True)
+                target = dest / f"{key}{src.suffix}"
+                shutil.move(str(src), str(target))
+                moved[key] = target.relative_to(self.data_dir).as_posix()
+        row = self.conn.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+        self.conn.execute(
+            "INSERT OR REPLACE INTO asset_trash (id, project_id, kind, name, asset_json, files_json, detached_json, deleted_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (asset_id, asset["project_id"], asset["kind"], asset.get("name"), dumps(dict(row)), dumps(moved),
+             dumps(detached), now_iso()))
+        self.conn.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+        self.conn.commit()
+        return {"id": asset_id, "trashed": True, "detached": detached}
+
+    def restore_asset(self, asset_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM asset_trash WHERE id=?", (asset_id,)).fetchone()
+        if not row:
+            raise NotFound("trashed asset", asset_id)
+        original = loads(row["asset_json"], {})
+        for key, rel in loads(row["files_json"], {}).items():
+            src = self.data_dir / rel
+            back = original.get(key)
+            if src.is_file() and back:
+                (self.data_dir / back).parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(self.data_dir / back))
+        cols = list(original)
+        self.conn.execute(f"INSERT OR REPLACE INTO assets ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+                          [original[c] for c in cols])
+        for ref in loads(row["detached_json"], []):
+            kind, rid = ref.get("kind"), ref.get("id")
+            if kind == "project_cover":
+                self.conn.execute("UPDATE projects SET cover_asset_id=? WHERE id=? AND cover_asset_id IS NULL", (asset_id, rid))
+            elif kind == "character_canonical":
+                self.conn.execute("UPDATE characters SET canonical_asset_id=? WHERE id=? AND canonical_asset_id IS NULL",
+                                  (asset_id, rid))
+            elif kind == "character_reference":
+                r = self.conn.execute("SELECT reference_asset_ids_json FROM characters WHERE id=?", (rid,)).fetchone()
+                if r:
+                    ids = loads(r["reference_asset_ids_json"], [])
+                    if asset_id not in ids:
+                        self.conn.execute("UPDATE characters SET reference_asset_ids_json=? WHERE id=?",
+                                          (dumps(ids + [asset_id]), rid))
+            elif kind == "group_logo":
+                self.conn.execute("UPDATE groups SET logo_asset_id=? WHERE id=? AND logo_asset_id IS NULL", (asset_id, rid))
+            elif kind == "board":
+                r = self.conn.execute("SELECT items_json FROM boards WHERE id=?", (rid,)).fetchone()
+                if r:
+                    self.conn.execute("UPDATE boards SET items_json=? WHERE id=?",
+                                      (dumps(loads(r["items_json"], []) + list(ref.get("items") or [])), rid))
+        self.conn.execute("DELETE FROM asset_trash WHERE id=?", (asset_id,))
+        self.conn.commit()
+        shutil.rmtree(self.data_dir / "trash" / asset_id, ignore_errors=True)
+        return self.get_asset(asset_id)
+
+    def list_trash(self, project_id: Optional[str] = None, limit: int = 200) -> list[dict[str, Any]]:
+        sql = "SELECT id, project_id, kind, name, files_json, detached_json, deleted_at FROM asset_trash"
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE project_id=?"
+            params.append(project_id)
+        sql += " ORDER BY deleted_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 1000)))
+        out = []
+        for r in self.conn.execute(sql, params):
+            files = loads(r["files_json"], {})
+            out.append({"id": r["id"], "project_id": r["project_id"], "kind": r["kind"], "name": r["name"],
+                        "deleted_at": r["deleted_at"], "thumb": files.get("thumb_path") or files.get("file_path"),
+                        "detached": len(loads(r["detached_json"], []))})
+        return out
+
+    def trash_file(self, asset_id: str) -> Optional[Path]:
+        row = self.conn.execute("SELECT files_json FROM asset_trash WHERE id=?", (asset_id,)).fetchone()
+        if not row:
+            raise NotFound("trashed asset", asset_id)
+        files = loads(row["files_json"], {})
+        rel = files.get("thumb_path") or files.get("file_path")
+        return self.data_dir / rel if rel else None
+
+    def empty_trash(self, project_id: Optional[str] = None, ids: Optional[list[str]] = None) -> dict[str, Any]:
+        """Delete trashed assets for good (their files too)."""
+        rows = self.list_trash(project_id, limit=1000)
+        if ids is not None:
+            wanted = set(ids)
+            rows = [r for r in rows if r["id"] in wanted]
+        for r in rows:
+            shutil.rmtree(self.data_dir / "trash" / r["id"], ignore_errors=True)
+            self.conn.execute("DELETE FROM asset_trash WHERE id=?", (r["id"],))
+        self.conn.commit()
+        return {"purged": [r["id"] for r in rows]}
 
     def list_assets(
         self,

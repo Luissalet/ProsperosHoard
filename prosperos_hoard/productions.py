@@ -733,7 +733,7 @@ class Run:
         self.log("copied_character", character_id=char["id"], from_character_id=src["id"], canonical_asset_id=canonical)
         return char
 
-    def stage_song(self) -> None:
+    def stage_song(self) -> Optional[str]:
         song = self.spec.get("song")
         if not song:
             raise ProductionError("no_song", "the spec has no song; add spec.song (tags + lyrics) or an asset_id")
@@ -759,6 +759,14 @@ class Run:
         takes = partial.get("song_asset_ids") or []
         if not takes:
             raise ProductionError("no_song", "the song job produced no audio")
+        if (len(takes) > 1 and (self.state.get("settings") or {}).get("song_review")
+                and not (self.state.get("review") or {}).get("song_approved")):
+            # the person listens to the takes and picks one (continue with
+            # take=N) before any still is cut to it
+            partial["awaiting_take"] = True
+            self.log("song_takes_for_review", asset_ids=takes)
+            return "pause"
+        partial.pop("awaiting_take", None)
         chosen = takes[min(song["take"], len(takes)) - 1]
         asset = self.store.get_asset(chosen)
         self.state["done"]["song"] = {"song_asset_ids": takes, "song_asset_id": chosen, "duration_s": asset.get("duration_s"),

@@ -494,8 +494,38 @@ export interface ImageEngines {
   vram_mb: Record<string, number | null>;
 }
 
+export interface VideoShot {
+  prompt: string;
+  lead: boolean;
+  motion: "move" | "still";
+  motion_prompt: string;
+  section: string;
+}
+
+export interface VideoDraft {
+  title: string;
+  world_look: string;
+  world_negative: string;
+  song?: { tags: string; lyrics: string; bpm: number; key: string; language: string; duration: number };
+  shots: VideoShot[];
+  warnings?: string[];
+}
+
+export interface TrashItem {
+  id: string;
+  project_id: string;
+  kind: string;
+  name: string | null;
+  deleted_at: string;
+  thumb: string | null;
+  detached: number;
+}
+
 export interface GpuMemory {
-  gpus: { index: number; name: string; used_mb: number; free_mb: number; total_mb: number; services: string[]; others: number }[];
+  gpus: { index: number; name: string; used_mb: number; free_mb: number; total_mb: number; services: string[]; others: number;
+    util?: number | null; temp?: number | null; power?: number | null; power_limit?: number | null }[];
+  host?: { cpu_count?: number; cpu_pct?: number; ram?: { total_mb: number; used_mb: number; free_mb: number };
+    commit?: { total_mb: number; used_mb: number }; swap?: { total_mb: number; used_mb: number } };
   services: { id: string; label: string; kind: string; state: string; url: string; gpus: number[]; stoppable: boolean;
     started_by: string | null; held_mb: number | null; models: { name: string; vram_mb?: number }[] }[];
   vram_estimates_mb: Record<string, number>;
@@ -939,6 +969,11 @@ export const api = {
   freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
   services: () => request<ServicesStatus>("GET", "/api/backend/services"),
   memory: () => request<GpuMemory>("GET", "/api/backend/memory"),
+  deleteAssets: (ids: string[], force = false) =>
+    request<{ deleted: string[]; failed: { id: string; error: string; message: string }[] }>("POST", "/api/assets/delete", { ids, force }),
+  restoreAsset: (id: string) => request<Asset>("POST", `/api/assets/${id}/restore`),
+  trash: (project?: string) => request<{ items: TrashItem[] }>("GET", `/api/trash${project ? `?project=${encodeURIComponent(project)}` : ""}`),
+  emptyTrash: (project?: string, ids?: string[]) => request<{ purged: string[] }>("POST", "/api/trash/empty", { project: project || null, ids: ids || null }),
   startService: (id: string, gpu?: string) => request<ServiceStart>("POST", "/api/backend/services/start", { id, gpu: gpu || null }),
   stopService: (id: string) => request<ServiceStart>("POST", "/api/backend/services/stop", { id }),
   setLaunch: (patch: Record<string, unknown>) => request<ServicesStatus>("PUT", "/api/backend/launch", patch),
@@ -1001,7 +1036,8 @@ export const api = {
   // ------------------------------------------------------------- productions
   productions: () => request<{ items: ProductionSummary[] }>("GET", "/api/productions"),
   production: (slug: string) => request<ProductionState>("GET", `/api/productions/${slug}`),
-  continueProduction: (slug: string) => request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue`),
+  continueProduction: (slug: string, take?: number) =>
+    request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
     request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),
@@ -1009,6 +1045,8 @@ export const api = {
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
     request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
+  planVideo: (body: Record<string, unknown>) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/api/productions/plan", body),
+  videoFromPlan: (body: Record<string, unknown>) => request<{ production: ProductionView; job: Job }>("POST", "/api/productions/from-plan", body),
   createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;
                         settings?: Record<string, unknown>; count?: number; project?: string }) =>
     request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/api/shorts", body),

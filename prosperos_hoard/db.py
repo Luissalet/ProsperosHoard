@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -178,6 +178,19 @@ CREATE TABLE IF NOT EXISTS studio_voices (
 );
 CREATE INDEX IF NOT EXISTS idx_studio_voices_project ON studio_voices(project_id);
 
+-- Deleted assets: the row as it was and where its files went
+-- (data/trash/<id>/), so a delete can be undone until the trash is emptied.
+CREATE TABLE IF NOT EXISTS asset_trash (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT,
+    asset_json TEXT NOT NULL,
+    files_json TEXT NOT NULL DEFAULT '{}',
+    detached_json TEXT NOT NULL DEFAULT '[]',
+    deleted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asset_trash_project ON asset_trash(project_id);
 CREATE TABLE IF NOT EXISTS agent_calls (
     id TEXT PRIMARY KEY,
     tool TEXT NOT NULL,

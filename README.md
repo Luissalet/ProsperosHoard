@@ -211,6 +211,8 @@ loading anything of its own.
 | `studio_status` | Backends, checkpoints, free VRAM, queue | yes |
 | `studio_services` / `studio_service_start` / `studio_service_stop` | See, start and stop the local servers (ComfyUI, the render pool, Ollama) without Faustus | yes / no / no |
 | `studio_gpu_memory` | What each GPU holds and which server holds it, against what each image engine needs | yes |
+| `studio_video_plan` / `studio_video_from_plan` | Draft a music video from a concept (shot list, song tags and lyrics in the chosen language) and start it from the edited draft | no / no |
+| `studio_delete_assets` / `studio_trash` | Move bad results to the trash (refused while in use unless `force`); list, restore or empty the trash | no / no |
 | `studio_projects` / `studio_create_project` | List or create productions | yes / no |
 | `studio_cast` | List, create, update characters and groups | no (list is read-only) |
 | `studio_generate_image` | Queue txt2img/edit with @mentions, presets and an image engine choice | no |
@@ -270,7 +272,42 @@ ComfyUI, or from a small documented HTTP server you point
 `HOARD_MUSIC_URL` at. The **Backends** screen and `studio_status` always
 say what was found and why; nothing is loaded or unloaded behind your back.
 
+### A music video from the app
+
+**Productions > New music video**: a title, the lead from the cast (its
+canonical image keeps the look) or a new one, the concept, the song
+(composed - sound, lyrics language, length - or one you already have, with
+its lyrics), how many shots, which shots get Wan clips (every moving shot,
+only the lead's, or none for a cut of stills) and the formats. **Plan with
+the local model** writes the shot list, the shared look and, for a composed
+song, the tags and the lyrics - in the language chosen (an answer in the
+wrong language is asked again once, then flagged) - with thinking off and a
+long timeout, so a 27B split over four cards answers in a minute or two.
+Everything is editable before anything renders; **I'll write the shots**
+skips the model. **Create the production** runs the usual pipeline: the lead,
+the song takes (with more than one, it pauses so you listen and **Use this
+take**), Qwen-Image stills from the canonical image, the animatic to
+review, the Wan clips and the cut on the beat. In the viewer, **Animate**
+makes a Wan 2.2 clip (SVD only when Wan is not installed) and **Edit with the
+instruction** edits the picture with Qwen-Image keeping its subject.
+
 ### Running without Faustus
+
+The header carries the machine's vitals on every screen: GPU use, one tank
+per card (as wide as the card is big), VRAM, the hottest card's temperature,
+RAM and CPU. Click it for every card (use, temperature, power, VRAM and the
+servers and models on it), RAM with the committed memory (RAM + page file,
+what a model that does not fit ends up using) and CPU, with Free ComfyUI and
+Stop for the servers that may be stopped.
+
+Bad results go: **Select** in Generate and in the Library, then **Delete**
+(the Delete key in the Library too); **Delete** in the viewer (or the Delete
+key twice) moves to the next one. Deleted assets go to the trash (files under
+`data/trash/<id>/`) with ten seconds of **Undo**, and **Library > Trash**
+restores them or empties it for good. An asset used as a cover, a
+character's canonical or reference image, a group logo or on a board is
+refused with the reason and a **Detach and delete** (restoring puts it
+back); one used in a timeline is always refused.
 
 The **Generate** screen opens with the model header: the image engine
 (Automatic = Qwen-Image 2.1 when installed, FLUX.1, SDXL, SD 1.5, your

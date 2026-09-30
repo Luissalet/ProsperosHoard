@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Wand2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn } from "lucide-react";
 import { api, fileUrl, type Asset, type Board } from "../api";
 import { useT } from "../i18n";
-import { Stars, useApp, useAsync } from "./ui";
+import { ConfirmButton, Stars, useApp, useAsync } from "./ui";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
@@ -58,10 +58,34 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
       if (e.key === "ArrowRight" || e.key === "j" || e.key === "J") move(1);
       if (e.key === "ArrowLeft" || e.key === "k" || e.key === "K") move(-1);
       if ((e.key === "f" || e.key === "F") && asset) patch({ favourite: !asset.favourite });
+      if (e.key === "Delete" && asset) { if (delArmed) { setDelArmed(false); remove(); } else setDelArmed(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // Delete (key: Delete, twice): to the trash, then the next one in the list
+  const [delArmed, setDelArmed] = useState(false);
+  useEffect(() => { setDelArmed(false); }, [assetId]);
+  const remove = async (force = false) => {
+    if (!asset) return;
+    try {
+      const r = await api.deleteAssets([asset.id], force);
+      if (r.failed.length) {
+        const f = r.failed[0];
+        if (f.error === "asset_in_use" && !force && window.confirm(`${f.message}\n\n${t("deleteForce")}?`)) return remove(true);
+        if (f.error !== "asset_in_use") app.toast(f.message, "bad");
+        return;
+      }
+      app.toast(t("deleted", { n: 1 }), "ok");
+      app.bump();
+      const rest = list.filter((x) => x !== asset.id);
+      if (!rest.length) onClose();
+      else onNavigate(rest[Math.min(Math.max(0, idx), rest.length - 1)]);
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
 
   const run = async (label: string, fn: () => Promise<{ job: { id: string } }>) => {
     setBusy(true);
@@ -96,6 +120,8 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
             <button className="btn sm" onClick={() => setZoom(!zoom)}>{zoom ? <Minimize2 size={15} /> : <Maximize2 size={15} />} {zoom ? t("fit") : t("zoom")}</button>
           )}
           <a className="btn sm" href={`${fileUrl(asset.id)}?download=true`}><Download size={15} /> {t("download")}</a>
+          <ConfirmButton className="btn sm danger" onConfirm={() => remove()}><Trash2 size={15} /> {t("deleteAsset")}</ConfirmButton>
+          {delArmed && <span className="pill bad">{t("confirm")} (Supr / Del)</span>}
         </div>
         {list.length > 1 && <>
           <button className="btn icon lightbox-nav prev" onClick={() => move(-1)} aria-label="previous"><ChevronLeft size={18} /></button>
@@ -166,7 +192,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               <button className="btn sm" disabled={!fromComfy || busy} onClick={() => run(t("reuse"), () => api.edit(asset.id, { operation: "reuse" }))}><Repeat size={14} /> {t("reuse")}</button>
               <button className="btn sm" disabled={!fromComfy || busy} onClick={() => run(t("varySeed"), () => api.edit(asset.id, { operation: "vary", count: 2 }))}><Dices size={14} /> {t("varySeed")}</button>
               <button className="btn sm" disabled={busy || recipe?.template !== "sdxl_txt2img"} onClick={() => run(t("hires"), () => api.edit(asset.id, { operation: "hires" }))}><Sparkles size={14} /> {t("hires")}</button>
-              <button className="btn sm" disabled={busy} onClick={() => run(t("animate"), () => api.animate(asset.id, { frames: 14, fps: 7, motion: 127 }))}><Film size={14} /> {t("animate")}</button>
+              <button className="btn sm" disabled={busy} onClick={() => run(t("animate"), () => api.animate(asset.id, { engine: "auto", prompt: editPrompt ? `${editPrompt}, gentle natural motion` : null }))}><Film size={14} /> {t("animate")}</button>
               <button className="btn sm" disabled={busy} onClick={() => run(t("upscaleX2"), () => api.edit(asset.id, { operation: "upscale", scale: 2 }))}><ZoomIn size={14} /> {t("upscaleX2")}</button>
               <button className="btn sm" disabled={busy} onClick={() => run(t("upscaleX4"), () => api.edit(asset.id, { operation: "upscale", scale: 4 }))}><ZoomIn size={14} /> {t("upscaleX4")}</button>
               <button className="btn sm" disabled={busy} onClick={() => run(t("removeBackground"), () => api.edit(asset.id, { operation: "remove_background" }))}><Eraser size={14} /> {t("removeBackground")}</button>
@@ -178,10 +204,15 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               <label className="field grow">{t("strength")} <span className="mono">{strength.toFixed(2)}</span>
                 <input type="range" min={0.1} max={1} step={0.05} value={strength} onChange={(e) => setStrength(Number(e.target.value))} />
               </label>
-              <button className="btn sm primary" disabled={busy} onClick={() => run(t("img2img"), () => api.edit(asset.id, { operation: "img2img", prompt: editPrompt || null, strength }))}>
+              <button className="btn sm" disabled={busy} onClick={() => run(t("img2img"), () => api.edit(asset.id, { operation: "img2img", prompt: editPrompt || null, strength }))}>
                 <Wand2 size={14} /> {t("img2img")}
               </button>
             </div>
+            <button className="btn sm primary" disabled={busy || !editPrompt.trim()} title={t("editInstructionHint")}
+              onClick={() => run(t("editInstruction"), () => api.generate(asset.project_id, {
+                prompt: editPrompt, engine: "auto", reference_asset_id: asset.id, reference_asset_ids: [asset.id], count: 1 }))}>
+              <Sparkles size={14} /> {t("editInstruction")}
+            </button>
           </div>
         )}
 

@@ -354,3 +354,23 @@ def test_cancelling_a_production_cancels_its_sub_jobs(store, project):
     after = prod.load_state(store.data_dir, state["slug"])
     assert sorted(studio.cancelled) == ["job_slow_1", "job_slow_2"]  # both frame jobs it had queued
     assert after["status"] == "cancelled" and after["partial"]["frames"]["pending"] == {}
+
+
+def test_song_review_pauses_for_the_take_and_continue_picks_it(client):
+    c, app, _ = client
+    song = dict(tiny_spec()["song"], count=2)
+    r = c.post("/api/productions", json={"name": "Takes", "spec": tiny_spec(song=song),
+                                         "settings": {"song_review": True, "animatic_autocontinue": True}})
+    assert r.status_code == 200, r.text
+    slug = r.json()["production"]["slug"]
+    assert wait_job(c, r.json()["job"]["id"])["state"] == "done"
+    state = c.get(f"/api/productions/{slug}").json()
+    assert state["status"] == "awaiting_review" and state["stage"] == "song", state["status"]
+    takes = state["partial"]["song"]["song_asset_ids"]
+    assert len(takes) == 2 and "frames" not in state["done"]
+    assert c.post(f"/api/productions/{slug}/continue?take=5").status_code == 400
+    r = c.post(f"/api/productions/{slug}/continue?take=2")
+    assert r.status_code == 200, r.text
+    wait_job(c, r.json()["job"]["id"])
+    state = c.get(f"/api/productions/{slug}").json()
+    assert state["done"]["song"]["song_asset_id"] == takes[1] and state["spec"]["song"]["take"] == 2

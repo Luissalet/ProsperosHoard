@@ -25,6 +25,7 @@ import { ActivityView } from "./views/Activity";
 import { SettingsView } from "./views/Settings";
 import { VoiceView } from "./views/Voice";
 import { ProductionsView } from "./views/Productions";
+import { Vitals } from "./components/Vitals";
 
 const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "overview", key: "navOverview", icon: LayoutDashboard },
@@ -233,6 +234,7 @@ export default function App() {
                 <strong>{t(title)}</strong>
               </div>
               <div className="spacer" />
+              <Vitals />
               {demo && <span className="pill gold" title={t("demoHint")}>{t("demoBadge")}</span>}
               {active.length > 0 && (
                 <button className="btn sm" onClick={() => go("jobs")}>
