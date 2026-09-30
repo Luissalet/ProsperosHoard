@@ -53,7 +53,9 @@ def test_job_lifecycle(store):
 
 
 def test_requeue_running_jobs_on_boot(store):
-    job = store.create_job("generate_image", "gpu", {})
+    # Non-image jobs retain the legacy requeue contract. Running image jobs
+    # are covered separately by the uncertainty fence tests.
+    job = store.create_job("test_cpu", "cpu", {})
     store.update_job(job["id"], state="running")
     n = store.requeue_running_jobs()
     assert n == 1

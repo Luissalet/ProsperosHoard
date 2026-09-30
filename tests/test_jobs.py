@@ -52,8 +52,9 @@ def test_job_persistence_across_restart(store):
 
     # Simulate a fresh process boot against the same store/db.
     n_requeued = store.requeue_running_jobs()
-    assert n_requeued == 1
-    assert store.get_job(job["id"])["state"] == "queued"
+    assert n_requeued == 0
+    assert store.get_job(job["id"])["state"] == "failed"
+    assert "outcome_unknown" in store.get_job(job["id"])["message"]
 
     queue = JobQueue(store)
     seen = []
@@ -61,8 +62,8 @@ def test_job_persistence_across_restart(store):
     queue.start()
     try:
         final = queue.wait_for(job["id"], timeout_s=5.0)
-        assert final["state"] == "done"
-        assert seen == [job["id"]]
+        assert final["state"] == "failed"
+        assert seen == []
     finally:
         queue.stop()
 

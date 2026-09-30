@@ -704,6 +704,7 @@ class Store:
         d["params"] = loads(d.pop("params_json"), {})
         d["inputs"] = loads(d.pop("inputs_json"), {})
         d["outputs"] = loads(d.pop("outputs_json"), None)
+        d["comfy_submission"] = loads(d.pop("comfy_submission_json"), None)
         d["cancel_requested"] = bool(d.get("cancel_requested"))
         return d
 
@@ -748,12 +749,33 @@ class Store:
         self.conn.commit()
         return self.get_job(job_id)
 
+    def record_comfy_submission(self, job_id: str, receipt: dict[str, Any]) -> None:
+        """Commit before GPU submission; a failed commit must prevent the POST."""
+        self.get_job(job_id)
+        try:
+            self.conn.execute("UPDATE jobs SET comfy_submission_json=?, updated_at=? WHERE id=?",
+                              (dumps(receipt), now_iso(), job_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def requeue_running_jobs(self) -> int:
-        """On boot: any job left 'running' or 'waiting_gpu' after a restart goes back to queued."""
+        """Hold possibly submitted images; requeue only work safe to restart."""
+        ts = now_iso()
+        # Legacy running image jobs have no receipt: absence is not proof that
+        # their POST never happened. Keep the old state enum for UI compatibility.
+        self.conn.execute(
+            "UPDATE jobs SET state='failed', message='outcome_unknown: interrupted image job; "
+            "not resubmitted automatically', finished_at=?, updated_at=? "
+            "WHERE type IN ('generate_image','edit_image') AND "
+            "(state='running' OR (state IN ('queued','waiting_gpu') AND comfy_submission_json IS NOT NULL))",
+            (ts, ts),
+        )
         cur = self.conn.execute(
             "UPDATE jobs SET state='queued', progress=0.0, message='requeued after restart', cancel_requested=0, updated_at=? "
             "WHERE state IN ('running','waiting_gpu')",
-            (now_iso(),),
+            (ts,),
         )
         self.conn.commit()
         return cur.rowcount
