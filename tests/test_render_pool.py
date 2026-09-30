@@ -56,7 +56,12 @@ def test_two_servers_render_two_jobs_at_once(store, project, data_dir, fake_comf
     assert [f["state"] for f in finals] == ["done", "done"], finals
     # each server rendered one of them, and they overlapped
     assert len(main.prompts_seen) == 1 and len(extra.prompts_seen) == 1
-    assert elapsed < 3.8, elapsed
+    # the two renders overlapped on the servers' own clocks (wall time alone
+    # is at the mercy of a loaded machine)
+    (a_ready,), (b_ready,) = main._ready_at.values(), extra._ready_at.values()
+    a_start, b_start = a_ready - main.history_delay_s, b_ready - extra.history_delay_s
+    assert a_start < b_ready and b_start < a_ready, (a_start, a_ready, b_start, b_ready)
+    assert elapsed < 30, elapsed
     for f in finals:
         asset = store.get_asset(f["outputs"]["asset_ids"][0])
         assert (store.data_dir / asset["file_path"]).is_file()
