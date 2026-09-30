@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
@@ -411,7 +412,14 @@ def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
         )
 
 
-def _comfy(backend: Backend):
+def _comfy(backend: Backend, autostart: Optional[bool] = None):
+    """The ComfyUI client, or `Unavailable` with the reason. When ComfyUI is
+    a local server that is off, it is started first (standalone, no Faustus
+    needed) on a GPU worker thread, or here when `autostart=True` (a request
+    that is about to queue a job); status and listing calls never start it."""
+    wants = getattr(backend, "wants_comfy_autostart", None)
+    if wants is not None and wants(autostart):
+        backend.ensure_comfy()
     try:
         comfy = backend.comfy()
     except Exception as exc:  # noqa: BLE001 - resolver failures become one readable reason
@@ -527,12 +535,16 @@ def object_info_cache_path(data_dir: Path) -> Path:
     return Path(data_dir) / "comfy" / "object_info.json"
 
 
-def _object_info(backend: Backend) -> dict[str, Any]:
+def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str, Any]:
     """The live `/object_info`, also saved to `data/comfy/object_info.json`
     whenever it changes, so UI-format workflows can still be converted while
     ComfyUI is off (see `cached_object_info`)."""
-    comfy = _comfy(backend)
-    info = backend.run_async(comfy.object_info())
+    comfy = _comfy(backend, autostart)
+    try:
+        info = backend.run_async(comfy.object_info())
+    except httpx.TransportError as exc:
+        raise Unavailable("image", [f"ComfyUI is not answering ({type(exc).__name__}): start it in Backends > "
+                                    "Local services (or studio_service_start), or turn on autostart"]) from exc
     try:
         if info:
             blob = json.dumps(info, sort_keys=True)

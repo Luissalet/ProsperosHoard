@@ -84,7 +84,8 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_productions", "studio_production", "studio_production_create", "studio_production_continue",
                         "studio_production_shots", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
                         "studio_recipe_run", "studio_qa_run", "studio_qa_report", "studio_animatic",
-                        "studio_short_create", "studio_production_script", "studio_stock_search"}
+                        "studio_short_create", "studio_production_script", "studio_stock_search",
+                        "studio_services", "studio_service_start", "studio_service_stop"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
@@ -93,7 +94,7 @@ async def test_mcp_protocol_end_to_end(running_app):
             for name in ("studio_productions", "studio_production", "studio_recipes_list", "studio_recipe_get", "studio_qa_report"):
                 assert by_name[name].annotations.readOnlyHint is True, name
             for t in tools.tools:
-                if t.name.startswith(("studio_production", "studio_recipe", "studio_qa", "studio_animatic")):
+                if t.name.startswith(("studio_production", "studio_recipe", "studio_qa", "studio_animatic", "studio_service")):
                     assert len((t.description or "").splitlines()[0]) <= 110, t.name
             assert by_name["studio_generate_image"].annotations.readOnlyHint is False
             assert by_name["studio_voice"].annotations.openWorldHint is True  # first use downloads a voice

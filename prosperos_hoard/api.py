@@ -120,6 +120,30 @@ class BackendOverrides(BaseModel):
     render_pool: Optional[list[str]] = None  # extra ComfyUI servers, one per GPU; applied on restart
 
 
+class ServiceBody(BaseModel):
+    id: str  # "comfyui" (the main one), "comfyui@8189", "render_pool", "ollama", "cmd:<id>"
+    gpu: Optional[str] = None  # "auto" or a GPU index, ComfyUI only
+    wait_s: float = 0.0
+
+
+class LaunchBody(BaseModel):
+    comfyui_dir: Optional[str] = None
+    comfyui_python: Optional[str] = None
+    comfyui_gpu: Optional[str] = None  # "auto" or a GPU index
+    comfyui_args: Optional[list[str]] = None
+    ollama_exe: Optional[str] = None
+    autostart_comfy: Optional[bool] = None
+
+
+def _gpu_arg(value: Optional[str]) -> Any:
+    if value is None or str(value).strip() in ("", "auto"):
+        return None if value is None else "auto"
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        raise ValueError(f"gpu must be \"auto\" or a GPU index, got {value!r}") from None
+
+
 class CreateProjectBody(BaseModel):
     name: str
     brief: Optional[str] = None
@@ -637,7 +661,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
         proj = store.get_project(project)
-        object_info = engine._object_info(backend)
+        object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
         engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         available_loras = comfy_driver.lora_choices(object_info) if object_info else None
@@ -856,6 +880,26 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/backend/comfy/free")
     def free_comfy():
         return backend.free_comfy_memory()
+
+    @app.get("/api/backend/services")
+    def get_services():
+        return backend.services()
+
+    @app.post("/api/backend/services/start")
+    def start_service(body: ServiceBody):
+        return backend.start_service(body.id, gpu=_gpu_arg(body.gpu), wait_s=min(max(body.wait_s, 0.0), MAX_WAIT_S))
+
+    @app.post("/api/backend/services/stop")
+    def stop_service(body: ServiceBody):
+        return backend.stop_service(body.id)
+
+    @app.put("/api/backend/launch")
+    def set_launch(body: LaunchBody):
+        gpu = body.comfyui_gpu
+        if gpu is not None and gpu.strip() not in ("", "auto"):
+            gpu = _gpu_arg(gpu)
+        return backend.set_launch(body.comfyui_dir, body.comfyui_python, gpu, body.comfyui_args, body.ollama_exe,
+                                  body.autostart_comfy)
 
     @app.get("/api/agent-calls")
     def agent_calls(limit: int = 50):
@@ -2456,6 +2500,31 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         except Exception:  # ComfyUI unreachable and nothing cached yet - status still renders
             return "sdxl"
 
+    @app.get("/api/agent/studio_services")
+    def agent_services():
+        def run():
+            svc = backend.services()
+            return {
+                "items": [{k: v for k, v in {"id": i["id"], "label": i["label"], "state": i["state"], "role": i.get("role"),
+                                             "capabilities": i["capabilities"], "url": i["url"], "startable": i["startable"],
+                                             "stoppable": i["stoppable"], "started_by": i["started_by"], "gpu": i["gpu"],
+                                             "problem": i["problem"]}.items() if v not in (None, [], "")}
+                          for i in svc["items"]],
+                "gpus": [{"index": g["index"], "name": g["name"], "free_mb": g["free_mb"]} for g in svc["gpus"]],
+                "autostart_comfy": svc["autostart_comfy"],
+            }
+        return agent("studio_services", "", run)
+
+    @app.post("/api/agent/studio_service_start")
+    def agent_service_start(body: ServiceBody):
+        wait_s = min(max(body.wait_s, 0.0), MAX_WAIT_S)
+        return agent("studio_service_start", body.id,
+                     lambda: backend.start_service(body.id, gpu=_gpu_arg(body.gpu), wait_s=wait_s))
+
+    @app.post("/api/agent/studio_service_stop")
+    def agent_service_stop(body: ServiceBody):
+        return agent("studio_service_stop", body.id, lambda: backend.stop_service(body.id))
+
     @app.get("/api/agent/studio_status")
     def agent_status():
         def run():
@@ -2468,6 +2537,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                          "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
                                  for cap, r in link.items()},
                 "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
+                "services": [{"id": i["id"], "state": i["state"], "startable": i["startable"]}
+                             for i in status["services"]["items"]],
+                "autostart_comfy": status["services"]["autostart_comfy"],
                 "image_engine": {"available": list(engine.IMAGE_ENGINES), "auto_resolves_to": _auto_image_engine()},
                 "ffmpeg": status["ffmpeg"]["found"],
                 "piper_tts": status["piper"]["installed"],

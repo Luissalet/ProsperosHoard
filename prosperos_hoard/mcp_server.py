@@ -57,7 +57,7 @@ mcp = FastMCP(
 
 UNAVAILABLE = (
     "prosperos-hoard_unavailable: Prospero's Hoard is not running. "
-    "Start it from Faustus (Apps) or with 'Iniciar Prospero's Hoard.cmd', then retry."
+    "Start it from Faustus (Apps), from Hoard Hub or with 'Iniciar Prospero's Hoard.cmd', then retry."
 )
 
 
@@ -154,6 +154,44 @@ def studio_status() -> dict[str, Any]:
     Keywords: status, backend, is it running, gpu, comfyui, what can you do, estado, esta funcionando, gpu libre, que puedes hacer
     """
     return _call("GET", "/api/agent/studio_status")
+
+
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def studio_services() -> dict[str, Any]:
+    """Local backend servers (ComfyUI, render pool, Ollama, configured ones): running, down, startable.
+
+    Prospero does not need Faustus: when a server is down and startable, studio_service_start starts
+    it on this machine. role "main" is the ComfyUI jobs use; "render_pool" are the extra ones. gpus
+    lists free memory per card. autostart_comfy=true means a queued job starts ComfyUI by itself.
+
+    Keywords: services, start comfyui, backend down, not reachable, servidores, arrancar comfy, backend caido
+    """
+    return _call("GET", "/api/agent/studio_services")
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_service_start(id: str = "comfyui", gpu: Optional[str] = None, wait_s: float = 120) -> dict[str, Any]:
+    """Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.
+
+    id: "comfyui" (the main one), "comfyui@<port>", "render_pool" (main + every pool server, one GPU
+    each), "ollama" or "cmd:<id>" from studio_services. gpu: "auto" (most free memory, default) or a
+    GPU index, ComfyUI only. Already running = ok with already=true. Starting ComfyUI loads no model:
+    memory is used when a job runs.
+
+    Keywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend
+    """
+    return _call("POST", "/api/agent/studio_service_start", json={"id": id, "gpu": gpu, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_service_stop(id: str = "comfyui") -> dict[str, Any]:
+    """Stop a backend server the Hoard family started (a running job on it fails). Others are refused.
+
+    id as in studio_services. A server started by hand or by Faustus is left alone (error says so).
+
+    Keywords: stop comfyui, shut down backend, free gpu, parar comfyui, apagar servidor, liberar gpu
+    """
+    return _call("POST", "/api/agent/studio_service_stop", json={"id": id})
 
 
 @tool(_ro(readOnlyHint=True))

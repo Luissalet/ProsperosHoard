@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from . import procutil
 from .hoard_link import Link, LinkConfig, Unavailable
+from .hoard_link.launch import Launcher, _port_open, comfy_port_from_url, list_gpus
 
 # SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
 # model notes; editable at runtime via data/backend.json -> "vram_estimates_mb".
@@ -208,6 +209,10 @@ class Backend:
         self.config_path = self.data_dir / "backend.json"
         self.demo = demo
         self.link = self._build_link()
+        # starts ComfyUI/Ollama/configured servers itself when Faustus is not
+        # there (shared with the family: ~/.hoard/backends.json)
+        self.launcher = Launcher(app="prospero")
+        self._autostart_lock = threading.Lock()
         # render pool: which ComfyUI this worker thread talks to (None = the
         # main one Hoard Link resolves), one cached client per extra server
         self._bound = threading.local()
@@ -272,8 +277,11 @@ class Backend:
         return out[:7]
 
     def bind_comfy(self, url: Optional[str]) -> None:
-        """Pin the calling worker thread to one ComfyUI (None = the main one)."""
+        """Pin the calling worker thread to one ComfyUI (None = the main one).
+        Only GPU workers call this, so it also marks the thread as one that
+        may start ComfyUI when a job needs it (see `ensure_comfy`)."""
         self._bound.url = url.rstrip("/") if url else None
+        self._bound.worker = True
 
     def _pool_client(self, url: str):
         with self._pool_lock:
@@ -578,6 +586,183 @@ class Backend:
         self.run_async(comfy.free(unload_models=True, free_memory=True))
         return {"ok": True, "message": "asked ComfyUI to unload its models and free memory"}
 
+
+    # -- local services (standalone: no Faustus needed) -----------------
+    # ComfyUI (the main one and the render pool), Ollama and any server
+    # configured in ~/.hoard/backends.json can be started from here. The
+    # launcher is shared with the rest of the Hoard family, so a ComfyUI
+    # the Hub started shows up (and can be stopped) here, and the other way
+    # round. Servers started elsewhere are shown but never stopped.
+    def launch_settings(self) -> dict[str, Any]:
+        raw = self._raw_config().get("launch") or {}
+        return raw if isinstance(raw, dict) else {}
+
+    def autostart_comfy(self) -> bool:
+        return not self.demo and bool(self.launch_settings().get("autostart_comfy", True))
+
+    def main_comfy_port(self) -> Optional[int]:
+        """Port of the main ComfyUI when it is a local one (None = remote)."""
+        return comfy_port_from_url((self._raw_config().get("comfy") or {}).get("url"))
+
+    def comfy_ports(self) -> list[int]:
+        ports: list[int] = []
+        main = self.main_comfy_port()
+        if main is not None:
+            ports.append(main)
+        for url in self.render_pool():
+            p = comfy_port_from_url(url)
+            if p is not None and p not in ports:
+                ports.append(p)
+        return ports
+
+    def _service_id(self, service_id: str) -> str:
+        sid = str(service_id or "").strip()
+        if sid in ("comfyui", "comfy"):
+            port = self.main_comfy_port()
+            if port is None:
+                raise ValueError("the main ComfyUI is a remote server (Backends > ComfyUI URL): start it where it runs")
+            return f"comfyui@{port}"
+        return sid
+
+    def services(self) -> dict[str, Any]:
+        ports = self.comfy_ports()
+        main = self.main_comfy_port()
+        pool = [p for p in ports if p != main]
+        items = self.launcher.statuses(ports)
+        for item in items:
+            if item["kind"] == "comfyui":
+                port = int(item["id"].split("@", 1)[1])
+                item["role"] = "main" if port == main else ("render_pool" if port in pool else "other")
+        folder, python, problem = self.launcher.comfy_install()
+        cfg = self.launcher.config()
+        return {
+            "items": items,
+            "gpus": list_gpus(),
+            "demo": self.demo,
+            "autostart_comfy": self.autostart_comfy(),
+            "main_comfy": f"comfyui@{main}" if main is not None else None,
+            "comfyui": {"dir": str(folder) if folder else None, "python": str(python) if python else None,
+                        "problem": problem, "gpu": (cfg.get("comfyui") or {}).get("gpu", "auto"),
+                        "args": (cfg.get("comfyui") or {}).get("args") or []},
+            "ollama": {"exe": self.launcher.ollama_exe()},
+            "config_path": str(self.launcher.config_path),
+            "logs_dir": str(self.launcher.logs_dir),
+        }
+
+    def _after_service_change(self) -> None:
+        self._pool_health.clear()
+        self.reload()
+
+    def start_service(self, service_id: str, gpu: Any = None, wait_s: float = 0.0) -> dict[str, Any]:
+        if self.demo:
+            raise ValueError("demo mode has no real backends to start")
+        sid = self._service_id(service_id)
+        if sid == "render_pool":
+            return self.start_render_pool(gpu_auto=True, wait_s=wait_s)
+        res = self.launcher.start(sid, gpu=gpu, wait_s=wait_s)
+        if res.get("ready") or res.get("already"):
+            self._after_service_change()
+        return res
+
+    def start_render_pool(self, gpu_auto: bool = True, wait_s: float = 0.0) -> dict[str, Any]:
+        """Start the main ComfyUI and every render-pool server, one GPU each
+        (the launcher skips GPUs another ComfyUI already uses)."""
+        results = []
+        for port in self.comfy_ports():
+            results.append(self.launcher.start(f"comfyui@{port}", gpu="auto" if gpu_auto else None, wait_s=0))
+        if wait_s > 0:
+            deadline = time.monotonic() + wait_s
+            for r in results:
+                if r.get("ok") and not r.get("already"):
+                    r["ready"] = self.launcher.wait_ready(r["service"], max(1.0, deadline - time.monotonic()))
+        self._after_service_change()
+        return {"ok": all(r.get("ok") for r in results), "results": results}
+
+    def stop_service(self, service_id: str) -> dict[str, Any]:
+        sid = self._service_id(service_id)
+        res = self.launcher.stop(sid)
+        self._after_service_change()
+        return res
+
+    def set_launch(self, comfyui_dir: Optional[str] = None, comfyui_python: Optional[str] = None,
+                   comfyui_gpu: Any = None, comfyui_args: Optional[list[str]] = None,
+                   ollama_exe: Optional[str] = None, autostart_comfy: Optional[bool] = None) -> dict[str, Any]:
+        """Where ComfyUI/Ollama live (written to the family-wide
+        ~/.hoard/backends.json) and Prospero's own autostart switch.
+        "" clears a path. Only a real ComfyUI folder, a Python interpreter
+        and an ollama executable are accepted."""
+        comfy: dict[str, Any] = {}
+        if comfyui_dir is not None:
+            if comfyui_dir.strip():
+                d = Path(comfyui_dir.strip()).expanduser()
+                if not (d / "main.py").is_file():
+                    raise ValueError(f"{d} is not a ComfyUI folder (no main.py)")
+                comfy["dir"] = str(d)
+            else:
+                comfy["dir"] = None
+        if comfyui_python is not None:
+            if comfyui_python.strip():
+                py = Path(comfyui_python.strip()).expanduser()
+                if not py.is_file() or not py.name.lower().startswith("python"):
+                    raise ValueError(f"{py} is not a Python interpreter")
+                comfy["python"] = str(py)
+            else:
+                comfy["python"] = None
+        if comfyui_gpu is not None:
+            comfy["gpu"] = comfyui_gpu if comfyui_gpu != "" else None
+        if comfyui_args is not None:
+            comfy["args"] = [str(a) for a in comfyui_args if str(a).strip()] or None
+        patch: dict[str, Any] = {}
+        if comfy:
+            patch["comfyui"] = comfy
+        if ollama_exe is not None:
+            if ollama_exe.strip():
+                exe = Path(ollama_exe.strip()).expanduser()
+                if not exe.is_file() or not exe.name.lower().startswith("ollama"):
+                    raise ValueError(f"{exe} is not an ollama executable")
+                patch["ollama"] = {"exe": str(exe)}
+            else:
+                patch["ollama"] = {"exe": None}
+        if patch:
+            self.launcher.set_config(patch)
+        if autostart_comfy is not None:
+            raw = self._raw_config()
+            raw.setdefault("launch", {})["autostart_comfy"] = bool(autostart_comfy)
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        return self.services()
+
+    def wants_comfy_autostart(self, explicit: Optional[bool] = None) -> bool:
+        """Should the caller start the main ComfyUI before using it? Only when
+        autostart is on, the caller may (`explicit`, else: a GPU worker
+        thread), it is a local server and its port is closed right now."""
+        if not self.autostart_comfy():
+            return False
+        allowed = explicit if explicit is not None else bool(getattr(self._bound, "worker", False))
+        if not allowed or getattr(self._bound, "url", None):
+            return False
+        port = self.main_comfy_port()
+        return port is not None and not _port_open(f"http://127.0.0.1:{port}")
+
+    def ensure_comfy(self, timeout_s: float = 300.0) -> bool:
+        """Start the main ComfyUI (or this worker's pool server) and wait
+        until it answers. One worker at a time; the others find it running."""
+        target = getattr(self._bound, "url", None)
+        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        if port is None:
+            return False
+        with self._autostart_lock:
+            res = self.launcher.start(f"comfyui@{port}", wait_s=timeout_s)
+        ok = bool(res.get("ok") and (res.get("ready") or res.get("state") == "running"))
+        if ok:
+            self._after_service_change()
+        else:
+            import logging
+
+            logging.getLogger(__name__).warning("could not start ComfyUI on port %s: %s", port,
+                                                res.get("error") or res.get("detail"))
+        return ok
+
     # -- status ---------------------------------------------------------
     def status(self) -> dict[str, Any]:
         link_status = self.link.sync.status()
@@ -636,6 +821,7 @@ class Backend:
                 "import_roots": [str(p) for p in self.import_roots()],
             },
             "token_set": self.token_set(),
+            "services": self.services(),
         }
 
 
