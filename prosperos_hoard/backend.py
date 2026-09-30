@@ -25,6 +25,7 @@ from .hoard_link import Link, LinkConfig, Unavailable
 # Flux and Kontext fp8: ~13 GB; Wan 5B at 1280x704 (lower at 960x544): ~12 GB;
 # ACE-Step 1.5 turbo: ~8 GB; Qwen-Image 2.1 int8: ~7.3 GB diffusion + 9.4 GB
 # text encoder loaded one after the other, peak ~10-12 GB at 1 MP (more at 2K).
+# Real-ESRGAN x4 (tiled) ~2.5 GB; BiRefNet matting ~3.5 GB.
 DEFAULT_VRAM_ESTIMATES_MB = {
     "sdxl": 7000,
     "sd15": 3500,
@@ -34,6 +35,8 @@ DEFAULT_VRAM_ESTIMATES_MB = {
     "wan": 12000,
     "ace": 8000,
     "qwen21": 12000,
+    "esrgan": 2500,
+    "birefnet": 3500,
 }
 
 
@@ -433,6 +436,12 @@ class Backend:
     def vram_estimates_mb(self) -> dict[str, int]:
         raw = self._raw_config()
         return {**DEFAULT_VRAM_ESTIMATES_MB, **(raw.get("vram_estimates_mb") or {})}
+
+    def bg_removal_model(self) -> str:
+        """The background-removal model file (`backend.json -> bg_removal_model`),
+        `birefnet.safetensors` unless the config names another."""
+        name = self._raw_config().get("bg_removal_model")
+        return name.strip() if isinstance(name, str) and name.strip() else "birefnet.safetensors"
 
     def import_roots(self) -> list[Path]:
         """Folders `studio_import` may read from: the user's home folder,
