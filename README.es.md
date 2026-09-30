@@ -62,7 +62,7 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Área | Disponible ahora | Límite |
 | --- | --- | --- |
 | Proyectos y reparto | Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), grupos ordenados, menciones `@Nombre` que reconocen nombres de varias palabras y avisan de los desconocidos, 6 estilos predefinidos | Un único usuario local; los nombres no se pueden repetir en un proyecto (son la mención) |
-| Generación (ComfyUI) | Qwen-Image 2.1 (int8) txt2img y edición multi-referencia (1 a 10 referencias, hasta 2K nativo), SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix»), SD 1.5 txt2img, SVD imagen a vídeo, FLUX.1 schnell txt2img, FLUX.1 Kontext (edición guiada por referencia), Wan 2.2 TI2V imagen a vídeo, todo como plantillas en formato API, cada una con sus propios valores de sampler y tamaño; motor de imagen `auto \| qwen21 \| flux \| sdxl` por proyecto y por llamada («auto» usa Qwen-Image 2.1 si está instalado, si no Flux, si no SDXL, e indica siempre cuál usó); el prompt entero se comprueba contra `/object_info` antes de encolarlo (nodos, cada archivo de modelo, samplers, opciones, rangos), un archivo de modelo que falta se reporta como «descárgalo», nunca como un fallo, con las opciones instaladas en el error; importador de flujos en formato de interfaz **o** API cuyo conversor coincide entrada a entrada con la exportación del propio frontend de ComfyUI 0.37 en las plantillas oficiales (subgrafos y widgets promovidos, combos dinámicos, sockets autogrow, `PrimitiveNode`/`Reroute`, bypass/mute), con mapa de parámetros editable y una copia de la lista de nodos para cuando ComfyUI está apagado; `consistent=true` mantiene el diseño exacto de un `@Personaje` vía una plantilla de edición (Qwen-Image 2.1 o Kontext, según el motor) y su referencia canónica, recortada a una pose de la hoja de referencia | Prospero no aloja ningún modelo; Kontext admite una sola referencia (Qwen-Image 2.1 hasta 10), Wan solo imagen a vídeo |
+| Generación (ComfyUI) | Qwen-Image 2.1 (int8) txt2img y edición multi-referencia (1 a 10 referencias, hasta 2K nativo), SDXL txt2img, img2img, inpaint y ampliación en dos pasadas («hires fix»), ampliación con modelo (x2 o x4, familia ESRGAN) y eliminación de fondo a PNG transparente (BiRefNet) sobre cualquier imagen, SD 1.5 txt2img, SVD imagen a vídeo, FLUX.1 schnell txt2img, FLUX.1 Kontext (edición guiada por referencia), Wan 2.2 TI2V imagen a vídeo, todo como plantillas en formato API, cada una con sus propios valores de sampler y tamaño; motor de imagen `auto \| qwen21 \| flux \| sdxl` por proyecto y por llamada («auto» usa Qwen-Image 2.1 si está instalado, si no Flux, si no SDXL, e indica siempre cuál usó); el prompt entero se comprueba contra `/object_info` antes de encolarlo (nodos, cada archivo de modelo, samplers, opciones, rangos), un archivo de modelo que falta se reporta como «descárgalo», nunca como un fallo, con las opciones instaladas en el error; importador de flujos en formato de interfaz **o** API cuyo conversor coincide entrada a entrada con la exportación del propio frontend de ComfyUI 0.37 en las plantillas oficiales (subgrafos y widgets promovidos, combos dinámicos, sockets autogrow, `PrimitiveNode`/`Reroute`, bypass/mute), con mapa de parámetros editable y una copia de la lista de nodos para cuando ComfyUI está apagado; `consistent=true` mantiene el diseño exacto de un `@Personaje` vía una plantilla de edición (Qwen-Image 2.1 o Kontext, según el motor) y su referencia canónica, recortada a una pose de la hoja de referencia | Prospero no aloja ningún modelo; Kontext admite una sola referencia (Qwen-Image 2.1 hasta 10), Wan solo imagen a vídeo; ampliar necesita `RealESRGAN_x4plus.safetensors` y quitar el fondo necesita `birefnet.safetensors` en ComfyUI (ver Modelos) |
 | Uso compartido de la GPU | VRAM estimada por familia de flujo (editable), comparada con la tarjeta en la que corre de verdad ComfyUI (su propio `system_stats`, donde los modelos que tiene en caché cuentan como libres; nvidia-smi si no responde); si falta memoria, el trabajo espera en `waiting_gpu` con el motivo, reintentando cada 15 s hasta 30 min; se puede cancelar en cualquier momento; un grupo de render (`render_pool` en `backend.json`, un ComfyUI por GPU) reparte los trabajos en cola entre todas las tarjetas a la vez | Nunca se descarga nada salvo que pulses «Liberar memoria de ComfyUI» |
 | Linaje | Cada recurso generado guarda plantilla, hash de la plantilla, checkpoint, todos los parámetros y la semilla, entradas y tiempos; «Repetir receta» reproduce una imagen byte a byte en el mismo backend (probado), «Variar semilla» la repite con semillas nuevas | La reproducción solo está garantizada con el mismo backend, modelos y versión de ComfyUI |
 | Diseño | Renderizador con Pillow, sin navegador: photocard anverso y reverso, portada de álbum (4 composiciones), cartel teaser, tarjeta de letra, contraportada con lista de canciones, miniatura, con una variante «night» de terror/thriller para portada, cartel, tarjeta de letra y contraportada; degradados, lámina holográfica, modos de fusión, viñeta, espaciado de letras, sombras, texto que se encoge para caber y columnas para la lista de canciones; sets de photocards de un grupo entero o de un solista en varios looks, con hoja de contactos; modo imprenta con 3 mm de sangrado a 300 ppp; 6 familias tipográficas incluidas | La capa QR dibuja un recuadro de relleno (no hay librería de QR fijada) |
@@ -94,6 +94,8 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | SVD | `svd_xt.safetensors` | ~10 GB | Imagen a vídeo corto |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Imagen a vídeo, 1280x704 nativo |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Composición de canciones con voz |
+| Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2,5 GB | Ampliar x2 o x4 cualquier imagen |
+| BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3,5 GB | Quitar el fondo, PNG con transparencia |
 
 El parámetro `engine` de `studio_generate_image` (y el ajuste `image_engine`
 de cada proyecto) elige entre las familias de imagen: `auto` (por defecto)
@@ -103,6 +105,40 @@ usó realmente. Un `template` explícito siempre gana a `engine` cuando se
 dan los dos. Cómo el conversor pasa la exportación en formato de interfaz
 de cada plantilla al formato API de arriba, y cómo se reporta un archivo de
 modelo que falta: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Ampliar y quitar el fondo
+
+Dos ediciones de `studio_edit_image` (y los botones del visor **Ampliar ×2**,
+**Ampliar ×4** y **Quitar fondo**) que usan solo nodos del núcleo de ComfyUI,
+sin prompt, sobre cualquier imagen:
+
+- `upscale` amplía con un modelo de la familia ESRGAN (plantilla
+  `esrgan_upscale`). El modelo trabaja a 4x y el resultado se reduce al
+  `scale` pedido, 2 o 4 (por defecto 2). Cualquier otro valor se rechaza
+  (`bad_parameter`), igual que un resultado de más de 8192 px por lado
+  (`too_large`; el mensaje da el tamaño de origen y el máximo). `model` puede
+  nombrar otro archivo instalado en `upscale_models`; por defecto
+  `RealESRGAN_x4plus.safetensors`.
+- `remove_background` recorta el sujeto con BiRefNet (plantilla
+  `birefnet_remove_background`, el mismo grafo que el blueprint «Remove
+  Background (BiRefNet)» del propio ComfyUI) e importa un PNG que conserva el
+  canal alfa. El archivo es `birefnet.safetensors`, salvo que `backend.json`
+  indique otro en `"bg_removal_model"`.
+
+Las dos producen siempre una imagen y guardan el origen en la receta
+(`edit_image:upscale`, `edit_image:remove_background`). Los modelos no vienen
+incluidos; colócalos aquí (carpetas relativas a tu instalación de ComfyUI):
+
+| Archivo | Carpeta | Origen |
+| --- | --- | --- |
+| `RealESRGAN_x4plus.safetensors` | `ComfyUI/models/upscale_models/` | https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged |
+| `birefnet.safetensors` | `ComfyUI/models/background_removal/` | https://huggingface.co/Comfy-Org/BiRefNet |
+
+Si falta un archivo, el trabajo falla con `model_missing`, indicando la carpeta
+y los archivos que ComfyUI sí lista. Ambos nodos requieren un ComfyUI reciente
+(el cargador de eliminación de fondo no existe en versiones antiguas); una
+versión anterior avisa de los nodos que faltan. Las estimaciones de VRAM son
+2500 MB (`esrgan`) y 3500 MB (`birefnet`), editables como las demás.
 
 ## Inicio rápido
 
@@ -180,7 +216,7 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_projects` / `studio_create_project` | Listar o crear producciones | sí / no |
 | `studio_cast` | Listar, crear y editar personajes y grupos | no (listar sí lo es) |
 | `studio_generate_image` | Encolar txt2img/edición con @menciones, estilos y motor de imagen | no |
-| `studio_edit_image` | img2img, inpaint, ampliar, repetir receta, variar semilla | no |
+| `studio_edit_image` | img2img, inpaint, hires fix, ampliar con modelo x2/x4, quitar fondo, repetir receta, variar semilla | no |
 | `studio_animate` | Imagen a vídeo corto (SVD) | no |
 | `studio_compose` | Componer una canción con voz (ACE-Step) | no |
 | `studio_voice` | Frase hablada con la voz de un personaje | no |

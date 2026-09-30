@@ -60,7 +60,7 @@ with ids and pictures.
 | Area | Available now | Boundary |
 | --- | --- | --- |
 | Projects and cast | Projects, characters (look prompt, negative, palette, canonical reference, voice), ordered groups, `@Name` mentions that match multi-word names and report unknown ones, 6 style presets | Single local user; names must be unique per project (they are the mention) |
-| Generation (ComfyUI) | Qwen-Image 2.1 (int8) txt2img and a multi-reference edit (1-10 references, up to native 2K), SDXL txt2img, img2img, inpaint and a two-pass hires fix, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; each with its own sampler/size defaults; an `auto \| qwen21 \| flux \| sdxl` image engine choice per project and per call ("auto" reaches for Qwen-Image 2.1 when it is installed, else Flux, else SDXL, and always says which one it used); the whole prompt checked against `/object_info` before queueing (nodes, every model file, samplers, combo choices, ranges), a missing model file read as "download it" rather than a crash, with the installed options in the error; a UI-format **or** API-format workflow importer whose converter matches the real ComfyUI 0.37 frontend's export input for input on the official templates (subgraphs and promoted widgets, dynamic combos, autogrow sockets, `PrimitiveNode`/`Reroute`, bypass/mute), with an editable parameter map and a cached node list for when ComfyUI is off; `consistent=true` keeps a `@Character`'s exact design via an edit template (Qwen-Image 2.1 or Kontext, per engine) and their canonical reference, cropped to one pose of a turnaround sheet | Prospero hosts no model; Kontext is single-reference (Qwen-Image 2.1 takes up to 10), Wan is image-to-video only |
+| Generation (ComfyUI) | Qwen-Image 2.1 (int8) txt2img and a multi-reference edit (1-10 references, up to native 2K), SDXL txt2img, img2img, inpaint and a two-pass hires fix, model upscale (x2 or x4, ESRGAN-family) and background removal to a transparent PNG (BiRefNet) on any image asset, SD 1.5 txt2img, SVD image-to-video, FLUX.1 schnell txt2img, FLUX.1 Kontext reference-guided edits, Wan 2.2 TI2V image-to-video, all as API-format templates; each with its own sampler/size defaults; an `auto \| qwen21 \| flux \| sdxl` image engine choice per project and per call ("auto" reaches for Qwen-Image 2.1 when it is installed, else Flux, else SDXL, and always says which one it used); the whole prompt checked against `/object_info` before queueing (nodes, every model file, samplers, combo choices, ranges), a missing model file read as "download it" rather than a crash, with the installed options in the error; a UI-format **or** API-format workflow importer whose converter matches the real ComfyUI 0.37 frontend's export input for input on the official templates (subgraphs and promoted widgets, dynamic combos, autogrow sockets, `PrimitiveNode`/`Reroute`, bypass/mute), with an editable parameter map and a cached node list for when ComfyUI is off; `consistent=true` keeps a `@Character`'s exact design via an edit template (Qwen-Image 2.1 or Kontext, per engine) and their canonical reference, cropped to one pose of a turnaround sheet | Prospero hosts no model; Kontext is single-reference (Qwen-Image 2.1 takes up to 10), Wan is image-to-video only; upscale needs `RealESRGAN_x4plus.safetensors` and background removal needs `birefnet.safetensors` in ComfyUI (see Models) |
 | GPU etiquette | VRAM estimate per workflow family (editable) checked against the card ComfyUI really runs on (its own `system_stats`, where models it keeps cached count as free; nvidia-smi as the fallback); a job that does not fit waits in `waiting_gpu` with the reason, every 15 s for up to 30 min; cancel at any time; a render pool (`render_pool` in `backend.json`, one ComfyUI per GPU) renders queued jobs on every card at once | Nothing is ever unloaded unless you press "Free ComfyUI memory" |
 | Lineage | Every generated asset records template, template hash, checkpoint, every parameter and seed, inputs and timing; "Reuse recipe" reproduces an image byte for byte on the same backend (tested), "Vary seed" re-runs it with new seeds | Reproduction is only guaranteed on the same backend, models and ComfyUI version |
 | Design | Pillow renderer, no browser: photocard front and back, album cover (4 layouts), teaser poster, lyric card, tracklist back, thumbnail, with a "night" horror/thriller variant for the cover, poster, lyric card and tracklist; gradients, holographic foil, blends, vignette, letter spacing, shadows, shrink-to-fit text, tracklist columns; photocard sets for a whole group or a solo artist in several looks, with a contact sheet; print mode with 3 mm bleed at 300 dpi; 6 bundled font families | The QR layer draws a placeholder box (no QR library is pinned) |
@@ -92,6 +92,8 @@ with ids and pictures.
 | SVD | `svd_xt.safetensors` | ~10 GB | Image to short video |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Image to video, native 1280x704 |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Song composition with vocals |
+| Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2.5 GB | Upscale x2 or x4 of any image |
+| BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3.5 GB | Background removal, PNG with transparency |
 
 `studio_generate_image`'s `engine` parameter (and a project's own `image_engine`
 setting) picks between the image families: `auto` (default) resolves to
@@ -101,6 +103,39 @@ schnell, else SDXL - every result says which one it actually used. A
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the converter turns
 ComfyUI's own UI-format export of each template into the API-format
 workflow above, and how a missing model file is reported.
+
+### Upscale and background removal
+
+Two edits of `studio_edit_image` (and the lightbox buttons **Upscale x2**,
+**Upscale x4** and **Remove background**) run on ComfyUI core nodes only, with
+no prompt, and work on any image asset:
+
+- `upscale` enlarges with an ESRGAN-family model (template `esrgan_upscale`).
+  The model works at 4x and the result is scaled down to the requested
+  `scale`, 2 or 4 (default 2). Any other value is refused (`bad_parameter`),
+  and so is a result larger than 8192 px on a side (`too_large`; the message
+  gives the source size and the maximum). `model` may name another file that
+  is installed in `upscale_models`; the default is `RealESRGAN_x4plus.safetensors`.
+- `remove_background` cuts out the subject with BiRefNet (template
+  `birefnet_remove_background`, the same graph as ComfyUI's own "Remove
+  Background (BiRefNet)" blueprint) and imports a PNG that keeps its alpha
+  channel. The model file is `birefnet.safetensors` unless `backend.json`
+  names another one under `"bg_removal_model"`.
+
+Both always produce one image and record the source in the recipe
+(`edit_image:upscale`, `edit_image:remove_background`). The model files are
+not bundled; put them here (folders relative to your ComfyUI install):
+
+| File | Folder | Source |
+| --- | --- | --- |
+| `RealESRGAN_x4plus.safetensors` | `ComfyUI/models/upscale_models/` | https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged |
+| `birefnet.safetensors` | `ComfyUI/models/background_removal/` | https://huggingface.co/Comfy-Org/BiRefNet |
+
+When a file is missing the job fails with `model_missing`, naming the folder
+and the files ComfyUI does list. Both nodes need a recent ComfyUI (the
+background-removal loader is not in older releases); an older one reports the
+missing nodes. VRAM estimates are 2500 MB (`esrgan`) and 3500 MB (`birefnet`),
+editable like the others.
 
 ## Quick start
 
@@ -175,7 +210,7 @@ loading anything of its own.
 | `studio_projects` / `studio_create_project` | List or create productions | yes / no |
 | `studio_cast` | List, create, update characters and groups | no (list is read-only) |
 | `studio_generate_image` | Queue txt2img/edit with @mentions, presets and an image engine choice | no |
-| `studio_edit_image` | img2img, inpaint, upscale, reuse recipe, vary seed | no |
+| `studio_edit_image` | img2img, inpaint, hires fix, model upscale x2/x4, remove background, reuse recipe, vary seed | no |
 | `studio_animate` | Image to short video (SVD) | no |
 | `studio_compose` | Compose a song with vocals (ACE-Step) | no |
 | `studio_voice` | Spoken line with a character's voice | no |
