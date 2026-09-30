@@ -213,6 +213,7 @@ TTS están ya en marcha en vez de cargar nada propio.
 | Herramienta | Qué hace | Solo lectura |
 | --- | --- | --- |
 | `studio_status` | Backends, checkpoints, VRAM libre, cola | sí |
+| `studio_services` / `studio_service_start` / `studio_service_stop` | Ver, arrancar y parar los servidores locales (ComfyUI, el grupo de render, Ollama) sin Faustus | sí / no / no |
 | `studio_projects` / `studio_create_project` | Listar o crear producciones | sí / no |
 | `studio_cast` | Listar, crear y editar personajes y grupos | no (listar sí lo es) |
 | `studio_generate_image` | Encolar txt2img/edición con @menciones, estilos y motor de imagen | no |
@@ -273,6 +274,36 @@ través del mismo ComfyUI o de un pequeño servidor HTTP documentado al que
 apuntes con `HOARD_MUSIC_URL`. La pantalla **Backends** y `studio_status`
 dicen siempre qué se ha encontrado y por qué; nada se carga ni se descarga
 a tus espaldas.
+
+### Sin Faustus
+
+Prospero no necesita a Faustus en marcha. **Backends > Servicios locales**
+lista los servidores que usa - el ComfyUI principal, cada servidor del grupo
+de render, Ollama y cualquier servidor que describas en
+`~/.hoard/backends.json` - con un botón **Iniciar** (y la GPU para ComfyUI:
+por defecto la que más memoria libre tenga) y otro **Parar** para los que
+haya arrancado la familia Hoard. Con **«Arrancar ComfyUI solo cuando un
+trabajo lo necesite»** activado (lo está de serie), un render encolado con
+ComfyUI apagado lo arranca primero y después se ejecuta; desactivado, el
+trabajo falla con un mensaje que apunta al botón Iniciar. Arrancar ComfyUI
+no carga ningún modelo: la memoria solo se usa cuando corre un trabajo. El
+agente hace lo mismo con `studio_services`, `studio_service_start` y
+`studio_service_stop`.
+
+ComfyUI se busca en `COMFYUI_DIR`, en la carpeta guardada en Backends o en
+los sitios de siempre (`D:\LocalAI\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, la
+versión portable...), con el Python de su `venv`, `.venv` o
+`python_embeded`. Se arranca en loopback con `--cuda-device` para la GPU
+elegida; un servidor en cualquier puerto distinto del 8188 tiene sus propias
+carpetas de salida, temporales, de usuario y de base de datos en
+`~/.hoard/backends/`, para que dos instancias nunca se pisen. Ollama se busca
+en el `PATH` o en su carpeta de instalación. El lanzador es
+`hoard_link/launch.py` de HoardLink, compartido con Hoard Hub y el resto de
+la familia: `~/.hoard/backends.json` dice dónde está instalado cada cosa y
+`~/.hoard/backends/state.json` qué procesos ha arrancado la familia (pid y
+hora de creación, con los logs al lado). Un ComfyUI arrancado desde Hoard Hub
+aparece aquí y se puede parar aquí, y al revés; uno arrancado a mano o por
+Faustus se muestra en marcha y nunca se para.
 
 ## Ejemplo de producción
 
