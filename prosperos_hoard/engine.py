@@ -906,7 +906,90 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     )
 
 
-_EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires"}
+_EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires",
+                   "upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background"}
+
+# The two operations that run on ComfyUI core nodes with a model file and no
+# prompt: they take the source asset as reference and always make one output.
+MODEL_EDIT_OPERATIONS = ("upscale", "remove_background")
+UPSCALE_SCALES = (2, 4)
+UPSCALE_MODEL_DEFAULT = "RealESRGAN_x4plus.safetensors"
+UPSCALE_MODEL_FACTOR = 4  # the ESRGAN model enlarges 4x; ImageScaleBy brings it down to the asked factor
+MAX_UPSCALE_SIDE = 8192
+# operation -> (node class, combo input, ComfyUI models folder, where to get the file)
+_MODEL_FILES = {
+    "upscale": ("UpscaleModelLoader", "model_name", "models/upscale_models",
+                "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged"),
+    "remove_background": ("LoadBackgroundRemovalModel", "bg_removal_name", "models/background_removal",
+                          "https://huggingface.co/Comfy-Org/BiRefNet"),
+}
+
+
+def _source_size(store: Store, src: dict[str, Any]) -> Optional[tuple[int, int]]:
+    if src.get("width") and src.get("height"):
+        return int(src["width"]), int(src["height"])
+    try:
+        with Image.open(store.data_dir / src["file_path"]) as img:
+            return img.size
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def check_upscale_request(store: Store, src: dict[str, Any], scale: Any) -> int:
+    """Validate an `upscale` edit before it is queued: `scale` is 2 or 4
+    (default 2) and the result may not exceed 8192 px on a side. Returns
+    the integer scale."""
+    if scale is None:
+        scale = 2
+    if isinstance(scale, bool) or not isinstance(scale, int) or scale not in UPSCALE_SCALES:
+        raise EngineError("bad_parameter", f"scale must be {' or '.join(str(s) for s in UPSCALE_SCALES)}, got {scale!r}")
+    size = _source_size(store, src)
+    if size and max(size) * scale > MAX_UPSCALE_SIDE:
+        w, h = size
+        raise EngineError("too_large", f"upscaling the {w}x{h} source by x{scale} would give {w * scale}x{h * scale}; "
+                                       f"the maximum is {MAX_UPSCALE_SIDE} px on a side"
+                                       + (" (try x2)" if scale == 4 and max(size) * 2 <= MAX_UPSCALE_SIDE else ""))
+    return scale
+
+
+def require_model_file(backend: Backend, operation: str, wanted: str) -> str:
+    """The installed file name for `wanted`, or an actionable `model_missing`
+    error naming the ComfyUI folder and what is installed. Skipped (returns
+    `wanted`) when ComfyUI does not know the loader node at all: the node
+    check of `run_template` then says to update ComfyUI."""
+    class_type, input_name, folder, source = _MODEL_FILES[operation]
+    info = _object_info(backend)
+    if not info or class_type not in info:
+        return wanted
+    options = comfy_driver.combo_choices(info, class_type, input_name)
+    found = comfy_driver.resolve_checkpoint(wanted, options, None, operation) if options else None
+    if found is None:
+        installed = ", ".join(options) if options else "none"
+        raise EngineError("model_missing", f"model not installed: '{wanted}' is not in ComfyUI's {folder} folder; "
+                                           f"download it from {source} into ComfyUI/{folder}, or choose one of the "
+                                           f"installed files: {installed}")
+    return found
+
+
+def _edit_with_model(store: Store, backend: Backend, job: dict[str, Any], progress, src: dict[str, Any],
+                     operation: str) -> dict[str, Any]:
+    params = job["params"]
+    label = src.get("name") or src["id"]
+    if src["kind"] != "image":
+        raise EngineError("not_an_image", f"asset {src['id']} is {src['kind']}; edits need an image")
+    if operation == "upscale":
+        scale = check_upscale_request(store, src, params.get("scale"))
+        model = require_model_file(backend, operation, params.get("model") or UPSCALE_MODEL_DEFAULT)
+        values = {"upscale_model": model, "scale_by": scale / UPSCALE_MODEL_FACTOR, "scale": scale,
+                  "seed": params.get("seed")}
+        return run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation], values=values,
+                            operation="edit_image:upscale", count=1, reference_asset_id=src["id"],
+                            extra_recipe={"derived_from": src["id"]}, name=f"upscaled x{scale}: {label}")
+    model = require_model_file(backend, operation, backend.bg_removal_model())
+    return run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation],
+                        values={"bg_model": model, "seed": params.get("seed")},
+                        operation="edit_image:remove_background", count=1, reference_asset_id=src["id"],
+                        extra_recipe={"derived_from": src["id"]}, name=f"background removed: {label}")
 
 
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
@@ -916,6 +999,8 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
     if operation in ("reuse", "vary"):
         return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
                             count=params.get("count", 1))
+    if operation in MODEL_EDIT_OPERATIONS:
+        return _edit_with_model(store, backend, job, progress, src, operation)
     template = _EDIT_TEMPLATES[operation]
     src_params = (src.get("recipe") or {}).get("params") or {}
     values = {

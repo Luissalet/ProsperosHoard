@@ -268,22 +268,29 @@ def studio_generate_image(
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_edit_image(
     asset_id: str, operation: str, prompt: Optional[str] = None, strength: Optional[float] = None,
-    mask_asset_id: Optional[str] = None, count: int = 1, seed: Optional[int] = None, wait_s: float = 0,
-    include_image: bool = False,
+    mask_asset_id: Optional[str] = None, count: int = 1, seed: Optional[int] = None, scale: Optional[int] = None,
+    model: Optional[str] = None, wait_s: float = 0, include_image: bool = False,
 ) -> Any:
     """Change or re-run an existing image asset. operation:
     "img2img" - restyle it with `prompt` (strength 0-1 = how much changes, default 0.55);
     "inpaint" - repaint the white area of mask_asset_id;
     "hires" - 1.5x "hires fix" (re-runs the asset's SDXL txt2img recipe with a second pass);
+    "upscale" - model upscale (ESRGAN-family, ComfyUI core nodes) of any image by `scale` 2 or 4 (default 2),
+    no prompt; the result may not exceed 8192 px on a side; `model` optionally names another installed
+    file of ComfyUI/models/upscale_models (default RealESRGAN_x4plus.safetensors);
+    "remove_background" - BiRefNet matting: a PNG of the subject on a transparent background
+    (needs ComfyUI/models/background_removal/birefnet.safetensors);
     "reuse" - re-run the exact recipe (same seed: reproduces the asset);
     "vary" - same recipe with a new seed (or `seed`), `count` variations.
-    Returns the job (poll studio_job); a finished job within wait_s also returns a picture, but only
-    when include_image=true (default false).
+    upscale and remove_background always make one image; a missing model file fails with model_missing and
+    lists what is installed. Returns the job (poll studio_job); a finished job within wait_s also returns a
+    picture, but only when include_image=true (default false).
 
-    Keywords: edit image, inpaint, upscale, variation, reproduce, same seed, editar imagen, subir resolucion, variacion, repetir receta
+    Keywords: edit image, inpaint, upscale, enlarge, remove background, transparent png, cutout, variation, reproduce, same seed, editar imagen, subir resolucion, ampliar, quitar fondo, fondo transparente, variacion, repetir receta
     """
     body = {"asset_id": asset_id, "operation": operation, "prompt": prompt, "strength": strength,
-            "mask_asset_id": mask_asset_id, "count": count, "seed": seed, "wait_s": wait_s}
+            "mask_asset_id": mask_asset_id, "count": count, "seed": seed, "scale": scale, "model": model,
+            "wait_s": wait_s}
     return _with_preview(_call("POST", "/api/agent/studio_edit_image", json=body), include_image)
 
 

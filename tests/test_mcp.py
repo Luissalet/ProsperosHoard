@@ -139,6 +139,22 @@ async def test_mcp_protocol_end_to_end(running_app):
             images = [c for c in result.content if type(c).__name__ == "ImageContent"]
             assert images and len(images[0].data) * 3 / 4 < 210_000
 
+            # the model-based edits: documented on the tool, and they run end to end
+            edit_tool = by_name["studio_edit_image"]
+            assert {"scale", "model"} <= set(edit_tool.inputSchema["properties"])
+            for word in ("upscale", "remove_background", "8192", "model_missing"):
+                assert word in edit_tool.description
+            result = await session.call_tool("studio_edit_image", {"asset_id": asset_id, "operation": "upscale",
+                                                                   "scale": 2, "wait_s": 30})
+            up = json.loads(result.content[0].text)
+            assert up["job"]["state"] == "done", up
+            result = await session.call_tool("studio_edit_image", {"asset_id": asset_id, "operation": "upscale", "scale": 3})
+            assert result.isError and "bad_parameter" in result.content[0].text
+            result = await session.call_tool("studio_edit_image", {"asset_id": asset_id, "operation": "remove_background",
+                                                                   "wait_s": 30})
+            cut = json.loads(result.content[0].text)
+            assert cut["job"]["state"] == "done", cut
+
             result = await session.call_tool("studio_lineage", {"asset_id": asset_id})
             lineage = json.loads(result.content[0].text)
             assert lineage["recipe"]["operation"] == "generate_image"
