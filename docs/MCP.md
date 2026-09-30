@@ -69,7 +69,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_create_project` | no | `name, brief=None, image_engine=None` | `{id, name, brief, image_engine}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |
 | `studio_generate_image` | no | `project, prompt, style, negative, aspect, width, height, steps, cfg, sampler, scheduler, seed, count=1, reference_asset_id, reference_asset_ids, strength, template, engine, checkpoint, consistent=False, wait_s=0, use_character_reference=False, characters, use_adapters=True, prefer_adapter=False, include_image=False` | `{job, final_prompt, negative_prompt, matched_characters, unknown_mentions, template, engine, seed}` + `adapters` (LoRAs actually used, one per character) and `adapter_notes` when any adapter was skipped, both only when non-empty; `route: "adapter"` when `prefer_adapter` sent it through txt2img+LoRA instead of an edit of the canonical (+ picture only when `include_image=true`) |
-| `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
+| `studio_edit_image` | no | `asset_id, operation="img2img"|"inpaint"|"hires"|"upscale"|"remove_background"|"reuse"|"vary", prompt, strength, mask_asset_id, count=1, seed, scale (upscale: 2 or 4, default 2), model (upscale: an installed upscale model), wait_s=0, include_image=False` | `{job}` (+ picture only when `include_image=true`) |
 | `studio_animate` | no | `asset_id, frames=14, fps=7, motion=127, seed, wait_s=0, include_image=False` | `{job}`; the output is an mp4 video asset |
 | `studio_compose` | no | `project, tags, lyrics, bpm=120, duration=120.0, key="C major", language="en", time_signature=4, seed, count=1 (max 4), wait_s=0` | `{job}`; each take is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage (`ace15_song`: 8 steps, cfg 1, shift 3) |
 | `studio_voice` | no | `project, text, character_id, voice, speed` | audio asset summary + `provider` (`piper`, `faustus`, `piper_fallback`) |
@@ -238,6 +238,21 @@ other tool error (code + message).
 - **Edits:** `hires` re-runs an SDXL txt2img recipe with a second, larger
   sampling pass (so only for images generated here with that template);
   `reuse`/`vary` need a ComfyUI recipe; `img2img` and `inpaint` work on any image.
+  `upscale` (template `esrgan_upscale`) and `remove_background` (template
+  `birefnet_remove_background`) also work on any image, take no prompt, and
+  always make one image. `upscale` takes `scale` 2 or 4 (default 2; another
+  value is `bad_parameter`) and refuses a result over 8192 px on a side
+  (`too_large`, the message gives the source size and the maximum); `model`
+  may name another file installed in ComfyUI's `upscale_models` folder
+  (default `RealESRGAN_x4plus.safetensors`). `remove_background` imports a PNG
+  with an alpha channel. Model files (not bundled):
+  `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors`
+  (https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged) and
+  `ComfyUI/models/background_removal/birefnet.safetensors`
+  (https://huggingface.co/Comfy-Org/BiRefNet; `backend.json` key
+  `bg_removal_model` names another file). A missing file fails the job with
+  `model_missing`, naming the folder and the installed files. VRAM classes
+  `esrgan` (2500 MB) and `birefnet` (3500 MB).
 - **Image engine:** `engine="auto" | "qwen21" | "flux" | "sdxl"` (default
   `"auto"`, or the project's own `image_engine` set at
   `studio_create_project` / `PATCH /api/projects/{id}`) picks which family
@@ -249,7 +264,7 @@ other tool error (code + message).
   explicit `template` skips engine resolution entirely.
 - **Templates:** `sdxl_txt2img` (default engine's txt2img fallback),
   `sdxl_img2img` (default engine's edit fallback when a reference is
-  given), `sdxl_inpaint`, `sdxl_hires`, `sd15_txt2img`, `svd_img2vid`, and
+  given), `sdxl_inpaint`, `sdxl_hires`, `esrgan_upscale`, `birefnet_remove_background`, `sd15_txt2img`, `svd_img2vid`, and
   the six converted from the official ComfyUI templates and checked input
   for input against what the real ComfyUI 0.37 frontend exports:
 

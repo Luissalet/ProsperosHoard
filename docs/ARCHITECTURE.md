@@ -516,3 +516,17 @@ apart), segments that sound alike share a letter, energy relative to the song.
   picture: a text-only local model (e.g. behind llama.cpp) handed an
   `ImageContent` block mid-turn breaks; call `studio_show` explicitly, or
   pass `include_image=true`, once a picture is actually wanted.
+- **Model edits** (`upscale`, `remove_background`) share the edit route but
+  not the SDXL templates: `engine._edit_with_model` checks the model file
+  against `/object_info` before anything is queued or waits for VRAM
+  (`model_missing`, with the ComfyUI folder and the installed files), then
+  runs `esrgan_upscale` or `birefnet_remove_background` through `run_template`.
+  The graphs have no sampler, so the seed `run_template` injects is not mapped
+  to any node; it is still recorded in the recipe. The upscale model works at
+  4x and `ImageScaleBy` (lanczos) brings it to the asked factor
+  (`scale_by = scale / 4`). The cutout PNG is stored as ComfyUI wrote it, alpha
+  included; only its library thumbnail and the `studio_show` picture are
+  flattened onto the app's dark background, like every other transparent asset.
+  The combo readers accept both schema shapes ComfyUI reports for a combo
+  (`[[...]]` and `["COMBO", {"options": [...]}]`), since these two loaders use
+  the newer one.

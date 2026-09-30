@@ -27,7 +27,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_create_project` | `{name, brief?, image_engine?}` |
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
 | POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
-| POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, wait_s}` |
+| POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, scale?, model?, wait_s}`; `operation` is `img2img`, `inpaint`, `hires`, `upscale` (`scale` 2 or 4, default 2, at most 8192 px on a side; `model`), `remove_background`, `reuse` or `vary` |
 | POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
 | POST | `/api/agent/studio_voice?project=` | `{text, character_id?, voice?, speed?}` |
@@ -263,7 +263,9 @@ each line's own text so a re-render is byte-identical.
   "faustus": {"url": "http://127.0.0.1:8000", "token": "..."},
   "capabilities": {"music": {"url": "http://127.0.0.1:9000"}},
   "vram_estimates_mb": {"sdxl": 7000, "sd15": 3500, "svd": 10000,
-                        "flux": 13000, "kontext": 13000, "wan": 12000, "ace": 8000},
+                        "flux": 13000, "kontext": 13000, "wan": 12000, "ace": 8000,
+                        "esrgan": 2500, "birefnet": 3500},
+  "bg_removal_model": "birefnet.safetensors",
   "import_roots": ["D:\\Music", "E:\\Photos"],
   "render_pool": ["http://127.0.0.1:8189", "http://127.0.0.1:8190"],
   "stock": {"pexels": "<api key>", "pixabay": "<api key>"}
