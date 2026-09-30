@@ -296,7 +296,9 @@ cuatro tarjetas responde en uno o dos minutos. El botón cuenta el tiempo y
 modelo no empieza a escribir, o se calla, durante cuatro minutos
 (normalmente porque un render ha llenado las GPU que comparte), el plan se
 para con un mensaje que dice qué render estorba en vez de quedarse colgado.
-Un render que se queda sin tiempo también se para en ComfyUI, para que no
+Si la respuesta no sirve (sin planos, con otra forma o cortada), se pide
+otra vez una sola vez y con sitio para todos los planos; la última que no
+se pudo leer queda en `data/logs/plan_last_bad_reply.txt`. Un render que se queda sin tiempo también se para en ComfyUI, para que no
 siga ocupando la tarjeta con una imagen que nadie recoge. Todo se edita
 antes de renderizar; **Escribo yo los planos** se salta el modelo. **Crear la
 producción** lanza lo de siempre: el protagonista, las tomas de la canción

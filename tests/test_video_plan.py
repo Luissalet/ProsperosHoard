@@ -94,3 +94,37 @@ def test_lyrics_in_the_wrong_language_are_asked_again():
     assert draft["song"]["lyrics"].startswith("[Verse]\nCamino") and "warnings" not in draft
     assert "IMPORTANT: every sung line of the lyrics is in Spanish (Spain)" in calls[0]
     assert mv_planner.looks_english(english["song"]["lyrics"]) and not mv_planner.looks_english(draft["song"]["lyrics"])
+
+
+def test_shots_are_found_under_other_names_and_wrappers():
+    wrapped = {"music_video": {"title": "X", "scenes": [{"description": "a wide shot of a disco", "section": "verse"}]}}
+    draft = mv_planner.normalise_draft(wrapped, False, "en", 90)
+    assert draft["shots"][0]["prompt"] == "a wide shot of a disco"
+    bare = mv_planner._json_object('Here you go: [{"prompt": "a"}, {"prompt": "b"}]')
+    assert [s["prompt"] for s in mv_planner.normalise_draft(bare, False, "en", 90)["shots"]] == ["a", "b"]
+    strings = mv_planner.normalise_draft({"shots": ["close-up of a mirror ball", ""]}, False, "en", 90)
+    assert [s["prompt"] for s in strings["shots"]] == ["close-up of a mirror ball"]
+
+
+def test_an_unusable_reply_is_asked_again_once_and_kept():
+    replies = iter(['{"title": "Oops", "notes": "I forgot the shots"}', REPLY])
+    seen, budgets = [], []
+
+    def chat(messages, max_tokens, temperature):
+        budgets.append(max_tokens)
+        return next(replies)
+
+    draft = mv_planner.plan(chat, concept="disco", lead_name="Nova", lead_look="", n_shots=10, compose_song=False,
+                            on_bad_reply=seen.append)
+    assert len(draft["shots"]) == 2 and seen == ['{"title": "Oops", "notes": "I forgot the shots"}']
+    assert budgets[0] >= 1000 + 220 * 10  # room for every shot
+
+
+def test_two_unusable_replies_raise_the_first_error():
+    import pytest
+
+    def chat(messages, max_tokens, temperature):
+        return '{"title": "still nothing"}'
+
+    with pytest.raises(mv_planner.ProductionError, match="no shots"):
+        mv_planner.plan(chat, concept="disco", lead_name="Nova", lead_look="", n_shots=4, compose_song=False)
