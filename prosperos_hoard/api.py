@@ -293,6 +293,8 @@ class EditImageBody(BaseModel):
     seed: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    scale: Optional[int] = None
+    model: Optional[str] = None
     wait_s: float = 0
 
 
@@ -727,7 +729,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         asset = store.get_asset(body.asset_id)
         if asset["kind"] != "image":
             raise engine.EngineError("not_an_image", f"asset {body.asset_id} is {asset['kind']}; edits need an image")
-        ops = ("img2img", "inpaint", "hires", "vary", "reuse")
+        ops = ("img2img", "inpaint", "hires", "vary", "reuse", "upscale", "remove_background")
         if body.operation not in ops:
             raise engine.EngineError("bad_operation", f"operation must be one of {', '.join(ops)}")
         if body.operation == "inpaint" and not body.mask_asset_id:
@@ -737,6 +739,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                            f"asset {asset['id']} was not made that way (use img2img instead)")
         if body.operation in ("vary", "reuse") and (asset.get("recipe") or {}).get("backend") != "comfyui":
             raise engine.EngineError("not_reproducible", f"asset {asset['id']} was not generated on ComfyUI, so it has no recipe to re-run; use img2img")
+        if body.operation == "upscale":
+            engine.check_upscale_request(store, asset, body.scale)
         if not 1 <= body.count <= 8:
             raise engine.EngineError("bad_parameter", "count must be between 1 and 8")
         job = queue.enqueue("edit_image", "gpu", body.model_dump(exclude={"wait_s"}), project_id=asset["project_id"])
