@@ -1,0 +1,12 @@
+{
+  "template": "birefnet_remove_background",
+  "kind": "image",
+  "vram_class": "birefnet",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "bg_model": "2.bg_removal_name"
+  },
+  "output_node": "6",
+  "notes": "BiRefNet foreground matting on ComfyUI core nodes, the same graph as ComfyUI's own Remove Background (BiRefNet) blueprint: RemoveBackground outputs a foreground MASK (1 = foreground), InvertMask flips it because JoinImageWithAlpha computes alpha = 1 - mask, and SaveImage writes an RGBA PNG. No prompt and no seed. Model file: ComfyUI/models/background_removal/birefnet.safetensors (https://huggingface.co/Comfy-Org/BiRefNet)."
+}

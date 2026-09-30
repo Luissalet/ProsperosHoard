@@ -413,6 +413,7 @@ MODEL_FILE_INPUTS = {
     ("CheckpointLoaderSimple", "ckpt_name"), ("ImageOnlyCheckpointLoader", "ckpt_name"),
     ("UNETLoader", "unet_name"), ("CLIPLoader", "clip_name"),
     ("DualCLIPLoader", "clip_name1"), ("DualCLIPLoader", "clip_name2"), ("VAELoader", "vae_name"),
+    ("UpscaleModelLoader", "model_name"), ("LoadBackgroundRemovalModel", "bg_removal_name"),
 }
 
 

@@ -33,7 +33,7 @@ MAX_JSON_DEPTH = 12
 
 OUTPUT_CLASSES = {"SaveImage": "image", "SaveImageAdvanced": "image", "SaveAnimatedWEBP": "video",
                   "VHS_VideoCombine": "video", "SaveVideo": "video", "SaveAudioMP3": "audio", "SaveAudio": "audio"}
-VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace", "qwen21")
+VRAM_CLASSES = ("sdxl", "sd15", "svd", "flux", "kontext", "wan", "ace", "qwen21", "esrgan", "birefnet")
 
 # Inputs we know how to recognise when importing a custom workflow, and the
 # friendly parameter each maps to. CLIPTextEncode prompts are resolved to
@@ -427,13 +427,25 @@ def default_value(workflow: dict[str, Any], spec: dict[str, Any], friendly: str)
 
 
 def _choices(object_info: dict[str, Any], class_type: str, input_name: str) -> list[str]:
+    """The options of a combo input, in either shape ComfyUI reports it:
+    `[["a", "b"], {...}]` (older nodes) or `["COMBO", {"options": ["a", "b"]}]`
+    (newer ones, such as the upscale and background-removal loaders)."""
     try:
         spec = object_info[class_type]["input"]
         entry = (spec.get("required") or {}).get(input_name) or (spec.get("optional") or {}).get(input_name)
         first = entry[0]
-        return list(first) if isinstance(first, list) else []
+        if isinstance(first, list):
+            return list(first)
+        if first == "COMBO" and len(entry) > 1 and isinstance(entry[1], dict) and isinstance(entry[1].get("options"), list):
+            return list(entry[1]["options"])
+        return []
     except (KeyError, IndexError, TypeError, AttributeError):
         return []
+
+
+def combo_choices(object_info: dict[str, Any], class_type: str, input_name: str) -> list[str]:
+    """Public form of `_choices`: what ComfyUI lists for a model-file combo."""
+    return _choices(object_info, class_type, input_name)
 
 
 _MODEL_EXTS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf")

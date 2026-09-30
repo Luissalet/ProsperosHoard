@@ -1,0 +1,13 @@
+{
+  "template": "esrgan_upscale",
+  "kind": "image",
+  "vram_class": "esrgan",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "upscale_model": "2.model_name",
+    "scale_by": "4.scale_by"
+  },
+  "output_node": "5",
+  "notes": "Model upscale on ComfyUI core nodes only (no custom node pack): the ESRGAN-family model enlarges 4x, then ImageScaleBy (lanczos) brings the result to the requested factor - scale_by 0.5 gives x2, 1.0 gives x4 (the API's `scale` is 2 or 4 and scale_by is scale / 4). No prompt and no sampler, so the seed is not mapped; the recipe still records it. Model file: ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors (https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged)."
+}

@@ -48,6 +48,8 @@ VAE_FILES = ["ae.safetensors", "wan2.2_vae.safetensors", "qwen_image_2.1_vae_bf1
 QWEN_UNET_NAME = UNET_FILES[-1]
 QWEN_CLIP_NAME = CLIP_FILES[-1]
 QWEN_VAE_NAME = VAE_FILES[-1]
+UPSCALE_MODEL_FILES = ["RealESRGAN_x4plus.safetensors"]
+BG_REMOVAL_FILES = ["birefnet.safetensors"]
 
 _REAL_OBJECT_INFO_PATH = Path(__file__).parent / "comfy_object_info.json"
 _real_object_info_cache: Optional[dict[str, Any]] = None
@@ -61,9 +63,27 @@ def _set_choices(object_info: dict[str, Any], class_type: str, input_name: str, 
     for bucket in ("required", "optional"):
         entry = (spec.get(bucket) or {}).get(input_name)
         if entry is not None:
+            if entry[0] == "COMBO" and len(entry) > 1 and isinstance(entry[1], dict):
+                # the newer schema: ["COMBO", {"options": [...]}]
+                existing = entry[1].get("options") or []
+                entry[1]["options"] = existing + [c for c in choices if c not in existing]
+                continue
             existing = entry[0] if isinstance(entry[0], list) else []
             merged = existing + [c for c in choices if c not in existing]
             entry[0] = merged
+
+
+def _replace_choices(node_info: dict[str, Any], input_name: str, choices: list[str]) -> None:
+    """Set (not merge) the options of a combo input of one node's info, in
+    either schema; used for the model lists a test installs or removes."""
+    for bucket in ("required", "optional"):
+        entry = (node_info.get("input", {}).get(bucket) or {}).get(input_name)
+        if entry is None:
+            continue
+        if entry[0] == "COMBO" and len(entry) > 1 and isinstance(entry[1], dict):
+            entry[1]["options"] = list(choices)
+        else:
+            entry[0] = list(choices)
 
 
 def real_object_info() -> dict[str, Any]:
@@ -85,6 +105,8 @@ def real_object_info() -> dict[str, Any]:
         _set_choices(data, "DualCLIPLoader", "clip_name1", DUAL_CLIP_FILES)
         _set_choices(data, "DualCLIPLoader", "clip_name2", DUAL_CLIP_FILES)
         _set_choices(data, "VAELoader", "vae_name", VAE_FILES)
+        _set_choices(data, "UpscaleModelLoader", "model_name", UPSCALE_MODEL_FILES)
+        _set_choices(data, "LoadBackgroundRemovalModel", "bg_removal_name", BG_REMOVAL_FILES)
         _real_object_info_cache = data
     return _real_object_info_cache
 
@@ -299,6 +321,13 @@ def render_fake_song(seed: int, tags: str, lyrics: str, bpm: float, duration_s: 
     return buf.getvalue()
 
 
+def _installed_choices(node_info: dict[str, Any], input_name: str) -> list[str]:
+    entry = (node_info.get("input", {}).get("required") or {}).get(input_name) or []
+    if entry and entry[0] == "COMBO" and len(entry) > 1 and isinstance(entry[1], dict):
+        return list(entry[1].get("options") or [])
+    return list(entry[0]) if entry and isinstance(entry[0], list) else []
+
+
 def _first(workflow: dict, class_type: str) -> Optional[dict]:
     for node in workflow.values():
         if node.get("class_type") == class_type:
@@ -323,6 +352,9 @@ class FakeComfyServer:
         self.history: dict[str, dict[str, Any]] = {}
         self.prompts_seen: list[dict[str, Any]] = []
         self.vram_free_bytes = 20_000_000_000
+        # tests: the model files "installed" in ComfyUI/models/upscale_models and models/background_removal
+        self.upscale_models: list[str] = list(UPSCALE_MODEL_FILES)
+        self.bg_removal_models: list[str] = list(BG_REMOVAL_FILES)
         self.devices_override: Optional[list[dict]] = None  # tests: a custom /system_stats device list
         self.history_delay_s = 0.0  # tests: how long a prompt "renders" before /history shows it
         self._ready_at: dict[str, float] = {}
@@ -341,6 +373,12 @@ class FakeComfyServer:
             node_info = json.loads(json.dumps(full["LoraLoaderModelOnly"]))
             node_info["input"]["required"]["lora_name"][0] = loras
             full = {**full, "LoraLoaderModelOnly": node_info}
+        for class_type, input_name, installed in (("UpscaleModelLoader", "model_name", self.upscale_models),
+                                                  ("LoadBackgroundRemovalModel", "bg_removal_name", self.bg_removal_models)):
+            if class_type in full and installed != _installed_choices(full[class_type], input_name):
+                node_info = json.loads(json.dumps(full[class_type]))
+                _replace_choices(node_info, input_name, installed)
+                full = {**full, class_type: node_info}
         if node:
             if node not in full:
                 raise HTTPException(status_code=404, detail=f"unknown node class {node}")
@@ -400,7 +438,11 @@ class FakeComfyServer:
         save_node = _first(workflow, "SaveImage") or _first(workflow, "SaveImageAdvanced")
 
         outputs: dict[str, Any] = {}
-        if audio_node is not None:
+        if _first(workflow, "JoinImageWithAlpha") is not None and save_node is not None:
+            node_id = self._render_cutout(prompt_id, workflow, save_node, outputs)
+        elif _first(workflow, "ImageUpscaleWithModel") is not None and save_node is not None:
+            node_id = self._render_upscale(prompt_id, workflow, save_node, outputs)
+        elif audio_node is not None:
             node_id = self._render_audio(prompt_id, workflow, audio_node, outputs)
         elif wan_save is not None:
             node_id = self._render_wan_video(prompt_id, workflow, wan_save, outputs)
@@ -437,6 +479,49 @@ class FakeComfyServer:
         img = render_fake_image(seed, prompt_text, width, height, reference=reference, denoise=denoise)
         filename = f"{prompt_id}.png"
         img.save(self.output_dir / filename)
+        node_id = [k for k, v in workflow.items() if v is save_node][0]
+        outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}
+        return node_id
+
+    def _render_upscale(self, prompt_id: str, workflow: dict[str, Any], save_node: dict, outputs: dict) -> str:
+        """ImageUpscaleWithModel (4x) followed by ImageScaleBy: the source
+        resized by 4 * scale_by, so the output size follows the graph."""
+        reference = self._find_reference(workflow)
+        if reference is None:
+            raise HTTPException(status_code=400, detail={"error": "upscale graph without a readable LoadImage"})
+        scale_by = float((_first(workflow, "ImageScaleBy") or {}).get("inputs", {}).get("scale_by", 1.0))
+        size = (max(1, round(reference.width * 4 * scale_by)), max(1, round(reference.height * 4 * scale_by)))
+        filename = f"{prompt_id}.png"
+        reference.resize(size, Image.LANCZOS).save(self.output_dir / filename)
+        node_id = [k for k, v in workflow.items() if v is save_node][0]
+        outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}
+        return node_id
+
+    def _render_cutout(self, prompt_id: str, workflow: dict[str, Any], save_node: dict, outputs: dict) -> str:
+        """RemoveBackground -> [InvertMask ...] -> JoinImageWithAlpha: the
+        model's foreground mask is an ellipse in the middle (1 = foreground);
+        JoinImageWithAlpha computes alpha = 1 - mask, so the result follows
+        the wiring - with the InvertMask the subject is opaque, without it
+        the subject is transparent and the background opaque."""
+        reference = self._find_reference(workflow)
+        if reference is None:
+            raise HTTPException(status_code=400, detail={"error": "cutout graph without a readable LoadImage"})
+        join = _first(workflow, "JoinImageWithAlpha")
+        inverted = 0
+        link = join["inputs"].get("alpha")
+        while isinstance(link, list) and link and link[0] in workflow and workflow[link[0]].get("class_type") == "InvertMask":
+            inverted += 1
+            link = workflow[link[0]]["inputs"].get("mask")
+        w, h = reference.size
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).ellipse([w * 0.25, h * 0.2, w * 0.75, h * 0.9], fill=255)  # the foreground
+        if inverted % 2:
+            mask = mask.point(lambda v: 255 - v)
+        alpha = mask.point(lambda v: 255 - v)  # JoinImageWithAlpha: alpha = 1 - mask
+        rgba = reference.convert("RGBA")
+        rgba.putalpha(alpha)
+        filename = f"{prompt_id}.png"
+        rgba.save(self.output_dir / filename)
         node_id = [k for k, v in workflow.items() if v is save_node][0]
         outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}
         return node_id
