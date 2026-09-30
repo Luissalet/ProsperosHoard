@@ -69,7 +69,7 @@ def test_ollama_stream_is_joined():
 
 
 def test_a_model_that_never_starts_answering_is_reported_not_waited_on():
-    srv = _server(lambda h: time.sleep(5))  # prompt processing stuck: not a byte
+    srv = _server(lambda h: time.sleep(9))  # prompt processing stuck: not a byte
     try:
         chat = mv_planner.writer_chat(_backend(srv.server_port), first_token_s=0.5, stall_s=0.5,
                                       busy=lambda: "ComfyUI :8189 is rendering on GPU 1.")

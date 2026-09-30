@@ -189,26 +189,71 @@ def _json_object(text: str) -> dict[str, Any]:
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
         raise ProductionError("plan_unreadable", "the model's reply held no JSON plan")
+    # a bare list of shots ("[{...}, {...}]") is read as {"shots": [...]}
+    lb = raw.find("[")
+    if 0 <= lb < start and raw.rfind("]") > end:
+        start, end, wrap = lb, raw.rfind("]"), True
+    else:
+        wrap = False
     blob = raw[start:end + 1]
     for attempt in (blob, re.sub(r",\s*([}\]])", r"\1", blob)):
         try:
             data = json.loads(attempt)
-            if isinstance(data, dict):
-                return data
         except json.JSONDecodeError:
             continue
-    raise ProductionError("plan_unreadable", "the model's JSON plan did not parse")
+        if wrap and isinstance(data, list):
+            return {"shots": data}
+        if isinstance(data, dict):
+            return data
+    raise ProductionError("plan_unreadable", "the model's JSON plan did not parse (a reply cut short by the "
+                                             "token limit looks like this: try fewer shots)")
+
+
+# what models call the frame description when they do not use "prompt"
+_PROMPT_KEYS = ("prompt", "image_prompt", "description", "visual", "scene", "frame", "shot", "text")
+_SHOT_LIST_KEYS = ("shots", "shot_list", "shotlist", "scenes", "frames", "storyboard")
+
+
+def _find_shots(data: Any, depth: int = 0) -> list:
+    """The list of shots wherever the model put it: "shots" at the top (the
+    asked-for shape), another usual name, or one level down inside a wrapper
+    object ({"music_video": {"shots": [...]}})."""
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in _SHOT_LIST_KEYS:
+        value = data.get(key)
+        if isinstance(value, list) and value:
+            return value
+    if depth < 2:
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                found = _find_shots(value, depth + 1)
+                if found and all(isinstance(x, dict) for x in found):
+                    return found
+    return []
+
+
+def _shot_prompt(s: dict[str, Any]) -> str:
+    for key in _PROMPT_KEYS:
+        value = s.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def normalise_draft(data: Any, compose_song: bool, language: str, duration_s: float) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ProductionError("bad_draft", "the draft must be an object")
     shots = []
-    for i, s in enumerate(data.get("shots") or []):
-        if not isinstance(s, dict) or not str(s.get("prompt") or "").strip():
+    for i, s in enumerate(_find_shots(data)):
+        if isinstance(s, str) and s.strip():
+            s = {"prompt": s}
+        if not isinstance(s, dict) or not _shot_prompt(s):
             continue
         section = str(s.get("section") or "").lower().replace("-", "").replace(" ", "")
-        shots.append({"prompt": str(s["prompt"]).strip()[:600], "lead": bool(s.get("lead", True)),
+        shots.append({"prompt": _shot_prompt(s)[:600], "lead": bool(s.get("lead", True)),
                       "motion": "still" if str(s.get("motion")) == "still" else "move",
                       "motion_prompt": str(s.get("motion_prompt") or "subtle motion").strip()[:200],
                       "section": section if section in SECTIONS else ""})
@@ -247,20 +292,52 @@ def looks_english(lyrics: str) -> bool:
 
 def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: str, lead_name: str, lead_look: str,
          n_shots: int = 10, language: str = "en", compose_song: bool = True, duration_s: float = 120.0,
-         lyrics: Optional[str] = None, genre: Optional[str] = None) -> dict[str, Any]:
+         lyrics: Optional[str] = None, genre: Optional[str] = None,
+         on_bad_reply: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
+    """``on_bad_reply(text)`` sees a reply that could not be read (the app
+    keeps the last one on disk to see what the model did)."""
     if not concept.strip():
         raise ProductionError("bad_plan", "describe the concept of the video")
     if not 2 <= n_shots <= 40:
         raise ProductionError("bad_plan", "shots must be between 2 and 40")
+    # room for every shot (and the lyrics): a reply cut off by the limit
+    # cannot be read at all
+    budget = min(12000, 1000 + 220 * n_shots + (1800 if compose_song else 0))
     try:
         reply = chat(plan_messages(concept, lead_name, lead_look, n_shots, language, compose_song, duration_s, lyrics,
-                                   genre), 3500, 0.8)
+                                   genre), budget, 0.8)
     except ProductionError:
         raise
     except Exception as exc:  # noqa: BLE001 - no model resident, server down...
         raise ProductionError("no_llm", f"could not reach a language model to plan the video ({type(exc).__name__}: "
                                         f"{str(exc)[:200]}); start one (Backends) or write the shots yourself") from None
-    draft = normalise_draft(_json_object(reply), compose_song, language, duration_s)
+    try:
+        draft = normalise_draft(_json_object(reply), compose_song, language, duration_s)
+    except ProductionError as first:
+        # one more try with the shape spelled out again: a model that
+        # wandered off the format usually gets it right the second time
+        if on_bad_reply:
+            on_bad_reply(reply)
+        messages = plan_messages(concept, lead_name, lead_look, n_shots, language, compose_song, duration_s, lyrics,
+                                 genre)
+        messages += [{"role": "assistant", "content": str(reply or "")[:6000]},
+                     {"role": "user", "content": (
+                         f"That answer could not be used ({first.message}). Answer again with only the JSON object, "
+                         "exactly in the shape asked, with a \"shots\" array of " + str(n_shots) + " objects that each "
+                         "have a \"prompt\". Keep each prompt under 60 words.")}]
+        try:
+            again = chat(messages, budget, 0.4)
+        except ProductionError:
+            raise
+        except Exception:  # noqa: BLE001
+            raise first from None
+        try:
+            draft = normalise_draft(_json_object(again), compose_song, language, duration_s)
+        except ProductionError:
+            if on_bad_reply:
+                on_bad_reply(again)
+            raise ProductionError(first.code, f"{first.message} (asked the model twice): try again, plan fewer "
+                                              "shots or write them yourself") from None
     song = draft.get("song")
     if song and language != "en" and looks_english(song.get("lyrics") or ""):
         # asked for Spanish (or another language) and got English: ask once

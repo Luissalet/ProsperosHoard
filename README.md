@@ -286,7 +286,9 @@ long timeout, so a 27B split over four cards answers in a minute or two.
 The button counts the time and **Stop waiting** gives up on it. The answer
 is streamed: a model that does not start writing, or goes quiet, for four
 minutes (typically because a render has filled the GPUs it shares) ends the
-plan with a message naming the render in the way, instead of hanging. A
+plan with a message naming the render in the way, instead of hanging. A reply the planner cannot use (no shots, another
+shape, cut short) is asked for again once, with room for every shot; the
+last unreadable one is kept in `data/logs/plan_last_bad_reply.txt`. A
 render that runs out of time is stopped on ComfyUI too, so it does not keep
 the card busy for an image nobody collects.
 Everything is editable before anything renders; **I'll write the shots**

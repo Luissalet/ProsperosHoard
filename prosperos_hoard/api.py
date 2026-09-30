@@ -2372,13 +2372,23 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                          + (f" on GPU {', '.join(str(g) for g in shared)}, which the language model shares" if shared else ""))
         return ("; ".join(notes) + ".") if notes else ""
 
+    def _keep_bad_plan_reply(text: str) -> None:
+        """The last reply the planner could not read, to see what the model did."""
+        try:
+            path = store.data_dir / "logs" / "plan_last_bad_reply.txt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(str(text or ""), encoding="utf-8")
+        except OSError:
+            pass
+
     def op_video_plan(body: VideoPlanBody) -> dict[str, Any]:
         lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
         chat = ((getattr(app.state, "short_hooks", None) or {}).get("chat")
                 or mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus))
         draft = mv_planner.plan(chat, concept=body.concept, lead_name=lead["name"], lead_look=lead.get("look") or "",
                                 n_shots=body.shots, language=body.language, compose_song=not body.song_asset_id,
-                                duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre)
+                                duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre,
+                                on_bad_reply=_keep_bad_plan_reply)
         return {"draft": draft, "lead": lead}
 
     def op_video_from_plan(body: VideoFromPlanBody) -> dict[str, Any]:
