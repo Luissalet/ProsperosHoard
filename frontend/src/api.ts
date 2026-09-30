@@ -484,6 +484,24 @@ export interface BackendStatus {
   services?: ServicesStatus;
 }
 
+export interface ImageEngines {
+  engines: string[];
+  auto_resolves_to: string;
+  installed: { qwen21: boolean; flux: boolean; sdxl: boolean };
+  project_default: string;
+  live: boolean;
+  models: Record<string, string[]>;
+  vram_mb: Record<string, number | null>;
+}
+
+export interface GpuMemory {
+  gpus: { index: number; name: string; used_mb: number; free_mb: number; total_mb: number; services: string[]; others: number }[];
+  services: { id: string; label: string; kind: string; state: string; url: string; gpus: number[]; stoppable: boolean;
+    started_by: string | null; held_mb: number | null; models: { name: string; vram_mb?: number }[] }[];
+  vram_estimates_mb: Record<string, number>;
+  main_comfy: string | null;
+}
+
 export interface LocalService {
   id: string;
   kind: "comfyui" | "ollama" | "command";
@@ -847,6 +865,7 @@ export const api = {
   styles: (pid?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project: pid })}`),
   compose: (pid: string, prompt: string, negative: string, style: string | null) =>
     request<Composed>("POST", `/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style }),
+  imageEngines: (pid?: string) => request<ImageEngines>("GET", `/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
   generate: (pid: string, body: Record<string, unknown>) =>
     request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/api/projects/${pid}/generate`, body),
   edit: (assetId: string, body: Record<string, unknown>) =>
@@ -919,6 +938,7 @@ export const api = {
   setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/api/backend", patch),
   freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
   services: () => request<ServicesStatus>("GET", "/api/backend/services"),
+  memory: () => request<GpuMemory>("GET", "/api/backend/memory"),
   startService: (id: string, gpu?: string) => request<ServiceStart>("POST", "/api/backend/services/start", { id, gpu: gpu || null }),
   stopService: (id: string) => request<ServiceStart>("POST", "/api/backend/services/stop", { id }),
   setLaunch: (patch: Record<string, unknown>) => request<ServicesStatus>("PUT", "/api/backend/launch", patch),

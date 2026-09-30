@@ -208,6 +208,7 @@ loading anything of its own.
 | --- | --- | --- |
 | `studio_status` | Backends, checkpoints, free VRAM, queue | yes |
 | `studio_services` / `studio_service_start` / `studio_service_stop` | See, start and stop the local servers (ComfyUI, the render pool, Ollama) without Faustus | yes / no / no |
+| `studio_gpu_memory` | What each GPU holds and which server holds it, against what each image engine needs | yes |
 | `studio_projects` / `studio_create_project` | List or create productions | yes / no |
 | `studio_cast` | List, create, update characters and groups | no (list is read-only) |
 | `studio_generate_image` | Queue txt2img/edit with @mentions, presets and an image engine choice | no |
@@ -268,6 +269,19 @@ ComfyUI, or from a small documented HTTP server you point
 say what was found and why; nothing is loaded or unloaded behind your back.
 
 ### Running without Faustus
+
+The **Generate** screen opens with the model header: the image engine
+(Automatic = Qwen-Image 2.1 when installed, FLUX.1, SDXL, SD 1.5, your
+imported workflows) and the model file for it, where ComfyUI runs (with
+**Start** when it is off and **Free ComfyUI**), and whether the engine fits
+in the GPU it will use: "Qwen-Image 2.1 needs about 12 GB; GPU 3 has 3 GB for
+it... held by llama.cpp (qwen3.8-27b)" with a **Stop llama.cpp** button right
+there. **GPU memory** lists every card with what each server keeps loaded
+(ComfyUI, llama.cpp and its model, Ollama and its models) and the start/stop
+actions. With Qwen-Image or Kontext the reference images go to the engine's
+own edit (up to 10 with Qwen, `<image1>` is the subject) at full denoise;
+the img2img strength and the sampler settings only apply to SDXL, and empty
+fields under **Advanced** use each engine's tuned values.
 
 Prospero does not need Faustus running. **Backends > Local services** lists
 the servers it uses - the main ComfyUI, every render-pool server, Ollama and

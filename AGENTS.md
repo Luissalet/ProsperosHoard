@@ -39,6 +39,9 @@ Qué hacer cuando el usuario pide, con sus palabras:
   Prospero no necesita a Faustus. Si está `unavailable`, di el `problem`
   (no instalado, falta su Python) en vez de reintentar. Solo se paran con
   `studio_service_stop` los que arrancó la familia Hoard.
+- **«Va lentísimo» / «por qué tarda»**: `studio_gpu_memory`. Si el motor no
+  cabe (Qwen-Image ~12 GB) y la GPU la ocupa un modelo de lenguaje, dilo y
+  pregunta antes de pararlo: nunca pares un LLM por tu cuenta.
 
 - **«Recrea esto con X» / "remake this with X"**: la producción de origen es
   la que acaba de terminar o la que nombre (`studio_productions`). Si aún no

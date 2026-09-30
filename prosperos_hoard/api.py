@@ -194,6 +194,9 @@ class GenerateImageBody(BaseModel):
     strength: Optional[float] = None
     template: Optional[str] = None
     checkpoint: Optional[str] = None
+    # the model file for the chosen engine: a Qwen-Image diffusion model
+    # (UNETLoader) for qwen21, else a checkpoint; see /api/image-engines
+    model: Optional[str] = None
     engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - defaults to the project's
     use_character_reference: bool = False
     consistent: bool = False
@@ -698,6 +701,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             all_refs = extra_refs or ([reference] if reference else [])
             template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit" if all_refs else "txt2img"]
         reference = all_refs[0] if all_refs else None
+        strength = body.strength
+        if template in ("qwen21_edit", "flux_kontext_edit"):
+            # these edits read the references through the text encoder and
+            # sample a fresh latent: a partial denoise only turns the empty
+            # canvas into noise, so an img2img strength never applies here
+            strength = None
         width, height = body.width, body.height
         if body.aspect and not (width and height):
             if body.aspect not in engine.ASPECT_SIZES:
@@ -735,7 +744,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "width": width, "height": height, "steps": body.steps, "cfg": body.cfg, "sampler": body.sampler,
             "scheduler": body.scheduler, "seed": seed, "count": body.count, "reference_asset_id": reference,
             "reference_asset_ids": all_refs or None,
-            "strength": body.strength, "template": template, "checkpoint": body.checkpoint,
+            "strength": strength, "template": template,
+            "checkpoint": body.checkpoint or (body.model if engine.TEMPLATE_TO_ENGINE.get(template) != "qwen21" else None),
+            **({"unet_name": body.model} if body.model and engine.TEMPLATE_TO_ENGINE.get(template) == "qwen21" else {}),
             "style": composed["style"], "style_defaults": composed["style_defaults"],
             "matched_characters": composed["matched_characters"],
             **({"loras": adapters["loras"]} if adapters["loras"] else {}),
@@ -880,6 +891,50 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/backend/comfy/free")
     def free_comfy():
         return backend.free_comfy_memory()
+
+    @app.get("/api/image-engines")
+    def image_engines(project: Optional[str] = None):
+        """What the Generate screen offers: which engines are installed and
+        what "auto" resolves to (from the live or last known node list; never
+        starts ComfyUI), plus the project's own default."""
+        live = True
+        try:
+            info = engine._object_info(backend)
+        except Exception:  # noqa: BLE001 - ComfyUI off: the last known state
+            live = False
+            try:
+                info = engine.object_info_live_or_cached(backend)
+            except Exception:  # noqa: BLE001
+                info = {}
+        installed = {name: engine.resolve_image_engine(info, name) == name for name in ("qwen21", "flux", "sdxl")} \
+            if info else {"qwen21": False, "flux": False, "sdxl": True}
+        default = "auto"
+        if project:
+            default = (store.get_project(project).get("image_engine") or "auto")
+        def files(cls: str, field: str) -> list[str]:
+            try:
+                entry = info[cls]["input"]["required"][field][0]
+                return [str(x) for x in entry] if isinstance(entry, list) else []
+            except (KeyError, IndexError, TypeError):
+                return []
+        ckpts = files("CheckpointLoaderSimple", "ckpt_name")
+        not_image = ("svd", "ace_step", "ace-step", "wan", "ltx", "stable_audio")
+        models = {
+            "qwen21": [u for u in files("UNETLoader", "unet_name") if "qwen" in u.lower() and "edit" not in u.lower()],
+            "flux": [c for c in ckpts if "flux" in c.lower()],
+            "sdxl": [c for c in ckpts if "flux" not in c.lower() and not any(k in c.lower() for k in not_image)
+                     and "v1-5" not in c.lower() and "sd15" not in c.lower() and "sd_1" not in c.lower()],
+        }
+        est = backend.vram_estimates_mb()
+        return {"engines": list(engine.IMAGE_ENGINES), "auto_resolves_to": engine.resolve_image_engine(info or {}, "auto"),
+                "installed": installed, "project_default": default, "live": live,
+                "templates": engine.ENGINE_TEMPLATES, "models": models,
+                "vram_mb": {"qwen21": est.get("qwen21"), "flux": est.get("flux"), "sdxl": est.get("sdxl"),
+                            "sd15": est.get("sd15"), "kontext": est.get("kontext")}}
+
+    @app.get("/api/backend/memory")
+    def get_memory():
+        return backend.memory()
 
     @app.get("/api/backend/services")
     def get_services():
@@ -2514,6 +2569,21 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "autostart_comfy": svc["autostart_comfy"],
             }
         return agent("studio_services", "", run)
+
+    @app.get("/api/agent/studio_gpu_memory")
+    def agent_gpu_memory():
+        def run():
+            mem = backend.memory()
+            return {
+                "gpus": [{"index": g["index"], "name": g["name"], "free_mb": g["free_mb"], "total_mb": g["total_mb"],
+                          "held_by": g["services"], "other_processes": g["others"]} for g in mem["gpus"]],
+                "servers": [{k: v for k, v in {"id": x["id"], "label": x["label"], "gpus": x["gpus"],
+                                               "models": [m.get("name") for m in x["models"]] or None,
+                                               "held_mb": x["held_mb"], "stoppable": x["stoppable"]}.items() if v not in (None, [])}
+                            for x in mem["services"]],
+                "vram_needed_mb": {k: v for k, v in mem["vram_estimates_mb"].items() if k in ("qwen21", "flux", "sdxl", "wan", "ace")},
+            }
+        return agent("studio_gpu_memory", "", run)
 
     @app.post("/api/agent/studio_service_start")
     def agent_service_start(body: ServiceBody):

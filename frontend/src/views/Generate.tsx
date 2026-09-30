@@ -3,12 +3,23 @@ import { Columns2, Dices, ImagePlus, Loader2, Lock, LockOpen, Upload, Wand2, X }
 import { api, fileUrl, thumbUrl, type Asset, type Character, type Composed, type Job, type WorkflowSpec } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
+import { EngineBar } from "./EngineBar";
 
 const ASPECTS: Record<string, [number, number]> = {
   "1:1": [1024, 1024], "4:5": [896, 1120], "2:3": [832, 1216], "9:16": [768, 1344], "3:2": [1216, 832], "16:9": [1344, 768],
 };
-const SAMPLERS = ["dpmpp_2m", "dpmpp_2m_sde", "euler", "euler_ancestral", "dpmpp_sde", "heun", "uni_pc", "ddim"];
-const SCHEDULERS = ["karras", "normal", "exponential", "sgm_uniform", "simple"];
+// What each engine's own template uses when a field is left empty (shown as
+// placeholders; nothing is sent unless you type a value).
+const ENGINE_DEFAULTS: Record<string, { steps: number; cfg: number; sampler: string; scheduler: string }> = {
+  qwen21: { steps: 25, cfg: 1, sampler: "euler", scheduler: "simple" },
+  flux: { steps: 4, cfg: 1, sampler: "euler", scheduler: "simple" },
+  sdxl: { steps: 30, cfg: 6.5, sampler: "dpmpp_2m", scheduler: "karras" },
+  sd15: { steps: 30, cfg: 6.5, sampler: "dpmpp_2m", scheduler: "karras" },
+};
+const ENGINE_LABELS: Record<string, string> = { qwen21: "Qwen-Image 2.1", flux: "FLUX.1", sdxl: "SDXL", sd15: "SD 1.5" };
+const MAX_REFS: Record<string, number> = { qwen21: 10, flux: 1, sdxl: 1, sd15: 0, custom: 1 };
+const SAMPLERS = ["euler", "dpmpp_2m", "dpmpp_2m_sde", "euler_ancestral", "dpmpp_sde", "heun", "uni_pc", "ddim"];
+const SCHEDULERS = ["simple", "karras", "normal", "exponential", "sgm_uniform"];
 
 function highlight(text: string, names: string[], fragments: string[]) {
   // mark the inlined character fragments inside the final prompt
@@ -36,21 +47,25 @@ export function GenerateView() {
   const backend = useAsync(() => api.backend(), []);
   const workflows = useAsync(() => api.workflows(), []);
   const recent = useAsync(() => api.assets(pid, { source: "generated", kind: "image", limit: 24 }), [pid, app.dataVersion]);
+  const engines = useAsync(() => api.imageEngines(pid), [pid]);
 
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(`prospero.prompt.${pid}`) || "");
   const [negative, setNegative] = useState("");
   const [style, setStyle] = useState<string>("");
-  const [template, setTemplate] = useState("sdxl_txt2img");
+  // "auto" | "qwen21" | "flux" | "sdxl" | "tmpl:<template>" (SD 1.5, imported workflows)
+  const [engineSel, setEngineSel] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState("");
+  const [model, setModel] = useState("");
   const [aspect, setAspect] = useState("1:1");
-  const [steps, setSteps] = useState(30);
-  const [cfg, setCfg] = useState(6.5);
-  const [sampler, setSampler] = useState("dpmpp_2m");
-  const [scheduler, setScheduler] = useState("karras");
+  // empty = the engine template's own value
+  const [steps, setSteps] = useState("");
+  const [cfg, setCfg] = useState("");
+  const [sampler, setSampler] = useState("");
+  const [scheduler, setScheduler] = useState("");
   const [seed, setSeed] = useState<number>(() => Math.floor(Math.random() * 2 ** 31));
   const [seedLocked, setSeedLocked] = useState(false);
   const [count, setCount] = useState(2);
-  const [reference, setReference] = useState<Asset | null>(null);
+  const [refs, setRefs] = useState<Asset[]>([]);
   const [useCharRef, setUseCharRef] = useState(false);
   const [strength, setStrength] = useState(0.6);
   const [picking, setPicking] = useState(false);
@@ -72,16 +87,30 @@ export function GenerateView() {
     api.compose(pid, dPrompt, dNegative, style || null).then(setComposed).catch(() => setComposed(null));
   }, [dPrompt, dNegative, style, pid]);
 
-  // style preset defaults fill the parameter panel
+  useEffect(() => { setEngineSel(null); }, [pid]);
+  useEffect(() => {
+    if (engineSel === null && engines.data) setEngineSel(engines.data.project_default || "auto");
+  }, [engines.data, engineSel]);
+  const sel = engineSel || "auto";
+  const customTemplate = sel.startsWith("tmpl:") ? sel.slice(5) : null;
+  // the engine this render really gets ("custom" = an imported workflow)
+  const resolved = customTemplate ? (customTemplate === "sd15_txt2img" ? "sd15" : "custom")
+    : sel === "auto" ? (engines.data?.auto_resolves_to || "qwen21") : sel;
+  const sdLike = resolved === "sdxl" || resolved === "sd15" || resolved === "custom";
+  const maxRefs = MAX_REFS[resolved] ?? 1;
+  const defaults = ENGINE_DEFAULTS[resolved] || ENGINE_DEFAULTS.sdxl;
+  useEffect(() => { if (refs.length > maxRefs) setRefs(refs.slice(0, maxRefs)); }, [maxRefs]);
+
+  // a style preset is tuned for SDXL: its sampler settings only fill the panel there
   useEffect(() => {
     const preset = styles.data?.items.find((s) => s.id === style);
-    if (!preset) return;
+    if (!preset || !sdLike) return;
     const d = preset.defaults;
-    if (d.steps) setSteps(Number(d.steps));
-    if (d.cfg) setCfg(Number(d.cfg));
+    if (d.steps) setSteps(String(d.steps));
+    if (d.cfg) setCfg(String(d.cfg));
     if (d.sampler) setSampler(String(d.sampler));
     if (d.scheduler) setScheduler(String(d.scheduler));
-  }, [style, styles.data]);
+  }, [style, styles.data, sdLike]);
 
   const characters = chars.data?.items || [];
   const suggestions = useMemo(() => {
@@ -119,13 +148,31 @@ export function GenerateView() {
   const queue = async () => {
     setBusy(true);
     const [w, h] = ASPECTS[aspect];
+    const body: Record<string, unknown> = {
+      prompt, negative: negative || null, style: style || null, width: w, height: h, seed, count,
+    };
+    if (customTemplate) body.template = customTemplate;
+    else body.engine = sel;
+    if (model && !customTemplate) body.model = model;
+    if (refs.length) {
+      body.reference_asset_id = refs[0].id;
+      body.reference_asset_ids = refs.map((r) => r.id);
+    }
+    if (steps.trim()) body.steps = Number(steps);
+    if (cfg.trim()) body.cfg = Number(cfg);
+    if (sampler) body.sampler = sampler;
+    if (scheduler) body.scheduler = scheduler;
+    if (sdLike) {
+      if (checkpoint) body.checkpoint = checkpoint;
+      if (refs.length || useCharRef) body.strength = strength;
+      body.use_character_reference = useCharRef;
+    } else {
+      // Qwen-Image / Kontext: the character's canonical image goes in as the
+      // edit's first reference and the prompt becomes the instruction
+      body.consistent = useCharRef;
+    }
     try {
-      const r = await api.generate(pid, {
-        prompt, negative: negative || null, style: style || null, width: w, height: h, steps, cfg, sampler, scheduler,
-        seed, count, template: reference ? (template === "sdxl_txt2img" ? "sdxl_img2img" : template) : template,
-        checkpoint: checkpoint || null, reference_asset_id: reference?.id || null,
-        strength: reference || useCharRef ? strength : null, use_character_reference: useCharRef,
-      });
+      const r = await api.generate(pid, body);
       setQueuedIds((ids) => [r.job.id, ...ids].slice(0, 12));
       app.refreshJobs();
       if (!seedLocked) setSeed(Math.floor(Math.random() * 2 ** 31));
@@ -140,13 +187,20 @@ export function GenerateView() {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (maxRefs === 0) return;
     const id = e.dataTransfer.getData("text/prospero-asset");
-    if (id) { setReference(await api.asset(id)); return; }
+    if (id) { addRef(await api.asset(id)); return; }
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      try { setReference(await api.upload(pid, file)); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); }
+      try { addRef(await api.upload(pid, file)); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); }
     }
   };
+  const addRef = (a: Asset) => setRefs((cur) => (cur.some((x) => x.id === a.id) ? cur
+    : maxRefs <= 1 ? [a] : [...cur, a].slice(0, maxRefs)));
+  const engineLine = [
+    ENGINE_LABELS[resolved] || customTemplate || resolved,
+    refs.length ? (sdLike ? t("genModeImg2img") : t("genModeEdit", { n: refs.length })) : useCharRef && !sdLike ? t("genModeConsistent") : t("genModeTxt2img"),
+  ].join(" · ");
 
   const recentItems = recent.data?.items || [];
   const toggleCompare = (id: string) => {
@@ -163,6 +217,10 @@ export function GenerateView() {
           <h1>{t("generateTitle")}</h1>
           {comfy && !comfy.reachable && <p className="err-text">{t("comfyDown", { reason: comfy.reason || "" })}</p>}
         </div>
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <EngineBar sel={sel} setSel={setEngineSel} model={model} setModel={setModel} resolved={resolved}
+          customs={customs} engines={engines.data} />
       </div>
       <div className="gen-layout">
         <div className="stack">
@@ -253,32 +311,13 @@ export function GenerateView() {
 
         <aside className="card stack" style={{ position: "sticky", top: 0 }}>
           <div className="params">
-            <label className="field" style={{ gridColumn: "1 / -1" }}>{t("template")}
-              <select value={template} onChange={(e) => setTemplate(e.target.value)}>
-                <option value="sdxl_txt2img">SDXL · txt2img</option>
-                <option value="sdxl_img2img">SDXL · img2img</option>
-                <option value="sd15_txt2img">SD 1.5 · txt2img (low VRAM)</option>
-                {customs.map((w) => <option key={w.template} value={w.template}>{w.name || w.template}</option>)}
-              </select>
-            </label>
-            <label className="field" style={{ gridColumn: "1 / -1" }}>{t("checkpoint")}
-              <select value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)}>
-                <option value="">{t("checkpointDefault")}</option>
-                {checkpoints.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="hint">{engineLine}</span></div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>{t("aspect")}
               <div className="segmented" style={{ flexWrap: "wrap" }}>
                 {Object.keys(ASPECTS).map((a) => <button key={a} className={aspect === a ? "on" : ""} onClick={() => setAspect(a)}>{a}</button>)}
               </div>
               <span className="hint mono block">{ASPECTS[aspect][0]} x {ASPECTS[aspect][1]}</span>
             </div>
-            <label className="field">{t("steps")}<input type="number" min={1} max={150} value={steps} onChange={(e) => setSteps(Number(e.target.value))} /></label>
-            <label className="field">{t("cfg")}<input type="number" min={0} max={30} step={0.5} value={cfg} onChange={(e) => setCfg(Number(e.target.value))} /></label>
-            <label className="field">{t("sampler")}
-              <select value={sampler} onChange={(e) => setSampler(e.target.value)}>{SAMPLERS.map((s) => <option key={s}>{s}</option>)}</select></label>
-            <label className="field">{t("scheduler")}
-              <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>{SCHEDULERS.map((s) => <option key={s}>{s}</option>)}</select></label>
             <div className="field" style={{ gridColumn: "1 / -1" }}>{t("seed")}
               <div className="seed-row">
                 <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} className="mono" />
@@ -290,26 +329,61 @@ export function GenerateView() {
             <label className="field" style={{ gridColumn: "1 / -1" }}>{t("count")} <span className="mono">{count}</span>
               <input type="range" min={1} max={8} value={count} onChange={(e) => setCount(Number(e.target.value))} /></label>
           </div>
-          <div className="field">{t("referenceSlot")}
-            <div className={`drop-slot${dragOver ? " over" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
-              {reference ? <img src={thumbUrl(reference)} alt="" /> : <ImagePlus size={22} />}
-              <span className="grow">{reference ? reference.name : t("referenceDrop")}</span>
-              {reference ? <button className="btn sm icon ghost" onClick={() => setReference(null)}><X size={14} /></button>
-                : <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
+          {maxRefs > 0 && (
+            <div className="field">{maxRefs > 1 ? t("referencesSlot", { n: maxRefs }) : sdLike ? t("referenceSlot") : t("referenceEditSlot")}
+              <div className={`drop-slot${dragOver ? " over" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+                {refs.length === 0 && <ImagePlus size={22} />}
+                <span className="grow row wrap" style={{ gap: 6 }}>
+                  {refs.length === 0 && t("referenceDrop")}
+                  {refs.map((r, i) => (
+                    <span key={r.id} className="ref-chip" title={r.name || undefined}>
+                      <img src={thumbUrl(r)} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6 }} />
+                      {maxRefs > 1 && <span className="mono small">{`<image${i + 1}>`}</span>}
+                      <button className="btn sm icon ghost" onClick={() => setRefs(refs.filter((x) => x.id !== r.id))}><X size={12} /></button>
+                    </span>
+                  ))}
+                </span>
+                {refs.length < maxRefs && <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
+              </div>
+              {!sdLike && refs.length > 0 && <span className="hint">{maxRefs > 1 ? t("referenceEditHintMulti") : t("referenceEditHint")}</span>}
             </div>
-          </div>
-          <label className="check"><input type="checkbox" checked={useCharRef} onChange={(e) => setUseCharRef(e.target.checked)} /> {t("useCharacterRef")}</label>
-          {(reference || useCharRef) && (
+          )}
+          <label className="check"><input type="checkbox" checked={useCharRef} onChange={(e) => setUseCharRef(e.target.checked)} /> {sdLike ? t("useCharacterRef") : t("keepCharacter")}</label>
+          {sdLike && (refs.length > 0 || useCharRef) && (
             <label className="field">{t("strength")} <span className="mono">{strength.toFixed(2)}</span>
               <input type="range" min={0.1} max={1} step={0.05} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /></label>
           )}
+          <details>
+            <summary className="panel-title" style={{ cursor: "pointer" }}>{t("advanced")}</summary>
+            <div className="params" style={{ marginTop: 8 }}>
+              {sdLike && (
+                <label className="field" style={{ gridColumn: "1 / -1" }}>{t("checkpoint")}
+                  <select value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)}>
+                    <option value="">{t("checkpointDefault")}</option>
+                    {checkpoints.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="field">{t("steps")}<input type="number" min={1} max={150} value={steps} placeholder={String(defaults.steps)} onChange={(e) => setSteps(e.target.value)} /></label>
+              <label className="field">{t("cfg")}<input type="number" min={0} max={30} step={0.5} value={cfg} placeholder={String(defaults.cfg)} onChange={(e) => setCfg(e.target.value)} /></label>
+              <label className="field">{t("sampler")}
+                <select value={sampler} onChange={(e) => setSampler(e.target.value)}>
+                  <option value="">{defaults.sampler} ({t("engineDefault")})</option>
+                  {SAMPLERS.map((x) => <option key={x}>{x}</option>)}</select></label>
+              <label className="field">{t("scheduler")}
+                <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>
+                  <option value="">{defaults.scheduler} ({t("engineDefault")})</option>
+                  {SCHEDULERS.map((x) => <option key={x}>{x}</option>)}</select></label>
+            </div>
+            <span className="hint">{t("advancedHint")}</span>
+          </details>
           <button className="btn primary lg" onClick={queue} disabled={busy || !prompt.trim()}>
             {busy ? <Loader2 size={17} className="spin" /> : <Wand2 size={17} />} {t("queue")} <span className="kbd" style={{ color: "#fff", borderColor: "#fff6" }}>Ctrl+Enter</span>
           </button>
         </aside>
       </div>
-      {picking && <AssetPicker projectId={pid} onClose={() => setPicking(false)} onPick={(a) => { setReference(a); setPicking(false); }} />}
+      {picking && <AssetPicker projectId={pid} onClose={() => setPicking(false)} onPick={(a) => { addRef(a); setPicking(false); }} />}
     </>
   );
 }

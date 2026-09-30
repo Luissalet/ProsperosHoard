@@ -169,6 +169,19 @@ def studio_services() -> dict[str, Any]:
     return _call("GET", "/api/agent/studio_services")
 
 
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def studio_gpu_memory() -> dict[str, Any]:
+    """What each GPU holds and which server holds it (llama.cpp, ComfyUI, Ollama) vs what image engines need.
+
+    Use it when a render is slow or waits for VRAM: servers[] says which model each server keeps
+    loaded and whether studio_service_stop may stop it; vram_needed_mb is each engine's estimate
+    (qwen21 ~12 GB). Tell the user what to stop instead of stopping a language model on your own.
+
+    Keywords: gpu memory, vram, what is loaded, slow render, memoria gpu, que hay cargado, vram libre
+    """
+    return _call("GET", "/api/agent/studio_gpu_memory")
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_service_start(id: str = "comfyui", gpu: Optional[str] = None, wait_s: float = 120) -> dict[str, Any]:
     """Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.
@@ -252,6 +265,7 @@ def studio_generate_image(
     wait_s: float = 0, use_character_reference: bool = False,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
     characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
+    model: Optional[str] = None,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
@@ -277,6 +291,8 @@ def studio_generate_image(
     whose canonical shot came from a reference sheet.
     seed: fix it to reproduce or keep a look consistent (random when omitted, always returned).
     checkpoint: a file name from studio_status (default: the template's; a wrong name fails listing the installed ones).
+    model: the model file for the engine (a Qwen-Image diffusion model for qwen21, else a checkpoint);
+    the installed ones per engine are in GET /api/image-engines -> models. Default: the template's.
     count 1-8 (seeds seed..seed+count-1). Returns the job (poll studio_job), which engine and template were
     actually used, the exact final prompt and unknown_mentions; with wait_s > 0 and a finished job, also
     the asset ids and, only when include_image=true, a picture of them (default false: a text-only model
@@ -294,6 +310,7 @@ def studio_generate_image(
         "prompt": prompt, "style": style, "negative": negative, "aspect": aspect, "width": width,
         "height": height, "steps": steps, "cfg": cfg, "sampler": sampler, "scheduler": scheduler,
         "seed": seed, "count": count, "reference_asset_id": reference_asset_id,
+        "model": model,
         "reference_asset_ids": reference_asset_ids, "strength": strength,
         "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
         "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
