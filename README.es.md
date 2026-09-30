@@ -214,6 +214,7 @@ TTS están ya en marcha en vez de cargar nada propio.
 | --- | --- | --- |
 | `studio_status` | Backends, checkpoints, VRAM libre, cola | sí |
 | `studio_services` / `studio_service_start` / `studio_service_stop` | Ver, arrancar y parar los servidores locales (ComfyUI, el grupo de render, Ollama) sin Faustus | sí / no / no |
+| `studio_gpu_memory` | Qué tiene cada GPU y qué servidor lo ocupa, frente a lo que necesita cada motor de imagen | sí |
 | `studio_projects` / `studio_create_project` | Listar o crear producciones | sí / no |
 | `studio_cast` | Listar, crear y editar personajes y grupos | no (listar sí lo es) |
 | `studio_generate_image` | Encolar txt2img/edición con @menciones, estilos y motor de imagen | no |
@@ -276,6 +277,20 @@ dicen siempre qué se ha encontrado y por qué; nada se carga ni se descarga
 a tus espaldas.
 
 ### Sin Faustus
+
+La pantalla **Generar** empieza con la cabecera del modelo: el motor de
+imagen (Automático = Qwen-Image 2.1 si está instalado, FLUX.1, SDXL, SD 1.5,
+tus flujos importados) y su fichero de modelo, dónde corre ComfyUI (con
+**Iniciar** si está apagado y **Liberar ComfyUI**) y si el motor cabe en la
+GPU que va a usar: «Qwen-Image 2.1 necesita unos 12 GB; la GPU 3 tiene 3 GB…
+la ocupa llama.cpp (qwen3.8-27b)», con el botón **Parar llama.cpp** ahí
+mismo. **Memoria GPU** lista cada tarjeta con lo que mantiene cargado cada
+servidor (ComfyUI, llama.cpp y su modelo, Ollama y los suyos) y las
+acciones de arrancar y parar. Con Qwen-Image o Kontext las imágenes de
+referencia van a la edición del propio motor (hasta 10 con Qwen, `<image1>`
+es el sujeto) con denoise completo; la intensidad de img2img y los ajustes
+del sampler solo se aplican a SDXL, y los campos vacíos de **Avanzado** usan
+los valores ajustados de cada motor.
 
 Prospero no necesita a Faustus en marcha. **Backends > Servicios locales**
 lista los servidores que usa - el ComfyUI principal, cada servidor del grupo

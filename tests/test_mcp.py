@@ -85,7 +85,7 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_production_shots", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
                         "studio_recipe_run", "studio_qa_run", "studio_qa_report", "studio_animatic",
                         "studio_short_create", "studio_production_script", "studio_stock_search",
-                        "studio_services", "studio_service_start", "studio_service_stop"}
+                        "studio_services", "studio_service_start", "studio_service_stop", "studio_gpu_memory"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name

@@ -649,6 +649,18 @@ class Backend:
             "logs_dir": str(self.launcher.logs_dir),
         }
 
+    def memory(self) -> dict[str, Any]:
+        """What each GPU holds and which server holds it (the main ComfyUI,
+        the render pool, Ollama, llama.cpp...), with the VRAM each image
+        engine needs, so the studio can say why a render is slow and what to
+        stop or free."""
+        from .hoard_link import launch as launch_mod
+
+        mem = launch_mod.memory(self.launcher, self.comfy_ports())
+        mem["vram_estimates_mb"] = self.vram_estimates_mb()
+        mem["main_comfy"] = f"comfyui@{self.main_comfy_port()}" if self.main_comfy_port() is not None else None
+        return mem
+
     def _after_service_change(self) -> None:
         self._pool_health.clear()
         self.reload()

@@ -68,6 +68,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_services` | yes | - | `items[{id, label, state (running/starting/down/unavailable), role (main/render_pool), capabilities, url, startable, stoppable, started_by, gpu, problem}]`, `gpus[{index, name, free_mb}]`, `autostart_comfy` |
 | `studio_service_start` | no | `id` ("comfyui", "comfyui@<port>", "render_pool", "ollama", "cmd:<id>"), `gpu` ("auto" or an index), `wait_s` (120) | `ok`, `service`, `already`, `ready`, `state`, `gpu`, `log`, `error` |
 | `studio_service_stop` | no | `id` | `ok`, `service`, `error` (a server started outside the Hoard family is refused) |
+| `studio_gpu_memory` | yes | - | `gpus[{index, name, free_mb, total_mb, held_by[], other_processes}]`, `servers[{id, label, gpus, models, held_mb, stoppable}]`, `vram_needed_mb{qwen21, flux, sdxl, wan, ace}` |
 | `studio_projects` | yes | `query=None, limit=10` | `items[{id, name, brief, counts, updated_at}]`, `has_more` |
 | `studio_create_project` | no | `name, brief=None, image_engine=None` | `{id, name, brief, image_engine}` |
 | `studio_cast` | no* | `project, action="list"|"create"|"update", kind="character"|"group", id=None, name=None, fields={}` (character fields include `canonical_asset_id` and `canonical_crop`) | list: `characters[], groups[]`; create/update: the object |

@@ -194,3 +194,45 @@ def test_an_explicit_strength_still_sets_the_qwen_edit_denoise(store, backend_wi
     assert done["state"] == "done", done
     server, _ = fake_comfy
     assert server.prompts_seen[-1]["459:458"]["inputs"]["denoise"] == 0.7
+
+
+def _upload_png(c, project_id: str) -> str:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 96), (200, 60, 90)).save(buf, "PNG")
+    r = c.post(f"/api/projects/{project_id}/import-upload", files={"file": ("subject.png", buf.getvalue(), "image/png")})
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def test_image_engines_endpoint_for_the_generate_screen(client):
+    c, _, _ = client
+    project_id = c.post("/api/projects", json={"name": "Engines"}).json()["id"]
+    c.patch(f"/api/projects/{project_id}", json={"image_engine": "flux"}).raise_for_status()
+    body = c.get(f"/api/image-engines?project={project_id}").json()
+    assert body["auto_resolves_to"] == "qwen21" and body["installed"]["qwen21"] and body["installed"]["sdxl"]
+    assert body["project_default"] == "flux" and body["live"] is True
+
+
+def test_ui_generate_with_an_engine_and_references_edits_at_full_denoise(client):
+    """The Generate screen sends the engine (not a template) and the
+    references; a leftover img2img strength never reaches a Qwen edit."""
+    c, app, _ = client
+    project_id = c.post("/api/projects", json={"name": "UI edit"}).json()["id"]
+    ref1, ref2 = _upload_png(c, project_id), _upload_png(c, project_id)
+    r = c.post(f"/api/projects/{project_id}/generate", json={
+        "prompt": "<image1> dancing on a disco floor, lights from <image2>", "engine": "auto",
+        "reference_asset_id": ref1, "reference_asset_ids": [ref1, ref2], "strength": 0.6, "seed": 5, "count": 1})
+    assert r.status_code == 200, r.text
+    job = app.state.store.get_job(r.json()["job"]["id"])
+    assert job["params"]["template"] == "qwen21_edit" and job["params"]["strength"] is None
+    assert job["params"]["reference_asset_ids"] == [ref1, ref2]
+    # SDXL keeps img2img with the strength asked for
+    r = c.post(f"/api/projects/{project_id}/generate", json={
+        "prompt": "a lantern", "engine": "sdxl", "reference_asset_id": ref1, "reference_asset_ids": [ref1],
+        "strength": 0.55, "seed": 6, "count": 1})
+    job = app.state.store.get_job(r.json()["job"]["id"])
+    assert job["params"]["template"] == "sdxl_img2img" and job["params"]["strength"] == 0.55
