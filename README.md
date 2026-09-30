@@ -323,6 +323,7 @@ the img2img strength and the sampler settings only apply to SDXL, and empty
 fields under **Advanced** use each engine's tuned values. An edit keeps the
 size and framing of `<image1>` (**Like <image1>**, picked as soon as the
 first reference goes in; a ratio forces that exact canvas instead), and
+typing `<` in the prompt lists the references (`<image1>` with its thumbnail...; Tab or Enter inserts one), and
 with several references the panel warns when the instruction does not name
 one of them - say what to take from each, e.g. `<image1> wearing the jacket
 from <image2>`, and describe it by what the reference shows rather than

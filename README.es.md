@@ -334,7 +334,8 @@ es el sujeto) con denoise completo; la intensidad de img2img y los ajustes
 del sampler solo se aplican a SDXL, y los campos vacíos de **Avanzado** usan
 los valores ajustados de cada motor. Una edición conserva el tamaño y el
 encuadre de `<image1>` (**Como <image1>**, que se elige en cuanto entra la
-primera referencia; un formato fuerza ese lienzo exacto), y con varias
+primera referencia; un formato fuerza ese lienzo exacto), y escribir `<` en el prompt lista las referencias (`<image1>` con su miniatura...;
+Tab o Intro la inserta), y con varias
 referencias el panel avisa si la instrucción no nombra alguna: di qué tomar
 de cada una, p. ej. `<image1> wearing the jacket from <image2>`, y no le
 repitas colores que no son los de la referencia, porque la edición sigue al
