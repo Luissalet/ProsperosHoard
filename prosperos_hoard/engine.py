@@ -443,6 +443,34 @@ def comfy_timeout_s(kind: Optional[str]) -> float:
     return COMFY_TIMEOUT_S.get(kind or "", COMFY_TIMEOUT_DEFAULT_S)
 
 
+async def _cancel_comfy_prompt(comfy: Any, prompt_id: str) -> str:
+    """Stop only this job's prompt on a (possibly shared) ComfyUI.
+
+    A bare ``/interrupt`` stops whatever is executing, which may be another
+    job's prompt while ours still waits in ComfyUI's queue. Read the queue
+    first: interrupt only when our prompt is the one running (targeted by id),
+    dequeue it when pending, and do nothing when it already left the queue.
+    The vendored client stays untouched; its transport is reused as-is.
+    """
+    response = await comfy._client.get(comfy.url + "/queue", timeout=5.0)
+    response.raise_for_status()
+    queue = response.json() if response.content else {}
+
+    def ids(key: str) -> set:
+        items = queue.get(key) if isinstance(queue, dict) else None
+        return {item[1] for item in items or [] if isinstance(item, (list, tuple)) and len(item) > 1}
+
+    if prompt_id in ids("queue_running"):
+        (await comfy._client.post(comfy.url + "/interrupt", json={"prompt_id": prompt_id},
+                                  timeout=5.0)).raise_for_status()
+        return "interrupted"
+    if prompt_id in ids("queue_pending"):
+        (await comfy._client.post(comfy.url + "/queue", json={"delete": [prompt_id]},
+                                  timeout=5.0)).raise_for_status()
+        return "dequeued"
+    return "not_queued"
+
+
 def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
                          progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
     comfy = _comfy(backend)
@@ -467,7 +495,7 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
     while True:
         if cancelled():
             try:
-                backend.run_async(comfy.interrupt())
+                backend.run_async(_cancel_comfy_prompt(comfy, prompt_id))
             except Exception:  # pragma: no cover - best effort
                 pass
             raise JobCancelled("cancelled")
