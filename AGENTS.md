@@ -33,6 +33,13 @@ Reglas para agentes de código que trabajen en este repositorio.
 
 Qué hacer cuando el usuario pide, con sus palabras:
 
+- **«ComfyUI no está» / «no encuentra el backend» / "start ComfyUI"**:
+  `studio_services`; si el servidor que falta está `down` y `startable`,
+  `studio_service_start(id)` (espera a que responda) y repite lo que fallaba.
+  Prospero no necesita a Faustus. Si está `unavailable`, di el `problem`
+  (no instalado, falta su Python) en vez de reintentar. Solo se paran con
+  `studio_service_stop` los que arrancó la familia Hoard.
+
 - **«Recrea esto con X» / "remake this with X"**: la producción de origen es
   la que acaba de terminar o la que nombre (`studio_productions`). Si aún no
   es receta, `studio_recipe_export(production)`; lee sus `warnings` (prompts

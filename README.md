@@ -207,6 +207,7 @@ loading anything of its own.
 | Tool | What it does | Read-only |
 | --- | --- | --- |
 | `studio_status` | Backends, checkpoints, free VRAM, queue | yes |
+| `studio_services` / `studio_service_start` / `studio_service_stop` | See, start and stop the local servers (ComfyUI, the render pool, Ollama) without Faustus | yes / no / no |
 | `studio_projects` / `studio_create_project` | List or create productions | yes / no |
 | `studio_cast` | List, create, update characters and groups | no (list is read-only) |
 | `studio_generate_image` | Queue txt2img/edit with @mentions, presets and an image engine choice | no |
@@ -265,6 +266,44 @@ loopback (ComfyUI on 8188). Music comes from ACE-Step through the same
 ComfyUI, or from a small documented HTTP server you point
 `HOARD_MUSIC_URL` at. The **Backends** screen and `studio_status` always
 say what was found and why; nothing is loaded or unloaded behind your back.
+
+### Running without Faustus
+
+Prospero does not need Faustus running. **Backends > Local services** lists
+the servers it uses - the main ComfyUI, every render-pool server, Ollama and
+any server you describe in `~/.hoard/backends.json` - with a **Start** button
+(and a GPU choice for ComfyUI: the card with the most free memory by
+default) and a **Stop** button for the ones the Hoard family started. With
+**"Start ComfyUI by itself when a job needs it"** on (the default), a render
+queued while ComfyUI is off starts it first and then runs; with it off, the
+job fails with a message pointing at the Start button. Starting ComfyUI
+loads no model: memory is only used when a job runs. The agent does the
+same with `studio_services`, `studio_service_start` and `studio_service_stop`.
+
+ComfyUI is found in `COMFYUI_DIR`, the folder saved in Backends, or the
+usual places (`D:\LocalAI\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, the portable
+build...), with the Python of its `venv`, `.venv` or `python_embeded`.
+It is started on loopback with `--cuda-device` for the chosen GPU; a server
+on any port other than 8188 gets its own output, temp, user and database
+folders under `~/.hoard/backends/`, so two instances never race. Ollama is
+found on `PATH` or in its default install folder. The launcher is
+`hoard_link/launch.py` from HoardLink, shared with Hoard Hub and the rest of
+the family: `~/.hoard/backends.json` says where things are installed,
+`~/.hoard/backends/state.json` which processes the family started (pid and
+creation time, logs next to it). A ComfyUI started from Hoard Hub shows up
+here and can be stopped here, and the other way round; a server started by
+hand or by Faustus is shown as running and never stopped.
+
+```json
+{
+  "comfyui": {"dir": "D:/LocalAI/ComfyUI", "gpu": "auto", "args": ["--lowvram"]},
+  "ollama": {"exe": null},
+  "commands": [
+    {"id": "llamacpp", "label": "llama.cpp", "argv": ["powershell", "-NoProfile", "-File", "D:/LocalAI/Start-LlamaServer.ps1"],
+     "health": "http://127.0.0.1:8081/health", "capabilities": ["llm", "vision"]}
+  ]
+}
+```
 
 ## Production example
 
