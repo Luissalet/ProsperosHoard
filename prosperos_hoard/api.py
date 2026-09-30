@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
+from . import mv_planner
 from . import animatic as animatic_mod
 from . import audio as audio_mod
 from . import charkit
@@ -44,7 +45,7 @@ from .design import DesignError
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .ids import new_id
 from .jobs import JobQueue
-from .store import NotFound, Store
+from .store import AssetInUse, NotFound, Store
 from .voice_lab import VoiceLabError
 
 logger = logging.getLogger("prosperos_hoard.api")
@@ -83,6 +84,8 @@ class GuardMiddleware(BaseHTTPMiddleware):
 # ----------------------------------------------------------------- errors
 
 def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
+    if isinstance(exc, AssetInUse):
+        return 409, {"error": "asset_in_use", "message": str(exc)}
     if isinstance(exc, NotFound):
         return 404, {"error": "not_found", "message": str(exc)}
     if isinstance(exc, engine.EngineError):
@@ -142,6 +145,17 @@ def _gpu_arg(value: Optional[str]) -> Any:
         return int(str(value).strip())
     except ValueError:
         raise ValueError(f"gpu must be \"auto\" or a GPU index, got {value!r}") from None
+
+
+class DeleteAssetsBody(BaseModel):
+    ids: list[str]
+    force: bool = False  # detach it from covers, canonical/reference images, logos and boards first
+
+
+class TrashBody(BaseModel):
+    action: str = "list"  # list | restore | empty
+    ids: Optional[list[str]] = None
+    project: Optional[str] = None
 
 
 class CreateProjectBody(BaseModel):
@@ -327,6 +341,10 @@ class EditImageBody(BaseModel):
 
 class AnimateBody(BaseModel):
     asset_id: str
+    # "auto": Wan 2.2 (a 5 s clip that follows `prompt`) when it is installed,
+    # else SVD; "svd" forces the old image-to-video
+    engine: str = "auto"
+    prompt: Optional[str] = None  # Wan: what moves (camera and subject)
     frames: int = 14
     fps: int = 7
     motion: int = 127
@@ -388,6 +406,35 @@ class ProductionCreateBody(BaseModel):
     spec: dict[str, Any]
     settings: Optional[dict[str, Any]] = None
     project: Optional[str] = None
+
+
+class VideoPlanBody(BaseModel):
+    concept: str
+    character_id: Optional[str] = None  # the lead from the cast (its canonical image keeps the look)
+    lead_name: Optional[str] = None     # ... or a new lead: name + look
+    lead_look: Optional[str] = None
+    shots: int = 10
+    language: str = "en"               # the lyrics' language
+    song_asset_id: Optional[str] = None  # an existing song; otherwise it is composed
+    lyrics: Optional[str] = None       # the existing song's lyrics, for the shot plan
+    genre: Optional[str] = None
+    duration_s: float = 120
+
+
+class VideoFromPlanBody(BaseModel):
+    name: str
+    draft: dict[str, Any]
+    character_id: Optional[str] = None
+    lead_name: Optional[str] = None
+    lead_look: Optional[str] = None
+    song_asset_id: Optional[str] = None
+    clips: str = "all"          # all | lead | none
+    aspects: Optional[list[str]] = None
+    song_takes: int = 2
+    engine: str = "auto"
+    project: Optional[str] = None
+    brief: Optional[str] = None
+    settings: Optional[dict[str, Any]] = None
 
 
 class ShortCreateBody(BaseModel):
@@ -796,12 +843,26 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = queue.enqueue("compose_song", "gpu", body.model_dump(exclude={"wait_s"}), project_id=project)
         return {"job": wait(job, body.wait_s)}
 
+    def _wan_installed() -> bool:
+        try:
+            info = engine.object_info_live_or_cached(backend)
+        except Exception:  # noqa: BLE001 - nothing known yet: let the render say what is missing
+            return True
+        return "Wan22ImageToVideoLatent" in info and engine._has_model_file(info, "UNETLoader", "unet_name", "wan")
+
     def op_animate(body: AnimateBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)
         if asset["kind"] != "image":
             raise engine.EngineError("not_an_image", f"asset {body.asset_id} is {asset['kind']}; animate needs an image")
-        job = queue.enqueue("animate", "gpu", body.model_dump(exclude={"wait_s"}), project_id=asset["project_id"])
-        return {"job": wait(job, body.wait_s)}
+        if body.engine not in ("auto", "wan", "svd"):
+            raise ValueError("engine is auto, wan or svd")
+        if body.engine == "wan" or (body.engine == "auto" and _wan_installed()):
+            res = op_generate(asset["project_id"], GenerateImageBody(
+                prompt=(body.prompt or "subtle natural motion, gentle camera push-in").strip(), template="wan22_ti2v",
+                reference_asset_id=asset["id"], seed=body.seed, count=1, wait_s=body.wait_s))
+            return {"job": res["job"], "engine": "wan"}
+        job = queue.enqueue("animate", "gpu", body.model_dump(exclude={"wait_s", "engine", "prompt"}), project_id=asset["project_id"])
+        return {"job": wait(job, body.wait_s), "engine": "svd"}
 
     def op_render(body: RenderBody) -> dict[str, Any]:
         tl = store.get_timeline(body.timeline_id)
@@ -2043,6 +2104,65 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         filename = _download_name(asset, path) if download else None
         return FileResponse(path, media_type=asset.get("mime") or mimetypes.guess_type(path.name)[0], filename=filename)
 
+    def op_delete_assets(ids: list[str], force: bool) -> dict[str, Any]:
+        if not ids or len(ids) > 200:
+            raise ValueError("ids: 1 to 200 asset ids")
+        deleted, failed = [], []
+        for aid in dict.fromkeys(ids):
+            try:
+                deleted.append(store.trash_asset(aid, force=force))
+            except (AssetInUse, NotFound) as exc:
+                failed.append({"id": aid, "error": "asset_in_use" if isinstance(exc, AssetInUse) else "not_found",
+                               "message": str(exc), **({"references": exc.references} if isinstance(exc, AssetInUse) else {})})
+        return {"deleted": [d["id"] for d in deleted], "detached": {d["id"]: d["detached"] for d in deleted if d["detached"]},
+                "failed": failed, "note": "in the trash: restore with studio_trash(action='restore') until it is emptied"}
+
+    def op_trash(body: TrashBody) -> dict[str, Any]:
+        if body.action == "list":
+            return {"items": store.list_trash(body.project)}
+        if body.action == "restore":
+            if not body.ids:
+                raise ValueError("restore needs ids")
+            return {"restored": [store.restore_asset(i)["id"] for i in body.ids]}
+        if body.action == "empty":
+            return store.empty_trash(body.project, body.ids)
+        raise ValueError("action must be list, restore or empty")
+
+    @app.delete("/api/assets/{asset_id}")
+    def delete_asset(asset_id: str, force: bool = False):
+        return store.trash_asset(asset_id, force=force)
+
+    @app.post("/api/assets/delete")
+    def delete_assets(body: DeleteAssetsBody):
+        return op_delete_assets(body.ids, body.force)
+
+    @app.post("/api/assets/{asset_id}/restore")
+    def restore_asset(asset_id: str):
+        return store.restore_asset(asset_id)
+
+    @app.get("/api/trash")
+    def list_trash(project: Optional[str] = None):
+        return {"items": store.list_trash(project)}
+
+    @app.get("/api/trash/{asset_id}/thumb")
+    def trash_thumb(asset_id: str):
+        path = store.trash_file(asset_id)
+        if not path or not path.is_file():
+            return JSONResponse({"error": "no_thumb", "message": "no preview kept"}, status_code=404)
+        return FileResponse(path)
+
+    @app.post("/api/trash/empty")
+    def empty_trash(body: TrashBody):
+        return store.empty_trash(body.project, body.ids)
+
+    @app.post("/api/agent/studio_delete_assets")
+    def agent_delete_assets(body: DeleteAssetsBody):
+        return agent("studio_delete_assets", ",".join(body.ids)[:200], lambda: op_delete_assets(body.ids, body.force))
+
+    @app.post("/api/agent/studio_trash")
+    def agent_trash(body: TrashBody):
+        return agent("studio_trash", body.action, lambda: op_trash(body))
+
     @app.get("/api/assets/{asset_id}/thumb")
     def asset_thumb(asset_id: str):
         asset = store.get_asset(asset_id)
@@ -2221,11 +2341,47 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = queue_production(state["slug"])
         return {"production": production_view(state["slug"]), "job": engine.job_view(job)}
 
-    def op_production_continue(slug: str) -> dict[str, Any]:
+    def _plan_lead(character_id: Optional[str], name: Optional[str], look: Optional[str]) -> dict[str, Any]:
+        if character_id:
+            char = store.get_character(character_id)
+            return {"character_id": char["id"], "name": char["name"], "look": char.get("prompt") or ""}
+        if not (name or "").strip() or not (look or "").strip():
+            raise ValueError("pick a lead from the cast (character_id) or give lead_name and lead_look")
+        return {"name": name.strip(), "look": look.strip()}
+
+    def op_video_plan(body: VideoPlanBody) -> dict[str, Any]:
+        lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
+        chat = (getattr(app.state, "short_hooks", None) or {}).get("chat") or mv_planner.writer_chat(backend)
+        draft = mv_planner.plan(chat, concept=body.concept, lead_name=lead["name"], lead_look=lead.get("look") or "",
+                                n_shots=body.shots, language=body.language, compose_song=not body.song_asset_id,
+                                duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre)
+        return {"draft": draft, "lead": lead}
+
+    def op_video_from_plan(body: VideoFromPlanBody) -> dict[str, Any]:
+        lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
+        spec = mv_planner.spec_from_draft(body.draft, lead=lead, song_asset_id=body.song_asset_id, clips=body.clips,
+                                          aspects=body.aspects, song_takes=body.song_takes, engine=body.engine,
+                                          brief=body.brief)
+        project = body.project
+        if not project and body.character_id:
+            project = store.get_character(body.character_id)["project_id"]
+        settings = dict(body.settings or {})
+        if not body.song_asset_id and body.song_takes > 1:
+            settings.setdefault("song_review", True)  # listen to the takes and pick one before the stills
+        return op_production_create(ProductionCreateBody(name=body.name, spec=spec, settings=settings, project=project))
+
+    def op_production_continue(slug: str, take: Optional[int] = None) -> dict[str, Any]:
         with productions_mod.lock_for(slug):
             state = productions_mod.load_state(store.data_dir, slug)
+            if take is not None:
+                song = (state.get("spec") or {}).get("song") or {}
+                takes = ((state.get("partial") or {}).get("song") or {}).get("song_asset_ids") or []
+                if not song or not 1 <= int(take) <= max(1, len(takes) or int(song.get("count") or 1)):
+                    raise ValueError(f"take must be between 1 and {max(1, len(takes))}")
+                song["take"] = int(take)
             if state.get("status") == "awaiting_review":
-                what = "script_approved" if state.get("stage") == "script" else "animatic_approved"
+                what = ("script_approved" if state.get("stage") == "script" else
+                        "song_approved" if state.get("stage") == "song" else "animatic_approved")
                 state.setdefault("review", {})[what] = True
                 productions_mod.log(state, "review", "approved", what=what)
                 productions_mod.save_state(store.data_dir, state)
@@ -2349,14 +2505,30 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def production_create(body: ProductionCreateBody):
         return op_production_create(body)
 
+    @app.post("/api/productions/plan")
+    def production_plan(body: VideoPlanBody):
+        return op_video_plan(body)
+
+    @app.post("/api/productions/from-plan")
+    def production_from_plan(body: VideoFromPlanBody):
+        return op_video_from_plan(body)
+
+    @app.post("/api/agent/studio_video_plan")
+    def agent_video_plan(body: VideoPlanBody):
+        return agent("studio_video_plan", body.concept[:120], lambda: op_video_plan(body))
+
+    @app.post("/api/agent/studio_video_from_plan")
+    def agent_video_from_plan(body: VideoFromPlanBody):
+        return agent("studio_video_from_plan", body.name[:80], lambda: op_video_from_plan(body))
+
     @app.get("/api/productions/{slug}")
     def production_get(slug: str):
         state = productions_mod.load_state(store.data_dir, slug)
         return {**state, "view": productions_mod.compact_view(state)}
 
     @app.post("/api/productions/{slug}/continue")
-    def production_continue(slug: str):
-        return op_production_continue(slug)
+    def production_continue(slug: str, take: Optional[int] = None):
+        return op_production_continue(slug, take)
 
     @app.patch("/api/productions/{slug}/shots")
     def production_shots(slug: str, body: ProductionShotsBody):
@@ -2401,8 +2573,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_production_create", body.name[:80], lambda: op_production_create(body))
 
     @app.post("/api/agent/studio_production_continue")
-    def agent_production_continue(production: str):
-        return agent("studio_production_continue", production, lambda: op_production_continue(production))
+    def agent_production_continue(production: str, take: Optional[int] = None):
+        return agent("studio_production_continue", production, lambda: op_production_continue(production, take))
 
     @app.post("/api/agent/studio_production_shots")
     def agent_production_shots(production: str, body: ProductionShotsBody):

@@ -217,6 +217,8 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_status` | Backends, checkpoints, VRAM libre, cola | sí |
 | `studio_services` / `studio_service_start` / `studio_service_stop` | Ver, arrancar y parar los servidores locales (ComfyUI, el grupo de render, Ollama) sin Faustus | sí / no / no |
 | `studio_gpu_memory` | Qué tiene cada GPU y qué servidor lo ocupa, frente a lo que necesita cada motor de imagen | sí |
+| `studio_video_plan` / `studio_video_from_plan` | Proponer un videoclip a partir de un concepto (planos, sonido y letra en el idioma elegido) y arrancarlo desde el borrador editado | no / no |
+| `studio_delete_assets` / `studio_trash` | Mandar resultados malos a la papelera (rechazado si están en uso salvo `force`); listar, recuperar o vaciar la papelera | no / no |
 | `studio_projects` / `studio_create_project` | Listar o crear producciones | sí / no |
 | `studio_cast` | Listar, crear y editar personajes y grupos | no (listar sí lo es) |
 | `studio_generate_image` | Encolar txt2img/edición con @menciones, estilos y motor de imagen | no |
@@ -278,7 +280,45 @@ apuntes con `HOARD_MUSIC_URL`. La pantalla **Backends** y `studio_status`
 dicen siempre qué se ha encontrado y por qué; nada se carga ni se descarga
 a tus espaldas.
 
+### Un videoclip desde la app
+
+**Productions > Nuevo videoclip**: título, el protagonista del reparto (su
+imagen canónica mantiene el aspecto) o uno nuevo, el concepto, la canción
+(compuesta - sonido, idioma de la letra, duración - o una que ya tengas, con
+su letra), cuántos planos, qué planos llevan clip Wan (todos los que se
+mueven, solo los del protagonista o ninguno para un montaje de fotogramas) y
+los formatos. **Planificar con el modelo local** escribe los planos, la
+estética común y, si se compone, el sonido y la letra - en el idioma
+elegido (si responde en otro, se le pide una vez más y si no, se avisa) -
+sin razonamiento y con un tiempo de espera largo, así que un 27B repartido en
+cuatro tarjetas responde en uno o dos minutos. Todo se edita antes de
+renderizar; **Escribo yo los planos** se salta el modelo. **Crear la
+producción** lanza lo de siempre: el protagonista, las tomas de la canción
+(si hay más de una, se para para que las escuches y pulses **Usar esta
+toma**), los fotogramas con Qwen-Image desde la imagen canónica, el animático para
+revisar, los clips Wan y el montaje al ritmo. En el visor, **Animar** hace un
+clip Wan 2.2 (SVD solo si no está Wan) y **Editar con la instrucción** edita
+la imagen con Qwen-Image conservando el sujeto.
+
 ### Sin Faustus
+
+La cabecera lleva las constantes de la máquina en todas las pantallas: uso
+de GPU, un depósito por tarjeta (tan ancho como grande es la tarjeta), VRAM,
+la temperatura de la tarjeta más caliente, RAM y CPU. Al pulsarla se ve cada
+tarjeta (uso, temperatura, consumo, VRAM y los servidores y modelos que
+tiene), la RAM con la memoria comprometida (RAM + archivo de paginación, lo
+que acaba usando un modelo que no cabe) y la CPU, con Liberar ComfyUI y
+Parar para los servidores que se pueden parar.
+
+Los resultados malos se borran: **Seleccionar** en Generar y en la
+Biblioteca y después **Borrar** (también la tecla Supr en la Biblioteca);
+**Borrar** en el visor (o Supr dos veces) pasa al siguiente. Lo borrado va a
+la papelera (ficheros en `data/trash/<id>/`) con diez segundos para
+**Deshacer**, y **Biblioteca > Papelera** lo recupera o la vacía para
+siempre. Un recurso usado como portada, imagen canónica o de referencia de
+un personaje, logo de grupo o en un tablero se rechaza con el motivo y un
+**Quitarlo de ahí y borrar** (al recuperarlo vuelve a su sitio); uno usado en
+un timeline se rechaza siempre.
 
 La pantalla **Generar** empieza con la cabecera del modelo: el motor de
 imagen (Automático = Qwen-Image 2.1 si está instalado, FLUX.1, SDXL, SD 1.5,

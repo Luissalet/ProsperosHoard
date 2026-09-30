@@ -148,8 +148,8 @@ export function KindIcon({ kind, size = 28 }: { kind: string; size?: number }) {
   return <FileText size={size} />;
 }
 
-export function AssetTile({ asset, onClick, selected, focused, square, draggable = true }: {
-  asset: Asset; onClick?: () => void; selected?: boolean; focused?: boolean; square?: boolean; draggable?: boolean;
+export function AssetTile({ asset, onClick, selected, focused, square, draggable = true, selecting }: {
+  asset: Asset; onClick?: () => void; selected?: boolean; focused?: boolean; square?: boolean; draggable?: boolean; selecting?: boolean;
 }) {
   const src = thumbUrl(asset);
   return (
@@ -169,6 +169,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
         {asset.kind !== "image" && <span className="pill badge-dark">{asset.kind}</span>}
         {asset.source === "rendered" && asset.kind === "image" && <span className="pill badge-dark">design</span>}
       </div>
+      {selecting && <span className="tile-select">{selected ? "✓" : ""}</span>}
       {asset.favourite && <Heart className="fav" size={16} fill="currentColor" />}
       <div className="tile-meta">
         <span className="ellipsis grow">{asset.name || asset.id}</span>

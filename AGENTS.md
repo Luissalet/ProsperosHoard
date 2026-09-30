@@ -39,6 +39,14 @@ Qué hacer cuando el usuario pide, con sus palabras:
   Prospero no necesita a Faustus. Si está `unavailable`, di el `problem`
   (no instalado, falta su Python) en vez de reintentar. Solo se paran con
   `studio_service_stop` los que arrancó la familia Hoard.
+- **«Hazme un videoclip de X»**: pregunta el idioma de la letra si no lo
+  dice; `studio_cast(action="list")` para el protagonista; `studio_video_plan`
+  y enséñale el borrador (planos y letra) antes de `studio_video_from_plan`.
+  Para los clips, si un LLM ocupa las GPU, díselo (`studio_gpu_memory`).
+- **«Borra eso» / «quita los malos»**: `studio_delete_assets(ids)` con los
+  ids que el usuario señala (van a la papelera; `studio_trash` los recupera).
+  Si alguno está en uso, di dónde y pregunta antes de `force=true`. Vaciar la
+  papelera solo si lo pide.
 - **«Va lentísimo» / «por qué tarda»**: `studio_gpu_memory`. Si el motor no
   cabe (Qwen-Image ~12 GB) y la GPU la ocupa un modelo de lenguaje, dilo y
   pregunta antes de pararlo: nunca pares un LLM por tu cuenta.

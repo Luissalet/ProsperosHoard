@@ -113,6 +113,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
   padding: 14px 28px; border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 85%, transparent);
   backdrop-filter: blur(10px);
+  position: relative; z-index: 40; /* the vitals popover opens over the page */
 }
 .crumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; min-width: 0; }
 .crumbs strong { color: var(--text); font-weight: 600; font-size: 16px; white-space: nowrap; }
@@ -439,3 +440,20 @@ table.list tr:hover td { background: var(--surface-2); }
 .productions-grid { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 18px; align-items: start; }
 @media (max-width: 980px) { .productions-grid { grid-template-columns: 1fr; } }
 table.list tr.selected td { background: var(--accent-soft); }
+
+/* header vitals */
+.vitals { position: relative; }
+.vitals-pill { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.vitals-pill:hover { border-color: var(--border-strong); }
+.vitals .tanks { display: flex; gap: 3px; width: 90px; }
+.vitals .tank { height: 8px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 25%, transparent); overflow: hidden; display: block; }
+.vitals .tank > span { display: block; height: 100%; background: var(--ok); }
+.vitals .tank.warn > span, .bar.warn > span { background: var(--warn); }
+.vitals .tank.bad > span, .bar.bad > span { background: var(--bad); }
+.vitals-pop { position: absolute; right: 0; top: calc(100% + 8px); width: min(460px, 92vw); z-index: 60;
+  max-height: 75vh; overflow-y: auto; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); }
+.warn-text { color: var(--warn); }
+.tile-select { position: absolute; top: 8px; left: 8px; z-index: 2; width: 22px; height: 22px; border-radius: 6px;
+  border: 2px solid #fff; background: rgba(0, 0, 0, .35); display: grid; place-items: center; color: #fff; pointer-events: none; }
+.tile.selected .tile-select { background: var(--accent); border-color: var(--accent); }

@@ -85,11 +85,12 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_production_shots", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
                         "studio_recipe_run", "studio_qa_run", "studio_qa_report", "studio_animatic",
                         "studio_short_create", "studio_production_script", "studio_stock_search",
-                        "studio_services", "studio_service_start", "studio_service_stop", "studio_gpu_memory"}
+                        "studio_services", "studio_service_start", "studio_service_stop", "studio_gpu_memory",
+                        "studio_delete_assets", "studio_trash", "studio_video_plan", "studio_video_from_plan"}
             assert expected <= set(by_name)
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
-                assert t.annotations is not None and t.annotations.destructiveHint is False
+                assert t.annotations is not None and (t.annotations.destructiveHint is False or t.name == "studio_trash")
             assert by_name["studio_show"].annotations.readOnlyHint is True
             for name in ("studio_productions", "studio_production", "studio_recipes_list", "studio_recipe_get", "studio_qa_report"):
                 assert by_name[name].annotations.readOnlyHint is True, name

@@ -4,6 +4,8 @@ import { api, fileUrl, thumbUrl, type Asset, type Character, type Composed, type
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
 import { EngineBar } from "./EngineBar";
+import { useDeleteAssets } from "../components/useDeleteAssets";
+import { Trash2 } from "lucide-react";
 
 const ASPECTS: Record<string, [number, number]> = {
   "1:1": [1024, 1024], "4:5": [896, 1120], "2:3": [832, 1216], "9:16": [768, 1344], "3:2": [1216, 832], "16:9": [1344, 768],
@@ -75,6 +77,8 @@ export function GenerateView() {
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ query: string; start: number; index: number } | null>(null);
   const [compare, setCompare] = useState<string[] | null>(null);
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const del = useDeleteAssets();
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { sessionStorage.setItem(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
@@ -281,9 +285,16 @@ export function GenerateView() {
           <div className="card">
             <h2>{t("results")}
               <div className="card-actions">
-                <button className={`btn sm${compare ? " primary" : ""}`} onClick={() => setCompare(compare ? null : [])}><Columns2 size={14} /> {t("compare")}</button>
+                {picked && picked.length > 0 && (
+                  <button className="btn sm danger" onClick={async () => { await del.remove(picked); setPicked([]); }}>
+                    <Trash2 size={14} /> {t("deleteSelected", { n: picked.length })}</button>
+                )}
+                <button className={`btn sm${picked ? " primary" : ""}`} onClick={() => { setPicked(picked ? null : []); setCompare(null); }}>
+                  {picked ? t("selectDone") : t("selectMode")}</button>
+                <button className={`btn sm${compare ? " primary" : ""}`} onClick={() => { setCompare(compare ? null : []); setPicked(null); }}><Columns2 size={14} /> {t("compare")}</button>
               </div>
             </h2>
+            {del.bar}
             {compare && compare.length < 2 && <p className="muted small">{t("compareHint")}</p>}
             {compare && compare.length >= 2 && (
               <div className="compare" style={{ gridTemplateColumns: `repeat(${compare.length}, 1fr)`, marginBottom: 14 }}>
@@ -301,8 +312,9 @@ export function GenerateView() {
                   </div>
                 ))}
                 {recentItems.map((a) => (
-                  <AssetTile key={a.id} asset={a} selected={compare?.includes(a.id)}
-                    onClick={() => (compare ? toggleCompare(a.id) : app.openAsset(a.id, recentItems.map((x) => x.id)))} />
+                  <AssetTile key={a.id} asset={a} selected={compare?.includes(a.id) || picked?.includes(a.id)} selecting={!!picked}
+                    onClick={() => (picked ? setPicked(picked.includes(a.id) ? picked.filter((x) => x !== a.id) : [...picked, a.id])
+                      : compare ? toggleCompare(a.id) : app.openAsset(a.id, recentItems.map((x) => x.id)))} />
                 ))}
               </div>
             )}
