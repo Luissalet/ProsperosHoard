@@ -29,8 +29,7 @@ must not be treated as a ready-to-replay authenticated URL.
 
 Coverage applies to these two image job types using the production queue's
 `Progress` recorder. Video/audio/production jobs, direct engine calls with a
-plain progress function, multi-process queue ownership, global ComfyUI
-interruption behavior, per-user access and recovery of every partial batch
+plain progress function, multi-process queue ownership, per-user access and recovery of every partial batch
 output remain separate work. This change does not certify readiness to replace
 another application's media journal or authorize cloud providers.
 
@@ -45,3 +44,18 @@ Commands: `.venv/Scripts/python.exe -m pytest -q` and, inside `frontend`,
 `npm run build`. Final complete suite: 428 tests passed in 219.92 seconds;
 three existing dependency deprecation warnings. Targeted receipt/queue/store
 suite: 31 tests passed. Frontend TypeScript and Vite production build passed.
+
+## Scoped cancellation (added later)
+
+Cancelling one image job no longer stops whatever ComfyUI happens to be
+executing. `engine._cancel_comfy_prompt` reads ComfyUI's `/queue` first: it
+sends `/interrupt` with the job's own `prompt_id` only when that prompt is the
+running one, removes it with `/queue {"delete": [id]}` when it is still
+pending, and does nothing when it has already left the queue. The vendored
+`hoard_link` client is not modified; its HTTP transport is reused.
+
+Real check with ComfyUI 0.37 on a dedicated GPU: a foreign prompt was running
+and this job's prompt waited behind it. Cancelling the job dequeued only its
+prompt; the foreign prompt finished with `execution_success`, and the job ended
+`cancelled`. Tests: `tests/test_scoped_comfy_cancel.py` (running, pending,
+already gone, and the workflow loop never using the global interrupt).
