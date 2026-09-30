@@ -542,6 +542,8 @@ export interface LocalService {
   problem: string | null;
   command: string | null;
   state: "running" | "starting" | "down" | "unavailable";
+  // running but slow to answer its health page (in the middle of a render)
+  busy?: boolean;
   pid: number | null;
   started_by: string | null;
   stoppable: boolean;

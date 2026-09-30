@@ -58,6 +58,8 @@ export function GenerateView() {
   const [engineSel, setEngineSel] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState("");
   const [model, setModel] = useState("");
+  // "ref" = an edit keeps the canvas of <image1> (nothing sent, the template
+  // sizes it from the first reference); any ratio forces that exact size
   const [aspect, setAspect] = useState("1:1");
   // empty = the engine template's own value
   const [steps, setSteps] = useState("");
@@ -104,6 +106,16 @@ export function GenerateView() {
   const maxRefs = MAX_REFS[resolved] ?? 1;
   const defaults = ENGINE_DEFAULTS[resolved] || ENGINE_DEFAULTS.sdxl;
   useEffect(() => { if (refs.length > maxRefs) setRefs(refs.slice(0, maxRefs)); }, [maxRefs]);
+  const refSized = !sdLike && refs.length > 0;
+  // a multi-reference edit only uses the references its instruction names
+  const unnamedRefs = refs.map((_, i) => `<image${i + 1}>`).filter((tag) => !prompt.includes(tag));
+  const hadRefs = useRef(false);
+  useEffect(() => {
+    // first reference in: follow its size; last one out: back to a ratio
+    if (refSized && !hadRefs.current) setAspect("ref");
+    if (!refSized && aspect === "ref") setAspect("1:1");
+    hadRefs.current = refSized;
+  }, [refSized]);
 
   // a style preset is tuned for SDXL: its sampler settings only fill the panel there
   useEffect(() => {
@@ -151,10 +163,14 @@ export function GenerateView() {
 
   const queue = async () => {
     setBusy(true);
-    const [w, h] = ASPECTS[aspect];
     const body: Record<string, unknown> = {
-      prompt, negative: negative || null, style: style || null, width: w, height: h, seed, count,
+      prompt, negative: negative || null, style: style || null, seed, count,
     };
+    if (aspect !== "ref" || !refSized) {
+      const [w, h] = ASPECTS[aspect] || ASPECTS["1:1"];
+      body.width = w;
+      body.height = h;
+    }
     if (customTemplate) body.template = customTemplate;
     else body.engine = sel;
     if (model && !customTemplate) body.model = model;
@@ -326,9 +342,12 @@ export function GenerateView() {
             <div className="field" style={{ gridColumn: "1 / -1" }}><span className="hint">{engineLine}</span></div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>{t("aspect")}
               <div className="segmented" style={{ flexWrap: "wrap" }}>
+                {refSized && <button className={aspect === "ref" ? "on" : ""} onClick={() => setAspect("ref")} title={t("aspectRefHint")}>{t("aspectRef")}</button>}
                 {Object.keys(ASPECTS).map((a) => <button key={a} className={aspect === a ? "on" : ""} onClick={() => setAspect(a)}>{a}</button>)}
               </div>
-              <span className="hint mono block">{ASPECTS[aspect][0]} x {ASPECTS[aspect][1]}</span>
+              <span className="hint mono block">{aspect === "ref" && refSized
+                ? (refs[0].width && refs[0].height ? t("aspectRefSize", { w: refs[0].width, h: refs[0].height }) : t("aspectRefHint"))
+                : `${(ASPECTS[aspect] || ASPECTS["1:1"])[0]} x ${(ASPECTS[aspect] || ASPECTS["1:1"])[1]}`}</span>
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>{t("seed")}
               <div className="seed-row">
@@ -359,6 +378,9 @@ export function GenerateView() {
                 {refs.length < maxRefs && <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
               </div>
               {!sdLike && refs.length > 0 && <span className="hint">{maxRefs > 1 ? t("referenceEditHintMulti") : t("referenceEditHint")}</span>}
+              {!sdLike && refs.length > 1 && unnamedRefs.length > 0 && (
+                <span className="hint warn-text">{t("referenceUnnamed", { tags: unnamedRefs.join(", ") })}</span>
+              )}
             </div>
           )}
           <label className="check"><input type="checkbox" checked={useCharRef} onChange={(e) => setUseCharRef(e.target.checked)} /> {sdLike ? t("useCharacterRef") : t("keepCharacter")}</label>

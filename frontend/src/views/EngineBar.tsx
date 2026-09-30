@@ -96,7 +96,7 @@ export function EngineBar({ sel, setSel, model, setModel, resolved, customs, eng
         <div className="grow" />
         <div className="row" style={{ gap: 6 }}>
           <span className={`dot ${main?.state === "running" ? "ok" : main?.state === "starting" ? "warn" : "bad"}`} />
-          <span className="small">ComfyUI {main?.state === "running" ? (comfyGpu != null ? `· GPU ${comfyGpu}` : "")
+          <span className="small" title={main?.busy ? t("svcBusyHint") : undefined}>ComfyUI {main?.state === "running" ? (comfyGpu != null ? `· GPU ${comfyGpu}` : "") + (main.busy ? ` · ${t("svcBusy")}` : "")
             : main?.state === "starting" ? t("svcStarting") : t("comfyOff")}</span>
           {main && main.startable && (
             <button className="btn sm primary" disabled={busy !== null} onClick={() => startComfy("auto")}>

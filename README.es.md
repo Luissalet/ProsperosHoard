@@ -332,7 +332,14 @@ acciones de arrancar y parar. Con Qwen-Image o Kontext las imágenes de
 referencia van a la edición del propio motor (hasta 10 con Qwen, `<image1>`
 es el sujeto) con denoise completo; la intensidad de img2img y los ajustes
 del sampler solo se aplican a SDXL, y los campos vacíos de **Avanzado** usan
-los valores ajustados de cada motor.
+los valores ajustados de cada motor. Una edición conserva el tamaño y el
+encuadre de `<image1>` (**Como <image1>**, que se elige en cuanto entra la
+primera referencia; un formato fuerza ese lienzo exacto), y con varias
+referencias el panel avisa si la instrucción no nombra alguna: di qué tomar
+de cada una, p. ej. `<image1> wearing the jacket from <image2>`, y no le
+repitas colores que no son los de la referencia, porque la edición sigue al
+texto antes que a la imagen. Un ComfyUI ocupado con un render pesado sale
+como en marcha (**ocupado**), no como apagado.
 
 Prospero no necesita a Faustus en marcha. **Backends > Servicios locales**
 lista los servidores que usa - el ComfyUI principal, cada servidor del grupo
