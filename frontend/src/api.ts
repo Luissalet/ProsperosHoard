@@ -481,6 +481,49 @@ export interface BackendStatus {
   music: { name: string; available: boolean; reason: string }[];
   overrides: { faustus_url?: string | null; comfy_url?: string | null; import_roots: string[] };
   token_set: boolean;
+  services?: ServicesStatus;
+}
+
+export interface LocalService {
+  id: string;
+  kind: "comfyui" | "ollama" | "command";
+  label: string;
+  capabilities: string[];
+  url: string;
+  install: string | null;
+  problem: string | null;
+  command: string | null;
+  state: "running" | "starting" | "down" | "unavailable";
+  pid: number | null;
+  started_by: string | null;
+  stoppable: boolean;
+  startable: boolean;
+  gpu: number | null;
+  log: string | null;
+  role?: "main" | "render_pool" | "other";
+}
+
+export interface ServicesStatus {
+  items: LocalService[];
+  gpus: { index: number; name: string; free_mb: number; total_mb: number }[];
+  demo: boolean;
+  autostart_comfy: boolean;
+  main_comfy: string | null;
+  comfyui: { dir: string | null; python: string | null; problem: string | null; gpu: number | "auto"; args: string[] };
+  ollama: { exe: string | null };
+  config_path: string;
+  logs_dir: string;
+}
+
+export interface ServiceStart {
+  ok: boolean;
+  service?: string;
+  already?: boolean;
+  ready?: boolean;
+  state?: string;
+  error?: string;
+  detail?: string;
+  results?: ServiceStart[];
 }
 
 export interface AgentCall {
@@ -875,6 +918,10 @@ export const api = {
   backend: () => request<BackendStatus>("GET", "/api/backend"),
   setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/api/backend", patch),
   freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
+  services: () => request<ServicesStatus>("GET", "/api/backend/services"),
+  startService: (id: string, gpu?: string) => request<ServiceStart>("POST", "/api/backend/services/start", { id, gpu: gpu || null }),
+  stopService: (id: string) => request<ServiceStart>("POST", "/api/backend/services/stop", { id }),
+  setLaunch: (patch: Record<string, unknown>) => request<ServicesStatus>("PUT", "/api/backend/launch", patch),
   agentCalls: (limit = 100) => request<{ items: AgentCall[] }>("GET", `/api/agent-calls${q({ limit })}`),
 
   // -------------------------------------------------------------- voice studio

@@ -3,6 +3,7 @@ import { Cpu, Download, HardDrive, Loader2, Music, RefreshCw, Server, Type as Ty
 import { api } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, useApp, useAsync } from "../components/ui";
+import { LocalServices } from "./LocalServices";
 
 export function BackendsView() {
   const { t } = useT();
@@ -55,6 +56,7 @@ export function BackendsView() {
       {!s ? <p className="muted">{t("loading")}</p> : (
         <div className="stack">
           {s.demo && <div className="demo-banner"><Zap size={14} /> {t("demoHint")}</div>}
+          <LocalServices initial={s.services} onChange={status.reload} />
           <div className="card" style={{ padding: 6 }}>
             <table className="list">
               <thead><tr><th>{t("capability")}</th><th>{t("state")}</th><th>{t("provider")}</th><th>{t("model")}</th><th style={{ width: "44%" }}>{t("reason")}</th></tr></thead>
