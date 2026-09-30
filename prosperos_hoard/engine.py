@@ -401,6 +401,9 @@ def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
     needed = comfy_driver.estimate_vram_mb(spec, backend.vram_estimates_mb())
     free = backend.vram_free_mb()
     if free is not None and free < needed:
+        manages = getattr(backend, "comfy_manages_memory", None)
+        if manages is not None and manages(needed):
+            return
         raise WaitingForResources(
             f"waiting for {needed} MB of free VRAM for a {spec.get('vram_class', 'sdxl')} job ({free} MB free now); "
             "retrying every 15 s for up to 30 min. Nothing is unloaded automatically - use Backends > Free ComfyUI "
