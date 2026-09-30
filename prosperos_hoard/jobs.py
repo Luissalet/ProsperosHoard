@@ -1,7 +1,8 @@
 """Background job queue: one GPU worker thread, one CPU worker thread.
 
 Jobs persist in SQLite (`Store`) so a restart survives: any job left
-`running`/`waiting_gpu` is requeued on boot (`Store.requeue_running_jobs`).
+`running`/`waiting_gpu` is requeued on boot except possibly submitted image
+jobs, which are held as outcome_unknown (`Store.requeue_running_jobs`).
 Handlers are plain callables registered by job `type`; they receive the
 job dict and a `progress(fraction, message=None)` callback and return an
 `outputs` dict. A handler may raise:
@@ -76,6 +77,10 @@ class Progress:
     def check_cancel(self) -> None:
         if self.cancelled():
             raise JobCancelled("cancelled")
+
+    def record_comfy_submission(self, receipt: dict[str, Any]) -> None:
+        if self.store.get_job(self.job_id)["type"] in ("generate_image", "edit_image"):
+            self.store.record_comfy_submission(self.job_id, receipt)
 
 
 class JobQueue:

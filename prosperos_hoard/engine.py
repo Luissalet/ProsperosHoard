@@ -18,6 +18,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image, ImageDraw, ImageOps
 
@@ -445,7 +446,19 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
     for data, name in uploads:
         backend.run_async(comfy.upload_image(data, name))
     client_id = str(uuid.uuid4())
+    record = getattr(progress, "record_comfy_submission", None)
+    receipt = {"phase": "intent", "client_id": client_id,
+               "workflow_sha256": hashlib.sha256(json.dumps(workflow, sort_keys=True).encode("utf-8")).hexdigest()}
+    if record is not None:
+        endpoint = urlsplit(comfy.url)
+        host = endpoint.hostname or ""
+        host = f"[{host}]" if ":" in host else host
+        receipt["endpoint"] = urlunsplit((endpoint.scheme, host + (f":{endpoint.port}" if endpoint.port else ""),
+                                          endpoint.path, "", ""))
+        record(receipt)  # durable commit precedes the potentially accepted POST
     prompt_id = backend.run_async(comfy.queue(workflow, client_id))
+    if record is not None:
+        record(dict(receipt, phase="accepted", prompt_id=prompt_id))
     deadline = time.monotonic() + timeout_s
     cancelled = getattr(progress, "cancelled", lambda: False)
     while True:
