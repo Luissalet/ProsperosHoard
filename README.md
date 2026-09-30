@@ -320,7 +320,14 @@ there. **GPU memory** lists every card with what each server keeps loaded
 actions. With Qwen-Image or Kontext the reference images go to the engine's
 own edit (up to 10 with Qwen, `<image1>` is the subject) at full denoise;
 the img2img strength and the sampler settings only apply to SDXL, and empty
-fields under **Advanced** use each engine's tuned values.
+fields under **Advanced** use each engine's tuned values. An edit keeps the
+size and framing of `<image1>` (**Like <image1>**, picked as soon as the
+first reference goes in; a ratio forces that exact canvas instead), and
+with several references the panel warns when the instruction does not name
+one of them - say what to take from each, e.g. `<image1> wearing the jacket
+from <image2>`, and describe it by what the reference shows rather than
+restating its colours, which the edit follows over the image. A ComfyUI
+busy with a heavy render shows as running (**busy**), not off.
 
 Prospero does not need Faustus running. **Backends > Local services** lists
 the servers it uses - the main ComfyUI, every render-pool server, Ollama and
