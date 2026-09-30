@@ -1,0 +1,13 @@
+{
+  "template": "esrgan_upscale_alpha",
+  "kind": "image",
+  "vram_class": "esrgan",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "upscale_model": "2.model_name",
+    "scale_by": "4.scale_by"
+  },
+  "output_node": "5",
+  "notes": "Same model upscale as esrgan_upscale, for a source with transparency (a cut-out): LoadImage's MASK output (1 - alpha) goes into JoinImageWithAlpha, which resizes it to the upscaled image and computes alpha = 1 - mask, so the original transparency comes back at the new size instead of the hidden background colours. Core nodes only. The engine picks this template by itself when the source has any pixel that is not fully opaque."
+}

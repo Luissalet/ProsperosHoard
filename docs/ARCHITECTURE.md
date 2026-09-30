@@ -524,7 +524,11 @@ apart), segments that sound alike share a letter, energy relative to the song.
   The graphs have no sampler, so the seed `run_template` injects is not mapped
   to any node; it is still recorded in the recipe. The upscale model works at
   4x and `ImageScaleBy` (lanczos) brings it to the asked factor
-  (`scale_by = scale / 4`). The cutout PNG is stored as ComfyUI wrote it, alpha
+  (`scale_by = scale / 4`). When the source has any pixel that is not fully
+  opaque, `esrgan_upscale_alpha` runs instead: LoadImage's MASK output
+  (1 - alpha) goes into `JoinImageWithAlpha`, which resizes it to the upscaled
+  image and computes alpha = 1 - mask, so a cut-out keeps its transparency
+  rather than showing the background colours hidden under it. The cutout PNG is stored as ComfyUI wrote it, alpha
   included; only its library thumbnail and the `studio_show` picture are
   flattened onto the app's dark background, like every other transparent asset.
   The combo readers accept both schema shapes ComfyUI reports for a combo

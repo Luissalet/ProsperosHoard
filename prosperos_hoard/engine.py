@@ -994,7 +994,11 @@ def _edit_with_model(store: Store, backend: Backend, job: dict[str, Any], progre
         model = require_model_file(backend, operation, params.get("model") or UPSCALE_MODEL_DEFAULT)
         values = {"upscale_model": model, "scale_by": scale / UPSCALE_MODEL_FACTOR, "scale": scale,
                   "seed": params.get("seed")}
-        return run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation], values=values,
+        # A cut-out keeps its transparency: the alpha variant puts the source
+        # alpha back on the upscaled pixels (the plain one would bring back
+        # the background colours hidden under the transparent area).
+        template = UPSCALE_ALPHA_TEMPLATE if _has_transparency(store, src) else _EDIT_TEMPLATES[operation]
+        return run_template(store, backend, job, progress, template_name=template, values=values,
                             operation="edit_image:upscale", count=1, reference_asset_id=src["id"],
                             extra_recipe={"derived_from": src["id"]}, name=f"upscaled x{scale}: {label}")
     model = require_model_file(backend, operation, backend.bg_removal_model())
@@ -1014,6 +1018,20 @@ def _edit_with_model(store: Store, backend: Backend, job: dict[str, Any], progre
 
 
 MIN_FOREGROUND_SHARE = 0.01
+UPSCALE_ALPHA_TEMPLATE = "esrgan_upscale_alpha"
+
+
+def _has_transparency(store: Store, src: dict[str, Any]) -> bool:
+    """True when the source image has at least one pixel that is not fully opaque."""
+    try:
+        with Image.open(store.data_dir / src["file_path"]) as img:
+            if img.mode == "P":
+                return "transparency" in img.info
+            if "A" not in img.getbands():
+                return False
+            return img.getchannel("A").getextrema()[0] < 255
+    except (OSError, KeyError, ValueError):
+        return False
 
 
 def _opaque_share(store: Store, asset_id: str) -> Optional[float]:

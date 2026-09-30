@@ -118,7 +118,9 @@ sin prompt, sobre cualquier imagen:
   (`bad_parameter`), igual que un resultado de más de 8192 px por lado
   (`too_large`; el mensaje da el tamaño de origen y el máximo). `model` puede
   nombrar otro archivo instalado en `upscale_models`; por defecto
-  `RealESRGAN_x4plus.safetensors`.
+  `RealESRGAN_x4plus.safetensors`. Una imagen con transparencia (un recorte)
+  usa `esrgan_upscale_alpha`, que devuelve el alfa original al nuevo tamaño:
+  el recorte sigue siendo un recorte.
 - `remove_background` recorta el sujeto con BiRefNet (plantilla
   `birefnet_remove_background`, el mismo grafo que el blueprint «Remove
   Background (BiRefNet)» del propio ComfyUI) e importa un PNG que conserva el

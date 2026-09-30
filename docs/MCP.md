@@ -248,7 +248,8 @@ other tool error (code + message).
   value is `bad_parameter`) and refuses a result over 8192 px on a side
   (`too_large`, the message gives the source size and the maximum); `model`
   may name another file installed in ComfyUI's `upscale_models` folder
-  (default `RealESRGAN_x4plus.safetensors`). `remove_background` imports a PNG
+  (default `RealESRGAN_x4plus.safetensors`); a source with transparency runs
+  `esrgan_upscale_alpha` and keeps its alpha at the new size. `remove_background` imports a PNG
   with an alpha channel; the job outputs carry `foreground_share` (share of
   pixels kept) and, when the model kept under 1 %, a `warning` starting with
   `no_subject_found` (a scene with no clear subject comes back fully transparent). Model files (not bundled):
@@ -270,7 +271,7 @@ other tool error (code + message).
   explicit `template` skips engine resolution entirely.
 - **Templates:** `sdxl_txt2img` (default engine's txt2img fallback),
   `sdxl_img2img` (default engine's edit fallback when a reference is
-  given), `sdxl_inpaint`, `sdxl_hires`, `esrgan_upscale`, `birefnet_remove_background`, `sd15_txt2img`, `svd_img2vid`, and
+  given), `sdxl_inpaint`, `sdxl_hires`, `esrgan_upscale`, `esrgan_upscale_alpha`, `birefnet_remove_background`, `sd15_txt2img`, `svd_img2vid`, and
   the six converted from the official ComfyUI templates and checked input
   for input against what the real ComfyUI 0.37 frontend exports:
 

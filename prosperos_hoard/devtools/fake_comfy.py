@@ -395,6 +395,13 @@ class FakeComfyServer:
         with Image.open(ref_path) as im:
             return im.convert("RGB")
 
+    def _reference_alpha(self, workflow: dict[str, Any]) -> Image.Image:
+        """The LoadImage file's alpha channel (fully opaque when it has none)."""
+        load = _first(workflow, "LoadImage")
+        ref_path = self.input_dir / Path(str(load["inputs"].get("image", ""))).name
+        with Image.open(ref_path) as im:
+            return im.convert("RGBA").getchannel("A")
+
     def _positive_prompt_text(self, workflow: dict[str, Any], ksampler_inputs: dict[str, Any]) -> str:
         """The CLIPTextEncode the sampler's `positive` links to (works for
         SDXL/SD15/SVD/Flux/Kontext/Wan alike - they all wire a plain
@@ -438,10 +445,10 @@ class FakeComfyServer:
         save_node = _first(workflow, "SaveImage") or _first(workflow, "SaveImageAdvanced")
 
         outputs: dict[str, Any] = {}
-        if _first(workflow, "JoinImageWithAlpha") is not None and save_node is not None:
-            node_id = self._render_cutout(prompt_id, workflow, save_node, outputs)
-        elif _first(workflow, "ImageUpscaleWithModel") is not None and save_node is not None:
+        if _first(workflow, "ImageUpscaleWithModel") is not None and save_node is not None:
             node_id = self._render_upscale(prompt_id, workflow, save_node, outputs)
+        elif _first(workflow, "JoinImageWithAlpha") is not None and save_node is not None:
+            node_id = self._render_cutout(prompt_id, workflow, save_node, outputs)
         elif audio_node is not None:
             node_id = self._render_audio(prompt_id, workflow, audio_node, outputs)
         elif wan_save is not None:
@@ -491,8 +498,19 @@ class FakeComfyServer:
             raise HTTPException(status_code=400, detail={"error": "upscale graph without a readable LoadImage"})
         scale_by = float((_first(workflow, "ImageScaleBy") or {}).get("inputs", {}).get("scale_by", 1.0))
         size = (max(1, round(reference.width * 4 * scale_by)), max(1, round(reference.height * 4 * scale_by)))
+        out = reference.resize(size, Image.LANCZOS)
+        join = _first(workflow, "JoinImageWithAlpha")
+        if join is not None:
+            # LoadImage's MASK (output 1) is 1 - alpha and JoinImageWithAlpha
+            # resizes it and computes alpha = 1 - mask: the source alpha comes
+            # back at the new size. Anything else wired in is not modelled.
+            link = join["inputs"].get("alpha")
+            load = _first(workflow, "LoadImage")
+            if isinstance(link, list) and len(link) == 2 and workflow.get(link[0]) is load and link[1] == 1:
+                out = out.convert("RGBA")
+                out.putalpha(self._reference_alpha(workflow).resize(size, Image.BILINEAR))
         filename = f"{prompt_id}.png"
-        reference.resize(size, Image.LANCZOS).save(self.output_dir / filename)
+        out.save(self.output_dir / filename)
         node_id = [k for k, v in workflow.items() if v is save_node][0]
         outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}
         return node_id
