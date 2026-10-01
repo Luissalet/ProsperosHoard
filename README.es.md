@@ -363,7 +363,9 @@ toman varios (tres por defecto, rotando para que salgan todos; o
 exactamente los elegidos en el plano) como referencia, con la orden de que
 solo ellos aparecen detrás del protagonista, tal como están dibujados, sin
 inventar a nadie. Cambiar el reparto redibuja solo los planos cuyo público
-cambió.
+cambió. Cuando el corte usa clips, corta en compases enteros cada ~4 s (2 s
+en el estribillo), para que un baile se entienda (`clip_settings.cut_s`, o
+las opciones `beats_*`).
 
 **Biblioteca > Descargar de un enlace** trae un vídeo (o solo un trozo, o
 su audio) de YouTube, X, Instagram y los demás sitios que conoce yt-dlp,
