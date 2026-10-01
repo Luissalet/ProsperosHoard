@@ -106,6 +106,13 @@ ComfyUI/models/diffusion_models/wan_animate_2_distill_fp8_e4m3fn.safetensors`
 minuto); Prospero carga el fp8 cuando existe. Una plantilla puede pedir el
 tamaño de tarjeta que necesita (`min_card_mb`): con varios servidores, el
 trabajo espera a uno cuya tarjeta lo aguante y los demás siguen con el resto.
+Animate renderiza 3 s (73 fotogramas a 24 fps) por defecto: en una tarjeta
+de 16 GB 81 fotogramas ya se salen de la VRAM y se arrastran. El lanzador
+de Prospero arranca ComfyUI sin descarga a disco (un modelo grande pasa
+desde la RAM, no desde el disco, en cada paso); en Windows, en una tarjeta
+que también usan apps de escritorio, `"comfyui": {"args": ["--reserve-vram",
+"2.5"]}` en `~/.hoard/backends.json` evita que empujen el render a memoria
+compartida.
 
 El parámetro `engine` de `studio_generate_image` (y el ajuste `image_engine`
 de cada proyecto) elige entre las familias de imagen: `auto` (por defecto)

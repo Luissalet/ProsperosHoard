@@ -32,11 +32,11 @@
     "vae_name",
     "clip_vision_name"
   ],
-  "notes": "Wan Animate 2 (distilled, int8): the character of the reference image performs the motion of a driving video - a dance, a gesture, a stunt - with no pose extraction (the raw frames drive it). The background follows `positive_prompt` ('Character appearance description: ... Background description: ...', looks only); `pose_prompt` names the motion ('a person dancing'). The driving clip is trimmed and resampled by Prospero (ffmpeg) to `fps` before upload, so `length` frames cover length/fps seconds (81 = 3.4 s at 24 fps). Converted from the official video_wan_animate2_distilled.json template through the real 0.37 frontend; the side-by-side comparison and the driving clip's audio are dropped.",
+  "notes": "Wan Animate 2 (distilled, int8): the character of the reference image performs the motion of a driving video - a dance, a gesture, a stunt - with no pose extraction (the raw frames drive it). The background follows `positive_prompt` ('Character appearance description: ... Background description: ...', looks only); `pose_prompt` names the motion ('a person dancing'). The driving clip is trimmed and resampled by Prospero (ffmpeg) to `fps` before upload, so `length` frames cover length/fps seconds (73 = 3 s at 24 fps; on a 16 GB card 81 frames already spill out of VRAM and crawl). Converted from the official video_wan_animate2_distilled.json template through the real 0.37 frontend; the side-by-side comparison and the driving clip's audio are dropped.",
   "defaults": {
     "width": 832,
     "height": 480,
-    "length": 81,
+    "length": 73,
     "fps": 24,
     "steps": 10,
     "pose_strength": 1,
