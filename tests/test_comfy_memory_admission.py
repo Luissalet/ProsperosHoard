@@ -112,3 +112,35 @@ def test_testdouble_free_memory_contract_unchanged():
         def vram_estimates_mb(self): return {"qwen21": 12000}
         def vram_free_mb(self): return None
     check_vram_or_wait(Legacy(), {"vram_class": "qwen21"})
+
+
+def test_a_model_bigger_than_the_card_waits_only_for_most_of_it(data_dir):
+    # a 12 GB card never frees the 12000 MB a qwen21 job is estimated at (the
+    # desktop keeps a slice); ComfyUI offloads the rest, so most of the card is enough
+    card = dict(BEFORE, vram_total=12282 * MB, vram_free=10798 * MB, torch_vram_total=0, torch_vram_free=0)
+    backend, _ = fixture(data_dir, enabled=False, devices=[card])
+    assert backend.vram_total_mb() == 12282
+    check_vram_or_wait(backend, {"vram_class": "qwen21"})
+    busy = dict(card, vram_free=6000 * MB)
+    backend, _ = fixture(data_dir, enabled=False, devices=[busy])
+    with pytest.raises(WaitingForResources, match="10439 MB"):
+        check_vram_or_wait(backend, {"vram_class": "qwen21"})
+
+
+def test_dedicated_servers_let_any_idle_one_swap_its_models(data_dir):
+    # the last job's model still loaded leaves little free VRAM; on a server
+    # that is Prospero's alone, an idle one may load the next model in its place
+    loaded = dict(BEFORE, vram_total=12282 * MB, vram_free=3436 * MB, torch_vram_total=0, torch_vram_free=0)
+    backend, calls = fixture(data_dir, enabled=False, devices=[loaded], selected="http://127.0.0.1:8190")
+    with pytest.raises(WaitingForResources):
+        check_vram_or_wait(backend, {"vram_class": "qwen21"})
+    backend.set_overrides(comfy_dedicated=True)
+    check_vram_or_wait(backend, {"vram_class": "qwen21"})
+    # never while it is busy with someone else's render
+    backend2, _ = fixture(data_dir, enabled=False, devices=[loaded], selected="http://127.0.0.1:8190",
+                          queue={"queue_running": [[1]], "queue_pending": []})
+    backend2.set_overrides(comfy_dedicated=True)
+    with pytest.raises(WaitingForResources):
+        check_vram_or_wait(backend2, {"vram_class": "qwen21"})
+    backend2.set_overrides(comfy_dedicated=False)
+    assert "comfy_dedicated" not in json.loads((data_dir / "backend.json").read_text(encoding="utf-8"))

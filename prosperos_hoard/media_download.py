@@ -74,7 +74,9 @@ def download(store: Store, project_id: str, url: str, *, audio_only: bool = Fals
     opts: dict[str, Any] = {
         "outtmpl": str(tmp / "%(title).80s [%(id)s].%(ext)s"), "noplaylist": True, "quiet": True, "no_warnings": True,
         "restrictfilenames": True, "progress_hooks": [hook], "noprogress": True,
-        "match_filter": yt_dlp.utils.match_filter_func(f"duration < {MAX_DURATION_S + 1} | !duration")
+        # a list of filters is OR'ed: short enough, or no duration known (a
+        # single string would read "| !duration" as part of the number)
+        "match_filter": yt_dlp.utils.match_filter_func([f"duration < {MAX_DURATION_S + 1}", "!duration"])
         if start_s is None else None,
     }
     if ffmpeg:

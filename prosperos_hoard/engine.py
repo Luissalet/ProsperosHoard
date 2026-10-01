@@ -402,11 +402,18 @@ def _find_style(store: Store, project_id: str, style: str) -> dict[str, Any]:
 # -------------------------------------------------------------- ComfyUI --
 
 def check_vram_or_wait(backend: Backend, spec: dict[str, Any]) -> None:
-    needed = comfy_driver.estimate_vram_mb(spec, backend.vram_estimates_mb())
+    estimate = needed = comfy_driver.estimate_vram_mb(spec, backend.vram_estimates_mb())
     free = backend.vram_free_mb()
+    total_of = getattr(backend, "vram_total_mb", None)
+    total = total_of() if total_of is not None and free is not None and free < needed else None
+    if total and needed > total * VRAM_CARD_SHARE:
+        # a model bigger than this card ever frees (the desktop and drivers
+        # keep a slice) would wait forever; ComfyUI offloads what does not
+        # fit, so ask only for most of the card
+        needed = int(total * VRAM_CARD_SHARE)
     if free is not None and free < needed:
         manages = getattr(backend, "comfy_manages_memory", None)
-        if manages is not None and manages(needed):
+        if manages is not None and manages(estimate):
             return
         raise WaitingForResources(
             f"waiting for {needed} MB of free VRAM for a {spec.get('vram_class', 'sdxl')} job ({free} MB free now); "
@@ -446,6 +453,7 @@ def _comfy(backend: Backend, autostart: Optional[bool] = None):
 
 # how long a GPU job waits for a ComfyUI that listens but does not answer
 COMFY_BUSY_WAIT_S = 600.0
+VRAM_CARD_SHARE = 0.85  # the most of a card's memory a job ever waits for (see check_vram_or_wait)
 COMFY_BUSY_POLL_S = 5.0
 
 
@@ -651,6 +659,18 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
     comfy = _comfy(backend, autostart)
     try:
         info = backend.run_async(comfy.object_info())
+    except httpx.TimeoutException as exc:
+        # up but too busy to answer (a long render holds it): the node list
+        # does not change while it runs, so the last saved copy is as good
+        # and the job just waits its turn in ComfyUI's queue
+        path = object_info_cache_path(backend.data_dir)
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+        raise Unavailable("image", [f"ComfyUI is not answering ({type(exc).__name__}): start it in Backends > "
+                                    "Local services (or studio_service_start), or turn on autostart"]) from exc
     except httpx.TransportError as exc:
         raise Unavailable("image", [f"ComfyUI is not answering ({type(exc).__name__}): start it in Backends > "
                                     "Local services (or studio_service_start), or turn on autostart"]) from exc
@@ -693,7 +713,8 @@ def _svd_size(width: int, height: int) -> tuple[int, int]:
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
-                 mask_asset_id: Optional[str] = None,
+                 mask_asset_id: Optional[str] = None, driving_asset_id: Optional[str] = None,
+                 driving_start_s: float = 0.0,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -754,6 +775,22 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         uploads.append((mask_path.read_bytes(), mask_name))
         input_ids.append(mask["id"])
 
+    driving_name: Optional[str] = None
+    if spec.get("driving_video_node"):
+        if not driving_asset_id:
+            raise EngineError("driving_video_required", f"template '{template_name}' needs a driving video "
+                                                        "(driving_asset_id: the motion to copy)")
+        drive = store.get_asset(driving_asset_id)
+        if drive["kind"] != "video":
+            raise EngineError("driving_not_video", f"driving asset {drive['id']} is {drive['kind']}, not a video")
+        fps = float(values.get("fps") or 24)
+        seconds = (int(values.get("length") or 81) + 2) / fps
+        clip = _driving_clip(store, drive, float(driving_start_s or 0), seconds, fps,
+                             int(values.get("width") or 832), int(values.get("height") or 480))
+        driving_name = f"prospero_{drive['id']}_{int(float(driving_start_s or 0) * 1000)}.mp4"
+        uploads.append((clip, driving_name))
+        input_ids.append(drive["id"])
+
     count = max(1, min(int(count or 1), 8))
     base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
     thash = comfy_driver.template_hash(workflow, spec)
@@ -774,7 +811,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             wf[node]["inputs"][inp] = uploads[0][1]
         if spec.get("requires_mask"):
             node, _, inp = spec["mask_node"].partition(".")
-            wf[node]["inputs"][inp] = uploads[-1][1]
+            wf[node]["inputs"][inp] = next(n for _, n in uploads if n.endswith(f"_mask{Path(n).suffix}"))
+        if driving_name:
+            node, _, inp = spec["driving_video_node"].partition(".")
+            wf[node]["inputs"][inp] = driving_name
         if i == 0 and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
@@ -800,6 +840,31 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
+
+
+def _driving_clip(store: Store, asset: dict[str, Any], start_s: float, seconds: float, fps: float,
+                  width: int, height: int) -> bytes:
+    """The part of a driving video a motion-transfer render reads: from
+    `start_s`, `seconds` long, resampled to the render's fps and fitted to
+    its frame (cropped to fill, so the dancer keeps the framing), no audio."""
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to cut the driving video")
+    src = store.data_dir / asset["file_path"]
+    tmp = store.data_dir / "tmp" / f"{new_id('drv')}.mp4"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    vf = (f"fps={fps:g},scale={width}:{height}:force_original_aspect_ratio=increase,"
+          f"crop={width}:{height},setsar=1")
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-ss", f"{max(0.0, start_s):.3f}", "-i", str(src),
+                  "-t", f"{seconds:.3f}", "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                  "-pix_fmt", "yuv420p", str(tmp)], timeout=180)
+    try:
+        if not tmp.is_file() or tmp.stat().st_size < 1000:
+            raise EngineError("driving_cut_failed", f"could not cut {seconds:.1f} s of the driving video at {start_s:.1f} s "
+                                                    "(is it long enough?)")
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _import_comfy_output(store: Store, project_id: str, data: bytes, kind: str, recipe: dict[str, Any],
@@ -965,6 +1030,12 @@ def _size_from_reference(mode: str, ref_w: int, ref_h: int) -> tuple[int, int]:
     aspect: Kontext keeps it at ~1 MP (multiples of 16); Wan 2.2 TI2V 5B
     uses its native 1280x704 / 704x1280 (960x960 for near-square)."""
     ratio = (ref_w or 1) / float(ref_h or 1)
+    if mode == "wan480":  # Wan 2.2 14B / Animate 2 with the 480p distillations
+        if ratio > 1.2:
+            return 832, 480
+        if ratio < 1 / 1.2:
+            return 480, 832
+        return 640, 640
     if mode == "wan":
         if ratio > 1.2:
             return 1280, 704
@@ -1001,6 +1072,30 @@ def _has_model_file(object_info: dict[str, Any], class_type: str, input_name: st
     except (KeyError, IndexError, TypeError):
         return False
     return isinstance(entry, list) and any(needle in str(f).lower() for f in entry)
+
+
+def wan14b_installed(object_info: dict[str, Any]) -> bool:
+    """Wan 2.2 14B image-to-video: both experts and the 4-step LoRAs."""
+    return ("WanImageToVideo" in object_info
+            and _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_i2v_high_noise")
+            and _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_i2v_low_noise")
+            and _has_model_file(object_info, "LoraLoaderModelOnly", "lora_name", "lightx2v_4steps_lora_v1_high"))
+
+
+def animate2_installed(object_info: dict[str, Any]) -> bool:
+    """Wan Animate 2: the node class and its diffusion model."""
+    return "WanAnimate2ToVideo" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "wan_animate_2")
+
+
+def clip_template(object_info: dict[str, Any], motion_ref: bool = False) -> str:
+    """The clip template a still gets: motion copied from a driving video
+    (Wan Animate 2) when there is one and it is installed, else the 14B
+    image-to-video (real motion and camera moves), else the 5B."""
+    if motion_ref and animate2_installed(object_info):
+        return "wan_animate2"
+    if wan14b_installed(object_info):
+        return "wan22_i2v_14b"
+    return "wan22_ti2v"
 
 
 def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None) -> str:
@@ -1058,6 +1153,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         reference_asset_ids=params.get("reference_asset_ids"),
+        driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
                       "image_engine": engine_name or "custom"},

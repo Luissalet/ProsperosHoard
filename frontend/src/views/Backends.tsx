@@ -86,6 +86,12 @@ export function BackendsView() {
               </h2>
               <div className="mono small muted">{s.comfy.url} {s.comfy.version && `· ${s.comfy.version}`}</div>
               <div className="muted small">{t("freeComfyHint")}</div>
+              <label className="check small" title={t("comfyDedicatedHint")}>
+                <input type="checkbox" checked={!!s.comfy_dedicated} onChange={async (e) => {
+                  try { await api.setBackend({ comfy_dedicated: e.target.checked }); status.reload(); } catch (err) { app.toast((err as Error).message, "bad"); }
+                }} /> {t("comfyDedicated")}
+              </label>
+              <div className="muted small">{t("comfyDedicatedHint")}</div>
               <div>
                 <div className="panel-title">{t("checkpoints")}</div>
                 <div className="row wrap">{(s.comfy.checkpoints || []).map((c) => <span key={c} className="pill mono">{c}</span>)}</div>

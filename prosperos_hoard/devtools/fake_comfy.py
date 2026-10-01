@@ -110,6 +110,33 @@ def real_object_info() -> dict[str, Any]:
         _real_object_info_cache = data
     return _real_object_info_cache
 
+# the motion models (Wan 2.2 14B i2v + lightx2v, Wan Animate 2): not in the
+# default fake so the production tests keep exercising the 5B clip route;
+# `with_motion_models` adds them for the tests about those templates
+MOTION_FILES = {
+    ("UNETLoader", "unet_name"): ["wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+                                  "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+                                  "wan_animate_2_distill_int8_convrot.safetensors"],
+    ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
+    ("CLIPVisionLoader", "clip_name"): ["clip_vision_h.safetensors"],
+    ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+                                           "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors"],
+}
+
+
+def with_motion_models(info: dict[str, Any]) -> dict[str, Any]:
+    """A copy of an object_info with the motion model files listed too."""
+    out = json.loads(json.dumps(info))
+    for (cls, inp), files in MOTION_FILES.items():
+        try:
+            entry = out[cls]["input"]["required"][inp]
+        except KeyError:
+            continue
+        current = entry[0] if isinstance(entry[0], list) else []
+        entry[0] = list(dict.fromkeys([*current, *files]))
+    return out
+
+
 _PALETTE = [
     (255, 77, 141), (245, 194, 107), (108, 92, 231), (0, 184, 148),
     (9, 132, 227), (253, 121, 168), (225, 112, 85), (39, 60, 117),

@@ -91,6 +91,8 @@ with ids and pictures.
 | SDXL / SD 1.5 | `sd_xl_base_1.0.safetensors` / `v1-5-pruned-emaonly-fp16.safetensors` | ~7 GB / ~3.5 GB | Always available fallback, low-VRAM draft |
 | SVD | `svd_xt.safetensors` | ~10 GB | Image to short video |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Image to video, native 1280x704 |
+| Wan 2.2 I2V 14B (fp8) | `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` + `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors`, lightx2v 4-step LoRAs, `umt5_xxl_fp8_e4m3fn_scaled.safetensors`, `wan_2.1_vae.safetensors` | ~10 GB (offloads the rest) | Real motion and camera moves (orbit, crane, push-in) from a still, 832x480 / 480x832, 5 s at 16 fps in ~2.5 min |
+| Wan Animate 2 (distilled int8) | `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | ~10 GB (offloads the rest) | Motion transfer: the character of a still performs the motion of a driving video (a dance, a stunt) |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Song composition with vocals |
 | Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2.5 GB | Upscale x2 or x4 of any image |
 | BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3.5 GB | Background removal, PNG with transparency |
@@ -318,12 +320,34 @@ what changed. **Lyrics** gives an existing song its lyrics with
 its section. A lead shot is edited from the canonical image keeping its
 design (face, body shape, colours, props) but taking the pose and action of
 the shot's text. References shape the still; the clip animates that still
-from the motion text (copying a movement from a video needs a
-motion-transfer model, not installed).
+from the motion text with Wan 2.2 I2V 14B when it is installed (camera
+presets in the editor: orbit, crane from feet to head, push-in, tracking,
+low angle, handheld), else Wan 2.2 TI2V 5B.
+
+**Motion from a video**: a shot can take a video (library, upload or a
+link, from a chosen second) as its motion reference. Its clip then runs Wan
+Animate 2: the character of the shot's still performs that motion - a
+dance, a gesture, a stunt - frame by frame, no skeleton needed, with the
+background from the shot's text. The video is only a source of movement:
+nothing of its picture ends up in the clip.
+
+**Background cast**: one image and a name per character allowed in the
+background (up to 24). Shots ticked **Background from the cast** take a few
+of them (three by default, rotating so everybody shows up; or exactly the
+ones picked in the shot) as references, with the instruction that only they
+appear behind the lead, exactly as drawn, nobody invented. Changing the cast
+redraws only the shots whose crowd changed.
 
 **Library > Download from a link** brings a video (or just a section of
 it, or its audio) from YouTube, X, Instagram and the other sites yt-dlp
-knows, as an mp4 in the project. Animated GIFs import as videos.
+knows, as an mp4 in the project (whole videos up to 20 minutes, or the
+section between two times). Animated GIFs import as videos.
+
+**Backends > These ComfyUI servers are only for Prospero**: when a server
+is idle, a job may load its model in place of the last job's instead of
+waiting for free VRAM (off by default, for GPUs shared with other apps). A
+model estimated bigger than the card never waits for more than 85% of it:
+ComfyUI offloads the rest.
 
 ### Running without Faustus
 

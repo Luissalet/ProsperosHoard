@@ -123,6 +123,7 @@ class BackendOverrides(BaseModel):
     vram_estimates_mb: Optional[dict[str, int]] = None
     import_roots: Optional[list[str]] = None
     render_pool: Optional[list[str]] = None  # extra ComfyUI servers, one per GPU; applied on restart
+    comfy_dedicated: Optional[bool] = None  # the ComfyUI servers are Prospero's: an idle one may drop its models for the next job
 
 
 class ServiceBody(BaseModel):
@@ -213,6 +214,11 @@ class GenerateImageBody(BaseModel):
     # the model file for the chosen engine: a Qwen-Image diffusion model
     # (UNETLoader) for qwen21, else a checkpoint; see /api/image-engines
     model: Optional[str] = None
+    # motion transfer (template wan_animate2): the video whose motion the
+    # reference's character performs, from driving_start_s seconds in
+    driving_asset_id: Optional[str] = None
+    driving_start_s: Optional[float] = None
+    template_params: Optional[dict[str, Any]] = None  # the template's own knobs (see its params.json map)
     engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - defaults to the project's
     use_character_reference: bool = False
     consistent: bool = False
@@ -343,10 +349,15 @@ class EditImageBody(BaseModel):
 
 class AnimateBody(BaseModel):
     asset_id: str
-    # "auto": Wan 2.2 (a 5 s clip that follows `prompt`) when it is installed,
-    # else SVD; "svd" forces the old image-to-video
+    # "auto": with a driving video, Wan Animate 2 (the motion of that video);
+    # else Wan 2.2 14B (real motion and camera moves) when installed, else
+    # the 5B; "wan14b" | "wan" (5B) | "animate" | "svd" force one
     engine: str = "auto"
-    prompt: Optional[str] = None  # Wan: what moves (camera and subject)
+    prompt: Optional[str] = None  # Wan: what moves (camera and subject); Animate: the background
+    driving_asset_id: Optional[str] = None  # a video whose motion the image's character performs
+    driving_start_s: float = 0
+    pose_prompt: Optional[str] = None  # Animate: the motion in words ("a person dancing")
+    seconds: Optional[float] = None  # 14B: clip length (default 5)
     frames: int = 14
     fps: int = 7
     motion: int = 127
@@ -477,6 +488,12 @@ class StockKeysBody(BaseModel):
 
 class ProductionLyricsBody(BaseModel):
     lyrics: str
+    run: bool = False
+
+
+class ProductionCastBody(BaseModel):
+    cast: list[dict[str, Any]] = Field(default_factory=list)  # [{asset_id, name, note}]
+    per_shot: Optional[int] = None  # how many stand behind each crowd shot (1-6)
     run: bool = False
 
 
@@ -734,6 +751,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         proj = store.get_project(project)
         object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
         engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
+        if body.template == "auto_clip":
+            # a production's clip: the best video model installed (motion
+            # transfer when the call brings a driving video)
+            body = body.model_copy(update={"template": engine.clip_template(object_info or {}, bool(body.driving_asset_id))})
+            if body.template != "wan_animate2":
+                body = body.model_copy(update={"driving_asset_id": None, "driving_start_s": None,
+                                               "template_params": None})
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         available_loras = comfy_driver.lora_choices(object_info) if object_info else None
         adapter_route = False
@@ -819,6 +843,21 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "matched_characters": composed["matched_characters"],
             **({"loras": adapters["loras"]} if adapters["loras"] else {}),
         }
+        if body.driving_asset_id:
+            if store.get_asset(body.driving_asset_id)["kind"] != "video":
+                raise engine.EngineError("driving_not_video", "driving_asset_id must be a video (the motion to copy)")
+            params["driving_asset_id"] = body.driving_asset_id
+            params["driving_start_s"] = max(0.0, float(body.driving_start_s or 0))
+        if body.template_params:
+            # a template's own knobs (pose_prompt, seconds, lightning...): only
+            # the ones its map names, never the core keys set above
+            _, tspec = comfy_driver.load_template(template, store.data_dir)
+            allowed = set(tspec.get("map") or {}) - {"positive_prompt", "negative_prompt", "seed", "width", "height"}
+            unknown = sorted(set(body.template_params) - allowed)
+            if unknown:
+                raise engine.EngineError("bad_parameter", f"template '{template}' has no {', '.join(unknown)} "
+                                                          f"(it takes {', '.join(sorted(allowed)) or 'nothing extra'})")
+            params.update(body.template_params)
         job = queue.enqueue("generate_image", "gpu", params, project_id=project)
         job = wait(job, body.wait_s)
         return {"job": job, "final_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
@@ -875,8 +914,36 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         asset = store.get_asset(body.asset_id)
         if asset["kind"] != "image":
             raise engine.EngineError("not_an_image", f"asset {body.asset_id} is {asset['kind']}; animate needs an image")
-        if body.engine not in ("auto", "wan", "svd"):
-            raise ValueError("engine is auto, wan or svd")
+        if body.engine not in ("auto", "wan", "wan14b", "animate", "svd"):
+            raise ValueError("engine is auto, wan14b, wan, animate or svd")
+        try:
+            info = engine.object_info_live_or_cached(backend)
+        except Exception:  # noqa: BLE001
+            info = {}
+        if body.engine == "animate" or (body.engine == "auto" and body.driving_asset_id):
+            if not body.driving_asset_id:
+                raise engine.EngineError("driving_video_required", "animate copies the motion of a video: pass driving_asset_id")
+            if info and not engine.animate2_installed(info):
+                raise engine.EngineError("animate_missing", "Wan Animate 2 is not installed in ComfyUI "
+                                                            "(wan_animate_2_distill_int8_convrot.safetensors + clip_vision_h)")
+            prompt = (body.prompt or "").strip()
+            if not prompt.lower().startswith("character appearance"):
+                prompt = ("Character appearance description: the character in the reference image, same design and colours. "
+                          f"Background description: {prompt or 'the same place as the reference image'}.")
+            res = op_generate(asset["project_id"], GenerateImageBody(
+                prompt=prompt, template="wan_animate2", reference_asset_id=asset["id"], seed=body.seed, count=1,
+                driving_asset_id=body.driving_asset_id, driving_start_s=body.driving_start_s,
+                template_params={"pose_prompt": body.pose_prompt or "a person dancing",
+                                 # Animate runs at 24 fps: N seconds = 24N+1 frames (at most ~5 s)
+                                 **({"length": min(121, int(round(body.seconds * 24)) + 1)} if body.seconds else {})},
+                wait_s=body.wait_s))
+            return {"job": res["job"], "engine": "animate"}
+        if body.engine == "wan14b" or (body.engine == "auto" and info and engine.wan14b_installed(info)):
+            res = op_generate(asset["project_id"], GenerateImageBody(
+                prompt=(body.prompt or "natural motion, the camera slowly orbits around the subject").strip(),
+                template="wan22_i2v_14b", reference_asset_id=asset["id"], seed=body.seed, count=1,
+                template_params={"seconds": body.seconds} if body.seconds else None, wait_s=body.wait_s))
+            return {"job": res["job"], "engine": "wan14b"}
         if body.engine == "wan" or (body.engine == "auto" and _wan_installed()):
             res = op_generate(asset["project_id"], GenerateImageBody(
                 prompt=(body.prompt or "subtle natural motion, gentle camera push-in").strip(), template="wan22_ti2v",
@@ -967,7 +1034,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.faustus_url:
             _check_loopback_or_lan_url(body.faustus_url)
         backend.set_overrides(body.faustus_url, body.faustus_token, body.comfy_url, body.vram_estimates_mb, body.import_roots,
-                              body.render_pool)
+                              body.render_pool, body.comfy_dedicated)
         return backend.status()
 
     @app.post("/api/backend/comfy/free")
@@ -2452,6 +2519,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 if store.get_asset(str(aid))["kind"] != "image":
                     raise engine.EngineError("bad_reference", f"reference {aid} is not an image (take frames out of a "
                                                               "video or GIF first)")
+        for change in body.changes:
+            if not isinstance(change, dict):
+                continue
+            motions = [change.get("motion_ref")] + ([change["insert"].get("motion_ref")] if isinstance(change.get("insert"), dict) else [])
+            for m in motions:
+                if isinstance(m, dict) and m.get("asset_id") and store.get_asset(str(m["asset_id"]))["kind"] != "video":
+                    raise engine.EngineError("bad_motion_ref", f"motion reference {m['asset_id']} is not a video")
         result = productions_mod.update_shots(store.data_dir, slug, body.changes)
         if body.run and result["changed"]:
             result["job"] = engine.job_view(queue_production(slug))
@@ -2594,6 +2668,17 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def production_lyrics(slug: str, body: ProductionLyricsBody):
         out = productions_mod.set_song_lyrics(store.data_dir, slug, body.lyrics)
         if body.run:
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.put("/api/productions/{slug}/cast")
+    def production_cast(slug: str, body: ProductionCastBody):
+        for member in body.cast:
+            aid = str(member.get("asset_id") or "") if isinstance(member, dict) else ""
+            if aid and store.get_asset(aid)["kind"] != "image":
+                raise engine.EngineError("bad_cast", f"cast member {aid} is not an image (take a frame out of a video first)")
+        out = productions_mod.set_cast(store.data_dir, slug, body.cast, body.per_shot)
+        if body.run and out["redraw"]:
             out["job"] = engine.job_view(queue_production(slug))
         return {**out, "production": production_view(slug)}
 

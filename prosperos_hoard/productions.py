@@ -231,6 +231,64 @@ def _shot_refs(value: Any, key: str) -> list[dict[str, str]]:
     return out
 
 
+CAST_MAX = 24
+CAST_PER_SHOT_MAX = 6
+
+
+def normalise_cast(value: Any) -> list[dict[str, str]]:
+    """The production's background cast: [{asset_id, name, note}]. Crowd
+    shots draw their background characters only from it, from its images,
+    so nobody in the background is made up."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > CAST_MAX:
+        raise ProductionError("bad_cast", f"the background cast is a list of at most {CAST_MAX} {{asset_id, name}}")
+    out: list[dict[str, str]] = []
+    names: set[str] = set()
+    for i, member in enumerate(value):
+        if not isinstance(member, dict) or not re.fullmatch(r"a_[A-Za-z0-9]{6,40}", str(member.get("asset_id") or "")):
+            raise ProductionError("bad_cast", f"cast[{i}] needs the asset_id of its image")
+        name = re.sub(r"\s+", " ", str(member.get("name") or "")).strip()[:60]
+        if not name:
+            raise ProductionError("bad_cast", f"cast[{i}] needs a name")
+        if name.lower() in names:
+            raise ProductionError("bad_cast", f"the cast has two members called '{name}'")
+        names.add(name.lower())
+        out.append({"asset_id": str(member["asset_id"]), "name": name,
+                    "note": re.sub(r"\s+", " ", str(member.get("note") or "")).strip()[:200]})
+    return out
+
+
+def _shot_cast_names(value: Any, key: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > CAST_PER_SHOT_MAX or any(not isinstance(v, str) for v in value):
+        raise ProductionError("bad_changes", f"shot {key}: cast is a list of at most {CAST_PER_SHOT_MAX} cast names")
+    return [v.strip()[:60] for v in value if v.strip()]
+
+
+def cast_for_shot(spec: dict[str, Any], shot: dict[str, Any]) -> list[dict[str, str]]:
+    """Who stands in a shot's background: the names the shot lists, else -
+    for a crowd shot - a rotating group of `cast_per_shot`, so every member
+    shows up across the video and each crowd differs from the last."""
+    cast = spec.get("cast") or []
+    if not cast:
+        return []
+    by_name = {m["name"].lower(): m for m in cast}
+    named = [by_name[n.lower()] for n in shot.get("cast") or [] if n.lower() in by_name]
+    if named:
+        return named
+    if not shot.get("crowd"):
+        return []
+    per = max(1, min(int(spec.get("cast_per_shot") or 3), CAST_PER_SHOT_MAX, len(cast)))
+    # keyed on the shot's own number, not its place among the crowd shots,
+    # so adding or removing another shot never reshuffles this one's crowd
+    digits = re.sub(r"\D", "", str(shot.get("key") or ""))
+    turn = int(digits) - 1 if digits else sum(map(ord, str(shot.get("key") or "")))
+    start = (turn * per) % len(cast)
+    return [cast[(start + i) % len(cast)] for i in range(per)]
+
+
 def normalise_spec(spec: Any) -> dict[str, Any]:
     """Validate a production spec and fill defaults. Raises ProductionError
     with the offending field."""
@@ -254,6 +312,8 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
     world = spec.setdefault("world", {})
     world.setdefault("look", "")
     world.setdefault("negative", "")
+    spec["cast"] = normalise_cast(spec.get("cast"))
+    spec["cast_per_shot"] = _int(spec.get("cast_per_shot", 3), "spec.cast_per_shot", 1, CAST_PER_SHOT_MAX)
     ref = spec.get("reference")
     if ref is not None:
         if not isinstance(ref, dict):
@@ -311,10 +371,20 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         shot.setdefault("motion", "move")
         shot.setdefault("motion_prompt", "subtle motion")
         shot["clip_seed"] = _int(shot.get("clip_seed", 5000 + number), f"spec.shots[{i}].clip_seed", 0, 2**31 - 2)
+        shot["crowd"] = bool(shot.get("crowd", False))
+        names = _shot_cast_names(shot.get("cast"), key)
+        known = {m["name"].lower() for m in spec["cast"]}
+        unknown = [n for n in names if n.lower() not in known]
+        if unknown:
+            raise ProductionError("bad_spec", f"spec.shots[{i}].cast names {', '.join(unknown)}, not in spec.cast")
+        if names:
+            shot["cast"] = names
+        else:
+            shot.pop("cast", None)
         if not (shot.get("width") and shot.get("height")):
             shot.setdefault("aspect", "16:9")
     clip_settings = spec.setdefault("clip_settings", {})
-    clip_settings.setdefault("template", "wan22_ti2v")
+    clip_settings.setdefault("template", "auto_clip")
     clip_settings.setdefault("still_negative", STILL_NEGATIVE)
     looks = (spec.get("photocards") or {}).get("looks") or []
     if not isinstance(looks, list) or len(looks) > 12:
@@ -831,6 +901,16 @@ class Run:
         notes = [f"<image{first + i}>: {r.get('use') or 'use as a reference for this shot'}" for i, r in enumerate(refs)]
         if notes:
             text += ". " + "; ".join(notes)
+        # the background cast: each member's image goes in as a reference
+        # and the text pins the background to exactly them, as drawn
+        crowd = cast_for_shot(self.spec, shot)[:max(0, 10 - first + 1 - len(refs))]
+        if crowd:
+            start = first + len(refs)
+            who = ", ".join(f"{m['name']} (<image{start + i}>{', ' + m['note'] if m.get('note') else ''})"
+                            for i, m in enumerate(crowd))
+            text += (f". In the background only these characters appear, each exactly as drawn in its image, same "
+                     f"design, colours and proportions: {who}. No other creatures or characters, nobody invented")
+            refs = refs + [{"asset_id": m["asset_id"], "use": m["name"]} for m in crowd]
         if refs:
             body["reference_asset_ids"] = [r["asset_id"] for r in refs]
         if shot.get("lead"):
@@ -926,9 +1006,30 @@ class Run:
     def clip_body(self, shot: dict[str, Any], variant: int) -> dict[str, Any]:
         settings = self.spec.get("clip_settings") or {}
         key = shot_key(shot["key"], variant)
-        body: dict[str, Any] = {"template": settings.get("template") or "wan22_ti2v", "reference_asset_id": self.still_for(key),
+        template = settings.get("template") or "auto_clip"
+        if template in ("wan22_ti2v", "auto") and not settings.get("template_pinned"):
+            template = "auto_clip"  # the old default: the best clip model installed now
+        body: dict[str, Any] = {"template": template, "reference_asset_id": self.still_for(key),
                                 "prompt": shot.get("motion_prompt") or "subtle motion",
                                 "seed": shot["clip_seed"] + (100 * variant)}
+        motion = shot.get("motion_ref") or {}
+        if motion.get("asset_id") and template == "auto_clip":
+            # copy the motion of a video (a dance, a stunt) onto the still's
+            # character; the background comes from the shot's own text
+            lead = self.spec.get("lead") or {}
+            look = "the character in the reference image, same design, colours and proportions"
+            if not shot.get("lead"):
+                look = "the characters in the reference image, same designs and colours"
+            elif lead.get("name"):
+                look = f"{lead['name']}, {look}"
+            world = (self.spec.get("world") or {}).get("look") or ""
+            crowd = cast_for_shot(self.spec, shot)
+            behind = (f", in the background only {', '.join(m['name'] for m in crowd)} as in the reference image, "
+                      "no other characters") if crowd else ""
+            body.update({"prompt": f"Character appearance description: {look}. Background description: {shot['prompt']}"
+                                   + (f", {world}" if world else "") + behind + ".",
+                         "driving_asset_id": motion["asset_id"], "driving_start_s": float(motion.get("start_s") or 0),
+                         "template_params": {"pose_prompt": motion.get("prompt") or shot.get("motion_prompt") or "a person dancing"}})
         char_id = ((self.state.get("done") or {}).get("character") or {}).get("character_id")
         if shot.get("lead") and char_id:
             body["characters"] = [char_id]  # a video adapter of the lead, if it has one
@@ -1113,7 +1214,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
     run rebuilds exactly that. Returns what changed."""
     if not isinstance(changes, list) or not changes or len(changes) > 80:
         raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|motion|"
-                                             "seed|regenerate|lead|section|refs|negative|after|delete} or {insert: {...}}")
+                                             "seed|regenerate|lead|section|refs|crowd|cast|negative|after|delete} or {insert: {...}}")
     with lock_for(slug):
         state = load_state(data_dir, slug)
         if is_legacy(state):
@@ -1159,7 +1260,12 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                         "variants": int(near.get("variants") or 1), "best": 0,
                         "clips": [0] if new.get("clip", new.get("motion") != "still") else [],
                         **({"section": section} if section in SHOT_SECTIONS else {}),
-                        **({"refs": _shot_refs(new.get("refs"), key)} if new.get("refs") else {})}
+                        "crowd": bool(new.get("crowd", False)),
+                        **({"refs": _shot_refs(new.get("refs"), key)} if new.get("refs") else {}),
+                        **({"motion_ref": {"asset_id": str(new["motion_ref"]["asset_id"]),
+                                           "start_s": max(0.0, float(new["motion_ref"].get("start_s") or 0)),
+                                           "prompt": str(new["motion_ref"].get("prompt") or "")[:300]}}
+                           if isinstance(new.get("motion_ref"), dict) and new["motion_ref"].get("asset_id") else {})}
                 if near.get("width") and near.get("height"):
                     shot["width"], shot["height"] = near["width"], near["height"]
                 else:
@@ -1210,6 +1316,38 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
             if change.get("negative") is not None:
                 shot["negative"] = str(change["negative"])[:600] or None
                 regenerate = True
+            if change.get("crowd") is not None and bool(change["crowd"]) != bool(shot.get("crowd")):
+                shot["crowd"] = bool(change["crowd"])
+                regenerate = True
+            if change.get("cast") is not None:
+                names = _shot_cast_names(change["cast"], key)
+                known = {m["name"].lower(): m["name"] for m in spec.get("cast") or []}
+                unknown = [n for n in names if n.lower() not in known]
+                if unknown:
+                    raise ProductionError("bad_changes", f"shot {key}: {', '.join(unknown)} not in the background cast")
+                names = [known[n.lower()] for n in names]
+                if names != (shot.get("cast") or []):
+                    if names:
+                        shot["cast"] = names
+                    else:
+                        shot.pop("cast", None)
+                    regenerate = True
+            if "motion_ref" in change:
+                ref = change["motion_ref"]
+                if not ref:
+                    shot.pop("motion_ref", None)
+                else:
+                    if not isinstance(ref, dict) or not re.fullmatch(r"a_[A-Za-z0-9]{6,40}", str(ref.get("asset_id") or "")):
+                        raise ProductionError("bad_changes", f"shot {key}: motion_ref is {{asset_id, start_s, prompt}}")
+                    shot["motion_ref"] = {"asset_id": str(ref["asset_id"]),
+                                          "start_s": max(0.0, float(ref.get("start_s") or 0)),
+                                          "prompt": str(ref.get("prompt") or "").strip()[:300]}
+                    if shot.get("motion") == "still":
+                        shot["motion"] = "move"
+                    if not shot.get("clips"):
+                        shot["clips"] = [0]
+                for ck in [k for k in clips if split_key(k)[0] == key]:
+                    clips.pop(ck, None)
             for field in ("prompt", "motion_prompt"):
                 if change.get(field) is not None:
                     if not str(change[field]).strip():
@@ -1287,6 +1425,56 @@ def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:
         log(state, "review", "changed_lyrics", lines=len([l for l in lyrics.splitlines() if l.strip()]))
         save_state(data_dir, state)
         return {"slug": slug, "status": state["status"]}
+
+
+def set_cast(data_dir: Path, slug: str, cast: Any, per_shot: Optional[int] = None) -> dict[str, Any]:
+    """Set the production's background cast ([{asset_id, name, note}]) and
+    how many of them stand behind each crowd shot. The stills of every shot
+    whose crowd changed are dropped, so the next run redraws exactly those."""
+    members = normalise_cast(cast)
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if is_legacy(state):
+            raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
+        if state.get("status") == "running":
+            raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
+        spec = state["spec"]
+        before = {s["key"]: [m["asset_id"] for m in cast_for_shot(spec, s)] for s in spec.get("shots") or []}
+        spec["cast"] = members
+        if per_shot is not None:
+            spec["cast_per_shot"] = _int(per_shot, "per_shot", 1, CAST_PER_SHOT_MAX)
+        known = {m["name"].lower(): m["name"] for m in members}
+        for shot in spec.get("shots") or []:
+            if shot.get("cast"):
+                kept = [known[n.lower()] for n in shot["cast"] if n.lower() in known]
+                if kept:
+                    shot["cast"] = kept
+                else:
+                    shot.pop("cast")
+        frames = (state["done"].get("frames") or {}).get("items") or {}
+        clips = (state["done"].get("clips") or {}).get("items") or {}
+        redraw = [s["key"] for s in spec.get("shots") or []
+                  if [m["asset_id"] for m in cast_for_shot(spec, s)] != before.get(s["key"])]
+        for key in redraw:
+            if key in frames:
+                frames.pop(key)
+            for ck in [k for k in clips if split_key(k)[0] == key]:
+                clips.pop(ck, None)
+        if redraw:
+            if "frames" in state["done"]:
+                state["done"]["frames"]["complete"] = False
+            if "clips" in state["done"]:
+                state["done"]["clips"]["complete"] = False
+            for stage in ("animatic", "album", "timeline", "report"):
+                state["done"].pop(stage, None)
+            state.get("partial", {}).pop("timeline", None)
+            state["review"] = {}
+            state["status"] = "queued"
+            state["message"] = f"background cast changed: redraw shot(s) {', '.join(redraw)}"
+        log(state, "review", "changed_cast", members=[m["name"] for m in members], redraw=redraw)
+        save_state(data_dir, state)
+        return {"slug": slug, "cast": members, "cast_per_shot": spec.get("cast_per_shot", 3), "redraw": redraw,
+                "status": state["status"]}
 
 
 def shot_timing(data_dir: Path, store: Any, state: dict[str, Any]) -> dict[str, Any]:

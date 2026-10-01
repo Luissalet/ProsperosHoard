@@ -419,17 +419,30 @@ def studio_edit_image(
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "auto", frames: int = 14, fps: int = 7,
-                   motion: int = 127, seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False) -> Any:
-    """Turn a still image into a short video clip: Wan 2.2 (5 s, follows prompt) when installed, else SVD.
-    prompt: what moves (camera and subject), Wan only. engine: "auto" | "wan" | "svd" (frames 4-50, fps and
-    motion 1-255 are SVD settings). The output is an mp4 video asset usable in timelines. Returns the job
-    and which engine ran; poll studio_job (a Wan clip takes ~10 min on a free 16 GB card, much longer when
-    a language model holds the GPU). include_image=true also returns a picture of a finished job.
+                   motion: int = 127, seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False,
+                   driving_asset_id: Optional[str] = None, driving_start_s: float = 0.0,
+                   pose_prompt: Optional[str] = None, seconds: Optional[float] = None) -> Any:
+    """Turn a still image into a video clip, or make its character copy the motion of a video / animar.
 
-    Keywords: animate image, image to video, make it move, wan, svd, animar imagen, imagen a video, dar movimiento
+    engine: "auto" (Wan Animate 2 when driving_asset_id is given, else Wan 2.2 I2V 14B when
+    installed, else Wan 2.2 5B, else SVD) | "wan14b" | "wan" | "animate" | "svd".
+    prompt: what moves - subject and camera ("the camera orbits 180 degrees around her", "the camera
+    cranes up from the feet to the head"). With driving_asset_id (a video asset: a dance, a stunt,
+    from driving_start_s) the character of the image performs that motion frame by frame; prompt
+    then describes the background and pose_prompt names the motion ("a person dancing"). seconds:
+    clip length (14B: 5 s default; Animate: 24 fps, up to 5 s). frames/fps/motion are SVD settings.
+    The output is an mp4 video asset; poll studio_job. include_image=true returns a picture when done.
+
+    Keywords: animate image, image to video, make it move, camera move, orbit, dance like this video,
+    motion transfer, copy the dance, animar imagen, imagen a video, mover camara, que baile como, copiar movimiento
     """
     body = {"asset_id": asset_id, "prompt": prompt, "engine": engine, "frames": frames, "fps": fps, "motion": motion,
             "seed": seed, "wait_s": wait_s}
+    if driving_asset_id:
+        body.update({"driving_asset_id": driving_asset_id, "driving_start_s": driving_start_s,
+                     "pose_prompt": pose_prompt})
+    if seconds:
+        body["seconds"] = seconds
     return _with_preview(_call("POST", "/api/agent/studio_animate", json=body), include_image)
 
 
@@ -984,7 +997,8 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     shot over that part of the song); {"refs": [{"asset_id": "a_...", "use": "copy this dance pose"},
     {"asset_id": "a_...", "use": "these Pokemon dance in the background"}]} gives the shot its own
     reference images (numbered after the lead's canonical image); {"after": "5"} moves it after
-    shot 5 ("start" = first); {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
+    shot 5 ("start" = first); {"crowd": true} puts part of the background cast behind it (see
+    studio_production_cast), {"cast": ["Name", ...]} picks exactly who; {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
     "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot. Only
     what depends on a changed shot is redone; run=true queues the production (it rebuilds the
     animatic and pauses again when animatic is on). The production must not be running.
@@ -1006,6 +1020,25 @@ def studio_production_lyrics(production: str, lyrics: str, run: bool = False) ->
     Keywords: lyrics, song lyrics, sections, letra, letra de la cancion, secciones
     """
     return _call("PUT", f"/api/productions/{production}/lyrics", json={"lyrics": lyrics, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_cast(production: str, cast: list[dict[str, Any]], per_shot: Optional[int] = None,
+                           run: bool = False) -> dict[str, Any]:
+    """Set a production's background cast: the only characters allowed in the background / reparto de fondo.
+
+    cast = [{asset_id, name, note}] - one image per character (up to 24). Shots marked crowd=true
+    (studio_production_shots) get `per_shot` of them (default 3, rotating so every member shows up)
+    as references, with the instruction that only they appear in the background, exactly as drawn,
+    nobody invented. A shot can also name its own: {key, cast: ["Name", ...]}. Shots whose crowd
+    changed are redrawn on the next run; run=true queues it.
+
+    Keywords: background cast, extras, crowd, background characters, reparto, figurantes, fondo, publico
+    """
+    body: dict[str, Any] = {"cast": cast, "run": run}
+    if per_shot is not None:
+        body["per_shot"] = per_shot
+    return _call("PUT", f"/api/productions/{production}/cast", json=body)
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))

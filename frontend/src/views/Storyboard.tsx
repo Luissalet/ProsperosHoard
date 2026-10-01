@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Clapperboard, Film, Images, Link2, Loader2, Pause, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
-import { api, thumbUrl, type Asset, type Job, type ProductionShot, type ProductionState, type ShotRef } from "../api";
+import { Clapperboard, Film, Images, Link2, Loader2, Pause, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
@@ -10,6 +10,20 @@ const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown"
 const SECTION_KIND: Record<string, string> = { prechorus: "pre", breakdown: "bridge" };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const parseClock = (text: string) => {
+  const parts = text.trim().split(":").map(Number);
+  return parts.some((n) => Number.isNaN(n)) ? 0 : parts.reduce((a, n) => a * 60 + n, 0);
+};
+// camera moves the 14B image-to-video follows well, added to the motion text
+const CAMERA = ["camOrbit", "camCrane", "camPush", "camTrack", "camLow", "camHandheld"] as const;
+const CAMERA_TEXT: Record<string, string> = {
+  camOrbit: "the camera orbits 180 degrees around the character",
+  camCrane: "the camera cranes up slowly from the feet to the head, following the body's surface",
+  camPush: "slow dolly push-in towards the character",
+  camTrack: "the camera tracks sideways alongside the character",
+  camLow: "low-angle camera looking up, slowly rising",
+  camHandheld: "energetic handheld camera, slight shake, quick reframes",
+};
 
 function sectionMatches(label: string, kind: string | null, section?: string) {
   if (!section) return false;
@@ -26,6 +40,8 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   const app = useApp();
   const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null } | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [castOpen, setCastOpen] = useState(false);
+  const castCount = (state.spec.cast || []).length;
   const shots = state.spec.shots || [];
   const frames = (state.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
   const clips = (state.done?.clips?.items || {}) as Record<string, string>;
@@ -70,6 +86,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
     <div className="card">
       <h2 className="row" style={{ gap: 8 }}>
         <span className="grow">{t("shotsTitle")} <span className="muted small">· {shots.length}</span></span>
+        <button className="btn sm" onClick={() => setCastOpen(true)} title={t("castHint")}><Users size={13} /> {t("bgCastTitle")}{castCount ? ` · ${castCount}` : ""}</button>
         <button className="btn sm" onClick={() => setLyricsOpen(true)}>{t("sbLyrics")}</button>
         {running && state.job_id && <button className="btn sm" onClick={pause}><Pause size={13} /> {t("sbPause")}</button>}
       </h2>
@@ -91,6 +108,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                   {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
                   {hasClip && <span className="pill badge-dark"><Film size={10} /> {t("clipBadge")}</span>}
                   {(shot.refs || []).length > 0 && <span className="pill badge-dark"><Images size={10} /> {shot.refs!.length}</span>}
+                  {(shot.crowd || (shot.cast || []).length > 0) && castCount > 0 && <span className="pill badge-dark" title={t("castCrowd")}><Users size={10} /></span>}
                 </div>
                 {st && <div className={`sb-status ${st.tone}`}>{st.busy && <Loader2 size={11} className="spin" />} {st.label}</div>}
                 <div className="tile-meta stack" style={{ gap: 2, alignItems: "stretch" }}>
@@ -111,6 +129,8 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
         <ShotEditor state={state} shot={editing.shot} after={editing.after} running={running}
           onPause={pause} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged(); }} />
       )}
+      {castOpen && <CastModal state={state} running={running} onClose={() => setCastOpen(false)}
+        onSaved={() => { setCastOpen(false); onChanged(); }} />}
       {lyricsOpen && <LyricsModal state={state} running={running} onClose={() => setLyricsOpen(false)}
         onSaved={() => { setLyricsOpen(false); onChanged(); }} />}
     </div>
@@ -134,6 +154,12 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
   const [clip, setClip] = useState(shot ? shot.clips.length > 0 : true);
   const [section, setSection] = useState(shot?.section || "");
   const [refs, setRefs] = useState<ShotRef[]>(shot?.refs || []);
+  const [motionRef, setMotionRef] = useState<MotionRef | null>(shot?.motion_ref || null);
+  const [crowd, setCrowd] = useState(!!shot?.crowd);
+  const [castNames, setCastNames] = useState<string[]>(shot?.cast || []);
+  const cast = state.spec.cast || [];
+  const [motionStart, setMotionStart] = useState(shot?.motion_ref ? clock(shot.motion_ref.start_s) : "0:00");
+  const [motionPick, setMotionPick] = useState<null | "library" | "link">(null);
   const [best, setBest] = useState(Math.max(0, variants.indexOf(entry.best || "")));
   const [regenerate, setRegenerate] = useState(false);
   const [picking, setPicking] = useState<"image" | "video" | null>(null);
@@ -169,9 +195,11 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
   const save = async (run: boolean) => {
     if (!prompt.trim()) { app.toast(t("sbNeedPrompt"), "bad"); return; }
     let change: Record<string, unknown>;
+    const extraChange: Record<string, unknown>[] = [];
     if (isNew) {
       change = { insert: { after: after ?? "start", prompt: prompt.trim(), lead, motion, clip: motion === "move" && clip,
-                           motion_prompt: motionPrompt.trim() || undefined, section: section || undefined, refs } };
+                           motion_prompt: motionPrompt.trim() || undefined, section: section || undefined, refs, crowd,
+                           motion_ref: motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : undefined } };
     } else {
       change = { key: shot!.key };
       if (prompt.trim() !== shot!.prompt) change.prompt = prompt.trim();
@@ -181,13 +209,22 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
       if (clip !== shot!.clips.length > 0) change.clip = clip;
       if (section !== (shot!.section || "")) change.section = section;
       if (JSON.stringify(refs) !== JSON.stringify(shot!.refs || [])) change.refs = refs;
+      if (crowd !== !!shot!.crowd) change.crowd = crowd;
+      if (JSON.stringify(castNames) !== JSON.stringify(shot!.cast || [])) change.cast = castNames;
+      const mr = motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : null;
+      if (JSON.stringify(mr) !== JSON.stringify(shot!.motion_ref || null)) change.motion_ref = mr;
       if (variants.length > 1 && variants[best] !== entry.best) change.best = best;
       if (regenerate) change.regenerate = true;
       if (Object.keys(change).length === 1) { onClose(); return; }
     }
     setBusy(true);
     try {
-      await api.changeShots(state.slug, [change], run);
+      const sent = await api.changeShots(state.slug, [change], run && !(isNew && castNames.length));
+      // a new shot's own cast goes in a second change, once it has a key
+      if (isNew && castNames.length) {
+        const key = (sent as { changed?: string[] }).changed?.[0];
+        if (key) await api.changeShots(state.slug, [{ key, cast: castNames }, ...extraChange], run);
+      }
       app.toast(run ? t("sbSavedRun") : t("sbSaved"), "ok");
       onSaved();
     } catch (e) { app.toast((e as Error).message, "bad"); }
@@ -259,8 +296,62 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
         {motion === "move" && (
           <label className="field">{t("sbMotionPrompt")}
             <input value={motionPrompt} onChange={(e) => setMotionPrompt(e.target.value)} placeholder={t("sbMotionPh")} />
+            <span className="row wrap" style={{ gap: 4, marginTop: 4 }}>
+              <span className="hint">{t("sbCamera")}</span>
+              {CAMERA.map((c) => (
+                <button key={c} type="button" className="btn sm ghost" onClick={() => setMotionPrompt((m) => (m.trim() ? `${m.trim().replace(/[.,;]$/, "")}, ` : "") + CAMERA_TEXT[c])}>{t(c)}</button>
+              ))}
+            </span>
           </label>
         )}
+        {motion === "move" && (
+          <div className="field">{t("sbMotionRef")}
+            <span className="hint">{t("sbMotionRefHint")}</span>
+            {motionRef ? (
+              <div className="row wrap" style={{ gap: 8 }}>
+                <img src={thumbUrl({ id: motionRef.asset_id, thumb_path: "x", kind: "video" })} alt="" style={{ width: 96, height: 54, objectFit: "cover", borderRadius: 6 }} />
+                <label className="row" style={{ gap: 4 }}>{t("sbMotionFrom")}
+                  <input style={{ width: 70 }} value={motionStart} onChange={(e) => setMotionStart(e.target.value)} /></label>
+                <input className="grow" value={motionRef.prompt} placeholder={t("sbMotionRefPromptPh")}
+                  onChange={(e) => setMotionRef({ ...motionRef, prompt: e.target.value })} />
+                <button type="button" className="btn sm icon ghost" onClick={() => setMotionRef(null)}><X size={13} /></button>
+              </div>
+            ) : (
+              <div className="row wrap" style={{ gap: 6 }}>
+                <button type="button" className="btn sm" onClick={() => setMotionPick("library")}><Film size={13} /> {t("sbRefPick")}</button>
+                <button type="button" className={`btn sm${motionPick === "link" ? " primary" : ""}`} onClick={() => setMotionPick(motionPick === "link" ? null : "link")}><Link2 size={13} /> {t("sbRefLink")}</button>
+              </div>
+            )}
+            {motionPick === "link" && projectId && (
+              <LinkDownload projectId={projectId} compact onDone={(a) => {
+                setMotionPick(null);
+                if (a.kind === "video") { setMotionRef({ asset_id: a.id, start_s: 0, prompt: "" }); setMotionStart("0:00"); }
+              }} />
+            )}
+            <span className="hint">{t("sbMotionRefNote")}</span>
+          </div>
+        )}
+        <div className="field">{t("bgCastTitle")}
+          {cast.length === 0 ? <span className="hint">{t("castNone")}</span> : (
+            <>
+              <label className="check"><input type="checkbox" checked={crowd || castNames.length > 0} disabled={castNames.length > 0}
+                onChange={(e) => setCrowd(e.target.checked)} /> {t("castCrowd")}</label>
+              <span className="hint">{castNames.length ? t("castPickedHint") : t("castAutoHint", { n: state.spec.cast_per_shot || 3 })}</span>
+              <div className="row wrap" style={{ gap: 6 }}>
+                {cast.map((m) => {
+                  const on = castNames.includes(m.name);
+                  return (
+                    <button key={m.name} type="button" className={`tile${on ? " selected" : ""}`} style={{ width: 76 }} title={m.note || m.name}
+                      onClick={() => setCastNames(on ? castNames.filter((n) => n !== m.name) : castNames.length >= 6 ? castNames : [...castNames, m.name])}>
+                      <img src={thumbUrl({ id: m.asset_id, thumb_path: "x", kind: "image" })} alt="" />
+                      <div className="tile-meta small ellipsis">{m.name}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
         <div className="field">{t("sbRefs")}
           <span className="hint">{t("sbRefsHint")}</span>
           <div className="stack" style={{ gap: 6 }}>
@@ -301,16 +392,101 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
                 </div>
               </div>
             )}
-            <span className="hint">{t("sbMotionLimit")}</span>
+            <span className="hint">{t("sbRefsStillNote")}</span>
           </div>
         </div>
         {!isNew && variants.length > 0 && (
           <label className="check"><input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> {t("regenerateShot")}</label>
         )}
       </fieldset>
+      {motionPick === "library" && projectId && (
+        <AssetPicker projectId={projectId} kind="video" title={t("sbMotionRef")}
+          onPick={(a) => { setMotionRef({ asset_id: a.id, start_s: 0, prompt: "" }); setMotionStart("0:00"); setMotionPick(null); }}
+          onClose={() => setMotionPick(null)} />
+      )}
       {picking && projectId && (
         <AssetPicker projectId={projectId} kind={picking} title={picking === "video" ? t("sbRefFromVideo") : t("sbRefPick")}
           onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => setPicking(null)} />
+      )}
+    </Modal>
+  );
+}
+
+/** The production's background cast: the only characters allowed behind
+ * the lead. One image and a name each; crowd shots take a few of them. */
+function CastModal({ state, running, onClose, onSaved }: { state: ProductionState; running: boolean; onClose: () => void; onSaved: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const [members, setMembers] = useState<CastMember[]>(state.spec.cast || []);
+  const [perShot, setPerShot] = useState(state.spec.cast_per_shot || 3);
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const projectId = state.project_id || app.projectId || "";
+  const nameFor = (raw: string) => {
+    let base = raw.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 60) || t("castMember");
+    let name = base;
+    for (let i = 2; members.some((m) => m.name.toLowerCase() === name.toLowerCase()); i++) name = `${base} ${i}`;
+    return name;
+  };
+  const add = (a: Asset) => setMembers((ms) => ms.some((m) => m.asset_id === a.id) || ms.length >= 24 ? ms
+    : [...ms, { asset_id: a.id, name: nameFor(a.name || ""), note: "" }]);
+  const upload = async (files: FileList) => {
+    setBusy(true);
+    try {
+      for (const f of Array.from(files).slice(0, 24)) add(await api.upload(projectId, f));
+      app.bump();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  const save = async (run: boolean) => {
+    if (members.some((m) => !m.name.trim())) { app.toast(t("castNeedName"), "bad"); return; }
+    setBusy(true);
+    try {
+      const out = await api.setProductionCast(state.slug, members.map((m) => ({ ...m, name: m.name.trim() })), perShot, run);
+      app.toast(out.redraw.length ? t("castSavedRedraw", { n: out.redraw.join(", ") }) : t("castSaved"), "ok");
+      onSaved();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={t("bgCastTitle")} onClose={onClose} wide footer={running ? <span className="hint">{t("sbPauseFirst")}</span> : (
+      <>
+        <span className="grow" />
+        <button className="btn" disabled={busy} onClick={() => save(false)}>{t("sbSave")}</button>
+        <button className="btn primary" disabled={busy} onClick={() => save(true)}>{busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("sbSaveRun")}</button>
+      </>
+    )}>
+      <fieldset disabled={running || busy} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
+        <p className="small muted">{t("castHint")}</p>
+        <div className="stack" style={{ gap: 6 }}>
+          {members.map((m, i) => (
+            <div key={m.asset_id} className="row" style={{ gap: 8 }}>
+              <img src={thumbUrl({ id: m.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 6, background: "var(--panel-2, #0002)" }} />
+              <input style={{ width: 180 }} value={m.name} placeholder={t("castNamePh")} maxLength={60}
+                onChange={(e) => setMembers(members.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+              <input className="grow" value={m.note || ""} placeholder={t("castNotePh")} maxLength={200}
+                onChange={(e) => setMembers(members.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} />
+              <button type="button" className="btn sm icon ghost" onClick={() => setMembers(members.filter((_, j) => j !== i))}><X size={13} /></button>
+            </div>
+          ))}
+          {members.length === 0 && <span className="hint">{t("castEmpty")}</span>}
+        </div>
+        <div className="row wrap" style={{ gap: 6 }}>
+          <button type="button" className="btn sm" disabled={members.length >= 24} onClick={() => setPicking(true)}><Images size={13} /> {t("sbRefPick")}</button>
+          <label className="btn sm"><Upload size={13} /> {t("castUpload")}
+            <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.target.value = ""; }} /></label>
+          <span className="grow" />
+          <label className="row small" style={{ gap: 6 }}>{t("castPerShot")}
+            <select value={perShot} onChange={(e) => setPerShot(Number(e.target.value))}>
+              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
+        <span className="hint">{t("castHowTo")}</span>
+      </fieldset>
+      {picking && projectId && (
+        <AssetPicker projectId={projectId} kind="image" title={t("bgCastTitle")}
+          onPick={(a) => { add(a); setPicking(false); }} onClose={() => setPicking(false)} />
       )}
     </Modal>
   );

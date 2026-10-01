@@ -477,6 +477,7 @@ export interface BackendStatus {
   ffmpeg: { found: boolean; path: string | null; version: string | null };
   piper: { installed: boolean };
   fonts_bundled: string[];
+  comfy_dedicated?: boolean;
   vram_estimates_mb: Record<string, number>;
   music: { name: string; available: boolean; reason: string }[];
   overrides: { faustus_url?: string | null; comfy_url?: string | null; import_roots: string[] };
@@ -738,9 +739,14 @@ export interface ProductionShot {
   motion_prompt?: string;
   section?: string;
   refs?: ShotRef[];
+  motion_ref?: MotionRef;
+  crowd?: boolean;   // part of the background cast stands behind it
+  cast?: string[];   // exactly these cast members (by name)
 }
 
 export interface ShotRef { asset_id: string; use: string }
+export interface CastMember { asset_id: string; name: string; note?: string }
+export interface MotionRef { asset_id: string; start_s: number; prompt: string }
 
 export interface ProductionTiming {
   shots: Record<string, { start_s: number; duration_s: number; section: string | null }[]>;
@@ -798,7 +804,7 @@ export interface ProductionState {
   job_id: string | null;
   recipe: { name: string; reuse: string[]; cast: { lead: string } } | null;
   spec: { title?: string; lead?: { name: string; look: string; palette?: string[] }; shots?: ProductionShot[];
-          timeline?: { aspects?: string[] } } & Record<string, unknown>;
+          timeline?: { aspects?: string[] }; cast?: CastMember[]; cast_per_shot?: number } & Record<string, unknown>;
   settings: { animatic: boolean; animatic_autocontinue: boolean; qa: { enabled: boolean; max_retries: number } };
   done: Record<string, any>;
   lineage: { at: string; stage: string; event: string; [k: string]: unknown }[];
@@ -1054,6 +1060,8 @@ export const api = {
     request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   setProductionLyrics: (slug: string, lyrics: string, run = false) =>
     request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+  setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>
+    request<{ status: string; redraw: string[] }>("PUT", `/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
     request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
   videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),

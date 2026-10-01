@@ -93,3 +93,61 @@ def test_lyrics_for_an_existing_song_and_their_sections(data_dir):
     timing = prod.shot_timing(data_dir, None, st)
     assert [(s["label"], s["lines"]) for s in timing["sections"]] == [("Intro", ["Darkness falls"]),
                                                                        ("Chorus", ["Blow up the night", "Head in the air"])]
+
+
+CAST = [{"asset_id": f"a_cast{i:04d}", "name": n} for i, n in enumerate(["Moth", "Kettle", "Fern", "Glim", "Rook"])]
+
+
+def test_crowd_shots_take_only_the_background_cast(data_dir):
+    spec = prod.normalise_spec(tiny_spec(cast=CAST, cast_per_shot=2))
+    spec["shots"][0]["crowd"] = True
+    spec["shots"][1]["crowd"] = True
+    runner = object.__new__(prod.Run)
+    runner.spec = spec
+    lead = runner.shot_prompt(spec["shots"][0])
+    # the lead's canonical image is <image1>; the cast follows it
+    assert lead["reference_asset_ids"] == ["a_cast0000", "a_cast0001"]
+    assert "only these characters appear" in lead["prompt"] and "Moth (<image2>)" in lead["prompt"]
+    assert "Kettle (<image3>)" in lead["prompt"] and "nobody invented" in lead["prompt"]
+    other = runner.shot_prompt(spec["shots"][1])
+    # shot 2 gets the next two, so every member shows up over the video
+    assert other["reference_asset_ids"] == ["a_cast0002", "a_cast0003"] and "Fern (<image1>)" in other["prompt"]
+    spec["shots"][1]["cast"] = ["Rook"]
+    assert runner.shot_prompt(spec["shots"][1])["reference_asset_ids"] == ["a_cast0004"]
+    spec["shots"][0]["crowd"] = False
+    assert "reference_asset_ids" not in runner.shot_prompt(spec["shots"][0])
+
+
+def test_unknown_cast_names_are_refused():
+    with pytest.raises(prod.ProductionError, match="not in spec.cast"):
+        prod.normalise_spec(tiny_spec(cast=CAST, shots=[{"prompt": "a crowd", "cast": ["Nobody"]}]))
+    with pytest.raises(prod.ProductionError, match="two members"):
+        prod.normalise_cast([CAST[0], dict(CAST[1], name="moth")])
+    with pytest.raises(prod.ProductionError, match="needs a name"):
+        prod.normalise_cast([{"asset_id": "a_cast9999"}])
+
+
+def test_changing_the_cast_redraws_only_the_crowd_shots(data_dir):
+    slug = _paused(data_dir)
+    prod.update_shots(data_dir, slug, [{"key": "2", "crowd": True}])
+    st = prod.load_state(data_dir, slug)
+    st["status"] = "awaiting_review"
+    st["done"]["frames"]["items"]["2"] = {"variants": ["a_3"], "best": "a_3"}
+    prod.save_state(data_dir, st)
+    out = prod.set_cast(data_dir, slug, CAST, per_shot=2)
+    assert out["redraw"] == ["2"] and out["status"] == "queued"
+    st = prod.load_state(data_dir, slug)
+    assert "1" in st["done"]["frames"]["items"] and "2" not in st["done"]["frames"]["items"]
+    st["status"] = "awaiting_review"
+    prod.save_state(data_dir, st)
+    # naming who stands behind a shot is a change too; unknown names are refused
+    assert prod.update_shots(data_dir, slug, [{"key": "2", "cast": ["kettle"]}])["changed"] == ["2"]
+    assert prod.load_state(data_dir, slug)["spec"]["shots"][1]["cast"] == ["Kettle"]
+    st = prod.load_state(data_dir, slug)
+    st["status"] = "awaiting_review"
+    prod.save_state(data_dir, st)
+    with pytest.raises(prod.ProductionError, match="not in the background cast"):
+        prod.update_shots(data_dir, slug, [{"key": "2", "cast": ["Nobody"]}])
+    # dropping a member also drops it from the shots that named it
+    out = prod.set_cast(data_dir, slug, CAST[:1])
+    assert "cast" not in prod.load_state(data_dir, slug)["spec"]["shots"][1]
