@@ -352,7 +352,9 @@ background (up to 24). Shots ticked **Background from the cast** take a few
 of them (three by default, rotating so everybody shows up; or exactly the
 ones picked in the shot) as references, with the instruction that only they
 appear behind the lead, exactly as drawn, nobody invented. Changing the cast
-redraws only the shots whose crowd changed.
+redraws only the shots whose crowd changed. When the cut uses clips it
+cuts on whole bars about every 4 s (2 s in the chorus), so a dance has time
+to read (`clip_settings.cut_s`, or explicit `beats_*` options).
 
 **Library > Download from a link** brings a video (or just a section of
 it, or its audio) from YouTube, X, Instagram and the other sites yt-dlp
