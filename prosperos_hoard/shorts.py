@@ -1054,7 +1054,7 @@ def replace_script(data_dir: Path, slug: str, script: Any) -> dict[str, Any]:
         state = prod.load_state(data_dir, slug)
         if not is_short(state):
             raise ShortError("not_a_short", f"'{slug}' is not a narrated short")
-        if state.get("status") == "running":
+        if prod.is_running(state, data_dir):
             raise ShortError("production_running", "the short is running; cancel it or wait before changing its script")
         clean = normalise_script(script)
         old = (state.get("done") or {}).get("script") or {}

@@ -411,6 +411,20 @@ table.list tr:hover td { background: var(--surface-2); }
 .picker-grid button { padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; background: var(--surface-2); }
 .picker-grid button.on { border-color: var(--accent); }
 .picker-grid img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+.picker2 { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.picker2-list { min-width: 0; }
+.picker2-grid { max-height: 58vh; overflow: auto; padding: 2px; }
+.picker2-grid button { display: flex; flex-direction: column; text-align: left; color: var(--text); }
+.picker2-grid .media-icon { aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.picker2-name { font-size: 11px; padding: 4px 6px 0; max-width: 100%; }
+.picker2-proj { font-size: 10px; padding: 0 6px 4px; color: var(--muted); max-width: 100%; }
+.picker2-preview { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; min-height: 200px; }
+.picker2-preview img, .picker2-preview video { width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; background: #0004; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--muted); height: auto; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 760px) { .picker2 { grid-template-columns: 1fr; } .picker2-preview { position: static; } }
 .overview-grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: start; }
 .cover-img { width: 100%; border-radius: 12px; display: block; aspect-ratio: 1 / 1; object-fit: cover; }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
@@ -485,3 +499,60 @@ table.list tr.selected td { background: var(--accent-soft); }
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); max-height: 180px; overflow: auto; }
 .sb-tile .tile-meta { opacity: 1; position: static; background: var(--surface-2); color: var(--text); padding: 6px 8px; }
 .sb-tile .tile-meta .pill { font-size: 10.5px; padding: 1px 6px; }
+
+/* song track: an editor timeline standing up - the lyrics on one vertical
+   line, the sections beside them and a shot track the shots are laid on */
+.track-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 12px; align-items: start; }
+.track-scroll { max-height: 74vh; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.track { position: relative; min-width: 600px; user-select: none; touch-action: none; }
+.track-heads { position: sticky; top: 0; z-index: 4; height: 0; }
+.track-heads span { position: absolute; top: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  background: var(--surface-2); padding: 1px 6px; border-radius: 0 0 6px 6px; }
+.track-heads span:first-child { left: 146px; }
+.track-heads span:last-child { right: 8px; }
+.track-tick { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--border); pointer-events: none; }
+.track-tick span { position: absolute; left: 6px; top: -8px; font: 10.5px var(--mono); color: var(--muted); background: var(--surface-2); padding: 0 2px; }
+.track-section { position: absolute; left: 46px; width: 92px; border-left: 3px solid var(--accent); background: var(--accent-soft);
+  border-radius: 0 6px 6px 0; pointer-events: none; overflow: hidden; }
+.track-section span { display: block; font-size: 11px; font-weight: 600; padding: 2px 6px; white-space: nowrap; }
+.track-section.sec-chorus { border-color: var(--gold, #d9a441); background: color-mix(in srgb, var(--gold, #d9a441) 16%, transparent); }
+.track-section.sec-verse { border-color: var(--info, #5b9bd5); background: color-mix(in srgb, var(--info, #5b9bd5) 14%, transparent); }
+.track-section.sec-bridge, .track-section.sec-breakdown { border-color: var(--ok, #4caf50); background: color-mix(in srgb, var(--ok, #4caf50) 14%, transparent); }
+.track-line { position: absolute; left: 146px; right: 262px; text-align: left; border: 1px solid transparent; background: none; color: var(--text);
+  border-radius: 6px; padding: 1px 6px; font-size: 13px; line-height: 1.25; cursor: pointer; height: auto; display: flex;
+  align-items: flex-start; justify-content: flex-start; gap: 4px; overflow: hidden; }
+.track-line:hover { background: var(--surface); border-color: var(--border-strong); }
+.track-line.on { background: var(--accent-soft); border-color: var(--accent); }
+.track-line.live { color: var(--accent); font-weight: 600; }
+.track-line-t { font-size: 10.5px; color: var(--muted); flex: none; padding-top: 2px; }
+.track-selbox { position: absolute; left: 140px; right: 258px; background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); pointer-events: none; }
+.track-lane { position: absolute; top: 0; bottom: 0; right: 8px; width: 244px; border-left: 1px solid var(--border-strong);
+  background: repeating-linear-gradient(0deg, transparent 0 9px, color-mix(in srgb, var(--border) 40%, transparent) 9px 10px); }
+.track-lane.over { background-color: var(--accent-soft); }
+.track-lane-empty { position: absolute; top: 40px; left: 12px; right: 12px; text-align: center; pointer-events: none; }
+.track-ghost { position: absolute; right: 8px; width: 244px; border-top: 2px dashed var(--accent); pointer-events: none; z-index: 3; }
+.track-ghost span { position: absolute; right: 4px; top: -16px; font-size: 10.5px; color: var(--accent); }
+.track-block { position: absolute; right: 12px; width: 236px; border: 1px solid var(--accent); border-radius: 7px; background: var(--surface);
+  box-shadow: 0 1px 0 #0003; cursor: grab; overflow: hidden; z-index: 2; touch-action: none; }
+.track-block.active { cursor: grabbing; box-shadow: var(--shadow); border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.track-block-body { display: flex; gap: 6px; padding: 3px 5px; align-items: flex-start; height: 100%; }
+.track-block img, .track-bin-item img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; flex: none; }
+.track-block-icon { width: 34px; height: 34px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 4px; background: var(--surface-2); color: var(--muted); }
+.track-block-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.track-block-words { font-size: 11.5px; line-height: 1.25; font-style: italic; overflow: hidden; }
+.track-block-x { border: 0; background: none; color: var(--muted); padding: 2px; cursor: pointer; height: auto; flex: none; }
+.track-block-x:hover { color: var(--bad, #e05656); }
+.track-handle { position: absolute; left: 0; right: 0; height: 7px; cursor: ns-resize; z-index: 3; }
+.track-handle.top { top: -1px; }
+.track-handle.bottom { bottom: -1px; }
+.track-handle:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.track-head { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); pointer-events: none; z-index: 5; }
+.track-sel { position: sticky; top: 0; z-index: 6; background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+.track-sel-lines { margin-top: 4px; color: var(--text); opacity: .85; }
+.track-bin { position: sticky; top: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
+.track-bin-list { display: flex; flex-direction: column; gap: 4px; max-height: 58vh; overflow: auto; }
+.track-bin-item { display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: grab; }
+.track-bin-item.placed { opacity: .6; border-style: dashed; }
+.track-bin-item:hover { border-color: var(--accent); opacity: 1; }
+@media (max-width: 1100px) { .track-wrap { grid-template-columns: 1fr; } .track-bin { position: static; } }

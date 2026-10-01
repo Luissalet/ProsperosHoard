@@ -742,16 +742,33 @@ export interface ProductionShot {
   motion_ref?: MotionRef;
   crowd?: boolean;   // part of the background cast stands behind it
   cast?: string[];   // exactly these cast members (by name)
+  start_s?: number;  // placed on exactly this stretch of the song
+  end_s?: number;
 }
 
 export interface ShotRef { asset_id: string; use: string }
 export interface CastMember { asset_id: string; name: string; note?: string }
 export interface MotionRef { asset_id: string; start_s: number; prompt: string }
 
+export interface TimedLine { time_s: number; end_s: number | null; text: string; section: string | null }
+
 export interface ProductionTiming {
   shots: Record<string, { start_s: number; duration_s: number; section: string | null }[]>;
   sections: { label: string; kind: string | null; start_s?: number; end_s?: number | null; lines: string[] }[];
   duration_s?: number;
+  song_asset_id?: string | null;
+  lines?: TimedLine[];
+  spans?: Record<string, { start_s: number; end_s: number }>;
+  timed?: boolean;
+}
+
+export interface SongChange {
+  asset_id?: string;
+  take?: number;
+  compose?: { tags?: string; bpm?: number; duration?: number; key?: string; language?: string; lyrics?: string; count?: number };
+  lyrics?: string;
+  time_lyrics?: boolean;
+  run?: boolean;
 }
 
 export interface ProductionView extends ProductionSummary {
@@ -1060,6 +1077,13 @@ export const api = {
     request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   setProductionLyrics: (slug: string, lyrics: string, run = false) =>
     request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+  setProductionSong: (slug: string, body: SongChange) =>
+    request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(
+      "PUT", `/api/productions/${slug}/song`, body),
+  timeProductionLyrics: (slug: string) =>
+    request<{ lyrics_asset_id: string | null; lines: number }>("POST", `/api/productions/${slug}/time-lyrics`),
+  allAssets: (params: Record<string, string | number | boolean | undefined> = {}) =>
+    request<Paged<Asset & { project_name?: string }>>("GET", `/api/assets${q(params)}`),
   setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>
     request<{ status: string; redraw: string[] }>("PUT", `/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>

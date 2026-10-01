@@ -180,6 +180,83 @@ def _assign_by_section(cuts: list[dict[str, Any]], sections: list[dict[str, Any]
     return out
 
 
+def _clean_spans(raw: Any, duration_s: float) -> list[dict[str, Any]]:
+    """`pinned_spans`: [{start_s, end_s, assets: [asset dicts]}] - a stretch
+    of the song that plays exactly these assets (a shot placed on its
+    lyrics). Clipped to the song, sorted; one overlapping an earlier span
+    is dropped."""
+    out: list[dict[str, Any]] = []
+    for span in raw or []:
+        try:
+            start, end = max(0.0, float(span["start_s"])), min(duration_s, float(span["end_s"]))
+        except (KeyError, TypeError, ValueError):
+            raise TimelineError("pinned_spans entries need start_s and end_s") from None
+        assets = [a for a in span.get("assets") or [] if a]
+        if end - start < MIN_CLIP_S or not assets:
+            continue
+        out.append({"start_s": round(start, 3), "end_s": round(end, 3), "assets": assets})
+    out.sort(key=lambda s: s["start_s"])
+    kept: list[dict[str, Any]] = []
+    for span in out:
+        if kept and span["start_s"] < kept[-1]["end_s"] - 1e-6:
+            continue
+        kept.append(span)
+    return kept
+
+
+def _span_at(t: float, spans: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    for span in spans:
+        if span["start_s"] - 1e-6 <= t < span["end_s"] - 1e-6:
+            return span
+    return None
+
+
+def _pin_cuts(cuts: list[dict[str, Any]], spans: list[dict[str, Any]], duration_s: float) -> list[dict[str, Any]]:
+    """Cut points with a cut exactly where each pinned span starts and ends.
+    Inside a span the beat cuts stay only when it has several assets to
+    alternate; a beat cut closer than MIN_CLIP_S to a span edge goes."""
+    edges = sorted({s["start_s"] for s in spans} | {s["end_s"] for s in spans if s["end_s"] < duration_s - 1e-6})
+    kept = []
+    for c in cuts:
+        t = c["start_s"]
+        span = _span_at(t, spans)
+        if span is not None and len(span["assets"]) < 2 and t > span["start_s"] + 1e-6:
+            continue
+        if any(abs(t - e) < MIN_CLIP_S for e in edges) and t not in edges:
+            continue
+        kept.append(dict(c))
+    for e in edges:
+        if not any(abs(c["start_s"] - e) < 1e-6 for c in kept):
+            kept.append({"start_s": e, "flash": False})
+    kept.sort(key=lambda c: c["start_s"])
+    if not kept or kept[0]["start_s"] > 1e-6:
+        kept.insert(0, {"start_s": 0.0, "flash": False})
+    # a gap that fell under MIN_CLIP_S between two kept edges stays: the
+    # span asked for it; any other too-short clip merges into the previous
+    out = [kept[0]]
+    for c in kept[1:]:
+        if c["start_s"] - out[-1]["start_s"] < MIN_CLIP_S and c["start_s"] not in edges:
+            continue
+        out.append(c)
+    return out
+
+
+def _assign_pinned(cuts: list[dict[str, Any]], assets: list[dict[str, Any]],
+                   spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Cuts inside a pinned span take that span's assets in order (cycling);
+    the rest keep what the storyboard or the pool gave them."""
+    out = list(assets)
+    cursors: dict[int, int] = {}
+    for i, cut in enumerate(cuts):
+        span = _span_at(cut["start_s"], spans)
+        if span is None:
+            continue
+        n = cursors.get(id(span), 0)
+        out[i] = span["assets"][n % len(span["assets"])]
+        cursors[id(span)] = n + 1
+    return out
+
+
 def build_auto_cut(
     song_duration_s: float,
     beat_times: list[float],
@@ -199,12 +276,17 @@ def build_auto_cut(
 
     line_times = [float(ln["time_s"]) for ln in (lyrics_lines or [])] if options.get("cut_on_lyrics") else None
     cuts = _cut_points(beat_times, downbeats, sections or [], song_duration_s, options, line_times)
+    spans = _clean_spans(options.get("pinned_spans"), song_duration_s)
+    if spans:
+        cuts = _pin_cuts(cuts, spans, song_duration_s)
     starts = [c["start_s"] for c in cuts] + [song_duration_s]
     section_pools = options.get("section_pools")
     if section_pools:
         assets = _assign_by_section(cuts, sections or [], section_pools, asset_pool)
     else:
         assets = _assign_assets(asset_pool, len(cuts), seed=seed)
+    if spans:
+        assets = _assign_pinned(cuts, assets, spans)
 
     rng = random.Random(seed)
     visual_clips = []

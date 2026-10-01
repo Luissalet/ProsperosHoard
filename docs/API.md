@@ -188,7 +188,11 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions` | `{name, spec, settings?, project?}`: create and queue |
 | GET | `/api/productions/{slug}` | the full `state.json` plus `view` (the compact agent view) |
 | POST | `/api/productions/{slug}/continue` | approve / resume |
-| PATCH | `/api/productions/{slug}/shots` | `{changes, run}`; a change may set `refs`, `motion_ref {asset_id, start_s, prompt}`, `crowd`, `cast [names]`, `section`, `lead`, `after`, `delete`, or `insert` a shot |
+| PATCH | `/api/productions/{slug}/shots` | `{changes, run}`; a change may set `span {start_s, end_s}` (null frees it; no overlaps), `refs`, `motion_ref {asset_id, start_s, prompt}`, `crowd`, `cast [names]`, `section`, `lead`, `after`, `delete`, or `insert` a shot |
+| PUT | `/api/productions/{slug}/song` | `{asset_id? \| take? \| compose?, lyrics?, time_lyrics=true, run}`: change the song (also `POST /api/agent/studio_production_song?production=`) |
+| POST | `/api/productions/{slug}/time-lyrics` | time the lyrics to the current song now (the lyrics stage without a run) |
+| GET | `/api/agent/studio_production_timing?production=` | timed lines, sections, spans, animatic positions |
+| GET | `/api/assets` | `kind?, query?, limit, offset, project?`: assets across every project, each with `project_name` (the pickers' "all projects") |
 | PUT | `/api/productions/{slug}/lyrics` | `{lyrics, run}`: the song's lyrics with section tags |
 | PUT | `/api/productions/{slug}/cast` | `{cast [{asset_id, name, note}], per_shot?, run}` -> `{cast, cast_per_shot, redraw, status}`: the background cast; crowd shots take only these |
 | POST | `/api/projects/{id}/download` | `{url, audio_only?, start_s?, end_s?}` -> `{job}` (`download_media`, yt-dlp) |

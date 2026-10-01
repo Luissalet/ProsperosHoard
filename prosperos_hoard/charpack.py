@@ -41,7 +41,7 @@ from . import engine
 from .backend import Backend
 from .ids import new_id
 from .store import NotFound, Store
-from .util import now_iso
+from .util import now_iso, replace_with_retry
 
 FORMAT = "hoardchar"
 FORMAT_VERSION = 1
@@ -163,7 +163,7 @@ def build_pack(store: Store, character_id: str, dest: Path, *, include_dataset: 
             buf = io.BytesIO()
             sheet.save(buf, format="PNG")
             z.writestr("preview.png", buf.getvalue(), compress_type=zipfile.ZIP_STORED)
-    tmp.replace(dest)
+    replace_with_retry(tmp, dest)
     return {"path": dest, "bytes": dest.stat().st_size, "name": char["name"], "images": len(files),
             "dataset": len(dataset_entries), "adapters": sum(1 for e, _ in adapters if e["weights"]),
             "adapters_without_weights": [e["lora_name"] for e, _ in adapters if not e["weights"]]}

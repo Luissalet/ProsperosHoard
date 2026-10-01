@@ -36,7 +36,7 @@ from .hoard_link.errors import Unavailable
 from .ids import new_id
 from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
-from .util import now_iso
+from .util import now_iso, replace_with_retry
 from .workflows import convert as convert_mod
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -683,7 +683,7 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
                 path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_suffix(".tmp")
                 tmp.write_text(blob, encoding="utf-8")
-                tmp.replace(path)
+                replace_with_retry(tmp, path)
                 _object_info_cache_hash[str(path)] = digest
     except OSError:
         pass  # the cache is a convenience; never fail a job over it
@@ -2098,6 +2098,18 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
                 raise EngineError("bad_options", f"section_pools['{key}'] must be a list of asset ids")
             resolved[str(key)] = [a for a in _pool(store, project_id, [str(i) for i in ids], None)] if ids else []
         options["section_pools"] = resolved
+    if options.get("pinned_spans") is not None:
+        raw_spans = options["pinned_spans"]
+        if not isinstance(raw_spans, list) or len(raw_spans) > 80:
+            raise EngineError("bad_options", "pinned_spans must be a list of {start_s, end_s, asset_ids}")
+        spans = []
+        for span in raw_spans:
+            ids = span.get("asset_ids") if isinstance(span, dict) else None
+            if not isinstance(ids, list) or not ids or len(ids) > 20:
+                raise EngineError("bad_options", "each pinned span needs start_s, end_s and 1-20 asset_ids")
+            spans.append({"start_s": span.get("start_s"), "end_s": span.get("end_s"),
+                          "assets": _pool(store, project_id, [str(i) for i in ids], None)})
+        options["pinned_spans"] = spans
     try:
         built = timeline_mod.build_auto_cut(
             analysis["duration_s"], analysis["beat_times"], sections, pool,

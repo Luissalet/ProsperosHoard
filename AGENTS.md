@@ -17,15 +17,19 @@ Reglas para agentes de código que trabajen en este repositorio.
    docstrings llevan una línea `Keywords:` en inglés y español.
 5. **Los archivos se sirven por id**, nunca por una ruta del cliente. Las
    importaciones por ruta pasan por `engine.resolve_import_path`.
-6. **Procesos hijos siempre con `procutil`** (CREATE_NO_WINDOW en Windows,
+6. **Escrituras atómicas con `util.replace_with_retry`** (o
+   `util.write_text_atomic`), nunca `Path.replace`/`os.replace` a pelo: en
+   Windows el reemplazo falla (WinError 5/32) mientras otro lector tiene el
+   archivo abierto.
+7. **Procesos hijos siempre con `procutil`** (CREATE_NO_WINDOW en Windows,
    UTF-8). Nada de `multiprocessing`. `pathlib` y `encoding="utf-8"` siempre.
-7. **ffmpeg**: los filtros reciben nombres relativos con `cwd` en la carpeta de
+8. **ffmpeg**: los filtros reciben nombres relativos con `cwd` en la carpeta de
    trabajo (la carpeta de Windows se llama «Prospero's Hoard»); la letra pasa
    por `video.ass_escape`.
-8. **Antes de dar un cambio por bueno**: `pytest -q` en verde,
+9. **Antes de dar un cambio por bueno**: `pytest -q` en verde,
    `npm run build` sin errores de TypeScript y, si tocas la interfaz,
    `python3 scripts/screenshots.py` para revisar las capturas.
-9. **Commits**: identidad `Luissalet <luissalet@users.noreply.github.com>`,
+10. **Commits**: identidad `Luissalet <luissalet@users.noreply.github.com>`,
    mensajes en inglés con prefijo convencional, sin nombres de otros productos
    ni datos personales.
 
@@ -51,6 +55,16 @@ Qué hacer cuando el usuario pide, con sus palabras:
   cabe (Qwen-Image ~12 GB) y la GPU la ocupa un modelo de lenguaje, dilo y
   pregunta antes de pararlo: nunca pares un LLM por tu cuenta.
 
+- **«Cambia la canción» / «usa esta canción» / "swap the song"**:
+  `studio_assets(kind="audio")` en el proyecto o en otros para encontrarla y
+  `studio_production_song(production, asset_id=...)`; «otra toma» →
+  `take=N`; «hazla más lenta / otro estilo» → `compose={...}`. Si devuelve
+  `lyrics_source: "previous"`, la letra es la de la canción anterior:
+  pregúntale si encaja o pide la nueva (`studio_production_lyrics`).
+- **«Pon el plano 3 en el estribillo» / «este plano con estos versos»**:
+  `studio_production_timing(production)` para los versos con sus tiempos y
+  `studio_production_shots` con `{"key": "3", "span": {"start_s",
+  "end_s"}}` (los tramos no se solapan; `span: null` lo libera).
 - **«Recrea esto con X» / "remake this with X"**: la producción de origen es
   la que acaba de terminar o la que nombre (`studio_productions`). Si aún no
   es receta, `studio_recipe_export(production)`; lee sus `warnings` (prompts

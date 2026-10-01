@@ -491,6 +491,15 @@ class ProductionLyricsBody(BaseModel):
     run: bool = False
 
 
+class ProductionSongBody(BaseModel):
+    asset_id: Optional[str] = None          # an audio asset of any project (library or uploaded)
+    take: Optional[int] = None              # another of the takes already composed (1-based)
+    compose: Optional[dict[str, Any]] = None  # {tags, bpm, duration, key, language, lyrics, count}
+    lyrics: Optional[str] = None
+    time_lyrics: bool = True                # time the lyrics to the new song right away
+    run: bool = False
+
+
 class ProductionCastBody(BaseModel):
     cast: list[dict[str, Any]] = Field(default_factory=list)  # [{asset_id, name, note}]
     per_shot: Optional[int] = None  # how many stand behind each crowd shot (1-6)
@@ -2177,6 +2186,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             a.pop("waveform", None)
         return res
 
+    @app.get("/api/assets")
+    def list_all_assets(kind: Optional[str] = None, query: Optional[str] = None, limit: int = 60, offset: int = 0,
+                        project: Optional[str] = None):
+        """Assets across every project (the pickers' "all projects" scope),
+        each with its project's name."""
+        res = store.list_assets(project or None, kind, query, None, None, limit, offset)
+        names: dict[str, str] = {}
+        for a in res["items"]:
+            a.pop("analysis", None)
+            a.pop("waveform", None)
+            pid = a.get("project_id")
+            if pid and pid not in names:
+                try:
+                    names[pid] = store.get_project(pid)["name"]
+                except NotFound:
+                    names[pid] = ""
+            a["project_name"] = names.get(pid, "")
+        return res
+
     @app.get("/api/assets/{asset_id}")
     def get_asset(asset_id: str):
         return store.get_asset(asset_id)
@@ -2375,6 +2403,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     queue.register("production", _production_job)
 
+    def _job_state(job_id: str) -> Optional[str]:
+        try:
+            return store.get_job(job_id)["state"]
+        except NotFound:
+            return None
+
+    # a production left "running" by a run that died (app closed, a failed
+    # write) is shown and edited as failed instead of staying locked
+    productions_mod.set_job_probe(_job_state)
+
     def queue_production(slug: str) -> dict[str, Any]:
         """Queue a production's run (or return the one already queued/running)."""
         with productions_mod.lock_for(slug):
@@ -2420,7 +2458,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     production_hooks["qa_hook"] = lambda run, stage: qa_mod.inline_hook(run, stage, *vision_for_qa())
 
     def production_view(slug: str) -> dict[str, Any]:
-        return productions_mod.compact_view(productions_mod.load_state(store.data_dir, slug))
+        return productions_mod.compact_view(productions_mod.load_fresh(store.data_dir, slug))
 
     def op_production_create(body: ProductionCreateBody) -> dict[str, Any]:
         if body.project:
@@ -2660,7 +2698,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/productions/{slug}")
     def production_get(slug: str):
-        state = productions_mod.load_state(store.data_dir, slug)
+        state = productions_mod.load_fresh(store.data_dir, slug)
         timing = None if productions_mod.is_legacy(state) else productions_mod.shot_timing(store.data_dir, store, state)
         return {**state, "view": productions_mod.compact_view(state), "timing": timing}
 
@@ -2670,6 +2708,43 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.run:
             out["job"] = engine.job_view(queue_production(slug))
         return {**out, "production": production_view(slug)}
+
+    def op_production_song(slug: str, body: ProductionSongBody) -> dict[str, Any]:
+        out = productions_mod.set_song(store, slug, asset_id=body.asset_id, take=body.take, compose=body.compose,
+                                       lyrics=body.lyrics)
+        if body.time_lyrics and out.get("song_asset_id"):
+            try:
+                out["timed"] = productions_mod.time_lyrics_now(store, slug)
+            except (engine.EngineError, productions_mod.ProductionError) as exc:
+                out["timing_note"] = getattr(exc, "message", None) or str(exc)
+        if body.run:
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.put("/api/productions/{slug}/song")
+    def production_song(slug: str, body: ProductionSongBody):
+        return op_production_song(slug, body)
+
+    @app.post("/api/agent/studio_production_song")
+    def agent_production_song(production: str, body: ProductionSongBody):
+        return agent("studio_production_song", production, lambda: op_production_song(production, body))
+
+    @app.post("/api/productions/{slug}/time-lyrics")
+    def production_time_lyrics(slug: str):
+        return {**productions_mod.time_lyrics_now(store, slug), "production": production_view(slug)}
+
+    @app.get("/api/agent/studio_production_timing")
+    def agent_production_timing(production: str):
+        def run() -> dict[str, Any]:
+            state = productions_mod.load_fresh(store.data_dir, production)
+            timing = productions_mod.shot_timing(store.data_dir, store, state)
+            return {"production": production, "duration_s": timing.get("duration_s"), "timed": timing.get("timed"),
+                    "song_asset_id": timing.get("song_asset_id"), "lines": timing.get("lines") or [],
+                    "sections": [{k: v for k, v in sec.items() if k != "lines"} for sec in timing.get("sections") or []],
+                    "spans": timing.get("spans") or {},
+                    "shots": {k: [{"start_s": c["start_s"], "duration_s": c["duration_s"]} for c in v]
+                              for k, v in (timing.get("shots") or {}).items()}}
+        return agent("studio_production_timing", production, run)
 
     @app.put("/api/productions/{slug}/cast")
     def production_cast(slug: str, body: ProductionCastBody):

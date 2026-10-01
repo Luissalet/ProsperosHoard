@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { Clapperboard, Film, Images, Link2, Loader2, Pause, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import { Clapperboard, Film, Images, Link2, Loader2, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
 
 // the song sections a shot can illustrate (what the planner writes)
-const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
+export const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
 const SECTION_KIND: Record<string, string> = { prechorus: "pre", breakdown: "bridge" };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -24,6 +24,17 @@ const CAMERA_TEXT: Record<string, string> = {
   camLow: "low-angle camera looking up, slowly rising",
   camHandheld: "energetic handheld camera, slight shake, quick reframes",
 };
+
+const clockTenths = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+
+/** A run really owns the production: running, or queued with its job alive
+ * ("queued" is also what an edit leaves behind, waiting for a continue). */
+export function liveRun(state: ProductionState, jobs: Job[]): boolean {
+  if (state.status === "running") return true;
+  if (state.status !== "queued" || !state.job_id) return false;
+  const job = jobs.find((j) => j.id === state.job_id);
+  return Boolean(job && ["queued", "waiting_gpu", "running"].includes(job.state));
+}
 
 function sectionMatches(label: string, kind: string | null, section?: string) {
   if (!section) return false;
@@ -47,7 +58,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   const clips = (state.done?.clips?.items || {}) as Record<string, string>;
   const pendingFrames = (state.partial?.frames?.pending || {}) as Record<string, string>;
   const pendingClips = (state.partial?.clips?.pending || {}) as Record<string, string>;
-  const running = ["running", "queued"].includes(state.status);
+  const running = liveRun(state, app.jobs);
   const timing = state.timing;
 
   // a typical render time on this machine right now, for the estimate
@@ -114,7 +125,8 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 <div className="tile-meta stack" style={{ gap: 2, alignItems: "stretch" }}>
                   <span className="row small" style={{ gap: 6 }}>
                     {shot.section && <span className="pill">{t(`sec_${shot.section}` as never) || shot.section}</span>}
-                    {when && when.length > 0 && <span className="mono muted" title={when.map((w) => `${clock(w.start_s)}–${clock(w.start_s + w.duration_s)}`).join("  ")}>
+                    {timing?.spans?.[shot.key] && <span className="mono" title={t("trackPinned")}><Pin size={10} /> {clock(timing.spans[shot.key].start_s)}–{clock(timing.spans[shot.key].end_s)}</span>}
+                    {!timing?.spans?.[shot.key] && when && when.length > 0 && <span className="mono muted" title={when.map((w) => `${clock(w.start_s)}–${clock(w.start_s + w.duration_s)}`).join("  ")}>
                       {clock(when[0].start_s)}–{clock(when[0].start_s + when[0].duration_s)}{when.length > 1 ? ` ×${when.length}` : ""}</span>}
                   </span>
                   <span className="ellipsis">{shot.prompt}</span>
@@ -137,9 +149,10 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   );
 }
 
-function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: {
+export function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection }: {
   state: ProductionState; shot?: ProductionShot; after?: string | null; running: boolean;
   onPause: () => void; onClose: () => void; onSaved: () => void;
+  initialSpan?: { start: number; end: number }; initialSection?: string;
 }) {
   const { t } = useT();
   const app = useApp();
@@ -152,7 +165,13 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
   const [lead, setLead] = useState(shot ? shot.lead : true);
   const [motion, setMotion] = useState<"still" | "move">(shot?.motion || "move");
   const [clip, setClip] = useState(shot ? shot.clips.length > 0 : true);
-  const [section, setSection] = useState(shot?.section || "");
+  const [section, setSection] = useState(shot?.section || initialSection || "");
+  const ownSpan = shot && shot.start_s != null && shot.end_s != null ? { start: shot.start_s, end: shot.end_s } : null;
+  const [span, setSpan] = useState<{ start: number; end: number } | null>(initialSpan || ownSpan);
+  const [spanText, setSpanText] = useState(() => {
+    const s0 = initialSpan || ownSpan;
+    return s0 ? [clockTenths(s0.start), clockTenths(s0.end)] : ["", ""];
+  });
   const [refs, setRefs] = useState<ShotRef[]>(shot?.refs || []);
   const [motionRef, setMotionRef] = useState<MotionRef | null>(shot?.motion_ref || null);
   const [crowd, setCrowd] = useState(!!shot?.crowd);
@@ -168,6 +187,12 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
   const [busy, setBusy] = useState(false);
   const projectId = state.project_id || app.projectId || "";
   const lines = (state.timing?.sections || []).filter((s) => sectionMatches(s.label, s.kind, section));
+  const spanLines = span ? (state.timing?.lines || []).filter((l) => l.time_s < span.end - 0.05 && (l.end_s ?? l.time_s + 1) > span.start + 0.05) : [];
+  const applySpanText = (a: string, b: string) => {
+    setSpanText([a, b]);
+    const s0 = parseClock(a), s1 = parseClock(b);
+    if (a.trim() && b.trim() && s1 - s0 >= 0.5) setSpan({ start: s0, end: s1 });
+  };
   const firstTag = lead ? 2 : 1;
 
   const addRef = (a: Asset) => {
@@ -199,7 +224,8 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
     if (isNew) {
       change = { insert: { after: after ?? "start", prompt: prompt.trim(), lead, motion, clip: motion === "move" && clip,
                            motion_prompt: motionPrompt.trim() || undefined, section: section || undefined, refs, crowd,
-                           motion_ref: motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : undefined } };
+                           motion_ref: motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : undefined,
+                           span: span ? { start_s: span.start, end_s: span.end } : undefined } };
     } else {
       change = { key: shot!.key };
       if (prompt.trim() !== shot!.prompt) change.prompt = prompt.trim();
@@ -215,6 +241,7 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
       if (JSON.stringify(mr) !== JSON.stringify(shot!.motion_ref || null)) change.motion_ref = mr;
       if (variants.length > 1 && variants[best] !== entry.best) change.best = best;
       if (regenerate) change.regenerate = true;
+      if (JSON.stringify(span) !== JSON.stringify(ownSpan)) change.span = span ? { start_s: span.start, end_s: span.end } : null;
       if (Object.keys(change).length === 1) { onClose(); return; }
     }
     setBusy(true);
@@ -285,7 +312,23 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
           </label>
           {motion === "move" && <label className="check"><input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} /> {t("makeClip")}</label>}
         </div>
-        {lines.length > 0 && (
+        <div className="field">{t("spanTitle")}
+          <span className="hint">{span ? t("spanPinnedHint") : t("spanFreeHint")}</span>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <label className="row small" style={{ gap: 4 }}>{t("trackFrom")}
+              <input style={{ width: 80 }} value={spanText[0]} placeholder="0:12.4" onChange={(e) => applySpanText(e.target.value, spanText[1])} /></label>
+            <label className="row small" style={{ gap: 4 }}>{t("trackTo")}
+              <input style={{ width: 80 }} value={spanText[1]} placeholder="0:19.8" onChange={(e) => applySpanText(spanText[0], e.target.value)} /></label>
+            {span && <span className="small muted">{(span.end - span.start).toFixed(1)} s</span>}
+            {span && <button type="button" className="btn sm ghost" onClick={() => { setSpan(null); setSpanText(["", ""]); }}><X size={12} /> {t("spanFree")}</button>}
+          </div>
+          {spanLines.length > 0 && (
+            <div className="sb-lyrics" style={{ gridTemplateColumns: "1fr" }}>
+              {spanLines.map((l, i) => <div key={i} className="small"><span className="mono muted">{clockTenths(l.time_s)}</span> {l.text}</div>)}
+            </div>
+          )}
+        </div>
+        {!span && lines.length > 0 && (
           <div className="sb-lyrics">
             {lines.map((s, i) => (
               <div key={i}><strong className="small">{s.label}{s.start_s != null ? ` · ${clock(s.start_s)}` : ""}</strong>
@@ -400,12 +443,12 @@ function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved }: 
         )}
       </fieldset>
       {motionPick === "library" && projectId && (
-        <AssetPicker projectId={projectId} kind="video" title={t("sbMotionRef")}
+        <AssetPicker projectId={projectId} kind="video" allProjects title={t("sbMotionRef")}
           onPick={(a) => { setMotionRef({ asset_id: a.id, start_s: 0, prompt: "" }); setMotionStart("0:00"); setMotionPick(null); }}
           onClose={() => setMotionPick(null)} />
       )}
       {picking && projectId && (
-        <AssetPicker projectId={projectId} kind={picking} title={picking === "video" ? t("sbRefFromVideo") : t("sbRefPick")}
+        <AssetPicker projectId={projectId} kind={picking} allProjects title={picking === "video" ? t("sbRefFromVideo") : t("sbRefPick")}
           onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => setPicking(null)} />
       )}
     </Modal>
@@ -485,14 +528,14 @@ function CastModal({ state, running, onClose, onSaved }: { state: ProductionStat
         <span className="hint">{t("castHowTo")}</span>
       </fieldset>
       {picking && projectId && (
-        <AssetPicker projectId={projectId} kind="image" title={t("bgCastTitle")}
+        <AssetPicker projectId={projectId} kind="image" allProjects title={t("bgCastTitle")}
           onPick={(a) => { add(a); setPicking(false); }} onClose={() => setPicking(false)} />
       )}
     </Modal>
   );
 }
 
-function LyricsModal({ state, running, onClose, onSaved }: { state: ProductionState; running: boolean; onClose: () => void; onSaved: () => void }) {
+export function LyricsModal({ state, running, onClose, onSaved }: { state: ProductionState; running: boolean; onClose: () => void; onSaved: () => void }) {
   const { t } = useT();
   const app = useApp();
   const song = (state.spec.song || {}) as { lyrics?: string };

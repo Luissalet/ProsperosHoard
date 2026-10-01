@@ -42,7 +42,7 @@ from . import engine
 from .ids import new_id
 from .jobs import JobCancelled
 from .store import NotFound, Store
-from .util import now_iso
+from .util import now_iso, replace_with_retry
 
 FORMAT = "prospero.production/1"
 STAGES = ("character", "song", "frames", "lyrics", "animatic", "clips", "photocards", "album", "timeline", "report")
@@ -116,6 +116,51 @@ def lock_for(slug: str) -> threading.RLock:
         return _locks.setdefault(slug, threading.RLock())
 
 
+# Who answers "is this job still alive?" - the app sets it (store.get_job);
+# without it a "running" state is taken at its word.
+_job_probe: Optional[Callable[[str], Optional[str]]] = None
+_LIVE_JOB_STATES = ("queued", "waiting_gpu", "running")
+
+
+def set_job_probe(probe: Optional[Callable[[str], Optional[str]]]) -> None:
+    global _job_probe
+    _job_probe = probe
+
+
+def reconcile_status(state: dict[str, Any]) -> bool:
+    """A state left "running" by a run that died without writing its end
+    (the app closed, a write failed) becomes "failed", so it can be edited
+    and resumed. Returns True when it changed the state (not saved)."""
+    # only "running": "queued" is also what an edit leaves behind (waiting
+    # for a continue), with the previous run's finished job still recorded
+    if state.get("status") != "running" or _job_probe is None:
+        return False
+    job_id = state.get("job_id")
+    try:
+        job_state = _job_probe(job_id) if job_id else None
+    except Exception:  # noqa: BLE001 - a missing job is a dead job
+        job_state = None
+    if job_state in _LIVE_JOB_STATES:
+        return False
+    state["status"] = "failed"
+    state["message"] = state.get("message") if job_state == "failed" and state.get("message") else (
+        "the run stopped without finishing (the app closed or the job ended); resume it")
+    log(state, state.get("stage") or "", "stale_run_recovered", job_state=job_state)
+    return True
+
+
+def is_running(state: dict[str, Any], data_dir: Optional[Path] = None) -> bool:
+    """True while a run really owns the state; a stale "running" is fixed
+    (and saved when `data_dir` is given) on the way."""
+    if state.get("status") != "running":
+        return False
+    if reconcile_status(state):
+        if data_dir is not None:
+            save_state(data_dir, state)
+        return False
+    return True
+
+
 def load_state(data_dir: Path, slug: str) -> dict[str, Any]:
     path = production_dir(data_dir, slug) / "state.json"
     if not path.is_file():
@@ -128,13 +173,25 @@ def load_state(data_dir: Path, slug: str) -> dict[str, Any]:
     return state
 
 
+def load_fresh(data_dir: Path, slug: str) -> dict[str, Any]:
+    """load_state for readers (lists, the detail view): a stale "running"
+    left by a dead run is turned into "failed" and saved first."""
+    state = load_state(data_dir, slug)
+    if state.get("status") == "running" and _job_probe is not None:
+        with lock_for(slug):
+            state = load_state(data_dir, slug)
+            if reconcile_status(state):
+                save_state(data_dir, state)
+    return state
+
+
 def save_state(data_dir: Path, state: dict[str, Any]) -> None:
     folder = production_dir(data_dir, state["slug"])
     folder.mkdir(parents=True, exist_ok=True)
     state["updated_at"] = now_iso()
     tmp = folder / f"state.{os.getpid()}.{threading.get_ident()}.tmp"
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(folder / "state.json")
+    replace_with_retry(tmp, folder / "state.json")
 
 
 def is_legacy(state: dict[str, Any]) -> bool:
@@ -151,8 +208,8 @@ def list_productions(data_dir: Path) -> list[dict[str, Any]]:
         if not (folder / "state.json").is_file() or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", folder.name):
             continue
         try:
-            state = load_state(data_dir, folder.name)
-        except (ProductionError, NotFound):
+            state = load_fresh(data_dir, folder.name)
+        except (ProductionError, NotFound, OSError):
             continue
         out.append(summary_view(state))
     out.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
@@ -231,6 +288,72 @@ def storyboard_for(spec: dict[str, Any]) -> dict[str, list[str]]:
         if section in SHOT_SECTIONS:
             out.setdefault(_SECTION_TO_KIND.get(section, section), []).append(shot["key"])
     return out
+
+
+def shot_span(shot: dict[str, Any]) -> Optional[tuple[float, float]]:
+    """(start_s, end_s) of a shot placed on its stretch of the song, or None."""
+    start, end = shot.get("start_s"), shot.get("end_s")
+    if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
+        return float(start), float(end)
+    return None
+
+
+def _parse_span(value: Any, key: str) -> Optional[tuple[float, float]]:
+    if value in (None, {}, []):
+        return None
+    if not isinstance(value, dict):
+        raise ProductionError("bad_changes", f"shot {key}: span is {{start_s, end_s}} in seconds, or null to free it")
+    try:
+        start, end = round(float(value["start_s"]), 3), round(float(value["end_s"]), 3)
+    except (KeyError, TypeError, ValueError):
+        raise ProductionError("bad_changes", f"shot {key}: span needs numeric start_s and end_s") from None
+    if start < 0 or end > 3600 or end - start < 0.5:
+        raise ProductionError("bad_changes", f"shot {key}: span must start at 0 s or later and last at least 0.5 s")
+    return start, end
+
+
+def _set_span(shot: dict[str, Any], span: Optional[tuple[float, float]]) -> None:
+    if span is None:
+        shot.pop("start_s", None)
+        shot.pop("end_s", None)
+    else:
+        shot["start_s"], shot["end_s"] = span
+
+
+def _check_spans(spec: dict[str, Any]) -> None:
+    placed = sorted(((shot_span(s), s["key"]) for s in spec.get("shots") or [] if shot_span(s)), key=lambda x: x[0][0])
+    for (a, ka), (b, kb) in zip(placed, placed[1:]):
+        if b[0] < a[1] - 1e-6:
+            raise ProductionError("bad_changes", f"shot {kb} ({b[0]:.1f}-{b[1]:.1f} s) overlaps shot {ka} "
+                                                 f"({a[0]:.1f}-{a[1]:.1f} s); each stretch of the song plays one shot")
+
+
+def pinned_spans(spec: dict[str, Any], assets_for: Callable[[str], list[str]]) -> list[dict[str, Any]]:
+    """The cut's pinned spans: every shot placed on its stretch of the song,
+    with the assets that stand for it (its clips, else its still)."""
+    out = []
+    for shot in spec.get("shots") or []:
+        span = shot_span(shot)
+        ids = [a for a in assets_for(shot["key"]) if a] if span else []
+        if span and ids:
+            out.append({"start_s": span[0], "end_s": span[1], "asset_ids": list(dict.fromkeys(ids)), "shot": shot["key"]})
+    return sorted(out, key=lambda x: x["start_s"])
+
+
+def apply_pins(options: dict[str, Any], pool: list[str], pools: Optional[dict[str, list[str]]],
+               spans: list[dict[str, Any]]) -> tuple[list[str], Optional[dict[str, list[str]]]]:
+    """Put the pinned spans into the cut options and keep their assets out of
+    the free pool and the section pools (a placed shot plays only where it
+    was placed), unless that would leave the free pool empty."""
+    if not spans:
+        return pool, pools
+    options["pinned_spans"] = [{k: v for k, v in sp.items() if k != "shot"} for sp in spans]
+    pinned = {a for sp in spans for a in sp["asset_ids"]}
+    free = [a for a in pool if a not in pinned]
+    if pools:
+        pools = {k: [a for a in v if a not in pinned] for k, v in pools.items()}
+        pools = {k: v for k, v in pools.items() if v} or None
+    return (free or pool), pools
 
 
 def _shot_refs(value: Any, key: str) -> list[dict[str, str]]:
@@ -402,6 +525,17 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
             shot.pop("cast", None)
         if not (shot.get("width") and shot.get("height")):
             shot.setdefault("aspect", "16:9")
+        if shot.get("start_s") is not None or shot.get("end_s") is not None:
+            try:
+                _set_span(shot, _parse_span({"start_s": shot.get("start_s"), "end_s": shot.get("end_s")}, key))
+            except ProductionError as exc:
+                raise ProductionError("bad_spec", exc.message) from None
+        else:
+            _set_span(shot, None)
+    try:
+        _check_spans(spec)
+    except ProductionError as exc:
+        raise ProductionError("bad_spec", exc.message) from None
     clip_settings = spec.setdefault("clip_settings", {})
     clip_settings.setdefault("template", "auto_clip")
     clip_settings.setdefault("still_negative", STILL_NEGATIVE)
@@ -1163,6 +1297,15 @@ class Run:
                      for section, keys in board.items()}
         return pool, pools
 
+    def pinned(self, prefer_clips: bool) -> list[dict[str, Any]]:
+        clips = self.items("clips") if prefer_clips else {}
+
+        def assets_for(key: str) -> list[str]:
+            own = [c for k, c in clips.items() if c and split_key(k)[0] == key]
+            return own or [self.still_for(key)]
+
+        return pinned_spans(self.spec, assets_for)
+
     def cut_options(self, prefer_clips: bool) -> dict[str, Any]:
         tl = self.spec.get("timeline") or {}
         options = dict(tl.get("options") or {})
@@ -1185,9 +1328,10 @@ class Run:
             info = timelines.get(aspect)
             if info is None:
                 options = self.cut_options(prefer)
-                if pools:
-                    options["section_pools"] = pools
-                built = engine.timeline_auto(self.store, self.project_id, song_id, pool, None, aspect, lyrics_id, options)
+                free, free_pools = apply_pins(options, pool, pools, self.pinned(prefer))
+                if free_pools:
+                    options["section_pools"] = free_pools
+                built = engine.timeline_auto(self.store, self.project_id, song_id, free, None, aspect, lyrics_id, options)
                 if tl.get("finishing"):
                     engine.update_timeline(self.store, built["id"], {"finishing": tl["finishing"]})
                 info = timelines[aspect] = {"timeline_id": built["id"], "renders": {}}
@@ -1241,14 +1385,14 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
     run rebuilds exactly that. Returns what changed."""
     if not isinstance(changes, list) or not changes or len(changes) > 80:
         raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|motion|"
-                                             "seed|regenerate|lead|section|refs|crowd|cast|negative|after|delete} or {insert: {...}}")
+                                             "seed|regenerate|lead|section|span|refs|crowd|cast|negative|after|delete} or {insert: {...}}")
     with lock_for(slug):
         state = load_state(data_dir, slug)
         if is_legacy(state):
             raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
         if state.get("kind") == "short":
             raise ProductionError("not_for_shorts", "a narrated short changes through its script (studio_production_script)")
-        if state.get("status") == "running":
+        if is_running(state, data_dir):
             raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
         spec = state["spec"]
         shots = {s["key"]: s for s in spec.get("shots") or []}
@@ -1293,6 +1437,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                                            "start_s": max(0.0, float(new["motion_ref"].get("start_s") or 0)),
                                            "prompt": str(new["motion_ref"].get("prompt") or "")[:300]}}
                            if isinstance(new.get("motion_ref"), dict) and new["motion_ref"].get("asset_id") else {})}
+                _set_span(shot, _parse_span(new.get("span"), key))
                 if near.get("width") and near.get("height"):
                     shot["width"], shot["height"] = near["width"], near["height"]
                 else:
@@ -1324,6 +1469,8 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 order.insert(position_after(change["after"]), shot)
                 changed.append(key)
             regenerate = bool(change.get("regenerate"))
+            if "span" in change:
+                _set_span(shot, _parse_span(change["span"], key))
             if change.get("lead") is not None and bool(change["lead"]) != bool(shot.get("lead")):
                 shot["lead"] = bool(change["lead"])
                 regenerate = True
@@ -1417,6 +1564,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                         clips.pop(ck, None)
             changed.append(key)
             log(state, "review", "changed_shot", key=key, change={k: v for k, v in change.items() if k != "key"})
+        _check_spans(spec)
         if changed:
             if "frames" in state["done"]:
                 state["done"]["frames"]["complete"] = all(s["key"] in frames for s in spec.get("shots") or [])
@@ -1441,7 +1589,7 @@ def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:
         raise ProductionError("bad_lyrics", "lyrics must be text (at most 20000 characters)")
     with lock_for(slug):
         state = load_state(data_dir, slug)
-        if state.get("status") == "running":
+        if is_running(state, data_dir):
             raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
         song = state["spec"].get("song")
         if not isinstance(song, dict):
@@ -1458,6 +1606,145 @@ def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:
         return {"slug": slug, "status": state["status"]}
 
 
+SONG_COMPOSE_FIELDS = ("tags", "lyrics", "bpm", "duration", "key", "language", "time_signature", "seed", "count")
+
+
+def _song_asset_lyrics(asset: dict[str, Any]) -> Optional[str]:
+    params = (asset.get("recipe") or {}).get("params") or {}
+    text = params.get("lyrics") or (asset.get("recipe") or {}).get("lyrics")
+    return str(text).strip() if isinstance(text, str) and text.strip() else None
+
+
+def set_song(store: Store, slug: str, *, asset_id: Optional[str] = None, take: Optional[int] = None,
+             compose: Optional[dict[str, Any]] = None, lyrics: Optional[str] = None) -> dict[str, Any]:
+    """Change a music video's song: `asset_id` (an audio asset of any project
+    - from the library or just uploaded - used as is), `take` (another take
+    of the ones already composed) or `compose` (new tags/bpm/duration/key/
+    language/lyrics/count: composed again on the next run). The stills and
+    clips stay; the lyrics timing, the animatic and the cut are redone."""
+    given = [x for x in (asset_id, take, compose) if x not in (None, "", {})]
+    if len(given) != 1:
+        raise ProductionError("bad_song", "give exactly one of asset_id, take or compose")
+    if lyrics is not None and (not isinstance(lyrics, str) or len(lyrics) > 20000):
+        raise ProductionError("bad_lyrics", "lyrics must be text (at most 20000 characters)")
+    data_dir = store.data_dir
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if is_legacy(state):
+            raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
+        if state.get("kind") == "short":
+            raise ProductionError("not_for_shorts", "a narrated short's music changes through studio_short")
+        if is_running(state, data_dir):
+            raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
+        spec = state["spec"]
+        song = spec.setdefault("song", {"count": 1, "take": 1})
+        done = state.setdefault("done", {})
+        partial = state.setdefault("partial", {})
+        review = state.get("review") or {}
+        lyrics_source = "kept"
+        if take is not None:
+            takes = (done.get("song") or {}).get("song_asset_ids") or (partial.get("song") or {}).get("song_asset_ids") or []
+            if not takes:
+                raise ProductionError("no_takes", "there are no composed takes yet; compose the song first")
+            n = _int(take, "take", 1, len(takes))
+            chosen = takes[n - 1]
+            song["take"] = n
+            done["song"] = {"song_asset_ids": takes, "song_asset_id": chosen,
+                            "duration_s": store.get_asset(chosen).get("duration_s"), "take": n}
+            (partial.get("song") or {}).pop("awaiting_take", None)
+            review = {"song_approved": True}
+            what = f"take {n}"
+        elif asset_id:
+            asset = store.get_asset(str(asset_id))
+            if asset["kind"] != "audio":
+                raise ProductionError("not_audio", f"{asset_id} is {asset['kind']}, not a song (audio)")
+            pid = state.get("project_id")
+            use = copy_asset(store, asset["id"], pid) if pid and asset.get("project_id") != pid else asset
+            song["asset_id"] = asset["id"]
+            song.pop("lrc_asset_id", None)
+            done["song"] = {"song_asset_ids": [use["id"]], "song_asset_id": use["id"],
+                            "duration_s": use.get("duration_s") or asset.get("duration_s"), "reused": asset["id"]}
+            partial.pop("song", None)
+            own = _song_asset_lyrics(asset)
+            if lyrics is None and own:
+                song["lyrics"] = own
+                lyrics_source = "song"
+            elif lyrics is None:
+                lyrics_source = "previous"  # the old song's words: check them
+            review = {"song_approved": True}
+            what = asset.get("name") or asset["id"]
+        else:
+            if not isinstance(compose, dict):
+                raise ProductionError("bad_song", "compose is {tags, bpm, duration, key, language, lyrics, count}")
+            unknown = set(compose) - set(SONG_COMPOSE_FIELDS)
+            if unknown:
+                raise ProductionError("bad_song", f"unknown compose field(s): {', '.join(sorted(unknown))}")
+            if "tags" in compose and not str(compose.get("tags") or "").strip():
+                raise ProductionError("bad_song", "tags (the style) cannot be empty")
+            clean: dict[str, Any] = {}
+            for k, v in compose.items():
+                if v in (None, ""):
+                    continue
+                if k in ("bpm", "duration", "time_signature", "seed", "count"):
+                    lo, hi = {"bpm": (40, 240), "duration": (10, 600), "time_signature": (2, 7),
+                              "seed": (0, 2**31 - 2), "count": (1, 4)}[k]
+                    clean[k] = _int(v, k, lo, hi)
+                else:
+                    clean[k] = str(v)[:20000 if k == "lyrics" else 600].strip()
+            song.pop("asset_id", None)
+            song.pop("lrc_asset_id", None)
+            song.update(clean)
+            if "seed" not in clean:
+                song["seed"] = int(song.get("seed") or 2000) + 1
+            song["take"] = 1
+            song.setdefault("count", 1)
+            done.pop("song", None)
+            partial.pop("song", None)
+            if song["count"] > 1:
+                state.setdefault("settings", {})["song_review"] = True
+            review = {}
+            lyrics_source = "compose" if "lyrics" in clean else "kept"
+            what = "compose"
+        if lyrics is not None:
+            song["lyrics"] = lyrics.strip()
+            lyrics_source = "given"
+        for stage in ("lyrics", "animatic", "timeline", "report"):
+            done.pop(stage, None)
+        partial.pop("timeline", None)
+        state["review"] = review
+        state["status"] = "queued"
+        state["message"] = "song changed"
+        log(state, "review", "changed_song", song=what, lyrics=lyrics_source)
+        save_state(data_dir, state)
+        return {"slug": slug, "status": state["status"], "song_asset_id": (done.get("song") or {}).get("song_asset_id"),
+                "lyrics_source": lyrics_source, "composes_on_run": "song" not in done}
+
+
+def time_lyrics_now(store: Store, slug: str) -> dict[str, Any]:
+    """Time the production's lyrics to its song right away (the lyrics
+    stage, without a run): the vertical lyric line in the editor needs the
+    times to place shots on their words."""
+    data_dir = store.data_dir
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if is_running(state, data_dir):
+            raise ProductionError("production_running", "the production is running; it times the lyrics itself")
+        song_id = ((state.get("done") or {}).get("song") or {}).get("song_asset_id")
+        if not song_id:
+            raise ProductionError("no_song_yet", "the song is not there yet: pick one or let the production compose it")
+        text = str(((state.get("spec") or {}).get("song") or {}).get("lyrics") or "").strip()
+        if not text:
+            state["done"]["lyrics"] = {"lyrics_asset_id": None, "source": "none"}
+        else:
+            timed = engine.time_lyrics(store, state["project_id"], song_id, text)
+            state["done"]["lyrics"] = {"lyrics_asset_id": timed["id"], "source": "estimated",
+                                       "sections": timed["sections"], "lines": timed["lines"]}
+            log(state, "lyrics", "timed_lyrics", asset_id=timed["id"], lines=timed["lines"])
+        save_state(data_dir, state)
+        return {"slug": slug, "lyrics_asset_id": state["done"]["lyrics"].get("lyrics_asset_id"),
+                "lines": state["done"]["lyrics"].get("lines", 0)}
+
+
 def set_cast(data_dir: Path, slug: str, cast: Any, per_shot: Optional[int] = None) -> dict[str, Any]:
     """Set the production's background cast ([{asset_id, name, note}]) and
     how many of them stand behind each crowd shot. The stills of every shot
@@ -1467,7 +1754,7 @@ def set_cast(data_dir: Path, slug: str, cast: Any, per_shot: Optional[int] = Non
         state = load_state(data_dir, slug)
         if is_legacy(state):
             raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
-        if state.get("status") == "running":
+        if is_running(state, data_dir):
             raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
         spec = state["spec"]
         before = {s["key"]: [m["asset_id"] for m in cast_for_shot(spec, s)] for s in spec.get("shots") or []}
@@ -1524,16 +1811,35 @@ def shot_timing(data_dir: Path, store: Any, state: dict[str, Any]) -> dict[str, 
         out["duration_s"] = plan.get("duration_s")
     except Exception:  # noqa: BLE001 - no animatic yet
         pass
+    song = (state.get("done") or {}).get("song") or {}
+    out["song_asset_id"] = song.get("song_asset_id")
+    if out.get("duration_s") is None and song.get("duration_s"):
+        out["duration_s"] = song["duration_s"]
+    out["spans"] = {s["key"]: {"start_s": sp[0], "end_s": sp[1]}
+                    for s in (state.get("spec") or {}).get("shots") or [] if (sp := shot_span(s))}
+    out["timed"] = False
     lyrics_id = ((state.get("done") or {}).get("lyrics") or {}).get("lyrics_asset_id")
     if lyrics_id:
         try:
             lyr = engine.read_lyrics(store, lyrics_id)
+            total = out.get("duration_s")
+            sung = sorted(lyr["lines"], key=lambda l: l["time_s"])
+            timed_lines = []
+            for i, line in enumerate(sung):
+                nxt = sung[i + 1]["time_s"] if i + 1 < len(sung) else None
+                sec = next((x for x in lyr["sections"] if x["start_s"] <= line["time_s"] + 0.06
+                            and (x.get("end_s") is None or line["time_s"] < x["end_s"])), None)
+                ends = [v for v in (nxt, sec.get("end_s") if sec else None, total) if v is not None]
+                timed_lines.append({"time_s": round(line["time_s"], 2), "end_s": round(min(ends), 2) if ends else None,
+                                    "text": line["text"], "section": sec["label"] if sec else None})
             for sec in lyr["sections"]:
                 end = sec.get("end_s")
                 lines = [l["text"] for l in lyr["lines"]
                          if l["time_s"] >= sec["start_s"] and (end is None or l["time_s"] < end)]
                 out["sections"].append({"label": sec["label"], "kind": sec.get("kind"), "start_s": sec["start_s"],
-                                        "end_s": end, "lines": lines})
+                                        "end_s": end if end is not None else total, "lines": lines})
+            out["lines"] = timed_lines
+            out["timed"] = True
             return out
         except Exception:  # noqa: BLE001
             pass

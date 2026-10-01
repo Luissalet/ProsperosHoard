@@ -998,7 +998,9 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     {"asset_id": "a_...", "use": "these Pokemon dance in the background"}]} gives the shot its own
     reference images (numbered after the lead's canonical image); {"after": "5"} moves it after
     shot 5 ("start" = first); {"crowd": true} puts part of the background cast behind it (see
-    studio_production_cast), {"cast": ["Name", ...]} picks exactly who; {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
+    studio_production_cast), {"cast": ["Name", ...]} picks exactly who; {"span": {"start_s": 12.4, "end_s": 19.8}}
+    places it on exactly that stretch of the song (its lyric lines: studio_production_timing; null frees it;
+    spans cannot overlap); {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
     "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot. Only
     what depends on a changed shot is redone; run=true queues the production (it rebuilds the
     animatic and pauses again when animatic is on). The production must not be running.
@@ -1020,6 +1022,45 @@ def studio_production_lyrics(production: str, lyrics: str, run: bool = False) ->
     Keywords: lyrics, song lyrics, sections, letra, letra de la cancion, secciones
     """
     return _call("PUT", f"/api/productions/{production}/lyrics", json={"lyrics": lyrics, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_song(production: str, asset_id: Optional[str] = None, take: Optional[int] = None,
+                           compose: Optional[dict[str, Any]] = None, lyrics: Optional[str] = None,
+                           run: bool = False) -> dict[str, Any]:
+    """Change a music video's song: a library song, another take or a new one / cambiar la cancion.
+
+    Exactly one of: asset_id (an audio asset of any project - find it with studio_assets kind="audio", or
+    import/upload it first - used as is; its own lyrics come with it when it has them), take (1-based, another
+    of the takes already composed) or compose ({tags, bpm, duration, key, language, lyrics, count}: composed
+    again on the next run). lyrics replaces the words too. The stills and clips stay; the lyrics are timed to
+    the new song right away and the animatic and cut are redone. lyrics_source "previous" means the old
+    song's words were kept: check them with the user. run=true queues the production.
+
+    Keywords: change song, swap song, other take, recompose, use my song, upload song, cambiar cancion,
+    otra toma, recomponer, usar mi cancion, subir cancion
+    """
+    body: dict[str, Any] = {"run": run}
+    for k, v in (("asset_id", asset_id), ("take", take), ("compose", compose), ("lyrics", lyrics)):
+        if v is not None:
+            body[k] = v
+    return _call("POST", "/api/agent/studio_production_song", params={"production": production}, json=body)
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_production_timing(production: str) -> dict[str, Any]:
+    """Where everything sits in a music video's song: timed lyric lines, sections, shots / tiempos de la letra.
+
+    lines: [{time_s, end_s, text, section}] once the lyrics are timed (timed=false: not yet - the song is
+    missing or the lyrics stage has not run); sections with start/end; spans: shots placed on an exact
+    stretch ({key: {start_s, end_s}}); shots: where each shot plays in the animatic's cut. To put a shot
+    on some lines, studio_production_shots with {"key": "3", "span": {"start_s": 12.4, "end_s": 19.8}}
+    (or {"insert": {..., "span": {...}}}); span null frees it.
+
+    Keywords: lyrics timing, timed lyrics, where does the shot play, song sections, place shot on lyrics,
+    tiempos de la letra, letra cronometrada, donde suena el plano, colocar plano en la letra
+    """
+    return _call("GET", "/api/agent/studio_production_timing", params={"production": production})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

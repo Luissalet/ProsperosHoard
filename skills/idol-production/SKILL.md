@@ -51,6 +51,11 @@ Whole productions and recipes:
 - A failed or cancelled production resumes with
   `studio_production_continue(production)`; `studio_production_shots` swaps
   a still (`best`), turns a clip on/off or rewrites a shot.
+- "Use this song instead" / "another take": `studio_production_song(production,
+  asset_id=... | take=N | compose={...})` - stills and clips stay. "Put shot
+  3 on the chorus lines": `studio_production_timing(production)` for the
+  timed lines, then `studio_production_shots` with `{"key": "3", "span":
+  {"start_s", "end_s"}}`; the cut plays it exactly there.
 
 - "Show me the animatic before rendering": new productions make one after
   the stills and song and stop at `awaiting_review`; otherwise

@@ -92,8 +92,14 @@ def build(store: Store, state: dict[str, Any]) -> dict[str, Any]:
     if not pool:
         raise prod.ProductionError("animatic_needs_frames", "the animatic needs the stills first (the frames stage)")
     options = cut_options(state)
-    if any(pools.values()):
-        options["section_pools"] = {k: v for k, v in pools.items() if v}
+
+    def assets_for(key: str) -> list[str]:
+        return [_still_for(state, key)]
+
+    pool, free_pools = prod.apply_pins(options, pool, {k: v for k, v in pools.items() if v} or None,
+                                       prod.pinned_spans(state.get("spec") or {}, assets_for))
+    if free_pools:
+        options["section_pools"] = free_pools
     lyrics_id = (done.get("lyrics") or {}).get("lyrics_asset_id")
     cut = engine.auto_cut(store, _project_id(state), song_id, pool, None, lyrics_id, options)
     visual = next(t for t in cut["tracks"] if t["type"] == "visual")
@@ -235,7 +241,7 @@ def make_for_production(store: Store, slug: str, aspects: Optional[list[str]] = 
         raise prod.ProductionError("not_for_shorts", "a narrated short makes its animatic itself when it has clips to render")
     legacy = prod.is_legacy(raw)
     view = prod.state_from_legacy(store, raw) if legacy else raw
-    if not legacy and raw.get("status") == "running":
+    if not legacy and prod.is_running(raw, store.data_dir):
         raise prod.ProductionError("production_running", "the production is running; its own animatic stage makes one")
     cancelled = getattr(progress, "cancelled", None)
     entry = make(store, view, aspects, progress, cancelled)
