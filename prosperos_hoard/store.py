@@ -957,7 +957,8 @@ class Store:
         return bool(row and (row["cancel_requested"] or row["state"] == "cancelled"))
 
     def next_queued_job(self, lane: str, types: Optional[tuple[str, ...]] = None,
-                        exclude_types: Optional[tuple[str, ...]] = None) -> Optional[dict[str, Any]]:
+                        exclude_types: Optional[tuple[str, ...]] = None,
+                        skip_ids: Optional[set[str]] = None) -> Optional[dict[str, Any]]:
         """The oldest queued job of a lane; `types` keeps only those job
         types, `exclude_types` skips them (the orchestrator worker takes
         production jobs stored on the cpu lane, the cpu worker leaves them)."""
@@ -969,6 +970,9 @@ class Store:
         if exclude_types:
             sql += f" AND type NOT IN ({','.join('?' * len(exclude_types))})"
             params += list(exclude_types)
+        if skip_ids:
+            sql += f" AND id NOT IN ({','.join('?' * len(skip_ids))})"
+            params += sorted(skip_ids)
         row = self.conn.execute(sql + " ORDER BY created_at ASC, id ASC LIMIT 1", params).fetchone()
         return self.get_job(row["id"]) if row else None
 

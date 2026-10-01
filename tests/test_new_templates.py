@@ -341,3 +341,16 @@ def test_missing_unet_file_is_reported_before_queueing(store, backend_with_comfy
     assert "wan2.2_ti2v_5B_fp16.safetensors" in failed["message"] and "model not installed" in failed["message"] \
         and "download it" in failed["message"]
     assert len(server.prompts_seen) == seen + 1  # the failing one never reached ComfyUI
+
+
+def test_animate_prefers_an_fp8_cast_when_installed():
+    from prosperos_hoard import engine as eng
+
+    def info(files):
+        return {"UNETLoader": {"input": {"required": {"unet_name": [files]}}}}
+
+    assert eng.animate2_unet(info(["wan_animate_2_distill_int8_convrot.safetensors"])) is None
+    assert eng.animate2_unet(info(["wan_animate_2_distill_int8_convrot.safetensors",
+                                   "wan_animate_2_fp8_e4m3fn.safetensors",
+                                   "wan_animate_2_distill_fp8_e4m3fn.safetensors"])) == "wan_animate_2_distill_fp8_e4m3fn.safetensors"
+    assert eng.animate2_unet({}) is None

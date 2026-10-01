@@ -86,7 +86,8 @@ class Progress:
 class JobQueue:
     def __init__(self, store: Store, gpu_targets: Optional[list[Optional[str]]] = None,
                  bind: Optional[Callable[[Optional[str]], None]] = None,
-                 target_ready: Optional[Callable[[str], bool]] = None):
+                 target_ready: Optional[Callable[[str], bool]] = None,
+                 accepts: Optional[Callable[[dict[str, Any]], bool]] = None):
         """`gpu_targets`: one GPU worker per entry (None = the main ComfyUI,
         a URL = a render-pool server); they all take jobs from the one GPU
         queue. `bind(target)` pins a worker thread to its server,
@@ -100,6 +101,10 @@ class JobQueue:
         self._gpu_targets: list[Optional[str]] = list(gpu_targets or [None])
         self._bind = bind
         self._target_ready = target_ready
+        # `accepts(job)`, asked on the GPU worker's own thread (bound to its
+        # server): False leaves the job for another worker - a model too big
+        # for this card goes to one that holds it
+        self._accepts = accepts
         self._claim_lock = threading.Lock()
 
     def register(self, type_: str, handler: Handler) -> None:
@@ -150,7 +155,7 @@ class JobQueue:
                 self._stop.wait(5.0)  # this worker's server is off: leave the queue to the others
                 continue
             try:
-                job = self._claim(lane)
+                job = self._claim(lane, gpu_worker=lane == "gpu")
             except Exception:  # pragma: no cover - a locked db must not kill the worker
                 logger.exception("could not read the job queue")
                 self._stop.wait(1.0)
@@ -161,17 +166,27 @@ class JobQueue:
                 continue
             self._run_job(job)
 
-    def _claim(self, lane: str) -> Optional[dict[str, Any]]:
-        """Take the oldest queued job of a lane; with several GPU workers the
-        read and the state change happen under one lock, so no two workers
-        start the same job."""
+    def _claim(self, lane: str, gpu_worker: bool = False) -> Optional[dict[str, Any]]:
+        """Take the oldest queued job of a lane (that this GPU worker accepts);
+        with several GPU workers the read and the state change happen under
+        one lock, so no two workers start the same job."""
+        skipped: set[str] = set()
         with self._claim_lock:
-            if lane == "orchestrator":
-                job = self.store.next_queued_job("cpu", types=ORCHESTRATOR_TYPES)
-            elif lane == "cpu":
-                job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES)
-            else:
-                job = self.store.next_queued_job(lane)
+            while True:
+                if lane == "orchestrator":
+                    job = self.store.next_queued_job("cpu", types=ORCHESTRATOR_TYPES)
+                elif lane == "cpu":
+                    job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES)
+                else:
+                    job = self.store.next_queued_job(lane, skip_ids=skipped or None)
+                if job is None or not gpu_worker or self._accepts is None or len(skipped) >= 50:
+                    break
+                try:
+                    if self._accepts(job):
+                        break
+                except Exception:  # noqa: BLE001 - a failed check never blocks a job
+                    break
+                skipped.add(job["id"])
             if job is not None:
                 self.store.update_job(job["id"], state="running", started_at=now_iso(), message="starting")
             return job

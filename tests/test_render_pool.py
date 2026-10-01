@@ -147,3 +147,35 @@ def test_busy_server_uses_the_saved_node_list(data_dir, fake_comfy, monkeypatch)
     engine.object_info_cache_path(data_dir).unlink()
     with pytest.raises(Exception, match="not answering"):
         engine._object_info(backend)
+
+
+def test_a_model_too_big_for_a_card_waits_for_the_bigger_one(data_dir, fake_comfy, second_comfy):
+    # Wan Animate 2 asks for a 15 GB card: the 12 GB server's worker leaves it
+    # to the 16 GB one, and takes everything else
+    main, main_port = fake_comfy
+    extra, extra_port = second_comfy
+    main.vram_total_bytes = 12 * 1024**3
+    extra.vram_total_bytes = 16 * 1024**3
+    url = f"http://127.0.0.1:{extra_port}"
+    backend = _pool_backend(data_dir, main_port, [url])
+    animate = {"type": "generate_image", "params": {"template": "wan_animate2"}}
+    still = {"type": "generate_image", "params": {"template": "sdxl_txt2img"}}
+    backend.bind_comfy(None)
+    assert backend.accepts_job(still) and not backend.accepts_job(animate)
+    backend.bind_comfy(url)
+    assert backend.accepts_job(animate)
+    # with no card big enough anywhere, anyone takes it rather than nobody
+    extra.vram_total_bytes = 12 * 1024**3
+    backend._card_totals = None
+    backend.bind_comfy(None)
+    assert backend.accepts_job(animate)
+
+
+def test_claim_skips_jobs_a_worker_does_not_accept(store, project, data_dir):
+    queue = JobQueue(store, accepts=lambda job: job["params"].get("big") is not True)
+    queue.register("generate_image", lambda job, p: {})
+    first = queue.enqueue("generate_image", "gpu", {"big": True}, project_id=project["id"])
+    second = queue.enqueue("generate_image", "gpu", {"big": False}, project_id=project["id"])
+    taken = queue._claim("gpu", gpu_worker=True)
+    assert taken["id"] == second["id"]
+    assert store.get_job(first["id"])["state"] == "queued"

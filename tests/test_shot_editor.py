@@ -151,3 +151,21 @@ def test_changing_the_cast_redraws_only_the_crowd_shots(data_dir):
     # dropping a member also drops it from the shots that named it
     out = prod.set_cast(data_dir, slug, CAST[:1])
     assert "cast" not in prod.load_state(data_dir, slug)["spec"]["shots"][1]
+
+
+def test_new_motion_text_remakes_only_the_clip(data_dir):
+    slug = _paused(data_dir)
+    prod.update_shots(data_dir, slug, [{"key": "1", "motion_prompt": "the camera orbits around him"}])
+    st = prod.load_state(data_dir, slug)
+    assert "1" in st["done"]["frames"]["items"] and "1" not in st["done"]["clips"]["items"]
+    assert "2" in st["done"]["clips"]["items"]
+
+
+def test_crowd_clips_add_nobody(data_dir):
+    spec = prod.normalise_spec(tiny_spec(cast=CAST))
+    spec["shots"][0]["crowd"] = True
+    runner = object.__new__(prod.Run)
+    runner.spec = spec
+    runner.state = {"done": {"frames": {"items": {"1": {"variants": ["a_1"], "best": "a_1"}}}}}
+    assert "no new characters" in runner.clip_body(spec["shots"][0], 0)["prompt"]
+    assert "no new characters" not in runner.clip_body(spec["shots"][1], 0)["prompt"]

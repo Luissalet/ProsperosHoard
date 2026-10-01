@@ -223,6 +223,8 @@ class Backend:
         self._pool_clients: dict[str, Any] = {}
         self._pool_health: dict[str, tuple[float, bool]] = {}
         self._pool_lock = threading.Lock()
+        self._min_card_cache: dict[str, int] = {}
+        self._card_totals: Optional[tuple[float, dict[Optional[str], Optional[int]]]] = None
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:
@@ -310,6 +312,54 @@ class Backend:
                 else:
                     self._pool_clients[url] = (link, client)
         return client
+
+    # -- which server takes which job --------------------------------------
+    # A template may say how big a card it needs (`min_card_mb`, e.g. Wan
+    # Animate 2: on a 12 GB card it streams its weights at minutes per step,
+    # on 16 GB it runs). A GPU worker leaves such a job to a server whose
+    # card holds it - unless none does, then anyone takes it.
+    def _min_card_mb(self, job: dict[str, Any]) -> int:
+        template = (job.get("params") or {}).get("template") if job.get("type") == "generate_image" else None
+        if not template:
+            return 0
+        cached = self._min_card_cache.get(template)
+        if cached is None:
+            try:
+                from .comfy_driver import load_template
+
+                cached = int(load_template(template, self.data_dir)[1].get("min_card_mb") or 0)
+            except Exception:
+                cached = 0
+            self._min_card_cache[template] = cached
+        return cached
+
+    def card_totals(self, ttl_s: float = 60.0) -> dict[Optional[str], Optional[int]]:
+        """Card size (MB) per GPU worker target: None = the main ComfyUI,
+        then each render-pool server; None when it does not answer."""
+        now = time.monotonic()
+        if self._card_totals and now - self._card_totals[0] < ttl_s:
+            return self._card_totals[1]
+        out: dict[Optional[str], Optional[int]] = {}
+        for target in [None, *self.render_pool()]:
+            try:
+                client = self._pool_client(target) if target else self.run_async(lambda link: link.comfy())
+                dev = self._primary_comfy_device(self.run_async(client.system_stats())) if client else None
+                total = dev.get("vram_total") if dev else None
+                out[target] = total // (1024 * 1024) if self._memory_bytes(total) and total else None
+            except Exception:
+                out[target] = None
+        self._card_totals = (now, out)
+        return out
+
+    def accepts_job(self, job: dict[str, Any]) -> bool:
+        need = self._min_card_mb(job)
+        if not need:
+            return True
+        totals = self.card_totals()
+        mine = totals.get(getattr(self._bound, "url", None))
+        if mine is None or mine >= need:
+            return True
+        return not any(t and t >= need for t in totals.values())
 
     def pool_server_ready(self, url: str, ttl_s: float = 10.0) -> bool:
         """Cheap, cached reachability check a pool worker makes before it

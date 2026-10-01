@@ -909,7 +909,8 @@ class Run:
             who = ", ".join(f"{m['name']} (<image{start + i}>{', ' + m['note'] if m.get('note') else ''})"
                             for i, m in enumerate(crowd))
             text += (f". In the background only these characters appear, each exactly as drawn in its image, same "
-                     f"design, colours and proportions: {who}. No other creatures or characters, nobody invented")
+                     f"design, colours and proportions: {who}. No other creatures or characters, nobody invented: "
+                     "no people, no audience, no silhouettes besides them")
             refs = refs + [{"asset_id": m["asset_id"], "use": m["name"]} for m in crowd]
         if refs:
             body["reference_asset_ids"] = [r["asset_id"] for r in refs]
@@ -1009,8 +1010,13 @@ class Run:
         template = settings.get("template") or "auto_clip"
         if template in ("wan22_ti2v", "auto") and not settings.get("template_pinned"):
             template = "auto_clip"  # the old default: the best clip model installed now
-        body: dict[str, Any] = {"template": template, "reference_asset_id": self.still_for(key),
-                                "prompt": shot.get("motion_prompt") or "subtle motion",
+        text = shot.get("motion_prompt") or "subtle motion"
+        if cast_for_shot(self.spec, shot):
+            # the still already holds the background cast; the clip must not
+            # add anybody to it
+            text += (". Only the characters already in the picture, unchanged; no new characters, people or "
+                     "creatures appear")
+        body: dict[str, Any] = {"template": template, "reference_asset_id": self.still_for(key), "prompt": text,
                                 "seed": shot["clip_seed"] + (100 * variant)}
         motion = shot.get("motion_ref") or {}
         if motion.get("asset_id") and template == "auto_clip":
@@ -1352,6 +1358,10 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 if change.get(field) is not None:
                     if not str(change[field]).strip():
                         raise ProductionError("bad_changes", f"shot {key}: {field} cannot be empty")
+                    if field == "motion_prompt" and str(change[field])[:2000] != shot.get(field):
+                        # a new motion is a new clip (the still stays)
+                        for ck in [k for k in clips if split_key(k)[0] == key]:
+                            clips.pop(ck, None)
                     shot[field] = str(change[field])[:2000]
                     regenerate = regenerate or field == "prompt"
             if change.get("seed") is not None:
