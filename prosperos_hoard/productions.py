@@ -216,6 +216,56 @@ def list_productions(data_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def productions_of_project(data_dir: Path, project_id: str) -> list[dict[str, Any]]:
+    """The productions whose pictures, clips and cut live in `project_id`."""
+    return [p for p in list_productions(data_dir) if p.get("project_id") == project_id]
+
+
+def _stash_dir(data_dir: Path, project_id: str) -> Path:
+    return data_dir / "trash" / "projects" / re.sub(r"[^A-Za-z0-9_]", "_", project_id) / "productions"
+
+
+def stash_productions(data_dir: Path, project_id: str) -> list[str]:
+    """A project going to the trash takes its productions with it (moved
+    under data/trash/projects/<id>/productions, back on restore)."""
+    moved = []
+    dest = _stash_dir(data_dir, project_id)
+    for p in productions_of_project(data_dir, project_id):
+        src = production_dir(data_dir, p["slug"])
+        dest.mkdir(parents=True, exist_ok=True)
+        with lock_for(p["slug"]):
+            shutil.move(str(src), str(dest / p["slug"]))
+        moved.append(p["slug"])
+    return moved
+
+
+def unstash_productions(data_dir: Path, project_id: str) -> list[str]:
+    src = _stash_dir(data_dir, project_id)
+    back = []
+    if src.is_dir():
+        for folder in sorted(src.iterdir()):
+            target = productions_dir(data_dir) / folder.name
+            if target.exists():  # a new production took the slug meanwhile
+                target = productions_dir(data_dir) / unique_slug(data_dir, folder.name)
+                state_path = folder / "state.json"
+                if state_path.is_file():
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    state["slug"] = target.name
+                    state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+            productions_dir(data_dir).mkdir(parents=True, exist_ok=True)
+            shutil.move(str(folder), str(target))
+            back.append(target.name)
+        shutil.rmtree(src.parent, ignore_errors=True)
+    return back
+
+
+def purge_stashed_productions(data_dir: Path, project_id: str) -> int:
+    src = _stash_dir(data_dir, project_id)
+    n = len(list(src.iterdir())) if src.is_dir() else 0
+    shutil.rmtree(src.parent, ignore_errors=True)
+    return n
+
+
 def unique_slug(data_dir: Path, name: str) -> str:
     base = slugify(name)
     slug, n = base, 2

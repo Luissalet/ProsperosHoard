@@ -438,6 +438,12 @@ table.list tr:hover td { background: var(--surface-2); }
 .project-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .project-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; text-align: left; padding: 0; transition: transform 0.12s, border-color 0.12s; }
 .project-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.project-card-wrap { position: relative; display: flex; }
+.project-card-wrap > .project-card { flex: 1; }
+.project-card-del { position: absolute; top: 8px; right: 8px; z-index: 2; background: color-mix(in srgb, var(--surface) 80%, transparent);
+  opacity: 0; transition: opacity .12s; }
+.project-card-wrap:hover .project-card-del, .project-card-del:focus-visible { opacity: 1; }
+.project-card-del:hover { color: var(--bad, #e05656); }
 .project-card .cover { aspect-ratio: 16 / 9; background: linear-gradient(135deg, var(--accent-soft), var(--gold-soft)); overflow: hidden; }
 .project-card .cover img { width: 100%; height: 100%; object-fit: cover; }
 .project-card .info { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }

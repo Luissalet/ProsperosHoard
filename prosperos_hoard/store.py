@@ -44,6 +44,17 @@ class AssetInUse(ValueError):
         self.references = references
 
 
+class ProjectBusy(ValueError):
+    """The project has jobs queued or running."""
+
+    def __init__(self, project_id: str, jobs: list[dict[str, Any]]):
+        kinds = ", ".join(sorted({j["type"] for j in jobs}))
+        super().__init__(f"project {project_id} has {len(jobs)} job(s) queued or running ({kinds}); "
+                         "cancel them or wait for them to finish")
+        self.project_id = project_id
+        self.jobs = jobs
+
+
 BUILTIN_STYLE_PRESETS = [
     dict(
         name="Studio portrait",
@@ -203,10 +214,10 @@ class Store:
 
     def list_projects(self, query: str | None = None, limit: int = 10, offset: int = 0) -> dict[str, Any]:
         limit = max(1, min(limit, 50))
-        sql = "SELECT * FROM projects"
+        sql = "SELECT * FROM projects WHERE deleted_at IS NULL"
         params: list[Any] = []
         if query:
-            sql += " WHERE name LIKE ? OR brief LIKE ?"
+            sql += " AND (name LIKE ? OR brief LIKE ?)"
             like = f"%{query}%"
             params += [like, like]
         sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
@@ -217,6 +228,77 @@ class Store:
         for p in rows:
             p["counts"] = self._project_counts(p["id"])
         return {"items": rows, "has_more": has_more, "next_offset": offset + limit if has_more else None}
+
+    LIVE_JOB_STATES = ("queued", "waiting_gpu", "running")
+
+    def project_live_jobs(self, project_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id, type, state FROM jobs WHERE project_id=? AND state IN (?,?,?)",
+            (project_id, *self.LIVE_JOB_STATES)).fetchall()
+        return [row_to_dict(r) for r in rows]
+
+    def trash_project(self, project_id: str) -> dict[str, Any]:
+        """Move a project to the trash: it disappears from every list (and
+        its assets from the all-projects search) but nothing is deleted
+        until purge_project. Refused while one of its jobs is queued or
+        running (cancel or wait first)."""
+        project = self.get_project(project_id)
+        live = self.project_live_jobs(project_id)
+        if live:
+            raise ProjectBusy(project_id, live)
+        if not project.get("deleted_at"):
+            self.conn.execute("UPDATE projects SET deleted_at=? WHERE id=?", (now_iso(), project_id))
+            self.conn.commit()
+        return self.get_project(project_id)
+
+    def restore_project(self, project_id: str) -> dict[str, Any]:
+        self.get_project(project_id)
+        self.conn.execute("UPDATE projects SET deleted_at=NULL WHERE id=?", (project_id,))
+        self.conn.commit()
+        self.touch_project(project_id)
+        return self.get_project(project_id)
+
+    def list_trashed_projects(self) -> list[dict[str, Any]]:
+        rows = [row_to_dict(r) for r in self.conn.execute(
+            "SELECT * FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()]
+        for p in rows:
+            p["counts"] = self._project_counts(p["id"])
+        return rows
+
+    def purge_project(self, project_id: str) -> dict[str, Any]:
+        """Delete a trashed project for good: its rows (assets, characters,
+        groups, boards, timelines), its files and thumbnails, its trashed
+        assets and its folder. Only a project already in the trash."""
+        project = self.get_project(project_id)
+        if not project.get("deleted_at"):
+            raise ValueError(f"project {project_id} is not in the trash; move it there first")
+        live = self.project_live_jobs(project_id)
+        if live:
+            raise ProjectBusy(project_id, live)
+        rows = self.conn.execute("SELECT id, file_path, thumb_path FROM assets WHERE project_id=?", (project_id,)).fetchall()
+        files = 0
+        for r in rows:
+            for rel in (r["file_path"], r["thumb_path"]):
+                if not rel:
+                    continue
+                path = (self.data_dir / rel).resolve()
+                # only files inside the data folder (imports by path are copied in)
+                if self.data_dir.resolve() in path.parents and path.is_file():
+                    try:
+                        path.unlink()
+                        files += 1
+                    except OSError:
+                        pass
+        trashed = [r["id"] for r in self.conn.execute("SELECT id FROM asset_trash WHERE project_id=?", (project_id,))]
+        for tid in trashed:
+            shutil.rmtree(self.data_dir / "trash" / tid, ignore_errors=True)
+        self.conn.execute("DELETE FROM asset_trash WHERE project_id=?", (project_id,))
+        self.conn.execute("UPDATE jobs SET project_id=NULL WHERE project_id=?", (project_id,))
+        self.conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        self.conn.commit()
+        shutil.rmtree(self.projects_dir / project_id, ignore_errors=True)
+        return {"id": project_id, "name": project["name"], "purged": True, "assets": len(rows),
+                "files_deleted": files, "trashed_assets": len(trashed)}
 
     def touch_project(self, project_id: str) -> None:
         self.conn.execute(
@@ -489,6 +571,8 @@ class Store:
         if project_id:
             sql += " AND project_id=?"
             params.append(project_id)
+        else:
+            sql += " AND project_id NOT IN (SELECT id FROM projects WHERE deleted_at IS NOT NULL)"
         if kind:
             sql += " AND kind=?"
             params.append(kind)

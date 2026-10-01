@@ -47,7 +47,7 @@ from .design import DesignError
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .ids import new_id
 from .jobs import JobQueue
-from .store import AssetInUse, NotFound, Store
+from .store import AssetInUse, NotFound, ProjectBusy, Store
 from .voice_lab import VoiceLabError
 
 logger = logging.getLogger("prosperos_hoard.api")
@@ -88,6 +88,8 @@ class GuardMiddleware(BaseHTTPMiddleware):
 def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
     if isinstance(exc, AssetInUse):
         return 409, {"error": "asset_in_use", "message": str(exc)}
+    if isinstance(exc, ProjectBusy):
+        return 409, {"error": "project_busy", "message": str(exc)}
     if isinstance(exc, NotFound):
         return 404, {"error": "not_found", "message": str(exc)}
     if isinstance(exc, engine.EngineError):
@@ -159,6 +161,11 @@ class TrashBody(BaseModel):
     action: str = "list"  # list | restore | empty
     ids: Optional[list[str]] = None
     project: Optional[str] = None
+    projects: Optional[list[str]] = None  # trashed projects to restore / delete for good
+
+
+class DeleteProjectBody(BaseModel):
+    project: str
 
 
 class CreateProjectBody(BaseModel):
@@ -1149,6 +1156,65 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str):
         return store.get_project(project_id)
+
+    # ------------------------------------------------- project trash
+    def project_delete_preview(project_id: str) -> dict[str, Any]:
+        p = store.get_project(project_id)
+        prods = productions_mod.productions_of_project(store.data_dir, project_id)
+        return {"id": p["id"], "name": p["name"], "counts": p["counts"], "deleted_at": p.get("deleted_at"),
+                "productions": [{"slug": x["slug"], "name": x.get("name"), "status": x.get("status")} for x in prods],
+                "live_jobs": store.project_live_jobs(project_id)}
+
+    def op_delete_project(project_id: str) -> dict[str, Any]:
+        preview = project_delete_preview(project_id)
+        store.trash_project(project_id)  # refuses with live jobs, before anything moves
+        moved = productions_mod.stash_productions(store.data_dir, project_id)
+        return {"id": project_id, "name": preview["name"], "trashed": True, "counts": preview["counts"],
+                "productions": moved,
+                "note": "in the trash: studio_trash(action='restore', projects=[id]) brings it back until it is emptied"}
+
+    def op_restore_project(project_id: str) -> dict[str, Any]:
+        p = store.restore_project(project_id)
+        back = productions_mod.unstash_productions(store.data_dir, project_id)
+        return {"id": p["id"], "name": p["name"], "restored": True, "productions": back}
+
+    def op_purge_project(project_id: str) -> dict[str, Any]:
+        out = store.purge_project(project_id)
+        out["productions_deleted"] = productions_mod.purge_stashed_productions(store.data_dir, project_id)
+        return out
+
+    def trashed_projects() -> list[dict[str, Any]]:
+        out = []
+        for p in store.list_trashed_projects():
+            stash = productions_mod._stash_dir(store.data_dir, p["id"])
+            out.append({"id": p["id"], "name": p["name"], "brief": p.get("brief"), "deleted_at": p["deleted_at"],
+                        "counts": p["counts"], "cover_asset_id": p.get("cover_asset_id"),
+                        "productions": sorted(f.name for f in stash.iterdir()) if stash.is_dir() else []})
+        return out
+
+    @app.get("/api/trash/projects")
+    def list_project_trash():
+        return {"items": trashed_projects()}
+
+    @app.get("/api/projects/{project_id}/delete-preview")
+    def project_delete_preview_route(project_id: str):
+        return project_delete_preview(project_id)
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str):
+        return op_delete_project(project_id)
+
+    @app.post("/api/projects/{project_id}/restore")
+    def restore_project(project_id: str):
+        return op_restore_project(project_id)
+
+    @app.post("/api/projects/{project_id}/purge")
+    def purge_project(project_id: str):
+        return op_purge_project(project_id)
+
+    @app.post("/api/agent/studio_delete_project")
+    def agent_delete_project(body: DeleteProjectBody):
+        return agent("studio_delete_project", body.project, lambda: op_delete_project(body.project))
 
     @app.patch("/api/projects/{project_id}")
     def update_project(project_id: str, body: UpdateProjectBody):
@@ -2235,12 +2301,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_trash(body: TrashBody) -> dict[str, Any]:
         if body.action == "list":
-            return {"items": store.list_trash(body.project)}
+            return {"items": store.list_trash(body.project), "projects": trashed_projects()}
         if body.action == "restore":
-            if not body.ids:
-                raise ValueError("restore needs ids")
-            return {"restored": [store.restore_asset(i)["id"] for i in body.ids]}
+            if not body.ids and not body.projects:
+                raise ValueError("restore needs ids (assets) or projects")
+            out: dict[str, Any] = {}
+            if body.projects:
+                out["projects"] = [op_restore_project(p) for p in body.projects]
+            if body.ids:
+                out["restored"] = [store.restore_asset(i)["id"] for i in body.ids]
+            return out
         if body.action == "empty":
+            if body.projects:
+                return {"projects": [op_purge_project(p) for p in body.projects]}
             return store.empty_trash(body.project, body.ids)
         raise ValueError("action must be list, restore or empty")
 

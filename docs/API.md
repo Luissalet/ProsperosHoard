@@ -192,6 +192,10 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | PUT | `/api/productions/{slug}/song` | `{asset_id? \| take? \| compose?, lyrics?, time_lyrics=true, run}`: change the song (also `POST /api/agent/studio_production_song?production=`) |
 | POST | `/api/productions/{slug}/time-lyrics` | time the lyrics to the current song now (the lyrics stage without a run) |
 | GET | `/api/agent/studio_production_timing?production=` | timed lines, sections, spans, animatic positions |
+| GET | `/api/projects/{id}/delete-preview` | counts, the productions that go with it, live jobs |
+| DELETE | `/api/projects/{id}` | to the trash (with its productions); 409 `project_busy` with live jobs (also `POST /api/agent/studio_delete_project {project}`) |
+| GET | `/api/trash/projects` | deleted projects |
+| POST | `/api/projects/{id}/restore` / `/purge` | bring it back / delete it for good (only from the trash); `studio_trash` takes `projects=[...]` for both |
 | GET | `/api/assets` | `kind?, query?, limit, offset, project?`: assets across every project, each with `project_name` (the pickers' "all projects") |
 | PUT | `/api/productions/{slug}/lyrics` | `{lyrics, run}`: the song's lyrics with section tags |
 | PUT | `/api/productions/{slug}/cast` | `{cast [{asset_id, name, note}], per_shot?, run}` -> `{cast, cast_per_shot, redraw, status}`: the background cast; crowd shots take only these |
