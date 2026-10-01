@@ -361,7 +361,7 @@ def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: st
 
 def spec_from_draft(draft: dict[str, Any], *, lead: dict[str, Any], song_asset_id: Optional[str] = None,
                     clips: str = "all", aspects: Optional[list[str]] = None, song_takes: int = 2,
-                    engine: str = "auto", brief: Optional[str] = None) -> dict[str, Any]:
+                    engine: str = "auto", brief: Optional[str] = None, lyrics: Optional[str] = None) -> dict[str, Any]:
     """A production spec from an (edited) draft. clips: "all" (every moving
     shot gets a Wan clip), "lead" (only shots with the lead) or "none"."""
     if clips not in ("all", "lead", "none"):
@@ -385,6 +385,8 @@ def spec_from_draft(draft: dict[str, Any], *, lead: dict[str, Any], song_asset_i
         spec["brief"] = brief
     if song_asset_id:
         spec["song"] = {"asset_id": song_asset_id}
+        if lyrics and lyrics.strip():
+            spec["song"]["lyrics"] = lyrics.strip()
     else:
         song = dict(draft.get("song") or {})
         if not str(song.get("tags") or "").strip() or not str(song.get("lyrics") or "").strip():

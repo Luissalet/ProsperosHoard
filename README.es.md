@@ -308,6 +308,34 @@ revisar, los clips Wan y el montaje al ritmo. En el visor, **Animar** hace un
 clip Wan 2.2 (SVD solo si no está Wan) y **Editar con la instrucción** edita
 la imagen con Qwen-Image conservando el sujeto.
 
+La página de la producción mantiene la **lista de planos editable** en todo
+momento: cada plano enseña su fotograma, su parte de la canción, dónde suena
+(según el corte del animático) y, mientras renderiza, cómo va («fotograma ·
+1:23 / ~2:00», en cola, falló). Pulsa un plano para cambiar qué muestra, el
+texto del movimiento, si sale el protagonista, su parte de la canción (con
+los versos de esa parte al lado), fijo o clip, qué variante es el
+fotograma, o para regenerarlo o borrarlo; **+** entre dos planos añade uno
+nuevo ahí. Cada plano admite sus propias **referencias**, cada una con qué
+tomar de ella («copia esta pose de baile», «estos Pokémon bailan al
+fondo», «este lugar»): de la biblioteca, fotogramas sacados de un vídeo o
+un GIF animado, una subida, o un enlace de YouTube / X / Instagram (solo se
+descarga el trozo entre *desde* y *hasta*). Van detrás de la imagen
+canónica del protagonista como `<image2>`, `<image3>`... Los cambios se
+aplican con la producción en pausa (**Pausar para editar** conserva lo ya
+renderizado); **Guardar y renderizar** rehace solo lo que ha cambiado.
+**Letra** le da a una canción existente su letra con etiquetas
+`[Verse]`/`[Chorus]`: sincronizada, hace que cada plano suene sobre su
+parte. Un plano con protagonista se edita desde la imagen canónica
+conservando su diseño (cara, cuerpo, colores, accesorios) pero con la pose
+y la acción del texto del plano. Las referencias dan forma al fotograma; el
+clip anima ese fotograma con el texto de movimiento (copiar un movimiento
+de un vídeo necesita un modelo de transferencia de movimiento, no
+instalado).
+
+**Biblioteca > Descargar de un enlace** trae un vídeo (o solo un trozo, o
+su audio) de YouTube, X, Instagram y los demás sitios que conoce yt-dlp,
+como mp4 en el proyecto. Los GIF animados entran como vídeos.
+
 ### Sin Faustus
 
 La cabecera lleva las constantes de la máquina en todas las pantallas: uso

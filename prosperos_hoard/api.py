@@ -23,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from . import mv_planner
+from . import media_download
 from . import animatic as animatic_mod
 from . import audio as audio_mod
 from . import charkit
@@ -436,6 +437,7 @@ class VideoFromPlanBody(BaseModel):
     project: Optional[str] = None
     brief: Optional[str] = None
     settings: Optional[dict[str, Any]] = None
+    lyrics: Optional[str] = None  # an existing song's lyrics: timed, they tie the shots to their sections
 
 
 class ShortCreateBody(BaseModel):
@@ -471,6 +473,23 @@ class StockSearchBody(BaseModel):
 class StockKeysBody(BaseModel):
     pexels: Optional[str] = None
     pixabay: Optional[str] = None
+
+
+class ProductionLyricsBody(BaseModel):
+    lyrics: str
+    run: bool = False
+
+
+class DownloadMediaBody(BaseModel):
+    url: str
+    audio_only: bool = False
+    start_s: Optional[float] = None
+    end_s: Optional[float] = None
+
+
+class VideoFramesBody(BaseModel):
+    asset_id: str
+    count: int = 6
 
 
 class ProductionShotsBody(BaseModel):
@@ -652,6 +671,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("audiobook", lambda job, p: vp.audiobook_job(store, backend, job, p))
     queue.register("dub", lambda job, p: dubbing_mod.dub_job(store, backend, job, p))
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
+    queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
     # production/QA handlers are registered below, next to the operations
     # they queue sub-jobs through; the workers start at the end of create_app
 
@@ -2395,7 +2415,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
         spec = mv_planner.spec_from_draft(body.draft, lead=lead, song_asset_id=body.song_asset_id, clips=body.clips,
                                           aspects=body.aspects, song_takes=body.song_takes, engine=body.engine,
-                                          brief=body.brief)
+                                          brief=body.brief, lyrics=body.lyrics)
         project = body.project
         if not project and body.character_id:
             project = store.get_character(body.character_id)["project_id"]
@@ -2423,6 +2443,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return {"production": production_view(slug), "job": engine.job_view(job)}
 
     def op_production_shots(slug: str, body: ProductionShotsBody) -> dict[str, Any]:
+        for change in body.changes:
+            refs = (change.get("refs") if isinstance(change, dict) else None) or []
+            if isinstance(change, dict) and isinstance(change.get("insert"), dict):
+                refs = list(refs) + list(change["insert"].get("refs") or [])
+            for r in refs:
+                aid = r.get("asset_id") if isinstance(r, dict) else r
+                if store.get_asset(str(aid))["kind"] != "image":
+                    raise engine.EngineError("bad_reference", f"reference {aid} is not an image (take frames out of a "
+                                                              "video or GIF first)")
         result = productions_mod.update_shots(store.data_dir, slug, body.changes)
         if body.run and result["changed"]:
             result["job"] = engine.job_view(queue_production(slug))
@@ -2558,7 +2587,42 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.get("/api/productions/{slug}")
     def production_get(slug: str):
         state = productions_mod.load_state(store.data_dir, slug)
-        return {**state, "view": productions_mod.compact_view(state)}
+        timing = None if productions_mod.is_legacy(state) else productions_mod.shot_timing(store.data_dir, store, state)
+        return {**state, "view": productions_mod.compact_view(state), "timing": timing}
+
+    @app.put("/api/productions/{slug}/lyrics")
+    def production_lyrics(slug: str, body: ProductionLyricsBody):
+        out = productions_mod.set_song_lyrics(store.data_dir, slug, body.lyrics)
+        if body.run:
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    def op_download(project_id: str, body: DownloadMediaBody) -> dict[str, Any]:
+        store.get_project(project_id)
+        url = media_download.check_url(body.url)
+        for v in (body.start_s, body.end_s):
+            if v is not None and not 0 <= v <= 6 * 3600:
+                raise engine.EngineError("bad_range", "start_s/end_s are seconds into the video")
+        job = queue.enqueue("download_media", "cpu", {"url": url, "audio_only": body.audio_only, "start_s": body.start_s,
+                                                       "end_s": body.end_s}, project_id=project_id)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/projects/{project_id}/download")
+    def project_download(project_id: str, body: DownloadMediaBody):
+        return op_download(project_id, body)
+
+    @app.post("/api/agent/studio_download_media")
+    def agent_download_media(project: str, body: DownloadMediaBody):
+        return agent("studio_download_media", body.url[:120], lambda: op_download(project, body))
+
+    @app.post("/api/assets/{asset_id}/frames")
+    def asset_frames(asset_id: str, count: int = 6):
+        return {"items": engine.extract_frames(store, asset_id, count)}
+
+    @app.post("/api/agent/studio_video_frames")
+    def agent_video_frames(body: VideoFramesBody):
+        return agent("studio_video_frames", body.asset_id, lambda: {"items": engine.extract_frames(store, body.asset_id,
+                                                                                                    body.count)})
 
     @app.post("/api/productions/{slug}/continue")
     def production_continue(slug: str, take: Optional[int] = None):

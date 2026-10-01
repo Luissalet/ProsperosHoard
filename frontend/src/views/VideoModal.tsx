@@ -92,6 +92,7 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
       const r = await api.videoFromPlan({
         name: name || draft.title || "Music video", draft, ...leadBody(), clips, aspects, song_takes: takes,
         song_asset_id: songMode === "asset" ? songId || null : null, project: projectId || null, brief: concept || null,
+        lyrics: songMode === "asset" ? lyrics || null : null,
       });
       app.toast(t("videoStarted"), "ok");
       onStarted(r.production.slug);

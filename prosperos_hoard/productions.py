@@ -193,6 +193,44 @@ def split_key(key: Any) -> tuple[str, int]:
     return text, 0
 
 
+# a shot's song section (what the planner writes) -> the section kind the
+# timed lyrics carry, which the auto-cut matches storyboard pools against
+SHOT_SECTIONS = ("intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro")
+_SECTION_TO_KIND = {"prechorus": "pre", "breakdown": "bridge"}
+
+
+def storyboard_for(spec: dict[str, Any]) -> dict[str, list[str]]:
+    """The cut's storyboard: the one written in the spec, else one built from
+    each shot's `section` (shots of the chorus play over the chorus, in their
+    order). Empty when no shot names a section: the cut then draws freely."""
+    board = (spec.get("timeline") or {}).get("storyboard") or {}
+    if board:
+        return board
+    out: dict[str, list[str]] = {}
+    for shot in spec.get("shots") or []:
+        section = str(shot.get("section") or "").lower()
+        if section in SHOT_SECTIONS:
+            out.setdefault(_SECTION_TO_KIND.get(section, section), []).append(shot["key"])
+    return out
+
+
+def _shot_refs(value: Any, key: str) -> list[dict[str, str]]:
+    """A shot's extra references: [{asset_id, use}] - a pose to copy, the
+    characters to show in the background, a place, a prop."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 6:
+        raise ProductionError("bad_changes", f"shot {key}: refs is a list of at most 6 {{asset_id, use}}")
+    out = []
+    for r in value:
+        if isinstance(r, str):
+            r = {"asset_id": r}
+        if not isinstance(r, dict) or not re.fullmatch(r"a_[A-Za-z0-9]{6,40}", str(r.get("asset_id") or "")):
+            raise ProductionError("bad_changes", f"shot {key}: each ref needs an asset_id")
+        out.append({"asset_id": str(r["asset_id"]), "use": str(r.get("use") or "").strip()[:240]})
+    return out
+
+
 def normalise_spec(spec: Any) -> dict[str, Any]:
     """Validate a production spec and fill defaults. Raises ProductionError
     with the offending field."""
@@ -786,12 +824,22 @@ class Run:
         else:
             body["aspect"] = shot.get("aspect") or "16:9"
         text = shot["prompt"] + (f", {look}" if look else "")
+        refs = [r for r in shot.get("refs") or [] if r.get("asset_id")]
+        # the shot's own references follow the lead's canonical image (which
+        # is <image1> of a lead shot), each with what to take from it
+        first = 2 if shot.get("lead") else 1
+        notes = [f"<image{first + i}>: {r.get('use') or 'use as a reference for this shot'}" for i, r in enumerate(refs)]
+        if notes:
+            text += ". " + "; ".join(notes)
+        if refs:
+            body["reference_asset_ids"] = [r["asset_id"] for r in refs]
         if shot.get("lead"):
             body.update({"prompt": f"@{lead['name']} {text}", "consistent": True,
                          # a lead with an adapter for this engine renders
                          # txt2img + LoRA (free poses); without one, the
-                         # canonical edit as before - see spec.lead_route
-                         "prefer_adapter": self.spec.get("lead_route", "auto") != "reference"})
+                         # canonical edit as before - see spec.lead_route.
+                         # References need the edit, which reads them.
+                         "prefer_adapter": self.spec.get("lead_route", "auto") != "reference" and not refs})
         else:
             body.update({"prompt": text, "negative": shot.get("negative") or world.get("negative") or None})
         for key in ("strength", "sampler", "scheduler", "steps", "cfg"):
@@ -980,7 +1028,7 @@ class Run:
         clips = self.items("clips") if prefer_clips else {}
         stills = [e.get("best") for e in self.items("frames").values() if e.get("best")]
         pool = stills + [c for c in clips.values() if c]
-        board = (self.spec.get("timeline") or {}).get("storyboard") or {}
+        board = storyboard_for(self.spec)
         pools = None
         if board:
             pools = {section: [a for a in (clips.get(k) or self.still_for(k) for k in keys) if a]
@@ -1064,7 +1112,8 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
     invalidated (its clip, the animatic, the cut, the report) so the next
     run rebuilds exactly that. Returns what changed."""
     if not isinstance(changes, list) or not changes or len(changes) > 80:
-        raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|seed|regenerate}")
+        raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|motion|"
+                                             "seed|regenerate|lead|section|refs|negative|after|delete} or {insert: {...}}")
     with lock_for(slug):
         state = load_state(data_dir, slug)
         if is_legacy(state):
@@ -1078,12 +1127,89 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
         frames = (state["done"].get("frames") or {}).get("items") or {}
         clips = (state["done"].get("clips") or {}).get("items") or {}
         changed: list[str] = []
+        order = spec.setdefault("shots", [])
+        board = (spec.get("timeline") or {}).get("storyboard") or {}
+
+        def position_after(after: Any) -> int:
+            if after in (None, "", "start"):
+                return 0
+            idx = next((i for i, s in enumerate(order) if s["key"] == str(after)), None)
+            if idx is None:
+                raise ProductionError("bad_changes", f"unknown shot key '{after}' to insert after")
+            return idx + 1
+
         for change in changes:
-            if not isinstance(change, dict) or str(change.get("key")) not in shots:
-                raise ProductionError("bad_changes", f"unknown shot key '{(change or {}).get('key') if isinstance(change, dict) else change}'")
+            if not isinstance(change, dict):
+                raise ProductionError("bad_changes", f"each change must be an object, got {change!r}")
+            if change.get("insert") is not None:
+                new = change["insert"]
+                if not isinstance(new, dict) or not str(new.get("prompt") or "").strip():
+                    raise ProductionError("bad_changes", "insert needs a prompt")
+                if len(order) >= 80:
+                    raise ProductionError("bad_changes", "a production holds at most 80 shots")
+                number = max([int(k) for k in shots if k.isdigit()] or [0]) + 1
+                key = str(number)
+                at = position_after(new.get("after", change.get("after")))
+                near = order[at - 1] if at > 0 else (order[0] if order else {})
+                section = str(new.get("section") or near.get("section") or "").lower()
+                shot = {"key": key, "prompt": str(new["prompt"]).strip()[:2000], "lead": bool(new.get("lead", True)),
+                        "motion": "still" if new.get("motion") == "still" else "move",
+                        "motion_prompt": str(new.get("motion_prompt") or "subtle motion")[:2000],
+                        "seed": 3000 + 10 * number, "clip_seed": 5000 + number,
+                        "variants": int(near.get("variants") or 1), "best": 0,
+                        "clips": [0] if new.get("clip", new.get("motion") != "still") else [],
+                        **({"section": section} if section in SHOT_SECTIONS else {}),
+                        **({"refs": _shot_refs(new.get("refs"), key)} if new.get("refs") else {})}
+                if near.get("width") and near.get("height"):
+                    shot["width"], shot["height"] = near["width"], near["height"]
+                else:
+                    shot["aspect"] = near.get("aspect") or "16:9"
+                order.insert(at, shot)
+                shots[key] = shot
+                changed.append(key)
+                log(state, "review", "inserted_shot", key=key, after=new.get("after", change.get("after")))
+                continue
+            if str(change.get("key")) not in shots:
+                raise ProductionError("bad_changes", f"unknown shot key '{change.get('key')}'")
             key = str(change["key"])
             shot = shots[key]
+            if change.get("delete"):
+                if len(order) <= 1:
+                    raise ProductionError("bad_changes", "a production needs at least one shot")
+                order[:] = [s for s in order if s["key"] != key]
+                shots.pop(key)
+                frames.pop(key, None)
+                for ck in [k for k in clips if split_key(k)[0] == key]:
+                    clips.pop(ck, None)
+                for section_keys in board.values():
+                    section_keys[:] = [k for k in section_keys if split_key(k)[0] != key]
+                changed.append(key)
+                log(state, "review", "deleted_shot", key=key)
+                continue
+            if "after" in change:
+                order[:] = [s for s in order if s["key"] != key]
+                order.insert(position_after(change["after"]), shot)
+                changed.append(key)
             regenerate = bool(change.get("regenerate"))
+            if change.get("lead") is not None and bool(change["lead"]) != bool(shot.get("lead")):
+                shot["lead"] = bool(change["lead"])
+                regenerate = True
+            if change.get("section") is not None:
+                section = str(change["section"]).lower()
+                if section and section not in SHOT_SECTIONS:
+                    raise ProductionError("bad_changes", f"shot {key}: section must be one of {', '.join(SHOT_SECTIONS)}")
+                if section:
+                    shot["section"] = section
+                else:
+                    shot.pop("section", None)
+            if change.get("refs") is not None:
+                shot["refs"] = _shot_refs(change["refs"], key)
+                if not shot["refs"]:
+                    shot.pop("refs")
+                regenerate = True
+            if change.get("negative") is not None:
+                shot["negative"] = str(change["negative"])[:600] or None
+                regenerate = True
             for field in ("prompt", "motion_prompt"):
                 if change.get(field) is not None:
                     if not str(change[field]).strip():
@@ -1134,7 +1260,78 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
             state["status"] = "queued"
             state["message"] = f"changed shot(s) {', '.join(changed)}"
         save_state(data_dir, state)
+        changed = list(dict.fromkeys(changed))
         return {"slug": slug, "changed": changed, "status": state["status"]}
+
+
+def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:
+    """Give the production's song its lyrics (with [Verse]/[Chorus] tags):
+    the lyrics stage times them to the song, the shots follow their sections
+    in the cut and the karaoke shows them. Rebuilds what depends on them."""
+    if not isinstance(lyrics, str) or len(lyrics) > 20000:
+        raise ProductionError("bad_lyrics", "lyrics must be text (at most 20000 characters)")
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if state.get("status") == "running":
+            raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
+        song = state["spec"].get("song")
+        if not isinstance(song, dict):
+            raise ProductionError("no_song", "this production has no song")
+        song["lyrics"] = lyrics.strip()
+        for stage in ("lyrics", "animatic", "timeline", "report"):
+            state["done"].pop(stage, None)
+        state.get("partial", {}).pop("timeline", None)
+        state["review"] = {}
+        state["status"] = "queued"
+        state["message"] = "lyrics changed"
+        log(state, "review", "changed_lyrics", lines=len([l for l in lyrics.splitlines() if l.strip()]))
+        save_state(data_dir, state)
+        return {"slug": slug, "status": state["status"]}
+
+
+def shot_timing(data_dir: Path, store: Any, state: dict[str, Any]) -> dict[str, Any]:
+    """For the shot editor: where each shot plays in the song (from the
+    animatic's cut, once there is one) and the song's sections with their
+    lyrics (timed once the lyrics stage ran, else straight from the text)."""
+    out: dict[str, Any] = {"shots": {}, "sections": []}
+    try:
+        from . import animatic as animatic_mod
+
+        plan = animatic_mod.read_plan(data_dir, state["slug"])
+        for c in plan.get("cuts") or []:
+            base = split_key(c.get("shot"))[0]
+            out["shots"].setdefault(base, []).append({"start_s": c.get("start_s"), "duration_s": c.get("duration_s"),
+                                                       "section": c.get("section")})
+        out["duration_s"] = plan.get("duration_s")
+    except Exception:  # noqa: BLE001 - no animatic yet
+        pass
+    lyrics_id = ((state.get("done") or {}).get("lyrics") or {}).get("lyrics_asset_id")
+    if lyrics_id:
+        try:
+            lyr = engine.read_lyrics(store, lyrics_id)
+            for sec in lyr["sections"]:
+                end = sec.get("end_s")
+                lines = [l["text"] for l in lyr["lines"]
+                         if l["time_s"] >= sec["start_s"] and (end is None or l["time_s"] < end)]
+                out["sections"].append({"label": sec["label"], "kind": sec.get("kind"), "start_s": sec["start_s"],
+                                        "end_s": end, "lines": lines})
+            return out
+        except Exception:  # noqa: BLE001
+            pass
+    text = str(((state.get("spec") or {}).get("song") or {}).get("lyrics") or "")
+    current: Optional[dict[str, Any]] = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = re.fullmatch(r"\[([^\]]+)\]", line)
+        if m:
+            current = {"label": m.group(1).strip(), "kind": None, "lines": []}
+            out["sections"].append(current)
+        elif line:
+            if current is None:
+                current = {"label": "", "kind": None, "lines": []}
+                out["sections"].append(current)
+            current["lines"].append(line)
+    return out
 
 
 # ----------------------------------------------------------------- report

@@ -7,6 +7,7 @@ import { useT, type MessageKey } from "../i18n";
 import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
+import { StoryboardCard } from "./Storyboard";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -143,8 +144,6 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
   };
   const saveRecipe = () => act(async () => { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); });
   const renders = view.renders || {};
-  const frames = (data.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
-  const clips = (data.done?.clips?.items || {}) as Record<string, string>;
 
   return (
     <div className="stack">
@@ -195,26 +194,8 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
         </div>
       )}
       {!isShort && view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {!legacy && (data.spec.shots || []).length > 0 && (
-        <div className="card">
-          <h2>{t("shotsTitle")}</h2>
-          <div className="thumb-grid">
-            {(data.spec.shots || []).map((shot) => {
-              const best = frames[shot.key]?.best;
-              return (
-                <button key={shot.key} className="tile" title={shot.prompt} onClick={() => best && app.openAsset(best, frames[shot.key]?.variants || [best])}>
-                  {best ? <img src={`/api/assets/${best}/thumb`} alt="" loading="lazy" /> : <div className="media-icon"><Clapperboard size={22} /></div>}
-                  <div className="tile-badges">
-                    <span className="pill badge-dark">{shot.key}</span>
-                    {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
-                    {Object.keys(clips).some((k) => k === shot.key || k.startsWith(`${shot.key}v`)) && <span className="pill badge-dark">{t("clipBadge")}</span>}
-                  </div>
-                  <div className="tile-meta"><span className="ellipsis grow">{shot.prompt}</span></div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {!legacy && !isShort && (data.spec.shots || []).length > 0 && (
+        <StoryboardCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />
       )}
       {!isShort && <QaCard state={data} onRan={reload} />}
       {!legacy && data.lineage?.length > 0 && (
