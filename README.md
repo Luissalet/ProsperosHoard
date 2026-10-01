@@ -527,6 +527,13 @@ songs) are a searchable menu with a preview: click to see it (videos and
 songs play), double click or Enter to use it, "All projects" to look
 beyond this one.
 
+**Deleting a project** (the bin on its card in Projects, or
+`studio_delete_project`) moves it to the trash with everything in it and
+its productions: it disappears from every list and from the all-projects
+search. "Deleted projects" at the bottom of Projects restores it as it was,
+or deletes it for good (rows, files, thumbnails, trashed assets and its
+productions; no undo). A project with a job queued or running is refused.
+
 A production whose run died without writing its end (the app closed, or
 Windows refused the state write because another reader had the file open)
 no longer stays "running": it shows as failed, can be edited and resumed.

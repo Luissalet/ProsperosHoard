@@ -55,6 +55,10 @@ Qué hacer cuando el usuario pide, con sus palabras:
   cabe (Qwen-Image ~12 GB) y la GPU la ocupa un modelo de lenguaje, dilo y
   pregunta antes de pararlo: nunca pares un LLM por tu cuenta.
 
+- **«Borra el proyecto X»**: `studio_projects` para su id y lo que tiene;
+  díselo y `studio_delete_project(project)` (papelera, con sus
+  producciones). Para siempre solo si lo pide:
+  `studio_trash(action="empty", projects=[id])`.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:
   `studio_assets(kind="audio")` en el proyecto o en otros para encontrarla y
   `studio_production_song(production, asset_id=...)`; «otra toma» →

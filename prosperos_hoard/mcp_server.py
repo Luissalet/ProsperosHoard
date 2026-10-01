@@ -225,16 +225,34 @@ def studio_delete_assets(ids: list[str], force: bool = False) -> dict[str, Any]:
     return _call("POST", "/api/agent/studio_delete_assets", json={"ids": ids, "force": force})
 
 
-@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
-def studio_trash(action: str = "list", ids: Optional[list[str]] = None, project: Optional[str] = None) -> dict[str, Any]:
-    """The studio trash: list deleted assets, restore them, or empty it for good (files deleted).
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_delete_project(project: str) -> dict[str, Any]:
+    """Delete a project: move it (assets, characters, timelines, its productions) to the trash, restorable.
 
-    action: "list" | "restore" (needs ids) | "empty" (ids or everything; a project limits it).
-    Empty only when the user asks: it cannot be undone.
+    The project disappears from every list; nothing is deleted until the trash is emptied
+    (studio_trash(action="empty", projects=[id])). Refused while one of its jobs is queued or running.
+    Only delete the project the user named; say what it holds (studio_projects counts) first.
 
-    Keywords: trash, restore, undo delete, empty trash, papelera, recuperar, deshacer borrado, vaciar papelera
+    Keywords: delete project, remove project, trash project, borrar proyecto, eliminar proyecto, quitar proyecto
     """
-    return _call("POST", "/api/agent/studio_trash", json={"action": action, "ids": ids, "project": project})
+    return _call("POST", "/api/agent/studio_delete_project", json={"project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def studio_trash(action: str = "list", ids: Optional[list[str]] = None, project: Optional[str] = None,
+                 projects: Optional[list[str]] = None) -> dict[str, Any]:
+    """The studio trash: list deleted assets and projects, restore them, or empty it for good.
+
+    action: "list" (assets in `items`, deleted projects in `projects`) | "restore" (ids for assets,
+    projects for whole projects with their productions) | "empty" (ids or everything; a project
+    limits it; projects=[...] deletes those projects for good, files included). Empty only when the
+    user asks: it cannot be undone.
+
+    Keywords: trash, restore, undo delete, empty trash, restore project, papelera, recuperar, deshacer borrado,
+    vaciar papelera, recuperar proyecto
+    """
+    return _call("POST", "/api/agent/studio_trash",
+                 json={"action": action, "ids": ids, "project": project, "projects": projects})
 
 
 @tool(_ro(readOnlyHint=True, idempotentHint=True))

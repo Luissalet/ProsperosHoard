@@ -77,6 +77,12 @@ export interface Project {
   created_at: string;
   updated_at: string;
   counts: Record<string, number>;
+  deleted_at?: string | null;
+}
+
+export interface TrashedProject extends Pick<Project, "id" | "name" | "brief" | "cover_asset_id" | "counts"> {
+  deleted_at: string;
+  productions: string[];
 }
 
 export interface Voice {
@@ -917,6 +923,14 @@ export const api = {
   projects: () => request<Paged<Project>>("GET", "/api/projects"),
   createProject: (name: string, brief?: string) => request<Project>("POST", "/api/projects", { name, brief }),
   project: (id: string) => request<Project>("GET", `/api/projects/${id}`),
+  projectDeletePreview: (id: string) => request<{ id: string; name: string; counts: Record<string, number>;
+    productions: { slug: string; name: string | null; status: string }[]; live_jobs: { id: string; type: string; state: string }[] }>(
+    "GET", `/api/projects/${id}/delete-preview`),
+  deleteProject: (id: string) => request<{ id: string; productions: string[] }>("DELETE", `/api/projects/${id}`),
+  restoreProject: (id: string) => request<{ id: string; productions: string[] }>("POST", `/api/projects/${id}/restore`),
+  purgeProject: (id: string) => request<{ id: string; assets: number; files_deleted: number; productions_deleted: number }>(
+    "POST", `/api/projects/${id}/purge`),
+  projectTrash: () => request<{ items: TrashedProject[] }>("GET", "/api/trash/projects"),
   updateProject: (id: string, patch: Partial<Pick<Project, "name" | "brief" | "cover_asset_id">>) =>
     request<Project>("PATCH", `/api/projects/${id}`, patch),
 

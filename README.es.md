@@ -539,6 +539,14 @@ reparto de fondo, canciones) son un menú con buscador y vista previa: clic
 para verlo (los vídeos y canciones se reproducen), doble clic o Intro para
 usarlo, «Todos los proyectos» para buscar fuera de este.
 
+**Borrar un proyecto** (la papelera de su tarjeta en Proyectos, o
+`studio_delete_project`) lo manda a la papelera con todo lo que tiene y sus
+producciones: desaparece de todas las listas y de la búsqueda en todos los
+proyectos. «Proyectos borrados», al final de Proyectos, lo recupera tal como
+estaba o lo borra para siempre (filas, archivos, miniaturas, assets en la
+papelera y sus producciones; no se puede deshacer). Un proyecto con un
+trabajo en cola o en marcha no se borra.
+
 Una producción cuya ejecución murió sin escribir su final (se cerró la app, o
 Windows rechazó la escritura del estado porque otro lector tenía el archivo
 abierto) ya no se queda en «running»: aparece como fallida y se puede editar
