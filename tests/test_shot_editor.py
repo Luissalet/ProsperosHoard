@@ -169,3 +169,15 @@ def test_crowd_clips_add_nobody(data_dir):
     runner.state = {"done": {"frames": {"items": {"1": {"variants": ["a_1"], "best": "a_1"}}}}}
     assert "no new characters" in runner.clip_body(spec["shots"][0], 0)["prompt"]
     assert "no new characters" not in runner.clip_body(spec["shots"][1], 0)["prompt"]
+
+
+def test_moving_shots_get_time_to_move():
+    spec = prod.normalise_spec(tiny_spec(song={"tags": "pop", "lyrics": "[Verse]\nla", "bpm": 120}))
+    for s in spec["shots"]:
+        s["clips"], s["motion"] = [0], "move"
+    out = prod.motion_pacing(spec, {})
+    assert out["beats_mid"] == 8 and out["beats_high"] == 4  # 4 s bars at 120 bpm, 2 s in the chorus
+    assert prod.motion_pacing(spec, {"beats_mid": 2})["beats_mid"] == 2
+    for s in spec["shots"]:
+        s["clips"] = []
+    assert prod.motion_pacing(spec, {}) == {}
