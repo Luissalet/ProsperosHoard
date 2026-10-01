@@ -1,13 +1,5 @@
-Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.1.1,
-plus launch.py from HoardLink 0.4 (starting ComfyUI/Ollama/configured
-servers without Faustus; stdlib only, imports nothing else from the package).
+Vendored from HoardLink (https://github.com/Luissalet/HoardLink), version 0.5.0
 
-This is a byte-for-byte copy of every hoard_link/*.py file from that
-release. License: MIT (same as this repository).
-
-Do not modify these files. Prospero's Hoard talks to Hoard Link only
-through prosperos_hoard/backend.py, which wraps it (VRAM estimates per
-workflow family, ffmpeg/fonts/music status, the ComfyUI client on Hoard
-Link's own event loop). To update: replace every .py file here with the
-new release's copies, update the version line above, and run
-`pytest tests/test_backend.py tests/test_api.py`.
+Byte-identical copy of the upstream hoard_link/ package (every .py file except the
+hub/ subpackage, which only the hub itself runs) plus its LICENSE. Do not edit these
+files; run scripts/sync_vendored.py in the HoardLink repository to update every copy.
