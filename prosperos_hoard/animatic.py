@@ -78,7 +78,7 @@ def cut_inputs(state: dict[str, Any], prefer_clips: bool) -> tuple[list[str], di
 def cut_options(state: dict[str, Any]) -> dict[str, Any]:
     options = dict(((state.get("spec") or {}).get("timeline") or {}).get("options") or {})
     options.setdefault("fps", 24)
-    return options
+    return prod.motion_pacing(state.get("spec") or {}, options)
 
 
 def build(store: Store, state: dict[str, Any]) -> dict[str, Any]:

@@ -199,6 +199,25 @@ SHOT_SECTIONS = ("intro", "verse", "prechorus", "chorus", "bridge", "breakdown",
 _SECTION_TO_KIND = {"prechorus": "pre", "breakdown": "bridge"}
 
 
+def motion_pacing(spec: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    """Moving shots need time to move: when the cut will use clips, cut every
+    ~`clip_settings.cut_s` seconds (4) on whole bars instead of every couple
+    of beats (a dance chopped every beat reads as a slideshow). Explicit
+    `beats_*` options win. The animatic uses it too, so its cut points stay
+    those of the final cut."""
+    tl = spec.get("timeline") or {}
+    moving = any(s.get("clips") and s.get("motion", "move") == "move" for s in spec.get("shots") or [])
+    if not (moving and tl.get("prefer_clips", True)):
+        return options
+    bpm = float((spec.get("song") or {}).get("bpm") or 120)
+    target = float((spec.get("clip_settings") or {}).get("cut_s", 4.0))
+    beats = int(max(4, min(16, 4 * round(target * bpm / 60 / 4))))
+    options.setdefault("beats_low", beats)
+    options.setdefault("beats_mid", beats)
+    options.setdefault("beats_high", max(4, beats // 2))
+    return options
+
+
 def storyboard_for(spec: dict[str, Any]) -> dict[str, list[str]]:
     """The cut's storyboard: the one written in the spec, else one built from
     each shot's `section` (shots of the chorus play over the chorus, in their
@@ -1133,8 +1152,10 @@ class Run:
         every best still (and clip when preferred), and each storyboard
         entry resolved to its clip or its still."""
         clips = self.items("clips") if prefer_clips else {}
-        stills = [e.get("best") for e in self.items("frames").values() if e.get("best")]
-        pool = stills + [c for c in clips.values() if c]
+        # a shot with a clip enters the general pool as its clip, not also as
+        # its still (a still with a slow zoom next to the same shot moving)
+        pool = [clips.get(k) or e.get("best") for k, e in self.items("frames").items() if clips.get(k) or e.get("best")]
+        pool += [c for k, c in clips.items() if c and split_key(k)[0] not in self.items("frames") and c not in pool]
         board = storyboard_for(self.spec)
         pools = None
         if board:
@@ -1149,7 +1170,7 @@ class Run:
             clip_settings = self.spec.get("clip_settings") or {}
             options.setdefault("video_lead_in_s", clip_settings.get("lead_in_s", 1.0))
             options.setdefault("video_rotate_offsets", clip_settings.get("rotate_offsets", True))
-        return options
+        return motion_pacing(self.spec, options)
 
     def stage_timeline(self) -> None:
         tl = self.spec.get("timeline") or {}
