@@ -1,28 +1,34 @@
+@import "./hoard-theme.css";
+
 :root {
-  --bg: #0d0a11;
-  --bg-2: #120e17;
-  --surface: #17121e;
-  --surface-2: #1e1827;
-  --surface-3: #271f32;
-  --border: #2d2538;
-  --border-strong: #3d3349;
-  --text: #f1ebf6;
-  --text-2: #c3b8cf;
-  --muted: #8e839c;
-  --accent: #ff4d8d;
-  --accent-2: #ff7aa9;
-  --accent-soft: rgba(255, 77, 141, 0.14);
-  --gold: #f5c26b;
-  --gold-soft: rgba(245, 194, 107, 0.14);
-  --ok: #4fd6a0;
-  --warn: #f5c26b;
-  --bad: #ff6b6b;
-  --info: #7aa7ff;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  --radius: 14px;
-  --radius-sm: 9px;
-  --font: "Space Grotesk Variable", "Segoe UI", system-ui, sans-serif;
-  --mono: "JetBrains Mono Variable", "Cascadia Mono", Consolas, monospace;
+  /* Dark by default: Prospero's names mapped onto the shared Hoard theme
+     (hoard-theme.css, palette "prospero"). The light block below is the
+     optional light theme and keeps its own colours. */
+  --bg: var(--hoard-deep);
+  --bg-2: var(--hoard-surface);
+  --surface: var(--hoard-surface);
+  --surface-2: var(--hoard-elevated);
+  --surface-3: var(--hoard-hover);
+  --border: var(--hoard-border);
+  --border-strong: var(--hoard-border-hover);
+  --text: var(--hoard-text);
+  --text-2: var(--hoard-text-muted);
+  --muted: var(--hoard-text-dim);
+  --accent: var(--hoard-accent);
+  --accent-2: var(--hoard-accent-strong);
+  --accent-soft: var(--hoard-accent-soft);
+  --accent-ink: var(--hoard-accent-ink);
+  --gold: #e2b24c;
+  --gold-soft: rgba(226, 178, 76, 0.14);
+  --ok: #5bbf86;
+  --warn: #e2b24c;
+  --bad: #e07a6e;
+  --info: #7fa6d9;
+  --shadow: var(--hoard-shadow);
+  --radius: var(--hoard-radius-lg);
+  --radius-sm: var(--hoard-radius);
+  --font: var(--hoard-font-sans);
+  --mono: var(--hoard-font-mono);
   color-scheme: dark;
 }
 
@@ -47,6 +53,7 @@
   --bad: #c9373a;
   --info: #2f5fcf;
   --shadow: 0 16px 40px rgba(60, 30, 80, 0.14);
+  --accent-ink: #ffffff;
   color-scheme: light;
 }
 
@@ -70,36 +77,40 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 10px; border: 2px solid var(--bg); }
 
 /* ------------------------------------------------------------ layout */
-.app { display: grid; grid-template-columns: 248px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: 236px 1fr; height: 100vh; }
 .sidebar {
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
-  padding: 18px 12px 14px;
+  padding: 0 12px 14px;
   gap: 14px;
   overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 6px; }
+.brand {
+  display: flex; align-items: center; gap: 11px;
+  min-height: 64px; margin: 0 -12px; padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
 .brand-mark {
   width: 28px; height: 28px; border-radius: 8px;
   display: grid; place-items: center; overflow: hidden;
-  box-shadow: 0 6px 18px rgba(255, 77, 141, 0.35);
+  box-shadow: 0 6px 18px rgba(var(--hoard-accent-rgb), 0.28);
 }
 .brand-mark img { width: 28px; height: 28px; display: block; border-radius: 8px; }
-.brand-name { font-weight: 650; font-size: 15.5px; letter-spacing: -0.01em; }
+.brand-name { font-family: var(--hoard-font-serif); font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 0.01em; }
 .brand-sub { color: var(--muted); font-size: 11.5px; }
 .project-switch { padding: 0 4px; }
 .project-switch select { width: 100%; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
-.nav-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; padding: 6px 10px 4px; }
+.nav-label { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; padding: 6px 10px 4px; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: 9px;
+  min-height: 38px; padding: 8px 10px; border-radius: var(--radius-sm);
   color: var(--text-2); background: none; border: 0; cursor: pointer; text-align: left;
-  font-size: 13.5px;
+  font-size: 14px;
 }
-.nav-item:hover { background: var(--surface); color: var(--text); }
-.nav-item.active { background: var(--accent-soft); color: var(--text); }
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--surface-2); color: var(--text); }
 .nav-item.active svg { color: var(--accent); }
 .nav-item:disabled { opacity: 0.4; cursor: default; }
 .nav-item .count { margin-left: auto; font-size: 11px; color: var(--muted); font-family: var(--mono); }
@@ -110,33 +121,33 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .topbar {
   display: flex; align-items: center; gap: 14px;
-  padding: 14px 28px; border-bottom: 1px solid var(--border);
+  min-height: 64px; padding: 0 28px; border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 85%, transparent);
   backdrop-filter: blur(10px);
   position: relative; z-index: 40; /* the vitals popover opens over the page */
 }
 .crumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; min-width: 0; }
-.crumbs strong { color: var(--text); font-weight: 600; font-size: 16px; white-space: nowrap; }
+.crumbs strong { color: var(--text); font-weight: 600; font-size: 15px; white-space: nowrap; }
 .topbar .spacer { flex: 1; }
 .content { flex: 1; overflow-y: auto; padding: 26px 28px 60px; }
 .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-.page-head h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; font-weight: 650; }
+.page-head h1 { margin: 0; font-family: var(--hoard-font-serif); font-size: 30px; letter-spacing: 0.005em; font-weight: 700; }
 .page-head p { margin: 4px 0 0; color: var(--muted); max-width: 720px; }
 .page-head .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------ controls */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  height: 34px; padding: 0 13px; border-radius: 9px;
-  border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
+  height: 36px; padding: 0 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: transparent; color: var(--text);
   cursor: pointer; font-size: 13px; font-weight: 500; white-space: nowrap;
   transition: background 0.12s, border-color 0.12s, transform 0.05s;
 }
-.btn:hover { background: var(--surface-3); }
+.btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover { background: var(--accent-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
 .btn.ghost { background: none; border-color: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
 .btn.danger { color: var(--bad); }
