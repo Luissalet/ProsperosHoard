@@ -41,7 +41,7 @@ from .workflows import convert as convert_mod
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
-VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv"}
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".gif"}  # an animated GIF is a (silent) video
 LYRICS_EXTS = {".lrc", ".txt"}
 FONT_EXTS = {".ttf", ".otf"}
 KIND_EXTS = {"image": IMAGE_EXTS, "audio": AUDIO_EXTS, "video": VIDEO_EXTS, "lyrics": LYRICS_EXTS, "font": FONT_EXTS}
@@ -373,7 +373,10 @@ def build_kontext_instruction(store: Store, project_id: str, prompt: str, engine
     # both engines follow explicit preservation best ("keep X, change Y"):
     # name what must not drift, then the new scene
     if engine == "qwen21":
-        keep = "Keep the character from <image1> exactly the same (face, silhouette, colours, props)"
+        # the design must not drift, the pose must: "silhouette" here used
+        # to freeze every shot in the reference image's stance
+        keep = ("Keep the character from <image1> exactly the same design (face, body shape, colours, props), "
+                "in a new pose and action as described")
     else:
         keep = "the same character from the reference image, with exactly the same design, proportions and colours"
     instruction = f"{keep}, now {scene}" if scene else keep
@@ -424,10 +427,43 @@ def _comfy(backend: Backend, autostart: Optional[bool] = None):
         comfy = backend.comfy()
     except Exception as exc:  # noqa: BLE001 - resolver failures become one readable reason
         raise Unavailable("image", [f"ComfyUI could not be resolved: {exc}"]) from exc
+    if comfy is None and _comfy_port_busy(backend):
+        # the server is up (its port listens) but too busy to answer the
+        # probe - loading a large model, or a heavy step on a shared card. A
+        # GPU job waits for it instead of failing on the spot.
+        deadline = time.monotonic() + COMFY_BUSY_WAIT_S
+        while comfy is None and time.monotonic() < deadline and _comfy_port_busy(backend):
+            time.sleep(COMFY_BUSY_POLL_S)
+            try:
+                comfy = backend.comfy()
+            except Exception:  # noqa: BLE001
+                comfy = None
     if comfy is None:
         res = backend.link.sync.resolve("image")
         raise Unavailable("image", (res.details or {}).get("reasons") or [res.reason or "ComfyUI is not reachable"])
     return comfy
+
+
+# how long a GPU job waits for a ComfyUI that listens but does not answer
+COMFY_BUSY_WAIT_S = 600.0
+COMFY_BUSY_POLL_S = 5.0
+
+
+def _comfy_port_busy(backend: Any) -> bool:
+    """True on a GPU worker whose ComfyUI port accepts connections (the
+    server is alive, only slow). Request threads never wait."""
+    bound = getattr(backend, "_bound", None)
+    if not getattr(bound, "worker", False):
+        return False
+    url = getattr(bound, "url", None)
+    if not url:
+        port = getattr(backend, "main_comfy_port", lambda: None)()
+        if port is None:
+            return False
+        url = f"http://127.0.0.1:{port}"
+    from .hoard_link.launch import _port_open
+
+    return _port_open(url, timeout=1.0)
 
 
 # How long a job may take on ComfyUI. A render on a busy or shared card
@@ -479,11 +515,55 @@ async def _cancel_comfy_prompt(comfy: Any, prompt_id: str) -> str:
     return "not_queued"
 
 
+def _queue_tolerant(backend: Any, comfy: Any, workflow: dict[str, Any], client_id: str) -> str:
+    """POST the prompt, riding out a ComfyUI too busy to answer in time. A
+    timed-out POST may still have been accepted, so before sending it again
+    look for our client_id in ComfyUI's queue - never queue the same render
+    twice."""
+    last: Optional[Exception] = None
+    for attempt in range(4):
+        try:
+            return backend.run_async(comfy.queue(workflow, client_id))
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last = exc
+        for _ in range(6):  # up to ~30 s to see whether it got in after all
+            time.sleep(COMFY_BUSY_POLL_S)
+            found = _queued_prompt_for(backend, comfy, client_id)
+            if found:
+                return found
+    raise last if last else RuntimeError("could not queue the prompt")
+
+
+def _queued_prompt_for(backend: Any, comfy: Any, client_id: str) -> Optional[str]:
+    async def look() -> Optional[str]:
+        resp = await comfy._client.get(comfy.url + "/queue", timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json() if resp.content else {}
+        for key in ("queue_running", "queue_pending"):
+            for item in data.get(key) or []:
+                if (isinstance(item, (list, tuple)) and len(item) > 3 and isinstance(item[3], dict)
+                        and item[3].get("client_id") == client_id):
+                    return str(item[1])
+        return None
+
+    try:
+        return backend.run_async(look())
+    except Exception:  # noqa: BLE001 - still too busy; the caller tries again
+        return None
+
+
 def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: list[tuple[bytes, str]],
                          progress: Callable[..., None], timeout_s: float, output_node: Optional[str]) -> list:
     comfy = _comfy(backend)
     for data, name in uploads:
-        backend.run_async(comfy.upload_image(data, name))
+        for attempt in range(4):  # same name overwrites, so a retry is harmless
+            try:
+                backend.run_async(comfy.upload_image(data, name))
+                break
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt == 3:
+                    raise
+                time.sleep(COMFY_BUSY_POLL_S)
     client_id = str(uuid.uuid4())
     record = getattr(progress, "record_comfy_submission", None)
     receipt = {"phase": "intent", "client_id": client_id,
@@ -495,7 +575,7 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
         receipt["endpoint"] = urlunsplit((endpoint.scheme, host + (f":{endpoint.port}" if endpoint.port else ""),
                                           endpoint.path, "", ""))
         record(receipt)  # durable commit precedes the potentially accepted POST
-    prompt_id = backend.run_async(comfy.queue(workflow, client_id))
+    prompt_id = _queue_tolerant(backend, comfy, workflow, client_id)
     if record is not None:
         record(dict(receipt, phase="accepted", prompt_id=prompt_id))
     deadline = time.monotonic() + timeout_s
@@ -510,7 +590,13 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
         try:
             backend.run_async(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
             break
-        except TimeoutError:
+        except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
+            # TimeoutError: not finished yet. An httpx timeout or dropped
+            # connection: ComfyUI is too busy to answer /history right now
+            # (a model loading, a heavy step) - the render is still going,
+            # so keep polling until the job's own deadline instead of failing
+            if not isinstance(exc, TimeoutError) and time.monotonic() <= deadline:
+                time.sleep(1.0)
             if time.monotonic() > deadline:
                 # a render given up on must not stay on the card: it would
                 # keep the GPU (and any language model sharing it) busy for
@@ -524,7 +610,14 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
                 raise EngineError("comfy_timeout", f"ComfyUI did not finish job {prompt_id} within {int(timeout_s)} s; "
                                   f"{what}. On a shared or busy GPU free it first (the header shows who holds it) "
                                   "or raise PROSPERO_COMFY_TIMEOUT_S") from None
-    outputs = backend.run_async(comfy.outputs(prompt_id))
+    for attempt in range(6):
+        try:
+            outputs = backend.run_async(comfy.outputs(prompt_id))
+            break
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt == 5:
+                raise
+            time.sleep(COMFY_BUSY_POLL_S)
     saved = [o for o in outputs if o.type == "output"]
     if output_node:
         preferred = [o for o in saved if o.node_id == output_node]
@@ -534,7 +627,14 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
 
 def _download_output(backend: Backend, output) -> bytes:
     comfy = _comfy(backend)
-    return backend.run_async(comfy.download(output))
+    for attempt in range(6):
+        try:
+            return backend.run_async(comfy.download(output))
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt == 5:
+                raise
+            time.sleep(COMFY_BUSY_POLL_S)
+    raise RuntimeError("unreachable")
 
 
 _object_info_cache_hash: dict[str, str] = {}
@@ -784,6 +884,44 @@ def _video_thumbnail(path: Path, dest: Path) -> Optional[str]:
     make_thumbnail(tmp, dest)
     tmp.unlink(missing_ok=True)
     return dest.relative_to(dest.parent.parent).as_posix()
+
+
+def extract_frames(store: Store, asset_id: str, count: int = 6, project_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Stills out of a video or an animated GIF, evenly spaced, as image
+    assets: a dance GIF becomes poses to hand a shot as references."""
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "video":
+        raise EngineError("not_video", f"asset {asset_id} is {asset['kind']}; frames come out of a video or a GIF")
+    if not 1 <= int(count) <= 24:
+        raise EngineError("bad_parameter", "count must be between 1 and 24")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to take frames out of a video")
+    src = store.data_dir / asset["file_path"]
+    duration = float(asset.get("duration_s") or 0) or 1.0
+    pid = project_id or asset["project_id"]
+    tmp_dir = store.data_dir / "tmp" / "frames"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    out = []
+    n = int(count)
+    for i in range(n):
+        t = round(duration * (i + 0.5) / n, 3)
+        tmp = tmp_dir / f"{new_id('fr')}.png"
+        procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-ss", str(t), "-i", str(src), "-frames:v", "1", str(tmp)],
+                     timeout=60)
+        if not tmp.is_file():
+            continue
+        try:
+            out.append(import_asset(store, pid, tmp, "image",
+                                    original_name=f"{Path(asset.get('name') or 'video').stem} frame {i + 1}.png",
+                                    recipe={"operation": "extract_frame", "backend": "local", "input_asset_ids": [asset_id],
+                                            "derived_from": asset_id, "time_s": t},
+                                    source="derived"))
+        finally:
+            tmp.unlink(missing_ok=True)
+    if not out:
+        raise EngineError("no_frames", "no frame could be read from that video")
+    return out
 
 
 _SAMPLING_KEYS = ("steps", "cfg", "sampler", "scheduler")

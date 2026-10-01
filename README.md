@@ -299,6 +299,32 @@ review, the Wan clips and the cut on the beat. In the viewer, **Animate**
 makes a Wan 2.2 clip (SVD only when Wan is not installed) and **Edit with the
 instruction** edits the picture with Qwen-Image keeping its subject.
 
+The production page keeps the **shot list editable** the whole time: every
+shot shows its still, its song section, where it plays in the song (from
+the animatic's cut) and, while rendering, how it is going ("still · 1:23 /
+~2:00", queued, failed). Click a shot to change what it shows, the motion
+text, whether the lead is in it, its section (with that section's lyrics
+next to it), still or clip, which variant is the still, or to regenerate or
+delete it; **+** between two shots adds a new one there. Each shot can take
+its own **references**, each with what to take from it ("copy this dance
+pose", "these Pokemon dance in the background", "this place"): from the
+library, frames taken out of a video or an animated GIF, an upload, or a
+YouTube / X / Instagram link (only the part between *from* and *to* is
+downloaded). They follow the lead's canonical image as `<image2>`,
+`<image3>`... Edits apply when the production is paused (**Pause to
+edit** keeps whatever already rendered); **Save and render** rebuilds only
+what changed. **Lyrics** gives an existing song its lyrics with
+`[Verse]`/`[Chorus]` tags: timed to the song, they make each shot play over
+its section. A lead shot is edited from the canonical image keeping its
+design (face, body shape, colours, props) but taking the pose and action of
+the shot's text. References shape the still; the clip animates that still
+from the motion text (copying a movement from a video needs a
+motion-transfer model, not installed).
+
+**Library > Download from a link** brings a video (or just a section of
+it, or its audio) from YouTube, X, Instagram and the other sites yt-dlp
+knows, as an mp4 in the project. Animated GIFs import as videos.
+
 ### Running without Faustus
 
 The header carries the machine's vitals on every screen: GPU use, one tank

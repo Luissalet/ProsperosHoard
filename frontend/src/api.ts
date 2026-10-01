@@ -736,6 +736,16 @@ export interface ProductionShot {
   clips: number[];
   motion: "still" | "move";
   motion_prompt?: string;
+  section?: string;
+  refs?: ShotRef[];
+}
+
+export interface ShotRef { asset_id: string; use: string }
+
+export interface ProductionTiming {
+  shots: Record<string, { start_s: number; duration_s: number; section: string | null }[]>;
+  sections: { label: string; kind: string | null; start_s?: number; end_s?: number | null; lines: string[] }[];
+  duration_s?: number;
 }
 
 export interface ProductionView extends ProductionSummary {
@@ -795,6 +805,8 @@ export interface ProductionState {
   qa?: { last?: QaScorecard };
   view: ProductionView;
   done_keys?: string[];
+  partial?: Record<string, any>;
+  timing?: ProductionTiming | null;
 }
 
 export interface QaItem {
@@ -1040,6 +1052,11 @@ export const api = {
   production: (slug: string) => request<ProductionState>("GET", `/api/productions/${slug}`),
   continueProduction: (slug: string, take?: number) =>
     request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
+  setProductionLyrics: (slug: string, lyrics: string, run = false) =>
+    request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+  downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
+    request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
+  videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
     request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),

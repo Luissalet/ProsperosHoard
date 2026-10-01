@@ -194,19 +194,21 @@ def studio_video_from_plan(
     name: str, draft: dict[str, Any], character_id: Optional[str] = None, lead_name: Optional[str] = None,
     lead_look: Optional[str] = None, song_asset_id: Optional[str] = None, clips: str = "all",
     aspects: Optional[list[str]] = None, song_takes: int = 2, engine: str = "auto", project: Optional[str] = None,
+    lyrics: Optional[str] = None,
 ) -> dict[str, Any]:
     """Start a music video production from a (possibly edited) studio_video_plan draft.
 
     Runs character -> song -> stills -> animatic (pauses for review: studio_production_continue) ->
     clips -> cut, resumable. clips: "all" moving shots get a Wan clip, "lead" only shots with the lead,
-    "none" (a still-image cut). aspects: ["16:9"] by default, "9:16" for vertical. Poll studio_production.
+    "none" (a still-image cut). aspects: ["16:9"] by default, "9:16" for vertical. With an existing
+    song, pass its lyrics too: timed, they tie each shot to its section. Poll studio_production.
 
     Keywords: create music video, start videoclip, produce, crear videoclip, empezar produccion, montar videoclip
     """
     return _call("POST", "/api/agent/studio_video_from_plan", json={
         "name": name, "draft": draft, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look,
         "song_asset_id": song_asset_id, "clips": clips, "aspects": aspects, "song_takes": song_takes, "engine": engine,
-        "project": project})
+        "project": project, "lyrics": lyrics})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
@@ -977,14 +979,60 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
 
     changes: [{"key": "3", "best": 1}] picks variant 1 as the still; {"key": "3", "clip": false}
     keeps it a still (no Wan clip); {"key": "3", "prompt": "..."} or {"regenerate": true} makes it
-    again with a new seed; {"motion": "still"|"move"}, {"motion_prompt": "..."}. Only what depends on
-    a changed shot is redone; run=true queues the production (it rebuilds the animatic and pauses
-    again when animatic is on).
+    again with a new seed; {"motion": "still"|"move"}, {"motion_prompt": "..."}; {"lead": true|false};
+    {"section": "chorus"} (intro, verse, prechorus, chorus, bridge, breakdown, outro: the cut plays the
+    shot over that part of the song); {"refs": [{"asset_id": "a_...", "use": "copy this dance pose"},
+    {"asset_id": "a_...", "use": "these Pokemon dance in the background"}]} gives the shot its own
+    reference images (numbered after the lead's canonical image); {"after": "5"} moves it after
+    shot 5 ("start" = first); {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
+    "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot. Only
+    what depends on a changed shot is redone; run=true queues the production (it rebuilds the
+    animatic and pauses again when animatic is on). The production must not be running.
 
-    Keywords: change shots, swap still, regenerate shot, cambiar planos, cambiar toma, regenerar plano
+    Keywords: change shots, swap still, regenerate shot, add shot, delete shot, reorder shots, shot reference,
+    cambiar planos, cambiar toma, regenerar plano, añadir plano, borrar plano, referencias del plano
     """
     return _call("POST", "/api/agent/studio_production_shots", params={"production": production},
                 json={"changes": changes, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_lyrics(production: str, lyrics: str, run: bool = False) -> dict[str, Any]:
+    """Give a production's song its lyrics, with [Verse]/[Chorus] tags / letra de la produccion.
+
+    The lyrics stage times them to the song, shots with a `section` play over that section in the
+    cut and the karaoke shows them. Rebuilds the lyrics, animatic and cut; run=true queues it.
+
+    Keywords: lyrics, song lyrics, sections, letra, letra de la cancion, secciones
+    """
+    return _call("PUT", f"/api/productions/{production}/lyrics", json={"lyrics": lyrics, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def studio_download_media(project: str, url: str, audio_only: bool = False, start_s: Optional[float] = None,
+                          end_s: Optional[float] = None) -> dict[str, Any]:
+    """Download a video from a link (YouTube, X, Instagram...) into the project's library as mp4 / descargar video.
+
+    Queues a job; the asset id is in its outputs when done (poll studio_job). start_s/end_s cut just
+    that section (a dance move, a scene), up to 20 min when uncut. audio_only keeps an mp3. Then
+    studio_video_frames turns it into reference stills.
+
+    Keywords: download video, youtube link, paste link, reference video, descargar video, enlace de youtube, bajar video
+    """
+    return _call("POST", "/api/agent/studio_download_media", params={"project": project},
+                 json={"url": url, "audio_only": audio_only, "start_s": start_s, "end_s": end_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_video_frames(asset_id: str, count: int = 6) -> dict[str, Any]:
+    """Take stills out of a video or an animated GIF as image assets / sacar fotogramas de un video o GIF.
+
+    count: 1-24, evenly spaced. Use them as references (a dance pose for a shot, a look to copy):
+    studio_production_shots refs or studio_generate_image reference_asset_ids.
+
+    Keywords: frames from video, gif frames, extract frames, pose reference, fotogramas, sacar frames, gif
+    """
+    return _call("POST", "/api/agent/studio_video_frames", json={"asset_id": asset_id, "count": count})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

@@ -17,6 +17,7 @@ dependencies = [
     "mcp==1.9.4",
     "imageio-ffmpeg==0.5.1",
     "piper-tts==1.8.0",
+    "yt-dlp==2026.8.19",
 ]
 
 [project.optional-dependencies]

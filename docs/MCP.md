@@ -70,6 +70,9 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_service_stop` | no | `id` | `ok`, `service`, `error` (a server started outside the Hoard family is refused) |
 | `studio_gpu_memory` | yes | - | `gpus[{index, name, free_mb, total_mb, held_by[], other_processes}]`, `servers[{id, label, gpus, models, held_mb, stoppable}]`, `vram_needed_mb{qwen21, flux, sdxl, wan, ace}` |
 | `studio_video_plan` | no | `concept`, `character_id` or `lead_name`+`lead_look`, `shots` (10), `language` ("en"), `song_asset_id`, `lyrics`, `genre`, `duration_s` (120) | `draft{title, world_look, world_negative, song{tags, lyrics, bpm, key, language, duration}, shots[{prompt, lead, motion, motion_prompt, section}], warnings?}`, `lead`; error `llm_stalled` when the model does not start or stops writing for 4 min (the message names any ComfyUI render on its GPUs) |
+| `studio_production_lyrics` | no | `production`, `lyrics` (with [Verse]/[Chorus] tags), `run` (false) | the song's lyrics: timed, each shot plays over its `section`; rebuilds lyrics, animatic and cut |
+| `studio_video_frames` | no | `asset_id` (a video or animated GIF), `count` (6, 1-24) | `items`: image assets evenly spaced - pose references for a shot |
+| `studio_download_media` | no | `project`, `url` (YouTube, X, Instagram...), `audio_only`, `start_s`, `end_s` | `job`; when done its outputs hold the mp4 (or mp3) asset id |
 | `studio_video_from_plan` | no | `name`, `draft`, the lead as above, `song_asset_id`, `clips` ("all" \| "lead" \| "none"), `aspects` (["16:9"]), `song_takes` (2; more than one pauses after the song: `studio_production_continue(take=N)`), `engine`, `project` | `production`, `job` |
 | `studio_delete_assets` | no | `ids` (up to 200), `force` (false) | `deleted[]`, `detached{id: [where]}`, `failed[{id, error (asset_in_use/not_found), message, references}]` |
 | `studio_trash` | no (destructive when emptying) | `action` ("list" \| "restore" \| "empty"), `ids`, `project` | `items[]` / `restored[]` / `purged[]` |
@@ -99,7 +102,7 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_production` | yes | `production` | `{slug, status, stages{...}, lead, shots, character_id, song_asset_id, renders{aspect: {quality: asset_id}}, animatic?, qa?, next}` |
 | `studio_production_create` | no | `name, spec, settings=None, project=None` | `{production, job}` - see [API.md](API.md#productions-and-recipes-ui-routes) for the spec |
 | `studio_production_continue` | no | `production` | `{production, job}` |
-| `studio_production_shots` | no | `production, changes[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?}], run=True` | `{changed, status, job?, production}` |
+| `studio_production_shots` | no | `production, changes[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?, lead?, section?, refs?[{asset_id, use}], after?, delete?} or {insert: {after, prompt, lead, section, motion_prompt, refs}}], run=True` | `{changed, status, job?, production}` |
 | `studio_recipe_export` | no | `production, name=None` | recipe summary + `cast` (what the `{lead}` slot needs), `warnings`, `notes` |
 | `studio_recipes_list` | yes | - | `items[{name, title, original_lead, shots, lead_shots, clips, reusable{song, frames, clips}, warnings}]` |
 | `studio_recipe_get` | yes | `recipe` | summary, `cast`, `placeholders`, song, world, `shot_list[{key, lead, prompt, seed, variants, clips, motion}]`, timeline, settings, warnings |

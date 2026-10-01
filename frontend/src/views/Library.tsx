@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderInput, Images, RotateCcw, Search, Trash2, Upload } from "lucide-react";
+import { Download, FolderInput, Images, RotateCcw, Search, Trash2, Upload } from "lucide-react";
 import { api, type Asset, type TrashItem } from "../api";
 import { useT } from "../i18n";
 import { AssetTile, ConfirmButton, Empty, Modal, useApp, useDebounced } from "../components/ui";
 import { useDeleteAssets } from "../components/useDeleteAssets";
+import { LinkDownload } from "../components/LinkDownload";
 
 export function LibraryView() {
   const { t } = useT();
@@ -18,6 +19,7 @@ export function LibraryView() {
   const [next, setNext] = useState<number | null>(null);
   const [focus, setFocus] = useState(0);
   const [pathOpen, setPathOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [path, setPath] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const [picked, setPicked] = useState<string[] | null>(null);
@@ -101,10 +103,11 @@ export function LibraryView() {
             {picked ? t("selectDone") : t("selectMode")}</button>
           <button className={`btn${showTrash ? " primary" : ""}`} onClick={() => { setShowTrash(!showTrash); setPicked(null); }}>
             <Trash2 size={16} /> {t("trashTitle")}</button>
+          <button className="btn" onClick={() => setLinkOpen(true)}><Download size={16} /> {t("dlTitle")}</button>
           <button className="btn" onClick={() => setPathOpen(true)}><FolderInput size={16} /> {t("importPath")}</button>
           <button className="btn primary" onClick={() => fileRef.current?.click()}><Upload size={16} /> {t("upload")}</button>
           <input ref={fileRef} type="file" multiple hidden onChange={(e) => upload(e.target.files)}
-            accept=".png,.jpg,.jpeg,.webp,.bmp,.mp3,.wav,.flac,.ogg,.m4a,.mp4,.mov,.webm,.mkv,.lrc,.txt,.ttf,.otf" />
+            accept=".png,.jpg,.jpeg,.webp,.bmp,.gif,.mp3,.wav,.flac,.ogg,.m4a,.mp4,.mov,.webm,.mkv,.lrc,.txt,.ttf,.otf" />
         </div>
       </div>
       <div className="filters">
@@ -168,6 +171,12 @@ export function LibraryView() {
           </div>
           {next !== null && <div style={{ textAlign: "center", marginTop: 16 }}><button className="btn" onClick={more}>{t("loadMore")}</button></div>}
         </>
+      )}
+      {linkOpen && (
+        <Modal title={t("dlTitle")} onClose={() => setLinkOpen(false)} wide>
+          <p className="small muted">{t("dlHint")}</p>
+          <LinkDownload projectId={pid} onDone={() => setLinkOpen(false)} />
+        </Modal>
       )}
       {pathOpen && (
         <Modal title={t("importPath")} onClose={() => setPathOpen(false)}

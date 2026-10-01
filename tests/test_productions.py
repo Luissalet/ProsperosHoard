@@ -202,7 +202,7 @@ def test_change_shots_invalidates_what_depends_on_them(data_dir):
     prod.save_state(data_dir, state)
     out = prod.update_shots(data_dir, state["slug"], [{"key": "1", "best": 1}, {"key": "2", "regenerate": True},
                                                       {"key": "2", "clip": False}])
-    assert out["changed"] == ["1", "2", "2"] and out["status"] == "queued"
+    assert out["changed"] == ["1", "2"] and out["status"] == "queued"
     after = prod.load_state(data_dir, state["slug"])
     assert after["done"]["frames"]["items"]["1"]["best"] == "a_2"
     assert "2" not in after["done"]["frames"]["items"] and after["done"]["frames"]["complete"] is False

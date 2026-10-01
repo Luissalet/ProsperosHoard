@@ -106,3 +106,52 @@ def test_a_timed_out_render_is_stopped_not_left_on_the_card(monkeypatch):
         engine._run_comfy_workflow(Backend(), {"1": {}}, [], progress, 0.0, None)
     assert err.value.code == "comfy_timeout" and "stopped it there" in err.value.message
     assert calls == ["ours"]
+
+
+def test_a_busy_comfyui_is_waited_on_not_failed(monkeypatch):
+    """/history timing out (ComfyUI loading a model) keeps the job polling."""
+    calls = {"wait": 0}
+
+    class Comfy:
+        url = "http://127.0.0.1:8188"
+
+        async def queue(self, workflow, client_id):
+            return "ours"
+
+        async def wait(self, prompt_id, timeout_s, poll_interval_s):
+            calls["wait"] += 1
+            if calls["wait"] < 3:
+                raise httpx.ReadTimeout("busy")
+
+        async def outputs(self, prompt_id):
+            return []
+
+    class Backend:
+        def run_async(self, coro):
+            return asyncio.run(coro)
+
+    progress = lambda *a, **k: None
+    monkeypatch.setattr(engine, "_comfy", lambda backend: Comfy())
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    assert engine._run_comfy_workflow(Backend(), {"1": {}}, [], progress, 60.0, None) == []
+    assert calls["wait"] == 3
+
+
+def test_a_timed_out_queue_post_is_not_sent_twice(monkeypatch):
+    posts = []
+
+    class Comfy:
+        url = "http://127.0.0.1:8188"
+
+        async def queue(self, workflow, client_id):
+            posts.append(client_id)
+            raise httpx.ReadTimeout("slow")
+
+    class Backend:
+        def run_async(self, coro):
+            return asyncio.run(coro)
+
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    monkeypatch.setattr(engine, "_queued_prompt_for", lambda backend, comfy, client_id: "accepted-anyway")
+    assert engine._queue_tolerant(Backend(), Comfy(), {"1": {}}, "cid") == "accepted-anyway"
+    assert posts == ["cid"]

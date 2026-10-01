@@ -70,7 +70,7 @@ def cut_inputs(state: dict[str, Any], prefer_clips: bool) -> tuple[list[str], di
                 owner.setdefault(aid, prod.shot_key(key, i))
     owner.update({aid: key for key, aid in clips.items() if aid})
     pool = [e["best"] for e in frames.values() if e.get("best")] + [c for c in clips.values() if c]
-    board = (spec.get("timeline") or {}).get("storyboard") or {}
+    board = prod.storyboard_for(spec)
     pools = {section: [a for a in (clips.get(k) or _still_for(state, k) for k in keys) if a] for section, keys in board.items()}
     return pool, pools, owner
 
