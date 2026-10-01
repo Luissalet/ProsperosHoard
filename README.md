@@ -105,6 +105,13 @@ ComfyUI/models/diffusion_models/wan_animate_2_distill_fp8_e4m3fn.safetensors`
 when it is there. A template can name the card it needs (`min_card_mb`):
 with a render pool, a job waits for a server whose card holds it and the
 others keep taking the rest.
+Animate renders 3 s (73 frames at 24 fps) by default: on a 16 GB card 81
+frames already spill out of VRAM and crawl. Prospero's launcher starts
+ComfyUI with disk-backed offload off (a big model then streams from RAM,
+not from the disk, on every step); on a Windows card that also draws
+desktop apps, `"comfyui": {"args": ["--reserve-vram", "2.5"]}` in
+`~/.hoard/backends.json` keeps them from pushing the render into shared
+memory.
 
 `studio_generate_image`'s `engine` parameter (and a project's own `image_engine`
 setting) picks between the image families: `auto` (default) resolves to
