@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import os
 import re
 import subprocess
@@ -28,12 +29,15 @@ from ._sync import SyncFacade
 from .config import CapabilityConfig, LinkConfig
 from .errors import BackendError, Unavailable
 from .gpu import GpuMemory, gpu_free_mb
+from .lease import Lease, LeaseError, LeaseTimeout
+from . import reasoning as _reasoning
 from .types import CAPABILITIES, ChatResult, Resolution, Usage
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPEN_RE = re.compile(r"<think>", re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
 _CACHE_TTL_S = 30.0
+_log = logging.getLogger("hoard_link")
 TTS_COMMAND_TIMEOUT_S = 120.0
 
 # Endpoint suffixes someone may paste into a URL field; stripped to get
@@ -202,6 +206,53 @@ def _ollama_fits(capability: str, caps: list[str]) -> bool:
         return not caps or "completion" in caps
     needed = {"vision": "vision", "embeddings": "embedding"}.get(capability)
     return needed is None or needed in caps
+
+
+def _tag_size_mb(tags: Any, name: Optional[str]) -> Optional[int]:
+    """Size on disk of an installed Ollama model, from ``/api/tags``."""
+    for t in tags or []:
+        if isinstance(t, dict) and name in (t.get("name"), t.get("model")) and isinstance(t.get("size"), (int, float)):
+            return int(t["size"] // (1024 * 1024))
+    return None
+
+
+def _load_vram_mb(size_mb: Any) -> Optional[int]:
+    """Rough VRAM for loading a model file: weights + 20% + 512 MiB of
+    context. Only used when the capability has no ``vram_mb`` configured."""
+    if isinstance(size_mb, (int, float)) and size_mb > 0:
+        return int(size_mb * 1.2) + 512
+    return None
+
+
+class _NoLease:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+class _GuardedLease:
+    """A :class:`Lease` whose refusals never break the call: a request the
+    hub rejects outright (e.g. an estimate larger than any single GPU, for a
+    model Ollama would split across several) proceeds without a lease, and a
+    queue wait past ``lease_timeout_s`` surfaces as :class:`Unavailable`."""
+
+    def __init__(self, capability: str, lease: Lease):
+        self.capability = capability
+        self.lease = lease
+
+    async def __aenter__(self) -> Lease:
+        try:
+            return await self.lease.aacquire()
+        except LeaseTimeout as exc:
+            raise Unavailable(self.capability, [f"GPU busy: {exc}"]) from exc
+        except LeaseError as exc:
+            _log.warning("%s; loading without a GPU lease", exc)
+            return self.lease
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.lease.arelease()
 
 
 def _prefer(names: list[str], preferred: Optional[str]) -> list[str]:
@@ -450,6 +501,7 @@ class Link:
         listed = [m for m in (item.get("models") or []) if isinstance(m, str) and m]
         preferred = self.config.capability(capability).model
         resident: Optional[bool]
+        size_mb: Optional[int] = None
 
         if api == "ollama":
             # The registry lists what Faustus *can* use, not what is loaded:
@@ -464,6 +516,7 @@ class Link:
                 model, resident = candidates[0], True
             elif self._may_load(capability) and listed:
                 model, resident = _prefer(listed, preferred)[0], False
+                size_mb = _tag_size_mb(ollama.get("tags"), model)
             else:
                 reasons.append(
                     f"Faustus registry lists Ollama models for '{capability}' but none is resident "
@@ -475,6 +528,9 @@ class Link:
             # A llama-server serves exactly the model it loaded at start.
             resident = True if provider == "llamacpp" else None
 
+        details_extra: dict[str, Any] = {}
+        if api == "ollama" and resident is False and size_mb is not None:
+            details_extra["size_mb"] = size_mb
         tail = {True: "; resident", False: "; would load", None: ""}[resident]
         reason = (
             f"{capability} -> {backend} at {_host(url)} ({model}), from Faustus registry{tail}"
@@ -493,6 +549,7 @@ class Link:
                 "endpoint_name": item.get("endpoint_name"),
                 "category": item.get("category"),
                 "resident": resident,
+                **details_extra,
             },
         )
 
@@ -616,7 +673,8 @@ class Link:
             api="ollama",
             state="resolved",
             reason=reason,
-            details={"source": "loopback", "resident": resident},
+            details={"source": "loopback", "resident": resident,
+                     **({"size_mb": _tag_size_mb(ollama.get("tags"), model)} if not resident else {})},
         )
 
     async def _loopback_openai_compat(self, reasons: list[str]) -> Optional[Resolution]:
@@ -670,6 +728,19 @@ class Link:
     # actions
     # ------------------------------------------------------------------
 
+    def _load_lease(self, res: Resolution) -> Any:
+        """``async with`` guard for a call that makes the server LOAD a model
+        (``details["resident"] is False``): hold a GPU lease from the hub for
+        the load and the call. A resident model needs none (no-op)."""
+        if not self.config.gpu_lease or res.details.get("resident") is not False:
+            return _NoLease()
+        cc = self.config.capability(res.capability)
+        vram = cc.vram_mb or _load_vram_mb(res.details.get("size_mb")) or self.config.lease_vram_mb
+        return _GuardedLease(res.capability, Lease(
+            vram, purpose=f"{res.capability}: load {res.model} on {res.provider}", owner=self.config.app,
+            timeout_s=self.config.lease_timeout_s, hub_url=self.config.hub_url, client=self._client,
+        ))
+
     async def _post_json(
         self,
         provider: Optional[str],
@@ -688,8 +759,36 @@ class Link:
         except httpx.HTTPError as exc:
             raise BackendError(provider, 0, f"{type(exc).__name__} at {_host(url)}: {exc}"[:200]) from exc
         if resp.status_code >= 400:
-            raise BackendError(provider, resp.status_code, resp.text[:200])
+            err = BackendError(provider, resp.status_code, resp.text[:200])
+            err.body = resp.text[:4000]
+            raise err
         return resp
+
+    async def _post_chat(
+        self, provider: Optional[str], url: str, payload: dict[str, Any], level: Optional[str]
+    ) -> httpx.Response:
+        """A chat POST whose timeout grows with the reasoning asked for; a
+        server that refuses the reasoning fields (400 naming them) gets the
+        call once more without them, at its own default."""
+        try:
+            return await self._post_json(provider, url, payload, timeout=_reasoning.timeout_for(120.0, level))
+        except BackendError as exc:
+            body = getattr(exc, "body", None) or exc.body_excerpt
+            if level is None or not _reasoning.looks_like_reasoning_error(exc.status, body):
+                raise
+            # A chat template that only knows some effort names says which;
+            # ask again with the nearest one before giving the reasoning up.
+            if _reasoning.remap_effort(payload, _reasoning.supported_efforts(body)):
+                try:
+                    return await self._post_json(provider, url, payload,
+                                                 timeout=_reasoning.timeout_for(120.0, level))
+                except BackendError as exc2:
+                    body2 = getattr(exc2, "body", None) or exc2.body_excerpt
+                    if not _reasoning.looks_like_reasoning_error(exc2.status, body2):
+                        raise
+            if not _reasoning.strip(payload):
+                raise
+            return await self._post_json(provider, url, payload, timeout=_reasoning.timeout_for(120.0, level))
 
     @staticmethod
     def _json(provider: Optional[str], resp: httpx.Response) -> Any:
@@ -706,7 +805,19 @@ class Link:
         temperature: Optional[float] = None,
         capability: str = "llm",
         response_format: Optional[dict[str, Any]] = None,
+        effort: Optional[str] = None,
     ) -> ChatResult:
+        """One chat call to the resolved model.
+
+        `effort` (``off`` / ``low`` / ``medium`` / ``high`` / ``max``) is how
+        hard the model reasons before answering; None or ``auto`` uses the
+        capability's configured default (``HOARD_LLM_EFFORT``), and with none
+        configured the server's own. Quality work (a graded answer, a report,
+        a plan) should ask for ``max``; titles and tags ``off``. See
+        :mod:`hoard_link.reasoning`."""
+        level = _reasoning.normalize(effort)
+        if level is None and (effort is None or str(effort).strip().lower() in ("", "auto")):
+            level = _reasoning.normalize(self.config.capability(capability).effort)
         res = await self.resolve(capability)
         if not res.resolved:
             raise Unavailable(capability, res.details.get("reasons", [res.reason]))
@@ -714,14 +825,15 @@ class Link:
             raise Unavailable(capability, [f"resolved provider '{res.provider}' has no URL to chat with"])
 
         start = self._now()
-        if res.api == "ollama":
-            text, extra_reasoning, raw = await self._chat_ollama(
-                res, messages, images, max_tokens, temperature, response_format
-            )
-        else:
-            text, extra_reasoning, raw = await self._chat_openai(
-                res, messages, images, max_tokens, temperature, response_format
-            )
+        async with self._load_lease(res):
+            if res.api == "ollama":
+                text, extra_reasoning, raw = await self._chat_ollama(
+                    res, messages, images, max_tokens, temperature, response_format, level
+                )
+            else:
+                text, extra_reasoning, raw = await self._chat_openai(
+                    res, messages, images, max_tokens, temperature, response_format, level
+                )
         elapsed_ms = (self._now() - start) * 1000.0
 
         clean_text, think = _strip_think(text)
@@ -733,6 +845,7 @@ class Link:
             usage=usage,
             elapsed_ms=elapsed_ms,
             reasoning=_join_reasoning(extra_reasoning, think),
+            effort=level,
         )
 
     async def _chat_openai(
@@ -743,6 +856,7 @@ class Link:
         max_tokens: Optional[int],
         temperature: Optional[float],
         response_format: Optional[dict[str, Any]],
+        level: Optional[str] = None,
     ) -> tuple[str, Optional[str], dict]:
         msgs = [dict(m) for m in messages]
         if images:
@@ -777,8 +891,10 @@ class Link:
         if response_format is not None:
             payload["response_format"] = response_format
 
+        _reasoning.apply_openai(payload, level)
+
         endpoint = _openai_endpoint(res.url or "", "/chat/completions")
-        resp = await self._post_json(res.provider, endpoint, payload, timeout=120.0)
+        resp = await self._post_chat(res.provider, endpoint, payload, level)
         data = self._json(res.provider, resp)
         try:
             message = data["choices"][0]["message"]
@@ -800,6 +916,7 @@ class Link:
         max_tokens: Optional[int],
         temperature: Optional[float],
         response_format: Optional[dict[str, Any]] = None,
+        level: Optional[str] = None,
     ) -> tuple[str, Optional[str], dict]:
         msgs = [dict(m) for m in messages]
         if images:
@@ -826,8 +943,10 @@ class Link:
         if fmt is not None:
             payload["format"] = fmt
 
+        _reasoning.apply_ollama(payload, level)
+
         endpoint = _ollama_endpoint(res.url or "", "/api/chat")
-        resp = await self._post_json(res.provider, endpoint, payload, timeout=120.0)
+        resp = await self._post_chat(res.provider, endpoint, payload, level)
         data = self._json(res.provider, resp)
         message = data.get("message") if isinstance(data, dict) else None
         if not isinstance(message, dict):
@@ -845,9 +964,10 @@ class Link:
 
         if res.api == "ollama":
             endpoint = _ollama_endpoint(res.url, "/api/embed")
-            resp = await self._post_json(
-                res.provider, endpoint, {"model": res.model, "input": texts}, timeout=60.0
-            )
+            async with self._load_lease(res):
+                resp = await self._post_json(
+                    res.provider, endpoint, {"model": res.model, "input": texts}, timeout=60.0
+                )
             data = self._json(res.provider, resp)
             if not isinstance(data, dict):
                 raise BackendError(res.provider, resp.status_code, "unexpected embeddings response")
@@ -857,9 +977,10 @@ class Link:
             return vectors or []
 
         endpoint = _openai_endpoint(res.url, "/embeddings")
-        resp = await self._post_json(
-            res.provider, endpoint, {"model": res.model, "input": texts}, timeout=60.0
-        )
+        async with self._load_lease(res):
+            resp = await self._post_json(
+                res.provider, endpoint, {"model": res.model, "input": texts}, timeout=60.0
+            )
         data = self._json(res.provider, resp)
         try:
             items = sorted(data["data"], key=lambda item: item.get("index", 0))
