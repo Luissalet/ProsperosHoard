@@ -63,7 +63,7 @@ def test_slug_and_keys():
 def test_normalise_spec_fills_defaults_and_rejects_bad_fields():
     spec = prod.normalise_spec(tiny_spec())
     assert spec["shots"][0]["best"] == 0 and spec["shots"][1]["clips"] == [0]
-    assert spec["clip_settings"]["template"] == "wan22_ti2v"
+    assert spec["clip_settings"]["template"] == "auto_clip"  # the best clip model installed at render time
     with pytest.raises(prod.ProductionError, match="lead"):
         prod.normalise_spec(tiny_spec(lead={"name": "x"}))
     with pytest.raises(prod.ProductionError, match="unknown shot"):

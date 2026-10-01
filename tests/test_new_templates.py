@@ -183,16 +183,17 @@ def test_every_builtin_template_passes_server_side_validation():
     """With its own defaults applied, every built-in template is a prompt
     a real ComfyUI 0.37 accepts as-is (required inputs including
     dynamic-combo children, combo choices, number ranges)."""
-    from prosperos_hoard.devtools.fake_comfy import real_object_info
+    from prosperos_hoard.devtools.fake_comfy import real_object_info, with_motion_models
     from prosperos_hoard.workflows.convert import validate_values
 
+    info = with_motion_models(real_object_info())
     for entry in comfy_driver.list_builtin_templates():
         workflow, spec = comfy_driver.load_template(entry["template"])
         values = dict(spec.get("defaults") or {})
         if spec.get("checkpoint_node"):
             values["checkpoint"] = comfy_driver.default_value(workflow, spec, "checkpoint")
         wf = comfy_driver.apply_params(workflow, spec, values)
-        assert validate_values(wf, real_object_info()) == [], entry["template"]
+        assert validate_values(wf, info) == [], entry["template"]
 
 
 def test_flux_schnell_without_explicit_settings_uses_its_own_defaults(store, backend_with_comfy, fake_comfy, project):

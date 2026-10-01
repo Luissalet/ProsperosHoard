@@ -93,6 +93,8 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | SDXL / SD 1.5 | `sd_xl_base_1.0.safetensors` / `v1-5-pruned-emaonly-fp16.safetensors` | ~7 GB / ~3,5 GB | Alternativa siempre disponible, boceto con poca VRAM |
 | SVD | `svd_xt.safetensors` | ~10 GB | Imagen a vídeo corto |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Imagen a vídeo, 1280x704 nativo |
+| Wan 2.2 I2V 14B (fp8) | `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` + `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors`, LoRAs lightx2v de 4 pasos, `umt5_xxl_fp8_e4m3fn_scaled.safetensors`, `wan_2.1_vae.safetensors` | ~10 GB (descarga el resto) | Movimiento real y movimientos de cámara (órbita, grúa, acercamiento) desde un fotograma, 832x480 / 480x832, 5 s a 16 fps en ~2,5 min |
+| Wan Animate 2 (destilado int8) | `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | ~10 GB (descarga el resto) | Transferencia de movimiento: el personaje de un fotograma hace el movimiento de un vídeo guía (un baile, una acrobacia) |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Composición de canciones con voz |
 | Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2,5 GB | Ampliar x2 o x4 cualquier imagen |
 | BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3,5 GB | Quitar el fondo, PNG con transparencia |
@@ -328,13 +330,36 @@ renderizado); **Guardar y renderizar** rehace solo lo que ha cambiado.
 parte. Un plano con protagonista se edita desde la imagen canónica
 conservando su diseño (cara, cuerpo, colores, accesorios) pero con la pose
 y la acción del texto del plano. Las referencias dan forma al fotograma; el
-clip anima ese fotograma con el texto de movimiento (copiar un movimiento
-de un vídeo necesita un modelo de transferencia de movimiento, no
-instalado).
+clip anima ese fotograma con el texto de movimiento con Wan 2.2 I2V 14B si
+está instalado (atajos de cámara en el editor: órbita, grúa de pies a
+cabeza, acercamiento, travelling, contrapicado, cámara en mano), si no con
+Wan 2.2 TI2V 5B.
+
+**Movimiento de un vídeo**: un plano puede tomar un vídeo (biblioteca,
+subida o enlace, desde el segundo que elijas) como referencia de
+movimiento. Su clip usa entonces Wan Animate 2: el personaje del fotograma
+hace ese movimiento - un baile, un gesto, una acrobacia - fotograma a
+fotograma, sin esqueleto, con el fondo del texto del plano. El vídeo solo
+aporta el movimiento: nada de su imagen acaba en el clip.
+
+**Reparto de fondo**: una imagen y un nombre por cada personaje que puede
+salir en el fondo (hasta 24). Los planos marcados **Fondo con el reparto**
+toman varios (tres por defecto, rotando para que salgan todos; o
+exactamente los elegidos en el plano) como referencia, con la orden de que
+solo ellos aparecen detrás del protagonista, tal como están dibujados, sin
+inventar a nadie. Cambiar el reparto redibuja solo los planos cuyo público
+cambió.
 
 **Biblioteca > Descargar de un enlace** trae un vídeo (o solo un trozo, o
 su audio) de YouTube, X, Instagram y los demás sitios que conoce yt-dlp,
-como mp4 en el proyecto. Los GIF animados entran como vídeos.
+como mp4 en el proyecto (vídeos enteros de hasta 20 minutos, o el trozo
+entre dos tiempos). Los GIF animados entran como vídeos.
+
+**Backends > Estos ComfyUI son solo para Prospero**: cuando un servidor
+está libre, un trabajo puede cargar su modelo en lugar del anterior en vez
+de esperar VRAM libre (apagado por defecto, para GPU compartidas con otras
+apps). Un modelo estimado más grande que la tarjeta nunca espera más del
+85% de ella: ComfyUI descarga el resto.
 
 ### Sin Faustus
 

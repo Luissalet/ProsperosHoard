@@ -445,7 +445,7 @@ def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -
             for short, raw in entries:
                 name = f"{prefix}{short}"
                 type_, cfg = _entry(raw)
-                if name not in inputs or cfg.get("image_upload"):
+                if name not in inputs or cfg.get("image_upload") or cfg.get("video_upload"):
                     continue
                 value = inputs[name]
                 if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):

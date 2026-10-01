@@ -1,0 +1,47 @@
+{
+  "template": "wan_animate2",
+  "kind": "video",
+  "vram_class": "wan_animate",
+  "requires_reference": true,
+  "reference_node": "189.image",
+  "driving_video_node": "240.file",
+  "map": {
+    "positive_prompt": "261:3.text",
+    "pose_prompt": "261:222.text",
+    "negative_prompt": "261:4.text",
+    "width": "261:243.resize_type.width",
+    "height": "261:243.resize_type.height",
+    "length": "261:247.length",
+    "seed": "261:19.noise_seed",
+    "steps": "261:18.steps",
+    "pose_strength": "261:247.pose_strength",
+    "reference_image_strength": "261:247.reference_image_strength",
+    "fps": "245.fps",
+    "context_windows": "261:258.switch",
+    "unet_name": "261:239.unet_name",
+    "clip_name": "261:9.clip_name",
+    "vae_name": "261:7.vae_name",
+    "clip_vision_name": "261:75.clip_name"
+  },
+  "output_node": "246",
+  "model_params": [
+    "unet_name",
+    "clip_name",
+    "vae_name",
+    "clip_vision_name"
+  ],
+  "notes": "Wan Animate 2 (distilled, int8): the character of the reference image performs the motion of a driving video - a dance, a gesture, a stunt - with no pose extraction (the raw frames drive it). The background follows `positive_prompt` ('Character appearance description: ... Background description: ...', looks only); `pose_prompt` names the motion ('a person dancing'). The driving clip is trimmed and resampled by Prospero (ffmpeg) to `fps` before upload, so `length` frames cover length/fps seconds (81 = 3.4 s at 24 fps). Converted from the official video_wan_animate2_distilled.json template through the real 0.37 frontend; the side-by-side comparison and the driving clip's audio are dropped.",
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "length": 81,
+    "fps": 24,
+    "steps": 10,
+    "pose_strength": 1,
+    "reference_image_strength": 1,
+    "context_windows": false,
+    "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+    "pose_prompt": "a person dancing"
+  },
+  "size_from_reference": "wan480"
+}

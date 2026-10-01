@@ -69,3 +69,28 @@ def test_frames_from_a_gif(store, project, tmp_path):
     assert frames[0]["recipe"]["derived_from"] == video["id"]
     with pytest.raises(engine.EngineError):
         engine.extract_frames(store, frames[0]["id"], 2)
+
+
+def test_whole_video_length_filter_with_the_real_ytdlp(store, project, monkeypatch):
+    yt_dlp = pytest.importorskip("yt_dlp")
+    seen = {}
+
+    class StopYDL:
+        def __init__(self, opts):
+            seen.update(opts)
+
+        def __enter__(self):
+            raise RuntimeError("stop here")
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", StopYDL)
+    with pytest.raises(media_download.DownloadError):
+        media_download.download(store, project["id"], "https://www.youtube.com/watch?v=abc")
+    keep = seen["match_filter"]
+    # short enough or of unknown length passes; a long stream is skipped -
+    # and none of it trips over comparing a number with text
+    assert keep({"duration": 120, "id": "a", "title": "t"}) is None
+    assert keep({"id": "a", "title": "t"}) is None
+    assert keep({"duration": 3 * 3600, "id": "a", "title": "t"})

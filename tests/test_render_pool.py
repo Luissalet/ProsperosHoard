@@ -109,3 +109,41 @@ def test_a_worker_bound_to_a_pool_server_gates_vram_on_that_server(data_dir, fak
         assert backend.vram_free_mb() == 3_000
     finally:
         backend.bind_comfy(None)
+
+
+def test_pool_client_survives_a_settings_reload(data_dir, fake_comfy, second_comfy):
+    # saving the backend settings rebuilds the Link and its event loop; the
+    # pool's ComfyUI client must follow it instead of failing with "Event is
+    # bound to a different event loop" on the next render
+    _main, main_port = fake_comfy
+    _extra, extra_port = second_comfy
+    url = f"http://127.0.0.1:{extra_port}"
+    backend = _pool_backend(data_dir, main_port, [url])
+    first = backend._pool_client(url)
+    assert backend.run_async(first.system_stats())
+    backend.reload()
+    second = backend._pool_client(url)
+    assert second is not first
+    assert backend.run_async(second.system_stats())
+    assert backend._pool_client(url) is second
+
+
+def test_busy_server_uses_the_saved_node_list(data_dir, fake_comfy, monkeypatch):
+    # a server deep in a long render can be too slow to list its nodes; the
+    # saved copy stands in so the job queues behind the render instead of failing
+    import httpx
+
+    _main, main_port = fake_comfy
+    backend = _pool_backend(data_dir, main_port, [])
+    live = engine._object_info(backend)  # saves the copy
+    assert live and engine.object_info_cache_path(data_dir).is_file()
+    comfy = engine._comfy(backend)
+
+    async def too_busy():
+        raise httpx.ReadTimeout("busy")
+
+    monkeypatch.setattr(type(comfy), "object_info", lambda self: too_busy())
+    assert engine._object_info(backend).keys() == live.keys()
+    engine.object_info_cache_path(data_dir).unlink()
+    with pytest.raises(Exception, match="not answering"):
+        engine._object_info(backend)

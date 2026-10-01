@@ -38,6 +38,10 @@ DEFAULT_VRAM_ESTIMATES_MB = {
     "qwen21": 12000,
     "esrgan": 2500,
     "birefnet": 3500,
+    # Wan 2.2 14B i2v: two 14 GB fp8 experts loaded one at a time (ComfyUI
+    # offloads the rest to RAM); Wan Animate 2 int8: 16.7 GB, partly offloaded
+    "wan14b": 10000,
+    "wan_animate": 10000,
 }
 
 
@@ -284,8 +288,14 @@ class Backend:
         self._bound.worker = True
 
     def _pool_client(self, url: str):
+        # A client's connections belong to the event loop it was created on.
+        # Saving the backend settings rebuilds the Link (and its loop), so a
+        # client made for the previous Link must not be reused - it fails
+        # with "Event is bound to a different event loop".
+        link = self.link
         with self._pool_lock:
-            client = self._pool_clients.get(url)
+            entry = self._pool_clients.get(url)
+        client = entry[1] if entry and entry[0] is link else None
         if client is None:
             from .hoard_link._comfy import ComfyClient
 
@@ -294,7 +304,11 @@ class Backend:
 
             client = self.run_async(make)
             with self._pool_lock:
-                client = self._pool_clients.setdefault(url, client)
+                current = self._pool_clients.get(url)
+                if current and current[0] is link:
+                    client = current[1]
+                else:
+                    self._pool_clients[url] = (link, client)
         return client
 
     def pool_server_ready(self, url: str, ttl_s: float = 10.0) -> bool:
@@ -320,8 +334,14 @@ class Backend:
         vram_estimates_mb: dict[str, int] | None = None,
         import_roots: list[str] | None = None,
         render_pool: list[str] | None = None,
+        comfy_dedicated: bool | None = None,
     ) -> None:
         raw = self._raw_config()
+        if comfy_dedicated is not None:
+            if comfy_dedicated:
+                raw["comfy_dedicated"] = True
+            else:
+                raw.pop("comfy_dedicated", None)
         if render_pool is not None:
             clean_pool = []
             for u in render_pool:
@@ -521,6 +541,19 @@ class Backend:
         reserved_in_use = max(0, total - unused) if self._memory_bytes(total) and self._memory_bytes(unused) else 0
         return (free + reserved_in_use) // (1024 * 1024)
 
+    def vram_total_mb(self) -> Optional[int]:
+        """The size of the card the bound ComfyUI runs on, in MB (None when
+        it does not say)."""
+        try:
+            comfy = self.comfy()
+            if comfy is None:
+                return None
+            dev = self._primary_comfy_device(self.run_async(comfy.system_stats()))
+        except Exception:
+            return None
+        total = dev.get("vram_total") if dev else None
+        return total // (1024 * 1024) if self._memory_bytes(total) and total else None
+
     @staticmethod
     def _memory_bytes(value: Any) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2**63 - 1
@@ -542,22 +575,36 @@ class Backend:
         return None
 
     def comfy_manages_memory(self, needed_mb: int) -> bool:
-        """Opt-in for one explicitly pinned dedicated endpoint, while idle.
+        """Opt-in: an idle ComfyUI that belongs to Prospero may make room
+        itself (drop the last job's models) instead of the job waiting for
+        free VRAM. Either the explicitly pinned endpoint (`comfy.manage_memory`)
+        or, with `comfy_dedicated`, every server Prospero renders on.
 
         No freeing/unloading request is made. ComfyUI handles its own cache
         as part of the already requested render; this is not a reservation.
         """
-        raw = self._raw_config().get("comfy")
-        if self.demo or not isinstance(raw, dict) or raw.get("manage_memory") is not True:
+        if self.demo:
             return False
-        pinned = raw.get("url")
-        if not isinstance(pinned, str) or not pinned.strip():
-            return False
-        pinned = pinned.strip().rstrip("/")
+
+        def allowed_for(url: str) -> bool:
+            # `comfy_dedicated: true` - every ComfyUI Prospero renders on (the
+            # main one and the render pool) is its own: an idle one may drop
+            # the previous job's models to load the next. Otherwise only the
+            # explicitly pinned `comfy.url` with `manage_memory: true`.
+            cfg = self._raw_config()
+            if cfg.get("comfy_dedicated") is True:
+                return True
+            raw = cfg.get("comfy")
+            if not isinstance(raw, dict) or raw.get("manage_memory") is not True:
+                return False
+            pinned = raw.get("url")
+            return isinstance(pinned, str) and bool(pinned.strip()) and pinned.strip().rstrip("/") == url
+
         try:
             comfy = self.comfy()
-            if comfy is None or comfy.url.rstrip("/") != pinned:
+            if comfy is None or not allowed_for(comfy.url.rstrip("/")):
                 return False
+            pinned = comfy.url.rstrip("/")
             dev = self._primary_comfy_device(self.run_async(comfy.system_stats()))
             total = dev.get("vram_total") if dev else None
             if (not self._memory_bytes(total) or not self._memory_bytes(dev.get("vram_free")) or
@@ -571,11 +618,8 @@ class Backend:
                 return response.json()
 
             queue = self.run_async(queue_snapshot())
-            current = self._raw_config().get("comfy")
             return (isinstance(queue, dict) and queue.get("queue_running") == [] and
-                    queue.get("queue_pending") == [] and isinstance(current, dict) and
-                    current.get("manage_memory") is True and
-                    str(current.get("url") or "").strip().rstrip("/") == pinned)
+                    queue.get("queue_pending") == [] and allowed_for(pinned))
         except Exception:
             return False
 
@@ -819,6 +863,7 @@ class Backend:
             "hoard_link": link_status,
             "comfy": comfy_info,
             "render_pool": [{"url": u, "reachable": self.pool_server_ready(u, ttl_s=0.0)} for u in self.render_pool()],
+            "comfy_dedicated": self._raw_config().get("comfy_dedicated") is True,
             "ffmpeg": {"found": bool(exe), "path": exe, "version": ffmpeg_version(exe)},
             "piper": {"installed": _piper_installed()},
             "fonts_bundled": bundled_fonts,
