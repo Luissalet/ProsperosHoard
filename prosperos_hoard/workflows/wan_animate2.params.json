@@ -3,6 +3,7 @@
   "kind": "video",
   "vram_class": "wan_animate",
   "min_card_mb": 15000,
+  "free_after": true,
   "requires_reference": true,
   "reference_node": "189.image",
   "driving_video_node": "240.file",

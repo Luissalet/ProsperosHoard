@@ -179,3 +179,25 @@ def test_claim_skips_jobs_a_worker_does_not_accept(store, project, data_dir):
     taken = queue._claim("gpu", gpu_worker=True)
     assert taken["id"] == second["id"]
     assert store.get_job(first["id"])["state"] == "queued"
+
+
+def test_main_client_held_by_a_job_survives_a_settings_reload(data_dir, fake_comfy):
+    # a render keeps the ComfyUI client it started with; saving settings or
+    # starting a server mid-render must not break its next call
+    _main, main_port = fake_comfy
+    backend = _pool_backend(data_dir, main_port, [])
+    comfy = backend.comfy()
+    assert backend.run_async(comfy.system_stats())
+    backend.reload()
+    assert backend.run_async(comfy.system_stats())
+    assert backend.run_async(backend.comfy().system_stats())
+
+
+def test_heavy_models_free_the_card_after_their_job_on_dedicated_servers(data_dir, fake_comfy):
+    main, main_port = fake_comfy
+    backend = _pool_backend(data_dir, main_port, [])
+    assert engine.free_after(backend, {"free_after": True}) is False  # not dedicated: never unload
+    backend.set_overrides(comfy_dedicated=True)
+    assert engine.free_after(backend, {}) is False
+    assert engine.free_after(backend, {"free_after": True}) is True
+    assert main.frees and main.frees[-1].get("unload_models") is True

@@ -28,7 +28,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
 | POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, scale?, model?, wait_s}`; `operation` is `img2img`, `inpaint`, `hires`, `upscale` (`scale` 2 or 4, default 2, at most 8192 px on a side; `model`), `remove_background`, `reuse` or `vary` |
-| POST | `/api/agent/studio_animate` | `{asset_id, frames, fps, motion, seed?, wait_s}` |
+| POST | `/api/agent/studio_animate` | `{asset_id, prompt?, engine (auto\|wan14b\|wan\|animate\|svd), driving_asset_id?, driving_start_s?, pose_prompt?, seconds?, frames, fps, motion, seed?, wait_s}`: with `driving_asset_id` the image's character performs that video's motion (Wan Animate 2) |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
 | POST | `/api/agent/studio_voice?project=` | `{text, character_id?, voice?, speed?}` |
 | POST | `/api/agent/studio_import?project=` | `{path, kind?}` |
@@ -98,7 +98,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/api/health` | `{service: "prosperos-hoard", name, version, status: "ok", demo, projects, active_jobs}` |
-| GET / POST | `/api/backend` | status: Hoard Link per capability, ComfyUI (checkpoints, devices, VRAM), ffmpeg, Piper, fonts, music adapters, VRAM estimates, overrides, `token_set`; POST `{faustus_url?, faustus_token?, comfy_url?, vram_estimates_mb?, import_roots?}` (empty string clears) |
+| GET / POST | `/api/backend` | status: Hoard Link per capability, ComfyUI (checkpoints, devices, VRAM), ffmpeg, Piper, fonts, music adapters, VRAM estimates, overrides, `token_set`; POST `{faustus_url?, faustus_token?, comfy_url?, vram_estimates_mb?, import_roots?, render_pool?, comfy_dedicated?}` (empty string clears; `comfy_dedicated: true` lets an idle server swap its own models instead of a job waiting for free VRAM) |
 | POST | `/api/backend/comfy/free` | ask ComfyUI to unload models (only on user request) |
 | GET | `/api/agent-calls?limit=` | the audit log |
 | GET / POST | `/api/projects` | list (with counts) / create `{name, brief?}` |
@@ -125,7 +125,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, unknown_mentions, reference_asset_id, style_defaults`) |
 | POST | `/api/projects/{id}/generate` | same body as the agent route; returns the full job |
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
-| POST | `/api/assets/{id}/animate` | `{asset_id, frames, fps, motion}` |
+| POST | `/api/assets/{id}/animate` | same body as `studio_animate` |
 | GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` (built-ins now include `flux_schnell_txt2img`, `flux_kontext_edit`, `wan22_ti2v`, `ace15_song` alongside SDXL/SD1.5/SVD) |
 | POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first, against the live `/object_info` or, with ComfyUI off, the copy cached in `data/comfy/object_info.json`) -> proposed spec with `map` (and `converted_from: "ui"`) |
 | POST | `/api/workflows/import-file` | multipart `file` (.json, at most 2 MB) |
@@ -188,7 +188,11 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions` | `{name, spec, settings?, project?}`: create and queue |
 | GET | `/api/productions/{slug}` | the full `state.json` plus `view` (the compact agent view) |
 | POST | `/api/productions/{slug}/continue` | approve / resume |
-| PATCH | `/api/productions/{slug}/shots` | `{changes, run}` |
+| PATCH | `/api/productions/{slug}/shots` | `{changes, run}`; a change may set `refs`, `motion_ref {asset_id, start_s, prompt}`, `crowd`, `cast [names]`, `section`, `lead`, `after`, `delete`, or `insert` a shot |
+| PUT | `/api/productions/{slug}/lyrics` | `{lyrics, run}`: the song's lyrics with section tags |
+| PUT | `/api/productions/{slug}/cast` | `{cast [{asset_id, name, note}], per_shot?, run}` -> `{cast, cast_per_shot, redraw, status}`: the background cast; crowd shots take only these |
+| POST | `/api/projects/{id}/download` | `{url, audio_only?, start_s?, end_s?}` -> `{job}` (`download_media`, yt-dlp) |
+| POST | `/api/assets/{id}/frames?count=` | stills taken out of a video or GIF |
 | GET | `/api/productions/{slug}/report` | `REPORT.md` (written on demand when missing) |
 | POST | `/api/productions/{slug}/recipe` | `{name?}` -> recipe summary |
 | GET | `/api/recipes` / `/api/recipes/{name}` | list / the whole recipe JSON |
@@ -281,8 +285,11 @@ install started again with `--cuda-device N --port P`). Each gets its own
 GPU worker, and all of them take jobs from the one GPU queue, so a batch of
 clips renders on every card at once. A pool server that is not answering
 takes no jobs. The VRAM check for a job runs against the card of the
-server that takes it. `POST /api/backend` accepts `render_pool` too, and a
-restart applies a changed list.
+server that takes it, and a template can name the card it needs
+(`min_card_mb`): that job waits for a server whose card holds it while the
+other workers take the rest (when no card is big enough, any worker takes
+it). `POST /api/backend` accepts `render_pool` too, and a restart applies a
+changed list.
 
 Environment: `PROSPERO_DATA_DIR`, `PROSPERO_COMFY_TIMEOUT_S` (how long a job
 may run on ComfyUI before it is reported as timed out; defaults 3600 s for

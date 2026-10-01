@@ -838,8 +838,24 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 **(extra_recipe or {}),
             }
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
+    free_after(backend, spec)
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
+
+
+def free_after(backend: Any, spec: dict[str, Any]) -> bool:
+    """A model that only just fits (`free_after` in its template) leaves the
+    server's memory in a state where the next run of it streams at minutes
+    per step. On servers that are Prospero's alone (`comfy_dedicated`), the
+    next job starts from a clean card. Best effort; True when asked."""
+    if not spec.get("free_after") or not getattr(backend, "comfy_dedicated", lambda: False)():
+        return False
+    try:
+        comfy = _comfy(backend)
+        backend.run_async(comfy.free(unload_models=True, free_memory=True))
+        return True
+    except Exception:  # noqa: BLE001 - the render is done either way
+        return False
 
 
 def _driving_clip(store: Store, asset: dict[str, Any], start_s: float, seconds: float, fps: float,
