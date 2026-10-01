@@ -180,22 +180,98 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
 }
 
 /** Modal grid to pick one image asset of the current project. */
-export function AssetPicker({ projectId, kind = "image", onPick, onClose, title }: {
-  projectId: string; kind?: string; onPick: (a: Asset) => void; onClose: () => void; title?: string;
+/** A searchable library menu: type to filter, click a tile to see it in the
+ * preview (image, video playing, song playing), "Use" or a double click to
+ * take it. `allProjects` adds the "all projects" scope. */
+export function AssetPicker({ projectId, kind = "image", onPick, onClose, title, allProjects = false }: {
+  projectId: string; kind?: string; onPick: (a: Asset) => void; onClose: () => void; title?: string; allProjects?: boolean;
 }) {
   const { t } = useT();
   const [query, setQuery] = useState("");
-  const dq = useDebounced(query, 250);
-  const { data } = useAsync(() => api.assets(projectId, { kind, query: dq, limit: 60 }), [projectId, kind, dq]);
+  const [scope, setScope] = useState<"project" | "all">("project");
+  const [items, setItems] = useState<(Asset & { project_name?: string })[]>([]);
+  const [next, setNext] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [focus, setFocus] = useState<(Asset & { project_name?: string }) | null>(null);
+  const dq = useDebounced(query, 220);
+  const load = useCallback(async (offset: number) => {
+    setLoading(true);
+    try {
+      const params = { kind, query: dq || undefined, limit: 60, offset };
+      const res = scope === "all" ? await api.allAssets(params) : await api.assets(projectId, params);
+      // an empty project opens on every project's library instead
+      if (!offset && !dq && scope === "project" && allProjects && !res.items.length) { setScope("all"); return; }
+      setItems((prev) => (offset ? [...prev, ...res.items] : res.items));
+      setNext(res.has_more ? res.next_offset : null);
+      if (!offset) setFocus((f) => (f && res.items.some((a) => a.id === f.id) ? f : res.items[0] || null));
+    } catch { if (!offset) setItems([]); }
+    finally { setLoading(false); }
+  }, [projectId, kind, dq, scope, allProjects]);
+  useEffect(() => { load(0); }, [load]);
+  const move = (step: number) => {
+    if (!items.length) return;
+    const i = Math.max(0, items.findIndex((a) => a.id === focus?.id));
+    setFocus(items[Math.min(items.length - 1, Math.max(0, i + step))]);
+  };
   return (
-    <Modal title={title || t("pickImage")} onClose={onClose} wide>
-      <input style={{ width: "100%", marginBottom: 12 }} placeholder={t("search")} value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-      <div className="picker-grid">
-        {(data?.items || []).map((a) => (
-          <button key={a.id} onClick={() => onPick(a)} title={a.name || a.id}>
-            {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" loading="lazy" /> : <div className="media-icon"><KindIcon kind={a.kind} /></div>}
-          </button>
-        ))}
+    <Modal title={title || t("pickImage")} onClose={onClose} wide footer={(
+      <>
+        <span className="hint grow">{t("pickerHint")}</span>
+        <button className="btn" onClick={onClose}>{t("cancel")}</button>
+        <button className="btn primary" disabled={!focus} onClick={() => focus && onPick(focus)}>{t("pickerUse")}</button>
+      </>
+    )}>
+      <div className="picker2">
+        <div className="picker2-list">
+          <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+            <input className="grow" placeholder={t("search")} value={query} autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); move(e.key === "ArrowDown" ? 4 : 1); }
+                if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); move(e.key === "ArrowUp" ? -4 : -1); }
+                if (e.key === "Enter" && focus) onPick(focus);
+              }} />
+            {allProjects && (
+              <div className="seg">
+                <button className={scope === "project" ? "on" : ""} onClick={() => setScope("project")}>{t("pickerThisProject")}</button>
+                <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>{t("pickerAllProjects")}</button>
+              </div>
+            )}
+          </div>
+          <div className="picker-grid picker2-grid">
+            {items.map((a) => (
+              <button key={a.id} className={focus?.id === a.id ? "on" : ""} title={a.name || a.id}
+                onClick={() => setFocus(a)} onDoubleClick={() => onPick(a)}>
+                {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" loading="lazy" /> : <div className="media-icon"><KindIcon kind={a.kind} /></div>}
+                <span className="picker2-name ellipsis">{a.name || a.id}</span>
+                {scope === "all" && a.project_name && <span className="picker2-proj ellipsis">{a.project_name}</span>}
+              </button>
+            ))}
+          </div>
+          {!loading && items.length === 0 && <p className="small muted">{t("pickerEmpty")}</p>}
+          {next != null && <button className="btn sm ghost" style={{ marginTop: 8 }} disabled={loading} onClick={() => load(next)}>{t("pickerMore")}</button>}
+        </div>
+        <div className="picker2-preview">
+          {focus ? (
+            <>
+              {focus.kind === "video" ? <video key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay muted loop playsInline />
+                : focus.kind === "audio" ? (
+                  <div className="stack" style={{ gap: 8, width: "100%" }}>
+                    <div className="media-icon" style={{ height: 120 }}><KindIcon kind="audio" size={40} /></div>
+                    <audio key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay style={{ width: "100%" }} />
+                  </div>
+                ) : <img src={focus.kind === "image" ? `/api/assets/${focus.id}/file` : thumbUrl(focus)} alt="" />}
+              <strong className="ellipsis" style={{ maxWidth: "100%" }}>{focus.name || focus.id}</strong>
+              <span className="small muted">
+                {[focus.project_name, focus.width && focus.height ? `${focus.width}×${focus.height}` : "",
+                  focus.duration_s ? `${Math.floor(focus.duration_s / 60)}:${String(Math.round(focus.duration_s % 60)).padStart(2, "0")}` : "",
+                  focus.created_at?.slice(0, 10)].filter(Boolean).join(" · ")}
+              </span>
+              {focus.tags?.length > 0 && <span className="small muted ellipsis">{focus.tags.join(", ")}</span>}
+              <button className="btn primary" onClick={() => onPick(focus)}>{t("pickerUse")}</button>
+            </>
+          ) : <span className="small muted">{t("pickerNothing")}</span>}
+        </div>
       </div>
     </Modal>
   );

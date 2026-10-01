@@ -7,7 +7,8 @@ import { useT, type MessageKey } from "../i18n";
 import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
-import { StoryboardCard } from "./Storyboard";
+import { StoryboardCard, liveRun } from "./Storyboard";
+import { SongTrackCard } from "./SongTrack";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -128,12 +129,15 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
   const app = useApp();
   const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
-  const active = data && ["queued", "running"].includes(data.status);
+  const active = data ? liveRun(data, app.jobs) : false;
   useEffect(() => {
     if (!active) return;
     const id = setInterval(reload, 2500);
     return () => clearInterval(id);
   }, [active, reload]);
+  // the list beside follows this production's status (it was left "running")
+  const status = data?.status;
+  useEffect(() => { if (status) reloadList(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <p className="muted">{t("loading")}</p>;
   const view = data.view;
@@ -150,7 +154,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
       <div className="card">
         <h2><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
         <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
-          {!legacy && ["failed", "cancelled"].includes(view.status) && (
+          {!legacy && (["failed", "cancelled"].includes(view.status) || (view.status === "queued" && !active)) && (
             <button className="btn sm primary" onClick={() => act(() => api.continueProduction(slug))}>
               <RotateCcw size={13} /> {t("resumeProduction")}
             </button>
@@ -194,6 +198,7 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
         </div>
       )}
       {!isShort && view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
+      {!legacy && !isShort && <SongTrackCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
       {!legacy && !isShort && (data.spec.shots || []).length > 0 && (
         <StoryboardCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />
       )}

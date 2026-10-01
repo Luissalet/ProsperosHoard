@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from . import productions as prod
 from .store import NotFound, Store
-from .util import now_iso
+from .util import now_iso, replace_with_retry
 
 FORMAT = "prospero.recipe/1"
 REUSABLE = ("song", "frames", "clips")
@@ -246,7 +246,7 @@ def export_recipe(store: Store, slug: str, name: Optional[str] = None) -> dict[s
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(recipe, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    replace_with_retry(tmp, path)
     return recipe
 
 

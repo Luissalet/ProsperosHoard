@@ -508,6 +508,31 @@ first, and the song (unless its lyrics name the old lead) and the stills
 and clips of the shots the lead is not in are reused
 (`options.reuse: ["song", "frames", "clips"]`).
 
+**Song and lyrics** on a production is a video editor standing up: the
+lyrics timed to the song on one vertical line (sections beside them, a
+playhead while it plays) and a **shot track** next to them. Shots are laid
+one after another - dragged in from the shot list, or **Add next** - then
+moved or trimmed at either edge (they snap to the lyric lines; Alt places
+freely), and each block shows the words it plays over. A placed shot plays
+exactly there in the animatic and the final cut (`span {start_s, end_s}` on
+the shot; spans cannot overlap); shots left off the track are placed by the
+cut by their section. Clicking lines (shift for several) makes a new shot for
+exactly those words. **Change song** swaps the song without redoing the
+stills or clips: a song from the library of any project (with its own lyrics
+when it was composed here), an uploaded file, another take, or a recompose
+with new style/tempo/length/words - the lyrics are timed to it at once.
+`studio_production_song` and `studio_production_timing` do the same for an
+agent. The library pickers (references, motion videos, background cast,
+songs) are a searchable menu with a preview: click to see it (videos and
+songs play), double click or Enter to use it, "All projects" to look
+beyond this one.
+
+A production whose run died without writing its end (the app closed, or
+Windows refused the state write because another reader had the file open)
+no longer stays "running": it shows as failed, can be edited and resumed.
+State and recipe writes retry the replace for a moment on a Windows
+sharing violation instead of failing the run.
+
 ### Narrated shorts
 
 `studio_short_create(topic="why the sea glows at night", options={"language":

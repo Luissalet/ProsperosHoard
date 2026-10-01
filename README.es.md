@@ -518,6 +518,33 @@ referencia, y se reutilizan la canción (salvo que su letra nombre al
 protagonista anterior) y los fotogramas y clips de los planos en los que no
 sale (`options.reuse: ["song", "frames", "clips"]`).
 
+**Canción y letra**, en una producción, es un editor de vídeo puesto en
+vertical: la letra sincronizada con la canción en una línea (las secciones al
+lado y un cabezal mientras suena) y, junto a ella, una **pista de planos**.
+Los planos se van poniendo uno detrás de otro - arrastrándolos desde la lista
+de planos, o con **Añadir siguiente** - y luego se mueven o se recortan por
+cualquiera de sus bordes (se ajustan a los versos; con Alt se colocan
+libres), y cada bloque enseña la letra sobre la que suena. Un plano colocado
+suena exactamente ahí en el animático y en el montaje final (`span {start_s,
+end_s}` en el plano; los tramos no se pueden solapar); los que no están en la
+pista los coloca el montaje por su sección. Haciendo clic en versos (mayús
+para varios) se crea un plano nuevo para exactamente esas palabras.
+**Cambiar canción** cambia la canción sin rehacer fotogramas ni clips: una de
+la biblioteca de cualquier proyecto (con su propia letra si se compuso aquí),
+un archivo subido, otra toma o una nueva composición con otro estilo, tempo,
+duración o letra; la letra se sincroniza con ella al momento.
+`studio_production_song` y `studio_production_timing` hacen lo mismo para un
+agente. Los selectores de la biblioteca (referencias, vídeos de movimiento,
+reparto de fondo, canciones) son un menú con buscador y vista previa: clic
+para verlo (los vídeos y canciones se reproducen), doble clic o Intro para
+usarlo, «Todos los proyectos» para buscar fuera de este.
+
+Una producción cuya ejecución murió sin escribir su final (se cerró la app, o
+Windows rechazó la escritura del estado porque otro lector tenía el archivo
+abierto) ya no se queda en «running»: aparece como fallida y se puede editar
+y reanudar. Las escrituras del estado y de las recetas reintentan el reemplazo
+un momento ante un bloqueo de Windows en vez de hacer fallar la ejecución.
+
 ### Shorts narrados
 
 `studio_short_create(topic="por qué brilla el mar de noche", options={"language":

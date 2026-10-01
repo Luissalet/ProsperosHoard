@@ -766,7 +766,7 @@ def run_qa(store: Store, studio: prod.Studio, slug: str, stage: str = "all", dry
     if prod.is_legacy(raw):
         return _run_legacy(store, slug, raw, stage, dry_run, keys, vision, vision_name)
     run = prod.Run(store, studio, slug, progress)
-    if run.state.get("status") == "running":
+    if prod.is_running(run.state, store.data_dir):
         raise QAError("production_running", "the production is running; QA runs inline with settings.qa.enabled, "
                                             "or after it pauses or finishes")
     qa = QA(store, run.state, vision, vision_name)
