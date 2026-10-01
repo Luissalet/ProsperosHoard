@@ -241,9 +241,18 @@ class Backend:
         return Link(config)
 
     def reload(self) -> None:
-        # The previous Link is not closed here: a GPU job may be mid-call on
-        # its event loop. Its daemon loop thread simply goes idle.
-        self.link = self._build_link()
+        # The previous Link is not closed: a GPU job may be mid-call with a
+        # ComfyUI client it got from it. The new Link runs on the same
+        # background event loop, so that client (bound to the loop's
+        # connections) keeps working for the rest of its job instead of
+        # failing with "bound to a different event loop".
+        old = getattr(self, "link", None)
+        new = self._build_link()
+        if old is not None:
+            with old.sync._start_lock:
+                if old.sync._loop is not None:
+                    new.sync._loop, new.sync._thread = old.sync._loop, old.sync._thread
+        self.link = new
 
     def run_async(self, call: Any) -> Any:
         """Run async Hoard Link work from a plain sync worker thread on Hoard
@@ -623,6 +632,11 @@ class Backend:
                 continue
             return dev if kind in ("cuda", "xpu", "mps", "npu", "mlu", "privateuseone") else None
         return None
+
+    def comfy_dedicated(self) -> bool:
+        """`comfy_dedicated: true` in backend.json: the ComfyUI servers are
+        Prospero's alone (see comfy_manages_memory and templates' free_after)."""
+        return self._raw_config().get("comfy_dedicated") is True and not self.demo
 
     def comfy_manages_memory(self, needed_mb: int) -> bool:
         """Opt-in: an idle ComfyUI that belongs to Prospero may make room

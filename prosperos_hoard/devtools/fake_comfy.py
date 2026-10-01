@@ -380,6 +380,7 @@ class FakeComfyServer:
         self.prompts_seen: list[dict[str, Any]] = []
         self.vram_free_bytes = 20_000_000_000
         self.vram_total_bytes = 24_000_000_000
+        self.frees: list[dict] = []  # /free requests received
         # tests: the model files "installed" in ComfyUI/models/upscale_models and models/background_removal
         self.upscale_models: list[str] = list(UPSCALE_MODEL_FILES)
         self.bg_removal_models: list[str] = list(BG_REMOVAL_FILES)
@@ -698,6 +699,7 @@ class FakeComfyServer:
 
         @app.post("/free")
         async def free(request: Request):
+            self.frees.append(await request.json() if await request.body() else {})
             return JSONResponse({"ok": True})
 
         @app.post("/interrupt")
