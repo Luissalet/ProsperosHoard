@@ -92,10 +92,19 @@ with ids and pictures.
 | SVD | `svd_xt.safetensors` | ~10 GB | Image to short video |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Image to video, native 1280x704 |
 | Wan 2.2 I2V 14B (fp8) | `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` + `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors`, lightx2v 4-step LoRAs, `umt5_xxl_fp8_e4m3fn_scaled.safetensors`, `wan_2.1_vae.safetensors` | ~10 GB (offloads the rest) | Real motion and camera moves (orbit, crane, push-in) from a still, 832x480 / 480x832, 5 s at 16 fps in ~2.5 min |
-| Wan Animate 2 (distilled int8) | `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | ~10 GB (offloads the rest) | Motion transfer: the character of a still performs the motion of a driving video (a dance, a stunt) |
+| Wan Animate 2 (distilled) | `wan_animate_2_distill_fp8_e4m3fn.safetensors` (an fp8 cast of the official bf16, see below; the int8 release also works but crawls when it does not fit in VRAM), `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | a 16 GB card (jobs wait for one; a 12 GB card takes minutes per step) | Motion transfer: the character of a still performs the motion of a driving video (a dance, a stunt), ~9 min for 3 s on a 16 GB card |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Song composition with vocals |
 | Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2.5 GB | Upscale x2 or x4 of any image |
 | BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3.5 GB | Background removal, PNG with transparency |
+
+Wan Animate 2 ships as bf16 (33 GB) and int8: cast the bf16 to fp8 with
+`python -m prosperos_hoard.devtools.cast_fp8 wan_animate_2_distill_bf16.safetensors
+ComfyUI/models/diffusion_models/wan_animate_2_distill_fp8_e4m3fn.safetensors`
+(run it with ComfyUI's Python, which has torch)
+(transformer-block weights only, a minute); Prospero loads the fp8 file
+when it is there. A template can name the card it needs (`min_card_mb`):
+with a render pool, a job waits for a server whose card holds it and the
+others keep taking the rest.
 
 `studio_generate_image`'s `engine` parameter (and a project's own `image_engine`
 setting) picks between the image families: `auto` (default) resolves to

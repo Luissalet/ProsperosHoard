@@ -678,7 +678,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     backend = Backend(data_dir, demo=demo)
     # one GPU worker for the main ComfyUI plus one per render-pool server
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
-                     target_ready=backend.pool_server_ready)
+                     target_ready=backend.pool_server_ready, accepts=backend.accepts_job)
     queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
     queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))

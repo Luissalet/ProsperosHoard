@@ -94,10 +94,18 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | SVD | `svd_xt.safetensors` | ~10 GB | Imagen a vídeo corto |
 | Wan 2.2 TI2V (5B) | `wan2.2_ti2v_5B_fp16.safetensors` + VAE | ~12 GB | Imagen a vídeo, 1280x704 nativo |
 | Wan 2.2 I2V 14B (fp8) | `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` + `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors`, LoRAs lightx2v de 4 pasos, `umt5_xxl_fp8_e4m3fn_scaled.safetensors`, `wan_2.1_vae.safetensors` | ~10 GB (descarga el resto) | Movimiento real y movimientos de cámara (órbita, grúa, acercamiento) desde un fotograma, 832x480 / 480x832, 5 s a 16 fps en ~2,5 min |
-| Wan Animate 2 (destilado int8) | `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | ~10 GB (descarga el resto) | Transferencia de movimiento: el personaje de un fotograma hace el movimiento de un vídeo guía (un baile, una acrobacia) |
+| Wan Animate 2 (destilado) | `wan_animate_2_distill_fp8_e4m3fn.safetensors` (una conversión fp8 del bf16 oficial, ver abajo; la versión int8 también funciona pero se arrastra cuando no cabe en VRAM), `clip_vision_h.safetensors`, `Wan2_1_VAE_bf16.safetensors` | una tarjeta de 16 GB (los trabajos esperan a una; en 12 GB tarda minutos por paso) | Transferencia de movimiento: el personaje de un fotograma hace el movimiento de un vídeo guía (un baile, una acrobacia), ~9 min por 3 s en 16 GB |
 | ACE-Step 1.5 | `ace_step_1.5_turbo_aio.safetensors` | ~8 GB | Composición de canciones con voz |
 | Real-ESRGAN x4 | `ComfyUI/models/upscale_models/RealESRGAN_x4plus.safetensors` | ~2,5 GB | Ampliar x2 o x4 cualquier imagen |
 | BiRefNet | `ComfyUI/models/background_removal/birefnet.safetensors` | ~3,5 GB | Quitar el fondo, PNG con transparencia |
+
+Wan Animate 2 se publica en bf16 (33 GB) e int8: convierte el bf16 a fp8 con
+`python -m prosperos_hoard.devtools.cast_fp8 wan_animate_2_distill_bf16.safetensors
+ComfyUI/models/diffusion_models/wan_animate_2_distill_fp8_e4m3fn.safetensors`
+(con el Python de ComfyUI, que trae torch; solo los pesos de los bloques, un
+minuto); Prospero carga el fp8 cuando existe. Una plantilla puede pedir el
+tamaño de tarjeta que necesita (`min_card_mb`): con varios servidores, el
+trabajo espera a uno cuya tarjeta lo aguante y los demás siguen con el resto.
 
 El parámetro `engine` de `studio_generate_image` (y el ajuste `image_engine`
 de cada proyecto) elige entre las familias de imagen: `auto` (por defecto)

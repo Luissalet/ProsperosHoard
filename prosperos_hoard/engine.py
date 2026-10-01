@@ -1087,6 +1087,20 @@ def animate2_installed(object_info: dict[str, Any]) -> bool:
     return "WanAnimate2ToVideo" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "wan_animate_2")
 
 
+def animate2_unet(object_info: dict[str, Any]) -> Optional[str]:
+    """The Wan Animate 2 diffusion file to load: an fp8 cast when there is
+    one (it streams from system memory at full speed on a 12-16 GB card,
+    where the int8 release crawls at minutes per step), else None - the
+    template's own default."""
+    try:
+        files = object_info["UNETLoader"]["input"]["required"]["unet_name"][0]
+    except (KeyError, IndexError, TypeError):
+        return None
+    fp8 = sorted(str(f) for f in files or [] if "wan_animate_2" in str(f).lower() and "fp8" in str(f).lower())
+    distilled = [f for f in fp8 if "distill" in f.lower()]
+    return (distilled or fp8 or [None])[0]
+
+
 def clip_template(object_info: dict[str, Any], motion_ref: bool = False) -> str:
     """The clip template a still gets: motion copied from a driving video
     (Wan Animate 2) when there is one and it is installed, else the 14B
@@ -1143,6 +1157,10 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
             values[key] = params[key]
     if params.get("loras"):
         values["loras"] = list(params["loras"])
+    if template == "wan_animate2" and not params.get("unet_name"):
+        unet = animate2_unet(_object_info(backend))
+        if unet:
+            values["unet_name"] = unet
     if template == "qwen21_edit" and params.get("custom_size") is None and (params.get("width") or params.get("height")):
         values["custom_size"] = True
     size_mode = spec.get("size_from_reference")

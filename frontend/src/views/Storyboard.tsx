@@ -17,8 +17,8 @@ const parseClock = (text: string) => {
 // camera moves the 14B image-to-video follows well, added to the motion text
 const CAMERA = ["camOrbit", "camCrane", "camPush", "camTrack", "camLow", "camHandheld"] as const;
 const CAMERA_TEXT: Record<string, string> = {
-  camOrbit: "the camera orbits 180 degrees around the character",
-  camCrane: "the camera cranes up slowly from the feet to the head, following the body's surface",
+  camOrbit: "orbit shot: the camera travels in a half circle around the character, from the front to the side to behind, the background sweeping past",
+  camCrane: "the shot starts as a close-up of the feet and the camera cranes up along the body to end on the head",
   camPush: "slow dolly push-in towards the character",
   camTrack: "the camera tracks sideways alongside the character",
   camLow: "low-angle camera looking up, slowly rising",
