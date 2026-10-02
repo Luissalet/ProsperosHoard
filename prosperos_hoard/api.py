@@ -29,6 +29,7 @@ from . import animatic as animatic_mod
 from . import audio as audio_mod
 from . import charkit
 from . import charpack
+from . import clip_edit as clip_edit_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, jobevents
@@ -46,7 +47,7 @@ from . import voice_engines as ve
 from . import voice_lab
 from . import voice_pipelines as vp
 from . import voices as voices_mod
-from .backend import Backend
+from .backend import Backend, ffmpeg_path
 from .design import DesignError
 from .hoard_link import family
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
@@ -634,6 +635,7 @@ class DownloadMediaBody(BaseModel):
 class VideoFramesBody(BaseModel):
     asset_id: str
     count: int = 6
+    at_s: Optional[float] = None                # one frame at this time (0 = the first) instead of `count` spread ones
 
 
 class ProductionShotsBody(BaseModel):
@@ -658,6 +660,21 @@ class RetakeBody(BaseModel):
     end_s: float
     prompt: Optional[str] = None                # what happens in it (default: the scene continues naturally)
     quality: str = "draft"                      # draft (Wan 2.1 VACE 1.3B, fast) | final (Wan 2.2 Fun VACE 14B)
+    seed: Optional[int] = None
+    negative: Optional[str] = None
+    wait_s: float = 0
+
+
+class ClipEditBody(BaseModel):
+    asset_id: str
+    prompt: str = ""                            # the instruction ("make it night, wet streets"); @Name for cast members
+    mode: str = "auto"                          # auto | edit | restyle | reference | propagate
+    quality: str = "draft"                      # draft (Bernini-R 1.3B) | final (Bernini-R Wan 2.2 A14B, 6 steps)
+    reference_asset_ids: list[str] = []         # pictures the instruction calls image0, image1... (after the first frame)
+    first_frame_asset_id: Optional[str] = None  # propagate: the window's first frame, edited as a picture
+    start_s: float = 0.0                        # a clip longer than 5 s is edited 5 s at a time from here
+    enhance: bool = True                        # rewrite the instruction in the detailed shape the model was trained on
+    exact: bool = False                         # send `prompt` as it is (already rewritten, e.g. reviewed in the app)
     seed: Optional[int] = None
     negative: Optional[str] = None
     wait_s: float = 0
@@ -871,6 +888,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
     queue.register("reframe", lambda job, p: engine.reframe_job(store, job, p))
     queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
+    queue.register("clip_edit", lambda job, p: engine.clip_edit_job(store, backend, job, p))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -2779,6 +2797,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def composite(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
             return engine.composite_media(store, project_id, body["background"], body["layers"])
 
+        def clip_edit(self, body: dict[str, Any]) -> dict[str, Any]:
+            return op_clip_edit(ClipEditBody(**{k: v for k, v in body.items() if v is not None}))["job"]
+
         def cancel(self, job_id: str) -> None:
             queue.cancel(job_id)
 
@@ -3368,7 +3389,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     a = store.get_asset(str(change["take"]))
                 except NotFound:
                     continue
-                src = (a.get("recipe") or {}).get("retake_of") if a["kind"] == "video" else None
+                r = a.get("recipe") or {}
+                src = (r.get("retake_of") or r.get("edit_of")) if a["kind"] == "video" else None
                 if src:
                     with productions_mod.lock_for(slug):
                         state = productions_mod.load_state(store.data_dir, slug)
@@ -3632,6 +3654,117 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_retake(body: RetakeBody):
         return agent("studio_retake", body.asset_id, lambda: op_retake(body))
 
+    def _edit_frames(clip: dict[str, Any], start_s: float, n: int = 3) -> list[bytes]:
+        """JPEG frames of the window a clip edit will touch, for the vision model."""
+        exe = ffmpeg_path()
+        if not exe:
+            return []
+        src = store.data_dir / clip["file_path"]
+        duration = float(clip.get("duration_s") or 0) or 5.0
+        end = min(duration, start_s + 5.0)
+        out: list[bytes] = []
+        for i in range(n):
+            t = start_s + (end - start_s) * (i + 0.5) / n
+            res = procutil.run([exe, "-nostdin", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1",
+                                "-vf", "scale=512:-2", "-f", "image2", "-c:v", "mjpeg", "-"], timeout=60)
+            if res.returncode == 0 and res.stdout:
+                out.append(bytes(res.stdout))
+        return out
+
+    def _edit_vision():
+        """(chat with images) through the family's vision model, or None.
+        Tests set app.state.edit_vision to a callable(messages, images)."""
+        override = getattr(app.state, "edit_vision", None)
+        if override is not None:
+            return override or None
+        try:
+            if not backend.link.sync.resolve("vision").resolved:
+                return None
+        except Exception:  # noqa: BLE001 - no resolver: text only
+            return None
+        return lambda messages, images: backend.link.sync.chat(messages=messages, images=images, capability="vision",
+                                                               max_tokens=700, temperature=0.3, effort="off").text
+
+    def op_clip_edit_prompt(body: ClipEditBody) -> dict[str, Any]:
+        """What a clip edit will send: the task, the references in order and
+        the renderer's text (the instruction rewritten unless `exact`)."""
+        clip = store.get_asset(body.asset_id)
+        if clip["kind"] != "video":
+            raise engine.EngineError("not_video", "only a clip can be edited this way")
+        explicit = [r for r in body.reference_asset_ids if r][:clip_edit_mod.MAX_REFERENCES]
+        for rid in explicit + ([body.first_frame_asset_id] if body.first_frame_asset_id else []):
+            if store.get_asset(rid)["kind"] != "image":
+                raise engine.EngineError("reference_not_image", f"reference {rid} is not a picture")
+        offset = len(explicit) + (1 if body.first_frame_asset_id else 0)
+        pieces, _, unknown = engine._scan_mentions(store, clip["project_id"], body.prompt or "")
+        text, cast = clip_edit_mod.name_references(pieces, offset)
+        refs = explicit + [c["canonical_asset_id"] for c in cast]
+        try:
+            task = clip_edit_mod.resolve_mode(body.mode, len(refs), bool(body.first_frame_asset_id))
+        except clip_edit_mod.ClipEditError as exc:
+            raise engine.EngineError(exc.code, exc.message) from None
+        enhanced, how, detail = False, "written", None   # how: written | propagation | language | vision | no_model
+        if task == "vi2v":
+            text, how = clip_edit_mod.PROPAGATE_PROMPT, "propagation"
+        elif not text.strip():
+            raise engine.EngineError("empty_prompt", "say what to change in the clip")
+        elif body.enhance and not body.exact:
+            recipe = clip.get("recipe") or {}
+            scene = str((recipe.get("params") or {}).get("positive_prompt") or recipe.get("prompt") or "")
+            vision = _edit_vision()
+            images = _edit_frames(clip, body.start_s) if vision else []
+            if vision and images:
+                images += [(store.data_dir / store.get_asset(r)["file_path"]).read_bytes() for r in refs]
+            msgs = clip_edit_mod.enhance_messages(task, text, scene, len(refs), with_frames=bool(vision and images))
+            try:
+                answer = vision(msgs, images) if (vision and images) else studio.chat(msgs, 700, 0.3, effort="off")
+                new = clip_edit_mod.clean_rewrite(answer, text)
+                if new != text:
+                    text, enhanced, how = new, True, ("vision" if (vision and images) else "language")
+            except Exception as exc:  # noqa: BLE001 - no model answered: the instruction as written
+                how, detail = "no_model", str(exc)[:160]
+        return {"asset_id": clip["id"], "task": task, "prompt": text, "enhanced": enhanced, "how": how, "how_detail": detail,
+                "reference_asset_ids": refs, "cast": [c["name"] for c in cast], "unknown_mentions": unknown,
+                "first_frame_asset_id": body.first_frame_asset_id}
+
+    def op_clip_edit(body: ClipEditBody) -> dict[str, Any]:
+        if body.quality not in ("draft", "final"):
+            raise engine.EngineError("bad_quality", "quality is draft or final")
+        clip = store.get_asset(body.asset_id)
+        if clip["kind"] != "video":
+            raise engine.EngineError("not_video", "only a clip can be edited this way")
+        try:
+            clip_edit_mod.window(float(clip.get("duration_s") or 5.0), body.start_s)
+        except clip_edit_mod.ClipEditError as exc:
+            raise engine.EngineError(exc.code, exc.message) from None
+        info = engine._object_info(backend) or {}
+        if info and not engine.clip_edit_installed(info)[body.quality]:
+            raise engine.EngineError("no_bernini", ("a draft edit needs wan2.1_bernini_1.3B_fp16" if body.quality == "draft" else
+                                                    "a final edit needs both wan2.2_bernini_r experts and the "
+                                                    "lightx2v_T2V_14B_cfg_step_distill_v2 LoRA") + " in ComfyUI/models")
+        plan = op_clip_edit_prompt(body)
+        params = {"asset_id": clip["id"], "prompt": plan["prompt"], "task": plan["task"], "instruction": body.prompt,
+                  "enhanced": plan["enhanced"], "reference_asset_ids": [r for r in plan["reference_asset_ids"]],
+                  "first_frame_asset_id": body.first_frame_asset_id, "quality": body.quality, "start_s": body.start_s,
+                  "seed": body.seed, "negative": body.negative}
+        job = queue.enqueue("clip_edit", "gpu", params, project_id=clip["project_id"])
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job), "plan": plan}
+
+    @app.post("/api/assets/{asset_id}/clip-edit/prompt")
+    def asset_clip_edit_prompt(asset_id: str, body: ClipEditBody):
+        return op_clip_edit_prompt(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/assets/{asset_id}/clip-edit")
+    def asset_clip_edit(asset_id: str, body: ClipEditBody):
+        return op_clip_edit(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/studio_clip_edit")
+    def agent_clip_edit(body: ClipEditBody, preview: bool = False):
+        return agent("studio_clip_edit", body.asset_id,
+                     lambda: op_clip_edit_prompt(body) if preview else op_clip_edit(body))
+
     def op_stems(body: StemsBody) -> dict[str, Any]:
         from . import stems as stems_mod
         asset = store.get_asset(body.asset_id)
@@ -3696,8 +3829,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     for a in _retakes_of(state, t["asset_id"]):
                         if a["id"] not in seen:
                             seen.add(a["id"])
+                            edit = (a.get("recipe") or {}).get("operation") == "clip_edit"
                             takes.append({"asset_id": a["id"], "quality": (a.get("recipe") or {}).get("quality"),
-                                          "retake": True, "current": False})
+                                          ("edit" if edit else "retake"): True, "current": False})
         return {"production": slug, "shots": shots,
                 "hint": "put one back with studio_production_shots([{\"key\": K, \"take\": asset_id}])"}
 
@@ -3706,8 +3840,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if not pid:
             return []
         items = store.list_assets(pid, kind="video", query=clip_id, limit=20)["items"]
-        return [a for a in items if (a.get("recipe") or {}).get("operation") == "retake"
-                and (a.get("recipe") or {}).get("retake_of") == clip_id]
+        return [a for a in items if ((a.get("recipe") or {}).get("operation") == "retake"
+                                     and (a.get("recipe") or {}).get("retake_of") == clip_id)
+                or ((a.get("recipe") or {}).get("operation") == "clip_edit"
+                    and (a.get("recipe") or {}).get("edit_of") == clip_id)]
 
     @app.get("/api/productions/{slug}/takes")
     def production_takes(slug: str, key: Optional[str] = None):
@@ -3858,11 +3994,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_download_media", body.url[:120], lambda: op_download(project, body))
 
     @app.post("/api/assets/{asset_id}/frames")
-    def asset_frames(asset_id: str, count: int = 6):
+    def asset_frames(asset_id: str, count: int = 6, at_s: Optional[float] = None):
+        if at_s is not None:
+            return {"items": [engine.frame_at(store, asset_id, at_s)]}
         return {"items": engine.extract_frames(store, asset_id, count)}
 
     @app.post("/api/agent/studio_video_frames")
     def agent_video_frames(body: VideoFramesBody):
+        if body.at_s is not None:
+            return agent("studio_video_frames", body.asset_id,
+                         lambda: {"items": [engine.frame_at(store, body.asset_id, float(body.at_s))]})
         return agent("studio_video_frames", body.asset_id, lambda: {"items": engine.extract_frames(store, body.asset_id,
                                                                                                     body.count)})
 

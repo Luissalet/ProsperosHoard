@@ -783,7 +783,7 @@ export interface ShotRef { asset_id: string; use: string }
 export interface ShotTakes {
   key: string;
   stills: { variants: string[]; seed?: number; at?: string; current: boolean; best?: string | null }[];
-  clips: Record<string, { asset_id: string; quality?: string; seed?: number; at?: string; current: boolean; retake?: boolean }[]>;
+  clips: Record<string, { asset_id: string; quality?: string; seed?: number; at?: string; current: boolean; retake?: boolean; edit?: boolean }[]>;
 }
 export interface CastMember { asset_id: string; name: string; note?: string }
 export interface MotionRef { asset_id: string; start_s: number; prompt: string }
@@ -950,7 +950,7 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 // ------------------------------------------------------------- spaces
 
 export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine"
-  | "variations" | "group" | "composite";
+  | "variations" | "group" | "composite" | "clip_edit";
 
 export interface SpaceNode {
   id: string;
@@ -1261,7 +1261,12 @@ export const api = {
     request<{ status: string; redraw: string[] }>("PUT", `/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
     request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
-  videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),
+  videoFrames: (assetId: string, count = 6, atS?: number) =>
+    request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}${atS != null ? `&at_s=${atS}` : ""}`),
+  clipEditPreview: (assetId: string, body: ClipEditRequest) =>
+    request<ClipEditPlan>("POST", `/api/assets/${assetId}/clip-edit/prompt`, { asset_id: assetId, ...body }),
+  clipEdit: (assetId: string, body: ClipEditRequest) =>
+    request<{ job: Job; plan: ClipEditPlan }>("POST", `/api/assets/${assetId}/clip-edit`, { asset_id: assetId, ...body }),
   reframeProduction: (slug: string, aspects: string[], framing?: string, run = true) =>
     request<{ aspects: string[]; new: string[]; rerender: string[]; job?: Job }>("POST", `/api/productions/${slug}/reframe`, { aspects, framing, run }),
   retake: (assetId: string, body: { start_s: number; end_s: number; prompt?: string; quality?: "draft" | "final" }) =>
@@ -1400,3 +1405,28 @@ export const api = {
   cinema: () => request<CinemaGuide>("GET", "/api/cinema"),
   libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
 };
+
+export type ClipEditMode = "auto" | "edit" | "restyle" | "reference" | "propagate";
+export interface ClipEditRequest {
+  prompt: string;
+  mode?: ClipEditMode;
+  quality?: "draft" | "final";
+  reference_asset_ids?: string[];
+  first_frame_asset_id?: string | null;
+  start_s?: number;
+  enhance?: boolean;
+  exact?: boolean;
+  seed?: number;
+}
+export interface ClipEditPlan {
+  asset_id: string;
+  task: "v2v" | "mv2v" | "rv2v" | "vi2v";
+  prompt: string;
+  enhanced: boolean;
+  how: "written" | "propagation" | "language" | "vision" | "no_model";
+  how_detail?: string | null;
+  reference_asset_ids: string[];
+  cast: string[];
+  unknown_mentions: string[];
+  first_frame_asset_id: string | null;
+}

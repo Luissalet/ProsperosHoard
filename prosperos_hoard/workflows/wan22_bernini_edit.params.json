@@ -1,0 +1,62 @@
+{
+ "template": "wan22_bernini_edit",
+ "kind": "video",
+ "source_video_node": "9.file",
+ "reference_group": {
+  "encode_node": "11",
+  "prefix": "reference_images.reference_image_",
+  "start": 0,
+  "min": 0,
+  "max": 4,
+  "nodes": []
+ },
+ "output_node": "19",
+ "vram_class": "wan14b",
+ "free_after": true,
+ "map": {
+  "positive_prompt": "7.text",
+  "negative_prompt": "8.text",
+  "width": "11.width",
+  "height": "11.height",
+  "length": "11.length",
+  "ref_max_size": "11.ref_max_size",
+  "fps": "18.fps",
+  "clip_name": "5.clip_name",
+  "vae_name": "6.vae_name",
+  "seed": "15.noise_seed",
+  "steps": "12.steps",
+  "split_step": "13.step",
+  "cfg": "15.cfg",
+  "unet_high": "1.unet_name",
+  "unet_low": "2.unet_name",
+  "lora_high": "3.lora_name",
+  "lora_low": "4.lora_name"
+ },
+ "linked_params": {
+  "cfg": [
+   "16.cfg"
+  ],
+  "lora_high": [
+   "4.lora_name"
+  ]
+ },
+ "model_params": [
+  "unet_high",
+  "unet_low",
+  "lora_high",
+  "clip_name",
+  "vae_name"
+ ],
+ "notes": "Clip edit (final): Bernini-R (Wan 2.2 A14B renderer fine-tune, Apache-2.0, high + low noise experts fp8) edits a whole clip from an instruction, with up to 4 reference images (BerniniConditioning reference_images.reference_image_0..3: a cast member, a garment, the edited first frame for propagation). The positive text is the task's system line followed directly by the instruction, as Bernini's pipeline builds it. The lightx2v T2V 14B cfg-distill v2 LoRA (3.0 high, 1.5 low) makes it 6 steps split at 3, cfg 1, res_multistep. Converted from the official video_bernini_r_video_editing.json template (its turbo branch; the switches, the per-task prompt subgraph and the reference batch are resolved by Prospero). Source video: Prospero's own 16 fps 848x480 (or the clip's orientation) cut, up to 81 frames.",
+ "defaults": {
+  "width": 848,
+  "height": 480,
+  "length": 81,
+  "fps": 16,
+  "ref_max_size": 848,
+  "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+  "steps": 6,
+  "split_step": 3,
+  "cfg": 1.0
+ }
+}

@@ -22,6 +22,7 @@ def _run_job(store, backend, type_, params, project_id):
         "animate": engine.animate_image,
         "compose_song": engine.compose_song,
         "retake": lambda st, be, job, p: engine.retake_job(st, be, job, p),
+        "clip_edit": lambda st, be, job, p: engine.clip_edit_job(st, be, job, p),
     }
     queue.register(type_, lambda job, p: handlers[type_](store, backend, job, p))
     queue.start()

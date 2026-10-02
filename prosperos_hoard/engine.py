@@ -795,6 +795,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  audio_seconds: Optional[float] = None, end_asset_id: Optional[str] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
                  use_vocals: bool = True, control_video: Optional[tuple[bytes, bytes]] = None,
+                 source_video: Optional[bytes] = None,
                  postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -894,6 +895,13 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         control_names = (f"prospero_{tag}_control.mp4", f"prospero_{tag}_mask.mp4")
         uploads += [(control_video[0], control_names[0]), (control_video[1], control_names[1])]
 
+    source_name: Optional[str] = None
+    if spec.get("source_video_node"):
+        if not source_video:
+            raise EngineError("source_required", f"template '{template_name}' needs the video to edit")
+        source_name = f"prospero_{new_id('src')}_source.mp4"
+        uploads.append((source_video, source_name))
+
     audio_name: Optional[str] = None
     vocals_name: Optional[str] = None
     if spec.get("audio_node"):
@@ -961,6 +969,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             for key, fname in zip(("control_video_node", "control_mask_node"), control_names):
                 node, _, inp = spec[key].partition(".")
                 wf[node]["inputs"][inp] = fname
+        if source_name:
+            node, _, inp = spec["source_video_node"].partition(".")
+            wf[node]["inputs"][inp] = source_name
         if i == 0 and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
@@ -1162,6 +1173,35 @@ def _video_thumbnail(path: Path, dest: Path) -> Optional[str]:
     return dest.relative_to(dest.parent.parent).as_posix()
 
 
+def frame_at(store: Store, asset_id: str, at_s: float, project_id: Optional[str] = None) -> dict[str, Any]:
+    """The frame of a clip at `at_s` seconds (0 = its first frame) as an
+    image asset: the picture to edit before propagating the edit through
+    the clip (studio_clip_edit, mode propagate)."""
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "video":
+        raise EngineError("not_video", f"asset {asset_id} is {asset['kind']}; a frame comes out of a video")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to take a frame out of a video")
+    duration = float(asset.get("duration_s") or 0)
+    if at_s < 0 or (duration and at_s >= duration):
+        raise EngineError("bad_parameter", f"at_s must be between 0 and the clip's length ({duration:.2f} s)")
+    tmp_dir = store.data_dir / "tmp" / "frames"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"{new_id('fr')}.png"
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(store.data_dir / asset["file_path"]), "-vf",
+                  f"select=gte(t\\,{float(at_s):.4f})", "-frames:v", "1", str(tmp)], timeout=90)
+    if not tmp.is_file() or not tmp.stat().st_size:
+        raise EngineError("no_frames", "no frame could be read at that time")
+    try:
+        return import_asset(store, project_id or asset["project_id"], tmp, "image",
+                            original_name=f"{Path(asset.get('name') or 'clip').stem} frame {at_s:.2f}s.png",
+                            recipe={"operation": "frame", "at_s": round(float(at_s), 3), "backend": "local",
+                                    "input_asset_ids": [asset_id], "derived_from": asset_id}, source="derived")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def extract_frames(store: Store, asset_id: str, count: int = 6, project_id: Optional[str] = None) -> list[dict[str, Any]]:
     """Stills out of a video or an animated GIF, evenly spaced, as image
     assets: a dance GIF becomes poses to hand a shot as references."""
@@ -1356,11 +1396,7 @@ def retake_job(store: Store, backend: Backend, job: dict[str, Any], progress) ->
     W, H = (832, 480) if sw > sh * 1.1 else ((480, 832) if sh > sw * 1.1 else (640, 640))
     F = RETAKE_FPS
     progress(0.03, "reading the clip")
-    raw = procutil.run([exe, "-nostdin", "-loglevel", "error", "-i", str(src), "-vf",
-                        f"fps={F},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1",
-                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], timeout=600)
-    data = raw.stdout if isinstance(raw.stdout, (bytes, bytearray)) else b""
-    frames = np.frombuffer(bytes(data[: len(data) // (W * H * 3) * W * H * 3]), dtype=np.uint8).reshape(-1, H, W, 3)
+    frames = _read_frames(exe, src, W, H, F)
     if len(frames) < plan["b"]:
         plan["b"] = min(plan["b"], len(frames))
         if plan["b"] - plan["a"] < 4:
@@ -1375,56 +1411,15 @@ def retake_job(store: Store, backend: Backend, job: dict[str, Any], progress) ->
         else:
             control[i] = frames[f]
 
-    def encode(arr: np.ndarray) -> bytes:
-        tmp = store.data_dir / "tmp" / f"{new_id('rtk')}.mp4"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            res = procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-                                "-s", f"{W}x{H}", "-r", str(F), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
-                                "-crf", "12", "-pix_fmt", "yuv420p", str(tmp)], input=arr.tobytes(), timeout=600)
-            if res.returncode != 0 or not tmp.is_file():
-                raise EngineError("retake_failed", "could not prepare the control video")
-            return tmp.read_bytes()
-        finally:
-            tmp.unlink(missing_ok=True)
-
-    control_bytes, mask_bytes = encode(control), encode(mask)
+    control_bytes = _encode_frames(store, exe, control, F, "retake_failed")
+    mask_bytes = _encode_frames(store, exe, mask, F, "retake_failed")
     fps_src = _video_fps(exe, src)
     t0, t1 = a / F, b / F
     has_audio = _has_audio(exe, src)
 
     def splice(generated: bytes) -> bytes:
-        """The clip with its stretch replaced: before and after from the
-        original, the middle from the render (its own frames a..b)."""
-        work = store.data_dir / "tmp" / new_id("rtk")
-        work.mkdir(parents=True, exist_ok=True)
-        try:
-            gen = work / "gen.mp4"
-            gen.write_bytes(generated)
-            out = work / "out.mp4"
-            ga, gb = a - s0, b - s0
-            norm = f"scale={sw // 2 * 2}:{sh // 2 * 2},setsar=1,fps={fps_src:g},format=yuv420p"
-            parts, labels = [], []
-            if t0 > 0.02:
-                parts.append(f"[0:v]trim=start=0:end={t0:.4f},setpts=PTS-STARTPTS,{norm}[p1]")
-                labels.append("[p1]")
-            parts.append(f"[1:v]trim=start_frame={ga}:end_frame={gb},setpts=PTS-STARTPTS,{norm}[p2]")
-            labels.append("[p2]")
-            if t1 < duration - 0.02:
-                parts.append(f"[0:v]trim=start={t1:.4f},setpts=PTS-STARTPTS,{norm}[p3]")
-                labels.append("[p3]")
-            graph = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]"
-            cmd = [exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-i", str(gen), "-filter_complex", graph,
-                   "-map", "[v]"]
-            if has_audio:
-                cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
-            cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-movflags", "+faststart", str(out)]
-            res = procutil.run(cmd, text=True, timeout=900)
-            if res.returncode != 0 or not out.is_file():
-                raise EngineError("retake_failed", f"could not splice the retake: {(res.stderr or '')[-300:]}")
-            return out.read_bytes()
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
+        return _splice_stretch(store, exe, src, generated, a - s0, b - s0, t0, t1, duration, sw, sh, fps_src, has_audio,
+                               "retake_failed")
 
     quality = "final" if p.get("quality") == "final" else "draft"
     template = "wan22_vace_retake" if quality == "final" else "wan21_vace_retake"
@@ -1441,6 +1436,148 @@ def retake_job(store: Store, backend: Backend, job: dict[str, Any], progress) ->
                                       "prompt": p.get("prompt"), "quality": quality, "derived_from": clip["id"],
                                       "input_asset_ids": [clip["id"]]},
                         name=f"{clip.get('name') or clip['id']} retake {t0:.1f}-{t1:.1f}s")
+
+
+def clip_edit_installed(object_info: dict[str, Any]) -> dict[str, bool]:
+    """Which Bernini-R renderers ComfyUI has: draft (1.3B) and final
+    (Wan 2.2 A14B experts with the lightx2v T2V cfg-distill LoRA)."""
+    return {"draft": _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.1_bernini_1.3B"),
+            "final": _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_bernini_r_high_noise")
+            and _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_bernini_r_low_noise")
+            and _has_model_file(object_info, "LoraLoaderModelOnly", "lora_name", "lightx2v_T2V_14B_cfg_step_distill")}
+
+
+EDIT_FPS = 16
+
+
+def edit_size(width: int, height: int) -> tuple[int, int]:
+    """Bernini-R's 480p canvas in the clip's orientation."""
+    if width > height * 1.1:
+        return 848, 480
+    if height > width * 1.1:
+        return 480, 848
+    return 640, 640
+
+
+def clip_edit_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
+    """Edit a clip from an instruction (Bernini-R, see clip_edit.py): up to
+    5 s of it from `start_s` is cut at 16 fps on the model's 480p canvas,
+    rendered again following `prompt` (already the renderer's text:
+    references named image0, image1...), and spliced back into the clip at
+    its own size, fps and sound. `first_frame_asset_id` (propagation) and
+    `reference_asset_ids` become the references, in that order."""
+    from . import clip_edit as ce
+    p = job["params"]
+    clip = store.get_asset(p["asset_id"])
+    if clip["kind"] != "video":
+        raise EngineError("not_video", "only a clip can be edited this way")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to edit a clip")
+    src = store.data_dir / clip["file_path"]
+    duration = float(clip.get("duration_s") or 0) or _probe_duration(exe, src)
+    try:
+        win = ce.window(duration, float(p.get("start_s") or 0), EDIT_FPS)
+        task = p.get("task") or "v2v"
+        text = ce.positive_text(task, str(p.get("prompt") or ""))
+    except ce.ClipEditError as exc:
+        raise EngineError(exc.code, exc.message) from None
+    sw, sh = int(clip.get("width") or 848), int(clip.get("height") or 480)
+    W, H = edit_size(sw, sh)
+    progress(0.03, "reading the clip")
+    frames = _read_frames(exe, src, W, H, EDIT_FPS)
+    a = win["start"]
+    L = min(win["length"], len(frames) - a)
+    L -= (L - 1) % 4
+    if L < 9:
+        raise EngineError("clip_too_short", "too little of the clip is left from start_s")
+    source = _encode_frames(store, exe, frames[a:a + L], EDIT_FPS, "edit_failed")
+    refs = ([p["first_frame_asset_id"]] if p.get("first_frame_asset_id") else []) + list(p.get("reference_asset_ids") or [])
+    t0, t1 = a / EDIT_FPS, min(duration, (a + L) / EDIT_FPS)
+    fps_src, has_audio = _video_fps(exe, src), _has_audio(exe, src)
+
+    def splice(generated: bytes) -> bytes:
+        return _splice_stretch(store, exe, src, generated, 0, L, t0, t1, duration, sw, sh, fps_src, has_audio,
+                               "edit_failed")
+
+    quality = "final" if p.get("quality") == "final" else "draft"
+    template = "wan22_bernini_edit" if quality == "final" else "wan21_bernini_edit"
+    _, spec = comfy_driver.load_template(template)
+    values = {**(spec.get("defaults") or {}), "positive_prompt": text, "width": W, "height": H, "length": L,
+              "fps": EDIT_FPS}
+    if p.get("negative"):
+        values["negative_prompt"] = p["negative"]
+    if p.get("seed") is not None:
+        values["seed"] = int(p["seed"])
+    whole = t0 < 0.02 and t1 > duration - 0.02
+    return run_template(store, backend, job, progress, template_name=template, values=values, operation="clip_edit",
+                        source_video=source, reference_asset_ids=refs, postprocess=splice,
+                        extra_recipe={"edit_of": clip["id"], "task": task, "instruction": p.get("instruction"),
+                                      "prompt": p.get("prompt"), "enhanced": bool(p.get("enhanced")),
+                                      "start_s": round(t0, 3), "end_s": round(t1, 3), "quality": quality,
+                                      "derived_from": clip["id"], "input_asset_ids": [clip["id"], *refs]},
+                        name=f"{clip.get('name') or clip['id']} edited" + ("" if whole else f" {t0:.1f}-{t1:.1f}s"))
+
+
+def _read_frames(exe: str, src: Path, W: int, H: int, F: int) -> np.ndarray:
+    """A clip as RGB frames at F fps, covering W x H (cropped to fill)."""
+    raw = procutil.run([exe, "-nostdin", "-loglevel", "error", "-i", str(src), "-vf",
+                        f"fps={F},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], timeout=600)
+    data = raw.stdout if isinstance(raw.stdout, (bytes, bytearray)) else b""
+    return np.frombuffer(bytes(data[: len(data) // (W * H * 3) * W * H * 3]), dtype=np.uint8).reshape(-1, H, W, 3)
+
+
+def _encode_frames(store: Store, exe: str, arr: np.ndarray, F: int, code: str) -> bytes:
+    """RGB frames as a near-lossless mp4 (the input of a video model)."""
+    L, H, W = arr.shape[:3]
+    tmp = store.data_dir / "tmp" / f"{new_id('vid')}.mp4"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        res = procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                            "-s", f"{W}x{H}", "-r", str(F), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
+                            "-crf", "12", "-pix_fmt", "yuv420p", str(tmp)], input=np.ascontiguousarray(arr).tobytes(),
+                           timeout=600)
+        if res.returncode != 0 or not tmp.is_file():
+            raise EngineError(code, "could not prepare the video for the model")
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _splice_stretch(store: Store, exe: str, src: Path, generated: bytes, ga: int, gb: int, t0: float, t1: float,
+                    duration: float, sw: int, sh: int, fps_src: float, has_audio: bool, code: str) -> bytes:
+    """The clip with [t0, t1) replaced by frames ga..gb of a render: before
+    and after from the original, the middle from the render, all at the
+    clip's own size and fps, with the clip's own sound."""
+    work = store.data_dir / "tmp" / new_id("spl")
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        gen = work / "gen.mp4"
+        gen.write_bytes(generated)
+        out = work / "out.mp4"
+        norm = f"scale={sw // 2 * 2}:{sh // 2 * 2},setsar=1,fps={fps_src:g},format=yuv420p"
+        parts, labels = [], []
+        if t0 > 0.02:
+            parts.append(f"[0:v]trim=start=0:end={t0:.4f},setpts=PTS-STARTPTS,{norm}[p1]")
+            labels.append("[p1]")
+        parts.append(f"[1:v]trim=start_frame={ga}:end_frame={gb},setpts=PTS-STARTPTS,{norm}[p2]")
+        labels.append("[p2]")
+        if t1 < duration - 0.02:
+            parts.append(f"[0:v]trim=start={t1:.4f},setpts=PTS-STARTPTS,{norm}[p3]")
+            labels.append("[p3]")
+        graph = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]"
+        cmd = [exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-i", str(gen), "-filter_complex", graph,
+               "-map", "[v]"]
+        if has_audio:
+            cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+        cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-movflags", "+faststart", str(out)]
+        res = procutil.run(cmd, text=True, timeout=900)
+        if res.returncode != 0 or not out.is_file():
+            raise EngineError(code, f"could not splice the new frames into the clip: {(res.stderr or '')[-300:]}")
+        return out.read_bytes()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _probe_duration(exe: str, path: Path) -> float:
@@ -1704,7 +1841,7 @@ def _has_model_file(object_info: dict[str, Any], class_type: str, input_name: st
         entry = object_info[class_type]["input"]["required"][input_name][0]
     except (KeyError, IndexError, TypeError):
         return False
-    return isinstance(entry, list) and any(needle in str(f).lower() for f in entry)
+    return isinstance(entry, list) and any(needle.lower() in str(f).lower() for f in entry)
 
 
 def wan14b_installed(object_info: dict[str, Any]) -> bool:

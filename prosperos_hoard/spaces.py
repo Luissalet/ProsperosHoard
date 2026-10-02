@@ -53,8 +53,8 @@ from .store import NotFound, Store
 from .util import now_iso
 
 NODE_TYPES = ("text", "asset", "cast", "image", "video", "music", "list", "note", "assistant", "edit", "combine",
-              "variations", "group", "composite")
-GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations", "composite")
+              "variations", "group", "composite", "clip_edit")
+GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit")
 INPUTS: dict[str, dict[str, str]] = {
     "image": {"prompt": "text", "refs": "image", "pose": "image", "layout": "image"},
     "video": {"start": "image", "end": "image", "prompt": "text", "motion": "video", "audio": "audio"},
@@ -65,9 +65,10 @@ INPUTS: dict[str, dict[str, str]] = {
     "combine": {"clips": "video", "audio": "audio"},
     "variations": {"image": "image", "prompt": "text"},
     "composite": {"background": "any", "layers": "any"},
+    "clip_edit": {"clip": "video", "prompt": "text", "refs": "image", "first": "image"},
 }
 SINGLE_INPUTS = {("video", "motion"), ("video", "audio"), ("video", "end"), ("combine", "audio"), ("image", "pose"),
-                 ("image", "layout")}
+                 ("image", "layout"), ("clip_edit", "first")}
 VARIATIONS: dict[str, list[str]] = {
     "angles": ["front view, facing the camera", "three-quarter view from the left", "profile view from the right",
                "seen from behind", "low angle looking up at it", "high angle looking down at it",
@@ -110,7 +111,7 @@ def output_type(node: dict[str, Any], store: Optional[Store] = None, handle: Opt
         return "image"
     if t == "assistant":
         return "text"
-    if t == "combine":
+    if t in ("combine", "clip_edit"):
         return "video"
     if t == "composite":
         return "any"  # a picture, or a clip when a clip went in
@@ -458,6 +459,25 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             raise SpaceError("bad_operation", "edit nodes upscale, remove the background or make a pose or depth map")
         body_extra = {"scale": 4 if str(data.get("scale")) == "4" else 2} if op == "upscale" else {}
         return [{"op": "edit", "body": {"asset_id": a, "operation": op, **body_extra}} for a in images]
+    if t == "clip_edit":
+        clips = list(dict.fromkeys(v for k, v in ins.get("clip", []) if k == "video"))[:MAX_FANOUT]
+        if not clips:
+            raise SpaceError("needs_clip", "wire the clip to edit into it")
+        refs = list(dict.fromkeys(v for k, v in ins.get("refs", []) if k == "image"))[:4]
+        first = next((v for k, v in ins.get("first", []) if k == "image"), None)
+        texts = _texts(ins.get("prompt", [])) + ([own] if own else [])
+        if not texts and not first:
+            raise SpaceError("needs_prompt", "write what changes in the clip, or wire an edited first frame into it")
+        ops = []
+        for i, clip in enumerate(clips):
+            body: dict[str, Any] = {"asset_id": clip, "prompt": ". ".join(texts)[:3900], "mode": data.get("mode") or "auto",
+                                    "quality": data.get("quality") or "draft", "reference_asset_ids": refs,
+                                    "first_frame_asset_id": first, "start_s": max(0.0, float(data.get("start_s") or 0)),
+                                    "enhance": data.get("enhance") is not False}
+            if data.get("seed") not in (None, ""):
+                body["seed"] = int(data["seed"]) + i
+            ops.append({"op": "clip_edit", "body": body})
+        return ops
     if t == "combine":
         clips = [v for k, v in ins.get("clips", []) if k == "video"]
         if not clips:
@@ -627,6 +647,8 @@ def run_space(store: Store, studio: Any, space_id: str, mode: str = "node", node
                             jobs.append(studio.compose(pid, op["body"])["id"])
                         elif op["op"] == "edit":
                             jobs.append(studio.edit(op["body"])["id"])
+                        elif op["op"] == "clip_edit":
+                            jobs.append(studio.clip_edit(op["body"])["id"])
                         else:
                             local.append(op)
                 except Exception as exc:  # noqa: BLE001 - a refused job fails this node, not the run
@@ -742,11 +764,12 @@ def _wait(studio: Any, jobs: list[str], poll_s: float, timeout_s: float,
 # seconds per render when this computer has no history of the template yet
 DEFAULT_SECONDS = {"qwen21_txt2img": 60, "qwen21_edit": 90, "wan22_ti2v": 180, "wan22_i2v_14b": 300, "wan22_flf2v": 320,
                    "wan22_s2v": 380, "wan21_infinitetalk": 700, "ace15_song": 60, "esrgan_upscale": 15,
-                   "birefnet_remove_background": 15, "control_pose": 20, "control_depth": 20}
+                   "birefnet_remove_background": 15, "control_pose": 20, "control_depth": 20, "wan21_bernini_edit": 240,
+                   "wan22_bernini_edit": 420}
 TEMPLATE_VRAM = {"qwen21_txt2img": "qwen21", "qwen21_edit": "qwen21", "wan22_ti2v": "wan", "wan22_i2v_14b": "wan14b",
                  "wan22_flf2v": "wan14b", "wan22_s2v": "wan_s2v", "wan21_infinitetalk": "wan14b", "ace15_song": "ace",
                  "esrgan_upscale": "esrgan", "birefnet_remove_background": "birefnet", "control_pose": "control",
-                 "control_depth": "control"}
+                 "control_depth": "control", "wan21_bernini_edit": "wan", "wan22_bernini_edit": "wan14b"}
 _EDIT_OP_TEMPLATE = {"upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background",
                      "pose_map": "control_pose", "depth_map": "control_depth"}
 
@@ -759,6 +782,8 @@ def _op_template(op: dict[str, Any]) -> tuple[str, float]:
         return "ace15_song", max(1, int(b.get("count") or 1)) * max(0.3, float(b.get("duration") or 60) / 60)
     if op["op"] == "edit":
         return _EDIT_OP_TEMPLATE.get(b.get("operation") or "upscale", "esrgan_upscale"), 1
+    if op["op"] == "clip_edit":
+        return ("wan22_bernini_edit" if b.get("quality") == "final" else "wan21_bernini_edit"), 1
     if op["op"] in ("chat", "combine", "composite"):
         return op["op"], 1
     t = b.get("template")
@@ -808,6 +833,8 @@ def _rough_estimate(graph: dict[str, Any], nid: str, per_node: dict[str, int]) -
         return "qwen21_edit", max(1, n) * fan("image")
     if kind == "edit":
         return _EDIT_OP_TEMPLATE.get(d.get("operation") or "upscale", "esrgan_upscale"), fan("image")
+    if kind == "clip_edit":
+        return ("wan22_bernini_edit" if d.get("quality") == "final" else "wan21_bernini_edit"), fan("clip")
     if kind == "music":
         return "ace15_song", max(1, int(d.get("count") or 1)) * max(0.3, float(d.get("duration") or 60) / 60)
     if kind in ("assistant", "combine", "composite"):
@@ -966,6 +993,7 @@ Each node is an object with an "id" (short, letters/digits), a "type" and fields
 - {"id","type":"music","tags","lyrics","duration":10-240}
 - {"id","type":"assistant","prompt","as_list":true,"items":3}: writes ideas; wire it into an image's prompt_from to make one picture per idea
 - {"id","type":"combine","clips":[ids of video nodes in order],"audio":"id of a music node"}
+- {"id","type":"clip_edit","prompt":"what changes, e.g. make it night with rain","mode":"auto|edit|restyle|reference","quality":"draft|final","clips":[ids of video/asset nodes],"refs":[ids of image/cast nodes]}: redraws an existing clip following the instruction and keeps its motion
 - {"id","type":"note","text"}
 Rules: a name the user mentions that is in the project cast is a cast node wired as refs into every picture
 that shows it (never draw a new reference sheet for it), and prompts write it as @Name; a reference sheet image
@@ -995,7 +1023,8 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
     types = {ids[str(n.get("id") or n["type"])]: n["type"] for n in raw}
     data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality"),
                  "music": ("tags", "lyrics", "duration", "bpm"), "assistant": ("prompt", "as_list", "items"),
-                 "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",)}
+                 "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",),
+                 "clip_edit": ("prompt", "mode", "quality")}
     kept = []
     for n in raw:
         nid = ids[str(n.get("id") or n["type"])]
@@ -1043,7 +1072,7 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
             wires.append((ref(n.get("audio")), None, nid, "audio"))
         for src in n.get("clips") or []:
             if ref(src):
-                wires.append((ref(src), None, nid, "clips"))
+                wires.append((ref(src), None, nid, "clip" if t == "clip_edit" else "clips"))
     kept_set = set(kept) | existing
     _attach_cast(store, project_id, ops, wires, kept_set, existing)
     # an @Name nobody in the cast answers to loads no reference: plain words then
@@ -1232,6 +1261,8 @@ def needed_models(graph: dict[str, Any]) -> list[str]:
                 need.add("Wan 2.2 14B image-to-video (first-last frame)")
             else:
                 need.add("Wan 2.2 5B (draft)" if d.get("quality") == "draft" else "Wan 2.2 14B image-to-video")
+        elif t == "clip_edit":
+            need.add("Bernini-R 14B (video editing)" if d.get("quality") == "final" else "Bernini-R 1.3B (video editing)")
         elif t == "music":
             need.add("ACE-Step")
         elif t == "assistant":

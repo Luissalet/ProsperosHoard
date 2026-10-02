@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import logging
 import logging.handlers
 import webbrowser
@@ -40,8 +41,6 @@ def main() -> None:
     elif args.demo:
         data_dir = repo_root / "data-demo"
     else:
-        import os
-
         data_dir = Path(os.environ.get("PROSPERO_DATA_DIR") or repo_root / "data")
     data_dir = data_dir.expanduser().resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -53,6 +52,8 @@ def main() -> None:
         from .devtools.fake_comfy import FakeComfyServer
 
         fake = FakeComfyServer(data_dir / "fake_comfy")
+        # PROSPERO_DEMO_MOTION=1: the fake also lists the big video models (Wan 14B, VACE, Bernini-R...)
+        fake.motion_models = os.environ.get("PROSPERO_DEMO_MOTION", "").strip() == "1"
         fake_port = fake.run_in_thread()
         backend_json = data_dir / "backend.json"
         raw = {}
