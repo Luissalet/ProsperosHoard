@@ -165,6 +165,17 @@ class TrashBody(BaseModel):
     projects: Optional[list[str]] = None  # trashed projects to restore / delete for good
 
 
+class CanvasBody(BaseModel):
+    seconds: float = 8.0               # 3-8 s
+    start_s: Optional[float] = None    # default: the first chorus
+    lyrics: bool = False               # keep the burned-in lyric captions
+
+
+class ProductionFinishingBody(BaseModel):
+    finishing: dict[str, Any] = Field(default_factory=dict)  # see video.validate_finishing; {} = no look
+    render: bool = True  # queue the run that re-renders the cut when one was already rendered
+
+
 class ProductionSettingsBody(BaseModel):
     autopilot: Optional[bool] = None            # no pauses: the first take, no animatic review
     animatic: Optional[bool] = None
@@ -2953,6 +2964,33 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.patch("/api/productions/{slug}/settings")
     def production_settings(slug: str, body: ProductionSettingsBody):
         return op_production_settings(slug, body)
+
+    def op_production_finishing(slug: str, body: ProductionFinishingBody) -> dict[str, Any]:
+        out = productions_mod.set_finishing(store, slug, body.finishing)
+        if body.render and out["rerender"]:
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": slug}
+
+    def op_canvas(slug: str, body: CanvasBody) -> dict[str, Any]:
+        from . import canvas as canvas_mod
+        out = canvas_mod.make_canvas(store, slug, body.seconds, body.start_s, body.lyrics)
+        return {**out, "production": slug, "download": f"/api/assets/{out['asset_id']}/file?download=true"}
+
+    @app.post("/api/productions/{slug}/canvas")
+    def production_canvas(slug: str, body: CanvasBody):
+        return op_canvas(slug, body)
+
+    @app.post("/api/agent/studio_canvas")
+    def agent_canvas(production: str, body: CanvasBody):
+        return agent("studio_canvas", production, lambda: op_canvas(production, body))
+
+    @app.patch("/api/productions/{slug}/finishing")
+    def production_finishing(slug: str, body: ProductionFinishingBody):
+        return op_production_finishing(slug, body)
+
+    @app.post("/api/agent/studio_production_finishing")
+    def agent_production_finishing(production: str, body: ProductionFinishingBody):
+        return agent("studio_production_finishing", production, lambda: op_production_finishing(production, body))
 
     @app.post("/api/agent/studio_production_settings")
     def agent_production_settings(production: str, body: ProductionSettingsBody):

@@ -40,7 +40,8 @@ TRANSITION_MAP = {"crossfade": "fade", "dip_black": "fadeblack", "flash_white": 
 #
 #   {"color_grade": "teal_orange"|"sodium_night"|"bleach_bypass",
 #    "grain": 0.0-1.0, "vignette": bool, "letterbox": bool,
-#    "glitch_on_downbeats": bool, "lyric_style": "default"|"horror"}
+#    "glitch_on_downbeats": bool, "lyric_style": "default"|"horror"|"bold",
+#    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom"/"flash"/"shake": 0-1}}
 #
 # Colour grades are single-pass `eq`/`colorbalance`/`curves` approximations,
 # not a real 3D LUT - good enough for a fast local render, not a colourist's
@@ -59,7 +60,14 @@ COLOR_GRADE_PRESETS = {
                     "colorbalance=rs=0.1:bs=-0.22:rm=0.18:gm=0.03:bm=-0.22:rh=0.1:bh=-0.12,format=yuv420p",
     "bleach_bypass": "format=rgb24,curves=preset=strong_contrast,format=yuv420p,eq=saturation=0.35:contrast=1.18",
 }
-FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style"}
+FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style", "beat_fx"}
+# Beat effects ("beat_fx"): a punch-in zoom, a brightness flash and a camera
+# shake that fire on the song's hits ({"source": "kick"|"beats"|"downbeats",
+# "zoom"|"flash"|"shake": 0-1}). They are applied per clip, with only that
+# clip's hits in the expressions, so a three-minute song never builds a
+# command line longer than Windows allows.
+BEAT_FX_SOURCES = ("kick", "beats", "downbeats")
+BEAT_FX_TAU = {"zoom": 0.14, "flash": 0.09, "shake": 0.10}
 LYRIC_STYLES = ("default", "horror", "bold")
 
 
@@ -94,12 +102,81 @@ def validate_finishing(finishing: Optional[dict[str, Any]]) -> dict[str, Any]:
         out["letterbox"] = True
     if finishing.get("glitch_on_downbeats"):
         out["glitch_on_downbeats"] = True
+    fx = finishing.get("beat_fx")
+    if fx:
+        if not isinstance(fx, dict):
+            raise RenderError("beat_fx must be an object like {\"source\": \"kick\", \"zoom\": 0.5}")
+        unknown = set(fx) - {"source", "zoom", "flash", "shake"}
+        if unknown:
+            raise RenderError(f"unknown beat_fx field(s): {', '.join(sorted(unknown))}")
+        clean: dict[str, Any] = {"source": fx.get("source") or "kick"}
+        if clean["source"] not in BEAT_FX_SOURCES:
+            raise RenderError(f"beat_fx.source must be one of {', '.join(BEAT_FX_SOURCES)}")
+        for key in ("zoom", "flash", "shake"):
+            if fx.get(key):
+                try:
+                    value = float(fx[key])
+                except (TypeError, ValueError):
+                    raise RenderError(f"beat_fx.{key} must be a number between 0 and 1") from None
+                if not 0.0 <= value <= 1.0:
+                    raise RenderError(f"beat_fx.{key} must be between 0 and 1")
+                if value > 0:
+                    clean[key] = round(value, 3)
+        if any(k in clean for k in ("zoom", "flash", "shake")):
+            out["beat_fx"] = clean
     style = finishing.get("lyric_style")
     if style and style != "default":
         if style not in LYRIC_STYLES:
             raise RenderError(f"lyric_style must be one of {', '.join(LYRIC_STYLES)}")
         out["lyric_style"] = style
     return out
+
+
+def _envelope(hits: list[tuple[float, float]], var: str, tau: float, amp: float) -> str:
+    """sum of decaying pulses a*exp(-(t-ti)/tau), each only inside its own
+    window, as an ffmpeg expression in `var` (seconds)."""
+    terms = [f"{a * amp:.4f}*exp(-({var}-{t:.3f})/{tau})*between({var},{t:.3f},{t + 5 * tau:.3f})"
+             for t, a in hits if a > 0]
+    return "+".join(terms) if terms else "0"
+
+
+def build_beat_fx_vf(fx: Optional[dict[str, Any]], hits: list[tuple[float, float]], width: int, height: int,
+                     fps: int) -> str:
+    """The beat effects of one clip: `hits` are (time in the clip, strength).
+    A d=1 zoompan does the punch-in and the shake (time = input frame / fps,
+    so seeks and timestamps never matter) and eq the flash. Empty when
+    there is nothing to do."""
+    if not fx or not hits:
+        return ""
+    parts: list[str] = []
+    zoom, shake, flash = float(fx.get("zoom") or 0), float(fx.get("shake") or 0), float(fx.get("flash") or 0)
+    if zoom or shake:
+        var = f"(in/{fps})"
+        z = f"1+{_envelope(hits, var, BEAT_FX_TAU['zoom'], 0.12 * zoom)}" if zoom else "1"
+        # the shake needs room to move: a slight zoom so the frame never
+        # shows its edge, then an offset that wobbles fast and dies out
+        if shake:
+            z = f"{z}+{0.03 * shake:.4f}"
+            amp = max(1.0, 0.02 * shake * min(width, height))
+            sh = _envelope(hits, var, BEAT_FX_TAU["shake"], amp)
+            x = f"iw/2-(iw/zoom/2)+({sh})*sin(in*1.9)"
+            y = f"ih/2-(ih/zoom/2)+({sh})*cos(in*1.3)"
+        else:
+            x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        q = lambda e: "'" + _escape_enable_arg(e) + "'"  # noqa: E731
+        parts.append(f"zoompan=z={q(z)}:x={q(x)}:y={q(y)}:d=1:s={width}x{height}:fps={fps}")
+    if flash:
+        bright = _envelope(hits, f"(n/{fps})", BEAT_FX_TAU["flash"], 0.22 * flash)
+        parts.append(f"eq=brightness='{_escape_enable_arg(bright)}':eval=frame")
+    if parts:
+        parts.append("format=yuv420p")
+    return ",".join(parts)
+
+
+def clip_hits(hits: list[tuple[float, float]], start_s: float, duration_s: float) -> list[tuple[float, float]]:
+    """The hits a clip starting at `start_s` shows, in clip time - a hit
+    just before the cut still decays into it."""
+    return [(round(t - start_s, 3), a) for t, a in hits if start_s - 0.5 <= t < start_s + duration_s]
 
 
 def _escape_enable_arg(value: str) -> str:
@@ -183,7 +260,7 @@ def _zoompan_expr(zoom_start: float, zoom_end: float, pan: str, n_frames: int) -
 
 def build_image_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float,
-    ken_burns: Optional[dict[str, Any]] = None,
+    ken_burns: Optional[dict[str, Any]] = None, extra_vf: str = "",
 ) -> list[str]:
     ken_burns = ken_burns or {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"}
     n_frames = max(1, round(duration_s * fps))
@@ -193,7 +270,7 @@ def build_image_clip_cmd(
         f"crop={width*2}:{height*2},"
         f"zoompan=z='{z}':d={n_frames}:s={width}x{height}:fps={fps}:x='{x}':y='{y}',"
         f"format=yuv420p"
-    )
+    ) + (f",{extra_vf}" if extra_vf else "")
     return [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-loop", "1", "-i", str(src), "-t", f"{duration_s + 0.5 / fps:.3f}",
         "-vf", vf, "-r", str(fps), "-frames:v", str(n_frames), "-an", "-c:v", "libx264", "-preset", "ultrafast",
@@ -203,17 +280,40 @@ def build_image_clip_cmd(
 
 def build_video_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float, trim_start_s: float,
+    extra_vf: str = "",
 ) -> list[str]:
     # tpad clones the last frame when the source is shorter than the clip
     # (a 2 s SVD animation placed on a 3 s beat slot) so every clip has the
     # exact length the timeline says.
     vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps},"
-          f"tpad=stop_mode=clone:stop_duration={duration_s:.3f},format=yuv420p")
+          f"tpad=stop_mode=clone:stop_duration={duration_s:.3f},format=yuv420p") + (f",{extra_vf}" if extra_vf else "")
     return [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-ss", f"{trim_start_s:.3f}", "-i", str(src),
         "-t", f"{duration_s + 0.5 / fps:.3f}", "-vf", vf, "-frames:v", str(max(1, round(duration_s * fps))),
         "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path),
     ]
+
+
+def build_loop_cmd(ffmpeg: str, src: Path, out_path: Path, start_s: float, seconds: float, fade_s: float,
+                   width: int, height: int, fps: int, src_width: int, src_height: int) -> list[str]:
+    """A seamless silent loop of `seconds` (a Spotify Canvas): the clip
+    from start+fade, whose tail crossfades into the stretch just before
+    it, so the last frame leads straight back into the first. The source
+    is centre-cropped to the target's shape first (a 16:9 cut gives a 9:16
+    loop)."""
+    target = width / height
+    if src_width / max(1, src_height) > target:
+        crop = f"crop=trunc(ih*{target:.6f}/2)*2:ih"
+    else:
+        crop = f"crop=iw:trunc(iw/{target:.6f}/2)*2"
+    prep = f"setpts=PTS-STARTPTS,fps={fps},{crop},scale={width}:{height}:flags=lanczos,setsar=1"
+    graph = (f"[0:v]{prep}[main];[1:v]{prep}[head];"
+             f"[main][head]xfade=transition=fade:duration={fade_s:.3f}:offset={seconds - fade_s:.3f},format=yuv420p")
+    return [ffmpeg, "-y", "-nostdin", "-loglevel", "error",
+            "-ss", f"{start_s + fade_s:.3f}", "-t", f"{seconds:.3f}", "-i", str(src),
+            "-ss", f"{start_s:.3f}", "-t", f"{fade_s:.3f}", "-i", str(src),
+            "-filter_complex", graph, "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_path)]
 
 
 def build_concat_cmd(ffmpeg: str, list_file: Path, out_path: Path) -> list[str]:
@@ -607,6 +707,16 @@ def render_timeline(
     grid_transitions = [dict(t, duration_s=overlap_frames[i] / fps) if t.get("type", "cut") != "cut" else t
                         for i, t in enumerate(transitions)]
 
+    hits: list[tuple[float, float]] = []
+    fx = finishing.get("beat_fx")
+    if fx and timeline.get("audio_asset_id"):
+        from . import audio as audio_mod  # numpy-only; only a render with beat effects pays for it
+        try:
+            samples = audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"]))
+            hits = audio_mod.beat_hits(samples, fx.get("source") or "kick")
+        except Exception:  # noqa: BLE001 - an unreadable song renders without the effect, not at all
+            hits = []
+
     clip_paths: list[Path] = []
     for i, clip in enumerate(clips):
         check_cancel()
@@ -616,10 +726,12 @@ def render_timeline(
         if not all_cuts and i + 1 < len(clips):
             frames += overlap_frames[i + 1] + 1
         duration = frames / fps
+        extra = build_beat_fx_vf(fx, clip_hits(hits, start_frames[i] / fps, duration), width, height, fps) if hits else ""
         if clip["kind"] == "video":
-            cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)))
+            cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)),
+                                       extra_vf=extra)
         else:
-            cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"))
+            cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"), extra_vf=extra)
         _run(cmd)
         clip_paths.append(out_clip)
         report(0.05 + 0.55 * (i + 1) / len(clips), f"rendered clip {i + 1}/{len(clips)}")

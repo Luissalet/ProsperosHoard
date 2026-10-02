@@ -126,6 +126,8 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/characters/{id}/restore` | back into the cast (refused when another entry took its name) |
 | GET | `/api/projects/{id}/characters/deleted` | the deleted cast entries that can come back |
 | DELETE | `/api/groups/{id}` | delete a group (its members stay) |
+| PATCH | `/api/productions/{slug}/finishing` | `{finishing, render=true}` -> `{finishing, rerender, job?}`; agent twin `POST /api/agent/studio_production_finishing?production=` |
+| POST | `/api/productions/{slug}/canvas` | `{seconds=8, start_s?, lyrics=false}` -> `{asset_id, start_s, start_from, seconds, lyrics, download}`; agent twin `POST /api/agent/studio_canvas?production=` |
 | POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?, engine?, references?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, matched_elements, element_references, added_references[{name, element, asset_id, index}], unknown_mentions, reference_asset_id, style_defaults`); with `engine: "qwen21"` the mentioned places/objects with an image are numbered after the call's `references` exactly as the render will |
 | POST | `/api/projects/{id}/generate` | same body as the agent route; returns the full job |
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
