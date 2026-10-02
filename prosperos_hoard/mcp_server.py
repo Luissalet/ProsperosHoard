@@ -1061,12 +1061,16 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     studio_production_cast), {"cast": ["Name", ...]} picks exactly who; {"span": {"start_s": 12.4, "end_s": 19.8}}
     places it on exactly that stretch of the song (its lyric lines: studio_production_timing; null frees it;
     spans cannot overlap); {"delete": true} removes it; {"insert": {"after": "4", "prompt": "...",
-    "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot. Only
+    "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot;
+    {"continue_from": "2"} makes its clip start on the last frame of shot 2's clip and end on its own
+    still (one continuous take; null cuts again); {"locked": true} approves the shot: it can't change
+    and studio_production_regenerate keeps it ({"locked": false} to edit it again). Only
     what depends on a changed shot is redone; run=true queues the production (it rebuilds the
     animatic and pauses again when animatic is on). The production must not be running.
 
     Keywords: change shots, swap still, regenerate shot, add shot, delete shot, reorder shots, shot reference,
-    cambiar planos, cambiar toma, regenerar plano, añadir plano, borrar plano, referencias del plano
+    approve shot, lock shot, continue shot, one take, cambiar planos, cambiar toma, regenerar plano, añadir plano,
+    borrar plano, referencias del plano, aprobar plano, bloquear plano, continuar plano, plano secuencia
     """
     return _call("POST", "/api/agent/studio_production_shots", params={"production": production},
                 json={"changes": changes, "run": run})
@@ -1125,19 +1129,53 @@ def studio_production_timing(production: str) -> dict[str, Any]:
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_production_settings(production: str, autopilot: Optional[bool] = None, animatic: Optional[bool] = None,
-                               song_review: Optional[bool] = None, qa: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+                               song_review: Optional[bool] = None, qa: Optional[dict[str, Any]] = None,
+                               clip_quality: Optional[str] = None) -> dict[str, Any]:
     """Change how a production runs: autopilot (no pauses), animatic review, song-take review, QA / ajustes.
 
     autopilot=true runs every stage without stopping (the first song take, no animatic review);
     false brings the pauses back. animatic=false skips the animatic; song_review=true pauses after the
-    song takes; qa={"enabled": true, "max_retries": 2} checks each stage inline. Applies from the next stage.
+    song takes; qa={"enabled": true, "max_retries": 2} checks each stage inline. clip_quality="draft"
+    renders new clips fast on the 5B model (no end frames) to judge the cut; "final" uses the 14B model
+    (studio_production_promote re-renders the drafts already made). Applies from the next stage.
 
     Keywords: autopilot, no pauses, run everything, skip review, settings, piloto automatico, sin pausas,
     hacerlo todo seguido, ajustes de la produccion
     """
     body: dict[str, Any] = {k: v for k, v in (("autopilot", autopilot), ("animatic", animatic), ("song_review", song_review),
-                                              ("qa", qa)) if v is not None}
+                                              ("qa", qa), ("clip_quality", clip_quality)) if v is not None}
     return _call("POST", "/api/agent/studio_production_settings", params={"production": production}, json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_regenerate(production: str, stage: str = "clips", keys: Optional[list[str]] = None,
+                                 run: bool = True) -> dict[str, Any]:
+    """Redo every shot not approved yet, keeping the approved (locked) ones / regenerar lo no aprobado.
+
+    stage="clips" renders the clips of the unlocked shots again with new seeds; "frames" redoes their
+    stills too (and so their clips). keys limits it to those shots. Clips that continue a redone clip
+    are redone as well. Lock the good shots first with studio_production_shots({"key", "locked": true}).
+    run=true queues the production. Returns regenerated, kept (locked) and chained keys.
+
+    Keywords: regenerate unapproved, redo the rest, reroll, keep approved shots, regenerar no aprobados,
+    rehacer el resto, otra tirada, mantener los aprobados
+    """
+    return _call("POST", "/api/agent/studio_production_regenerate", params={"production": production},
+                 json={"stage": stage, "keys": keys, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_promote(production: str, keys: Optional[list[str]] = None, run: bool = True) -> dict[str, Any]:
+    """Turn draft clips into final ones: re-render them on the 14B model with the same seeds / pasar a final.
+
+    Switches clip_quality to final and drops the draft clips (all, or those of the shots in keys);
+    run=true queues the production to render them. Returns promoted and chained keys.
+
+    Keywords: promote drafts, final quality, render final, high quality clips, pasar a final, calidad final,
+    renderizar en alta, borradores a final
+    """
+    return _call("POST", "/api/agent/studio_production_promote", params={"production": production},
+                 json={"keys": keys, "run": run})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

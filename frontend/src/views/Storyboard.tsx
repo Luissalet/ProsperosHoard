@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
@@ -61,6 +61,19 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   const pendingClips = (state.partial?.clips?.pending || {}) as Record<string, string>;
   const running = liveRun(state, app.jobs);
   const timing = state.timing;
+  const quality = ((state.done?.clips?.quality || {}) as Record<string, string>);
+  const drafts = Object.keys(clips).filter((k) => quality[k] === "draft");
+  const draftMode = state.settings?.clip_quality === "draft";
+  const lockedN = shots.filter((s) => s.locked).length;
+  const [acting, setActing] = useState(false);
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setActing(true);
+    try { await fn(); app.toast(ok, "ok"); onChanged(); app.refreshJobs(); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setActing(false); }
+  };
+  const toggleLock = (shot: ProductionShot) => act(() => api.changeShots(state.slug, [{ key: shot.key, locked: !shot.locked }], false),
+    shot.locked ? t("sbUnlocked", { n: shot.key }) : t("sbLocked", { n: shot.key }));
 
   // a typical render time on this machine right now, for the estimate
   const typical = useMemo(() => {
@@ -103,6 +116,23 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
         {running && state.job_id && <button className="btn sm" onClick={pause}><Pause size={13} /> {t("sbPause")}</button>}
       </h2>
       <p className="small muted" style={{ marginTop: -6 }}>{running ? t("sbRunningHint") : t("sbHint")}</p>
+      <div className="row wrap sb-takes" style={{ gap: 8, marginBottom: 8 }}>
+        <span className="small muted"><Gauge size={12} /> {t("sbClipQuality")}</span>
+        <div className="seg">
+          <button className={draftMode ? "on" : ""} disabled={running || acting} title={t("sbDraftHint")}
+            onClick={() => !draftMode && act(() => api.setProductionSettings(state.slug, { clip_quality: "draft" }), t("sbDraftOn"))}>{t("sbDraft")}</button>
+          <button className={!draftMode ? "on" : ""} disabled={running || acting} title={t("sbFinalHint")}
+            onClick={() => draftMode && act(() => api.setProductionSettings(state.slug, { clip_quality: "final" }), t("sbFinalOn"))}>{t("sbFinal")}</button>
+        </div>
+        {drafts.length > 0 && <button className="btn sm" disabled={running || acting} title={t("sbPromoteHint")}
+          onClick={() => act(() => api.promoteClips(state.slug), t("sbPromoted", { n: drafts.length }))}><Film size={13} /> {t("sbPromote", { n: drafts.length })}</button>}
+        <span className="grow" />
+        <span className="small muted"><Lock size={12} /> {t("sbLockedN", { n: lockedN, total: shots.length })}</span>
+        <button className="btn sm" disabled={running || acting || lockedN === shots.length} title={t("sbRerollClipsHint")}
+          onClick={() => act(() => api.regenerateUnlocked(state.slug, "clips"), t("sbRerolling"))}><Dices size={13} /> {t("sbRerollClips")}</button>
+        <button className="btn sm" disabled={running || acting || lockedN === shots.length} title={t("sbRerollFramesHint")}
+          onClick={() => act(() => api.regenerateUnlocked(state.slug, "frames"), t("sbRerolling"))}><Dices size={13} /> {t("sbRerollFrames")}</button>
+      </div>
       <div className="sb-strip">
         {insertButton("start")}
         {shots.map((shot) => {
@@ -111,7 +141,9 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
           const when = timing?.shots?.[shot.key];
           const hasClip = Object.keys(clips).some((k) => k === shot.key || k.startsWith(`${shot.key}v`));
           return (
-            <div key={shot.key} className="sb-item">
+            <div key={shot.key} className={`sb-item${shot.locked ? " locked" : ""}`}>
+              <button className="btn xs icon sb-lock" disabled={running || acting} title={shot.locked ? t("sbUnlockHint") : t("sbLockHint")}
+                onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
               <button className="tile sb-tile" title={shot.prompt} onClick={() => setEditing({ shot })}>
                 {best ? <img src={`/api/assets/${best}/thumb`} alt="" loading="lazy" />
                   : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : <Clapperboard size={22} />}</div>}
@@ -120,6 +152,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                   {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
                   {hasClip && <span className="pill badge-dark"><Film size={10} /> {t("clipBadge")}</span>}
                   {shot.sing && <span className="pill badge-dark" title={t("sbSing")}><Mic size={10} /></span>}
+
                   {(shot.refs || []).length > 0 && <span className="pill badge-dark"><Images size={10} /> {shot.refs!.length}</span>}
                   {(shot.crowd || (shot.cast || []).length > 0) && castCount > 0 && <span className="pill badge-dark" title={t("castCrowd")}><Users size={10} /></span>}
                 </div>
@@ -127,6 +160,8 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 <div className="tile-meta stack" style={{ gap: 2, alignItems: "stretch" }}>
                   <span className="row small" style={{ gap: 6 }}>
                     {shot.section && <span className="pill">{t(`sec_${shot.section}` as never) || shot.section}</span>}
+                    {shot.continue_from && <span className="pill accent" title={t("sbContinuesN", { n: shot.continue_from })}><ArrowRightToLine size={10} /> {shot.continue_from}</span>}
+                    {Object.keys(clips).some((k) => (k === shot.key || k.startsWith(`${shot.key}v`)) && quality[k] === "draft") && <span className="pill warn" title={t("sbDraftHint")}>{t("sbDraft")}</span>}
                     {timing?.spans?.[shot.key] && <span className="mono" title={t("trackPinned")}><Pin size={10} /> {clock(timing.spans[shot.key].start_s)}–{clock(timing.spans[shot.key].end_s)}</span>}
                     {!timing?.spans?.[shot.key] && when && when.length > 0 && <span className="mono muted" title={when.map((w) => `${clock(w.start_s)}–${clock(w.start_s + w.duration_s)}`).join("  ")}>
                       {clock(when[0].start_s)}–{clock(when[0].start_s + when[0].duration_s)}{when.length > 1 ? ` ×${when.length}` : ""}</span>}
@@ -188,6 +223,13 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
   const [motionPick, setMotionPick] = useState<null | "library" | "link">(null);
   const [best, setBest] = useState(Math.max(0, variants.indexOf(entry.best || "")));
   const [regenerate, setRegenerate] = useState(false);
+  const [locked, setLocked] = useState(!!shot?.locked);
+  const [continueFrom, setContinueFrom] = useState(shot?.continue_from || "");
+  const earlier = (() => {
+    const all = state.spec.shots || [];
+    const idx = shot ? all.findIndex((s) => s.key === shot.key) : (after && after !== "start" ? all.findIndex((s) => s.key === after) + 1 : 0);
+    return all.slice(0, idx < 0 ? all.length : idx).filter((s) => s.clips.length > 0 && s.key !== shot?.key);
+  })();
   const [picking, setPicking] = useState<"image" | "video" | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [framesOf, setFramesOf] = useState<Asset[] | null>(null);
@@ -245,6 +287,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
                            sing: sing && !!span ? true : undefined,
                            motion_ref: motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : undefined,
                            span: span ? { start_s: span.start, end_s: span.end } : undefined } };
+      if (continueFrom) extraChange.push({ continue_from: continueFrom });
     } else {
       change = { key: shot!.key };
       if (prompt.trim() !== shot!.prompt) change.prompt = prompt.trim();
@@ -262,15 +305,22 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
       if (variants.length > 1 && variants[best] !== entry.best) change.best = best;
       if (regenerate) change.regenerate = true;
       if (JSON.stringify(span) !== JSON.stringify(ownSpan)) change.span = span ? { start_s: span.start, end_s: span.end } : null;
+      if (continueFrom !== (shot!.continue_from || "")) change.continue_from = continueFrom || null;
+      if (locked && shot!.locked) {
+        // an approved shot only changes its place in the song
+        change = Object.fromEntries(Object.entries(change).filter(([k]) => ["key", "section"].includes(k)));
+      }
+      if (locked !== !!shot!.locked) change.locked = locked;
       if (Object.keys(change).length === 1) { onClose(); return; }
     }
     setBusy(true);
     try {
-      const sent = await api.changeShots(state.slug, [change], run && !(isNew && castNames.length));
-      // a new shot's own cast goes in a second change, once it has a key
-      if (isNew && castNames.length) {
+      const later = isNew && (castNames.length > 0 || extraChange.length > 0);
+      const sent = await api.changeShots(state.slug, [change], run && !later);
+      // a new shot's own cast (and chaining) goes in a second change, once it has a key
+      if (later) {
         const key = (sent as { changed?: string[] }).changed?.[0];
-        if (key) await api.changeShots(state.slug, [{ key, cast: castNames }, ...extraChange], run);
+        if (key) await api.changeShots(state.slug, [{ key, ...(castNames.length ? { cast: castNames } : {}), ...Object.assign({}, ...extraChange) }], run);
       }
       app.toast(run ? t("sbSavedRun") : t("sbSaved"), "ok");
       onSaved();
@@ -299,7 +349,14 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
         <button className="btn primary" disabled={busy} onClick={() => save(true)}>{busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("sbSaveRun")}</button>
       </>
     )}>
-      <fieldset disabled={running || busy} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
+      {!isNew && (
+        <label className={`check sb-approve${locked ? " on" : ""}`} title={t("sbLockHint")}>
+          <input type="checkbox" checked={locked} disabled={running || busy} onChange={(e) => setLocked(e.target.checked)} />
+          {locked ? <Lock size={13} /> : <Unlock size={13} />} {t("sbApproved")}
+          <span className="hint">{locked ? t("sbApprovedHint") : t("sbLockHint")}</span>
+        </label>
+      )}
+      <fieldset disabled={running || busy || (locked && !!shot?.locked)} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
         {variants.length > 0 && (
           <div className="field">{t("sbStillPick")}
             <div className="row wrap" style={{ gap: 6 }}>
@@ -347,6 +404,14 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
             </select>
           </label>
           {motion === "move" && <label className="check"><input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} /> {t("makeClip")}</label>}
+          {motion === "move" && earlier.length > 0 && !sing && (
+            <label className="field" style={{ minWidth: 190 }} title={t("sbContinueHint")}>{t("sbContinue")}
+              <select value={continueFrom} onChange={(e) => { setContinueFrom(e.target.value); if (e.target.value) setClip(true); }}>
+                <option value="">{t("sbContinueNone")}</option>
+                {earlier.map((s) => <option key={s.key} value={s.key}>{t("sbContinueOf", { n: s.key })}</option>)}
+              </select>
+            </label>
+          )}
           <label className="check" title={span ? t("sbSingHint") : t("sbSingNeedsSpan")}>
             <input type="checkbox" checked={sing} disabled={!span && !sing}
               onChange={(e) => { setSing(e.target.checked); if (e.target.checked) { setMotion("move"); setClip(true); } }} />

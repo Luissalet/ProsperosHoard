@@ -796,3 +796,15 @@ table.list tr.selected td { background: var(--accent-soft); }
 .sp-app-grid .sp-thumb, .sp-app-asset .sp-thumb { width: 100%; aspect-ratio: 1; }
 .sp-app-badge { margin-left: 6px; font-size: 10px; vertical-align: middle; gap: 3px; }
 @media (max-width: 760px) { .sp-app { grid-template-columns: 1fr; } .sp-app-form { position: static; } }
+
+/* storyboard: approved shots, takes */
+.sb-item { position: relative; }
+.sb-lock { position: absolute; top: 6px; left: 6px; z-index: 2; background: rgba(0, 0, 0, 0.55); color: #fff; border: 0; opacity: 0; transition: opacity .15s; }
+.sb-item:hover .sb-lock, .sb-item.locked .sb-lock { opacity: 1; }
+.sb-item.locked .sb-lock { background: var(--ok); color: #0b1a10; }
+.sb-item.locked .sb-tile { outline: 2px solid var(--ok); outline-offset: 1px; }
+.sb-item:has(.sb-lock) .tile-badges { padding-left: 30px; }
+.sb-approve { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); margin-bottom: 10px; flex-wrap: wrap; }
+.sb-approve.on { border-color: var(--ok); background: rgba(91, 191, 134, 0.08); color: var(--ok); }
+.sb-approve .hint { color: var(--muted); }
+.sb-takes .seg button { padding: 3px 10px; font-size: 12px; }
