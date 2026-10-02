@@ -1,40 +1,19 @@
-"""Subprocess helpers shared by every module that shells out (ffmpeg,
-ffprobe, nvidia-smi through Hoard Link does its own).
-
-On Windows a console child started from a windowless parent (the app is
-launched by Faustus or a .cmd shortcut) flashes a console window for every
-call unless `CREATE_NO_WINDOW` is passed. Text output is always decoded as
-UTF-8 with replacement so a non-ASCII file name in an ffmpeg error message
-can never raise `UnicodeDecodeError` under a cp1252 locale.
+"""Subprocess helpers for the modules that shell out (ffmpeg, ffprobe, trainers). Hoard Link's ``hoard_link.proc`` does the work:
+no console window on Windows, UTF-8 text decoding with replacement, a closed stdin, and a timed-out command is killed with its whole
+process tree. The names stay here because many modules import them; ``run`` keeps the old default of bytes unless ``text=True``.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import subprocess  # noqa: F401 - callers use procutil.subprocess.PIPE / STDOUT
 from typing import Any
 
+from .hoard_link import proc as _proc
 
-def no_window_kwargs() -> dict[str, Any]:
-    if sys.platform == "win32":
-        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
-    return {}
+no_window_kwargs = _proc.no_window_kwargs
+popen = _proc.popen
 
 
 def run(cmd: list[str], *, text: bool = False, **kwargs: Any) -> subprocess.CompletedProcess:
-    if "stdout" not in kwargs and "stderr" not in kwargs:
-        kwargs.setdefault("capture_output", True)
-    if "input" not in kwargs:
-        kwargs.setdefault("stdin", subprocess.DEVNULL)
-    if text:
-        kwargs.setdefault("encoding", "utf-8")
-        kwargs.setdefault("errors", "replace")
-    return subprocess.run(cmd, **no_window_kwargs(), **kwargs)
-
-
-def popen(cmd: list[str], **kwargs: Any) -> subprocess.Popen:
-    kwargs.setdefault("stdin", subprocess.DEVNULL)
-    if kwargs.get("text") or kwargs.get("universal_newlines"):
-        kwargs.setdefault("encoding", "utf-8")
-        kwargs.setdefault("errors", "replace")
-    return subprocess.Popen(cmd, **no_window_kwargs(), **kwargs)
+    kwargs.pop("capture_output", None)   # the shared runner always captures stdout and stderr
+    return _proc.run(cmd, text=text, **kwargs)

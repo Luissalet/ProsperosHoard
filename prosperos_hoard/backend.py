@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
 import time
 from pathlib import Path
@@ -19,6 +18,7 @@ from typing import Any, Optional
 
 from . import procutil
 from .hoard_link.atomic import write_text_atomic
+from .hoard_link.media import bins
 from .hoard_link import Link, LinkConfig, Unavailable
 from .hoard_link.launch import Launcher, _port_open, comfy_port_from_url, list_gpus
 
@@ -161,45 +161,19 @@ class HttpMusic(MusicBackend):
         return resp.content
 
 
-_FFMPEG_CACHE: dict[str, Optional[str]] = {}
-
-
 def ffmpeg_path() -> str | None:
-    """ffmpeg on PATH first (the user's install), then the imageio-ffmpeg
-    bundled binary. Cached: `shutil.which` is not free on Windows."""
-    if "ffmpeg" in _FFMPEG_CACHE:
-        return _FFMPEG_CACHE["ffmpeg"]
-    found = shutil.which("ffmpeg")
-    if not found:
-        try:
-            import imageio_ffmpeg
-
-            found = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
-            found = None
-    _FFMPEG_CACHE["ffmpeg"] = found
-    return found
+    """The working ffmpeg (Hoard Link's lookup: ``HOARD_FFMPEG``, the user's PATH and the usual Windows folders, then the
+    imageio-ffmpeg wheel). Each candidate is run once to prove it works, and the answer is cached for a few seconds."""
+    return bins.find("ffmpeg").path
 
 
 def ffprobe_path() -> str | None:
-    """The ffprobe that sits next to the ffmpeg in use (None for the
-    imageio-ffmpeg binary, which ships ffmpeg only)."""
-    if "ffprobe" in _FFMPEG_CACHE:
-        return _FFMPEG_CACHE["ffprobe"]
-    exe = ffmpeg_path()
-    found = None
-    if exe:
-        p = Path(exe)
-        candidate = p.with_name(p.name.replace("ffmpeg", "ffprobe"))
-        if candidate != p and candidate.is_file():
-            found = str(candidate)
-        else:
-            found = shutil.which("ffprobe")
-    _FFMPEG_CACHE["ffprobe"] = found
-    return found
+    """The ffprobe that sits next to the ffmpeg in use (None for the imageio-ffmpeg binary, which ships ffmpeg only)."""
+    return bins.find("ffprobe").path
 
 
 def ffmpeg_version(exe: str | None) -> str | None:
+    """The first line of ``ffmpeg -version`` (``None`` when it does not run)."""
     if not exe:
         return None
     try:

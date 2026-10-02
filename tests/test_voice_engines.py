@@ -205,3 +205,15 @@ def test_real_faster_whisper_transcription(tmp_path):
     eng = ve.FasterWhisperEngine(model_size="tiny")
     result = eng.transcribe(wav_path, language="en", word_timestamps=False)
     assert "segments" in result and isinstance(result["text"], str)
+
+
+def test_ffmpeg_lookup_is_the_shared_one_and_procutil_decodes_text():
+    from prosperos_hoard import backend, procutil
+    from prosperos_hoard.hoard_link.media import bins
+
+    assert backend.ffmpeg_path() == bins.find("ffmpeg").path
+    exe = backend.ffmpeg_path()
+    assert exe and backend.ffmpeg_version(exe).lower().startswith("ffmpeg version")
+    done = procutil.run([exe, "-version"], text=True, timeout=10, capture_output=True)   # old keyword still accepted
+    assert done.returncode == 0 and isinstance(done.stdout, str)
+    assert isinstance(procutil.run([exe, "-version"], timeout=10).stdout, bytes)         # bytes unless text=True

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import procutil
+from .hoard_link import proc as hlproc
 from .backend import ffmpeg_path
 
 FONTS_DIR = Path(__file__).parent / "fonts"
@@ -603,7 +604,7 @@ def run_ffmpeg_with_progress(cmd: list[str], total_duration_s: float, on_progres
         assert proc.stdout is not None
         for line in proc.stdout:
             if should_cancel and should_cancel():
-                proc.kill()
+                hlproc.kill_tree(proc, grace_s=1.0)
                 proc.wait()
                 raise RenderCancelled("render cancelled")
             m = re.match(r"out_time_(?:ms|us)=(\d+)", line.strip())
