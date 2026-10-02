@@ -533,13 +533,34 @@ haciendo ahora, con su progreso, un cancelar y un clic hasta la producción a
 la que pertenece. Los diálogos mantienen sus botones a la vista aunque sean
 largos.
 
+El **piloto automático** (un interruptor en la producción, o al crearla)
+hace todas las etapas sin pararse - la primera toma, sin revisar el
+animático - y el diálogo de creación dice lo que costará en esta máquina
+(fotogramas, clips, horas de GPU) antes de empezar. Antes de cada ejecución
+la página comprueba lo que la pararía - ComfyUI apagado (con un botón para
+arrancarlo), sin modelo de música para una canción por componer, sin
+ffmpeg, ninguna GPU con memoria libre suficiente - y lo dice claro. Un
+montaje terminado se descarga para **Premiere Pro o DaVinci Resolve** (FCP7
+XML + EDL CMX 3600, la letra como marcadores, los medios referenciados
+donde están en este ordenador) desde la pestaña Ver de la producción o
+desde Montaje (`studio_export_timeline`).
+
+La pantalla **Audio** también compone canciones (estilo, letra, BPM,
+duración, tonalidad, tomas) e importa archivos de audio; un personaje sin
+imagen de referencia tiene un botón «Crear referencia» que abre Generar con
+un prompt de retrato, y cualquier imagen del visor puede ser la referencia
+de un personaje con un clic.
+
 **Canción y letra**, en una producción, es un editor de vídeo puesto en
 vertical: la letra sincronizada con la canción en una línea (las secciones al
 lado y un cabezal mientras suena) y, junto a ella, una **pista de planos**.
 Los planos se van poniendo uno detrás de otro - arrastrándolos desde la lista
 de planos, o con **Añadir siguiente** - y luego se mueven o se recortan por
 cualquiera de sus bordes (se ajustan a los versos; con Alt se colocan
-libres), y cada bloque enseña la letra sobre la que suena. Un plano colocado
+libres, y también se ajustan a los pulsos de la canción: las líneas de
+compás cruzan la pista), y cada bloque enseña la letra sobre la que suena y
+cuántos compases dura. Donde el montaje puso los planos que no están en la
+pista aparece en marcas tenues; clic en una para fijar ese plano ahí. Un plano colocado
 suena exactamente ahí en el animático y en el montaje final (`span {start_s,
 end_s}` en el plano; los tramos no se pueden solapar); los que no están en la
 pista los coloca el montaje por su sección. Haciendo clic en versos (mayús

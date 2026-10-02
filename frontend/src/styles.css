@@ -627,3 +627,23 @@ table.list tr.selected td { background: var(--accent-soft); }
 .jobs-pop-main { flex: 1; min-width: 0; text-align: left; border: 0; background: var(--surface); color: var(--text); border-radius: 8px; padding: 8px 10px; cursor: pointer; height: auto; }
 .jobs-pop-main:hover { background: var(--surface-2); }
 .gold-text { color: var(--gold); }
+
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; padding: 4px 10px; border-radius: 99px;
+  border: 1px solid var(--border); background: var(--surface-2); }
+.switch input { appearance: none; width: 28px; height: 16px; border-radius: 99px; background: var(--border-strong); position: relative; margin: 0; cursor: pointer; transition: background .15s; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left .15s; }
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { left: 14px; }
+.preflight { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.pf-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 5px 8px; border-radius: 8px; background: var(--surface); }
+.pf-item.error { color: var(--bad); }
+.pf-item.warn { color: var(--gold); }
+.pf-item.info { color: var(--info); }
+.pf-item .btn { flex: none; }
+.char-card .portrait .portrait-cta { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.track-bar { position: absolute; left: 140px; right: 8px; border-top: 1px solid color-mix(in srgb, var(--gold) 22%, transparent); pointer-events: none; }
+.track-bar span { position: absolute; right: 252px; top: -7px; font: 9.5px var(--mono); color: color-mix(in srgb, var(--gold) 70%, transparent); }
+.track-auto { position: absolute; right: 12px; width: 236px; border: 1px dashed color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent); color: var(--muted); font: 10px var(--mono); text-align: left; padding: 0 6px;
+  cursor: pointer; z-index: 1; overflow: hidden; height: auto; }
+.track-auto:hover { border-color: var(--accent); color: var(--text); }

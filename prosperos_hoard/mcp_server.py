@@ -1082,6 +1082,38 @@ def studio_production_timing(production: str) -> dict[str, Any]:
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_settings(production: str, autopilot: Optional[bool] = None, animatic: Optional[bool] = None,
+                               song_review: Optional[bool] = None, qa: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Change how a production runs: autopilot (no pauses), animatic review, song-take review, QA / ajustes.
+
+    autopilot=true runs every stage without stopping (the first song take, no animatic review);
+    false brings the pauses back. animatic=false skips the animatic; song_review=true pauses after the
+    song takes; qa={"enabled": true, "max_retries": 2} checks each stage inline. Applies from the next stage.
+
+    Keywords: autopilot, no pauses, run everything, skip review, settings, piloto automatico, sin pausas,
+    hacerlo todo seguido, ajustes de la produccion
+    """
+    body: dict[str, Any] = {k: v for k, v in (("autopilot", autopilot), ("animatic", animatic), ("song_review", song_review),
+                                              ("qa", qa)) if v is not None}
+    return _call("POST", "/api/agent/studio_production_settings", params={"production": production}, json=body)
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_export_timeline(production: Optional[str] = None, aspect: Optional[str] = None,
+                           timeline_id: Optional[str] = None) -> dict[str, Any]:
+    """Export a cut for Premiere Pro or DaVinci Resolve: FCP7 XML + EDL with the lyrics as markers / exportar.
+
+    Give production (and aspect, e.g. "16:9") or a timeline_id. Returns the download links (a zip with
+    the XML, the EDL and a README; or each file alone). The XML points at the media where they live on
+    this computer, so the editor opens the same clips and stills - nothing is copied.
+
+    Keywords: export, premiere, davinci, resolve, final cut, xml, edl, editor, exportar montaje, editar en premiere
+    """
+    return _call("POST", "/api/agent/studio_export_timeline",
+                 json={"production": production, "aspect": aspect, "timeline_id": timeline_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_production_cast(production: str, cast: list[dict[str, Any]], per_shot: Optional[int] = None,
                            run: bool = False) -> dict[str, Any]:
     """Set a production's background cast: the only characters allowed in the background / reparto de fondo.

@@ -32,6 +32,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
   const [clips, setClips] = useState<"all" | "lead" | "none">("all");
   const [aspects, setAspects] = useState<string[]>(["16:9"]);
   const [takes, setTakes] = useState(2);
+  const [autopilot, setAutopilot] = useState(false);
   const [draft, setDraft] = useState<VideoDraft | null>(null);
   const [busy, setBusy] = useState<"" | "plan" | "create">("");
   // how long the plan has been writing, and the way to stop waiting for it
@@ -95,6 +96,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
         name: name.trim() || draft.title || [lead?.name || newName.trim(), concept.trim().split(/[,.;\n]/)[0].slice(0, 40)].filter(Boolean).join(" - ") || "Music video", draft, ...leadBody(), clips, aspects, song_takes: takes,
         song_asset_id: songMode === "asset" ? songId || null : null, project: projectId || null, brief: concept || null,
         lyrics: songMode === "asset" ? lyrics || null : null,
+        ...(autopilot ? { settings: { animatic_autocontinue: true, song_review: false } } : {}),
       });
       app.toast(t("videoStarted"), "ok");
       onStarted(r.production.slug);
@@ -106,6 +108,12 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
   };
   const setShot = (i: number, patch: Partial<VideoShot>) => draft && setDraft({ ...draft, shots: draft.shots.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const leadOk = !!charId || (newName.trim() && newLook.trim());
+  // what the run will cost on this machine, before anything starts (the animatic's measured rates)
+  const nShots = draft ? draft.shots.length : shots;
+  const nClips = clips === "none" ? 0 : draft ? draft.shots.filter((s) => s.motion === "move" && (clips === "all" || s.lead)).length
+    : clips === "all" ? shots : Math.ceil(shots * 0.7);
+  const gpuMin = Math.round(nShots * 1.19 + nClips * 9.5 + (songMode === "compose" ? takes * 0.7 : 0) + aspects.length * 1.75 * 2);
+  const estimate = t("videoEstimate", { stills: nShots, clips: nClips, h: Math.floor(gpuMin / 60), m: gpuMin % 60 });
   const songOk = songMode === "asset" ? !!songId : true;
 
   return (
@@ -123,6 +131,8 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
         </>
       ) : (
         <>
+          <span className="hint grow">{estimate}</span>
+          <label className="check" title={t("autopilotHint")}><input type="checkbox" checked={autopilot} onChange={(e) => setAutopilot(e.target.checked)} /> {t("autopilot")}</label>
           <button className="btn ghost" onClick={() => setDraft(null)}>{t("back")}</button>
           <button className="btn primary" disabled={busy !== "" || !draft.shots.some((s) => s.prompt.trim())} onClick={create}>
             {busy === "create" ? <Loader2 size={15} className="spin" /> : <Wand2 size={15} />} {t("videoCreate")}</button>
@@ -196,6 +206,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
               <input type="range" min={1} max={4} value={takes} onChange={(e) => setTakes(Number(e.target.value))} /></label>
           )}
           <p className="muted small">{t("videoHowItRuns")}</p>
+          <p className="small"><strong>{estimate}</strong></p>
         </div>
       ) : (
         <div className="stack">

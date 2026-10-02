@@ -148,6 +148,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
             <Heart size={14} fill={asset.favourite ? "currentColor" : "none"} /> {t("favourite")}
           </button>
         </div>
+        {asset.kind === "image" && <CastReference asset={asset} />}
         <dl className="kv">
           {asset.width && <><dt>{t("size")}</dt><dd>{asset.width} x {asset.height}</dd></>}
           {asset.duration_s && <><dt>{t("duration")}</dt><dd>{asset.duration_s.toFixed(2)} s</dd></>}
@@ -239,6 +240,36 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
           </label>
         )}
       </aside>
+    </div>
+  );
+}
+
+/** Make this picture a character's reference image (its canonical look), in one click from the viewer. */
+function CastReference({ asset }: { asset: Asset }) {
+  const { t } = useT();
+  const app = useApp();
+  const chars = useAsync(() => api.characters(asset.project_id), [asset.project_id, app.dataVersion]);
+  const [pick, setPick] = useState("");
+  const items = chars.data?.items || [];
+  const using = items.filter((c) => c.canonical_asset_id === asset.id);
+  if (!items.length) return null;
+  return (
+    <div className="row wrap" style={{ gap: 6 }}>
+      {using.length > 0 ? <span className="pill ok">{t("refOf", { names: using.map((c) => c.name).join(", ") })}</span> : (
+        <>
+          <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ maxWidth: 200 }}>
+            <option value="">{t("refPick")}</option>
+            {items.map((c) => <option key={c.id} value={c.id}>{c.name}{c.canonical_asset_id ? "" : ` · ${t("refNone")}`}</option>)}
+          </select>
+          <button className="btn sm" disabled={!pick} onClick={async () => {
+            try {
+              await api.updateCharacter(pick, { canonical_asset_id: asset.id });
+              app.toast(t("refSet", { name: items.find((c) => c.id === pick)?.name || "" }), "ok");
+              app.bump();
+            } catch (e) { app.toast((e as Error).message, "bad"); }
+          }}>{t("refUse")}</button>
+        </>
+      )}
     </div>
   );
 }

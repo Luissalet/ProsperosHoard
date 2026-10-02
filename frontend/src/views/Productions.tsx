@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, Film, Loader2, Megaphone, Music,
-  Pause as PauseIcon, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users,
+  Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Shuffle, Users,
 } from "lucide-react";
 import {
   api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
@@ -178,6 +178,34 @@ function PipelineStepper({ state, active, onPick }: { state: ProductionState; ac
   );
 }
 
+/** What would stop the next run, checked before it starts (ComfyUI, music model, ffmpeg, GPU memory). */
+function Preflight({ slug }: { slug: string }) {
+  const { t } = useT();
+  const app = useApp();
+  const [items, setItems] = useState<Awaited<ReturnType<typeof api.productionPreflight>>["items"] | null>(null);
+  const [starting, setStarting] = useState(false);
+  const check = () => api.productionPreflight(slug).then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { check(); }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!items || items.length === 0) return null;
+  const start = async () => {
+    setStarting(true);
+    try { await api.startService("comfyui"); app.toast(t("pfComfyStarting"), "info"); setTimeout(check, 4000); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setStarting(false); }
+  };
+  return (
+    <div className="preflight">
+      {items.map((i) => (
+        <div key={i.code} className={`pf-item ${i.level}`}>
+          {i.level === "error" ? <AlertTriangle size={14} /> : i.level === "warn" ? <AlertTriangle size={14} /> : <Info size={14} />}
+          <span className="grow">{(() => { const k = `pf_${i.code}` as MessageKey; const txt = t(k); return txt === k ? i.message : txt; })()}</span>
+          {i.code === "comfy_down" && i.startable && <button className="btn sm" disabled={starting} onClick={start}>{starting ? <Loader2 size={12} className="spin" /> : <Play size={12} />} {t("pfStartComfy")}</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** One banner that says where the production is and the one thing to do now. */
 function NextStep({ state, active, onChanged, setTab }: {
   state: ProductionState; active: boolean; onChanged: () => void; setTab: (tab: Tab) => void;
@@ -223,6 +251,7 @@ function NextStep({ state, active, onChanged, setTab }: {
         <Music size={18} />
         <div className="grow stack" style={{ gap: 8 }}>
           <div><strong>{t("nsPickTake")}</strong><div className="small muted">{t("nsPickTakeLead")}</div></div>
+          <Preflight slug={state.slug} />
           {takes.map((id, i) => (
             <div key={id} className="row" style={{ gap: 10 }}>
               <strong className="mono small">{t("takeN", { n: i + 1 })}</strong>
@@ -243,6 +272,7 @@ function NextStep({ state, active, onChanged, setTab }: {
         <div className="grow">
           <strong>{animatic ? t("nsAnimatic") : t("nsReview", { stage: stageName })}</strong>
           <div className="small muted">{animatic && plan ? t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes }) : state.message}</div>
+          <Preflight slug={state.slug} />
         </div>
         {animatic && <button className="btn sm" onClick={() => setTab("preview")}><Film size={13} /> {t("nsWatch")}</button>}
         <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {animatic ? t("nsAnimaticGo") : t("continueProduction")}</button>
@@ -261,6 +291,7 @@ function NextStep({ state, active, onChanged, setTab }: {
             <button className="link-btn small" onClick={() => setDetails(!details)}>{details ? t("errHide") : t("errDetails")}</button>
           )}
           {details && <pre className="ns-details">{state.message}</pre>}
+          <Preflight slug={state.slug} />
         </div>
         <button className="btn sm primary" disabled={busy} onClick={go}><RotateCcw size={13} /> {t("resumeProduction")}</button>
       </div>
@@ -270,7 +301,8 @@ function NextStep({ state, active, onChanged, setTab }: {
     return (
       <div className="next-step info">
         <Shuffle size={18} />
-        <div className="grow"><strong>{t("nsEdited")}</strong><div className="small muted">{state.message || t("nsEditedLead")}</div></div>
+        <div className="grow"><strong>{t("nsEdited")}</strong><div className="small muted">{state.message || t("nsEditedLead")}</div>
+          <Preflight slug={state.slug} /></div>
         <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {t("continueProduction")}</button>
       </div>
     );
@@ -314,6 +346,9 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
     catch (e) { app.toast((e as Error).message, "bad"); }
   };
   const renders = view.renders || {};
+  const settings = (data.settings || {}) as Record<string, unknown>;
+  const autopilot = Boolean(settings.animatic_autocontinue) && !settings.song_review;
+  const timelineIds = (((data.done?.timeline as { timelines?: Record<string, { timeline_id?: string }> } | undefined)?.timelines) || {});
   const animatic = (data.done?.animatic as { renders?: Record<string, string> } | undefined)?.renders;
   const outputs = Object.keys(renders).length + (animatic ? Object.keys(animatic).length : 0);
   // the tab follows the production until the person picks one
@@ -331,6 +366,14 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
         <div className="row wrap" style={{ gap: 8 }}>
           <button className="btn sm ghost" onClick={onBack}><ArrowLeft size={14} /> {t("prodBack")}</button>
           <h2 className="grow" style={{ margin: 0 }}><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
+          {!isShort && !legacy && (
+            <label className="switch" title={t("autopilotHint")}>
+              <input type="checkbox" checked={autopilot} onChange={async (e) => {
+                try { await api.setProductionSettings(slug, { autopilot: e.target.checked }); app.toast(e.target.checked ? t("autopilotOn") : t("autopilotOff"), "ok"); reload(); }
+                catch (err) { app.toast((err as Error).message, "bad"); }
+              }} /> <span>{t("autopilot")}</span>
+            </label>
+          )}
           {!isShort && !legacy && <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>}
           {!isShort && <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>}
         </div>
@@ -366,7 +409,13 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                           <div className="video-frame" style={{ width: aspect === "16:9" ? 480 : 260 }}>
                             <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
                           </div>
-                          <a className="btn sm ghost" href={fileUrl(id)} download><Download size={13} /> {t("download")}</a>
+                          <div className="row" style={{ gap: 6 }}>
+                            <a className="btn sm ghost" href={fileUrl(id)} download><Download size={13} /> {t("download")}</a>
+                            {timelineIds[aspect]?.timeline_id && (
+                              <a className="btn sm ghost" href={api.timelineExportUrl(timelineIds[aspect].timeline_id!, "zip", `${data.name || slug} ${aspect.replace(":", "x")}`)} download title={t("exportEditorsHint")}>
+                                <FileDown size={13} /> {t("exportEditors")}</a>
+                            )}
+                          </div>
                         </div>
                       ) : null;
                     })}

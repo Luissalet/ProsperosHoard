@@ -161,7 +161,13 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
       title={asset.name || asset.id}
     >
       {src ? (
-        <img src={src} alt={asset.name || ""} loading="lazy" style={square ? { aspectRatio: "1 / 1", objectFit: "cover" } : undefined} />
+        <img src={src} alt="" loading="lazy" style={square ? { aspectRatio: "1 / 1", objectFit: "cover" } : undefined}
+          onError={(e) => {
+            // a missing thumbnail: the picture itself for an image, the kind's icon otherwise
+            const img = e.currentTarget;
+            if (asset.kind === "image" && !img.dataset.fallback) { img.dataset.fallback = "1"; img.src = `/api/assets/${asset.id}/file`; }
+            else img.style.visibility = "hidden";
+          }} />
       ) : (
         <div className="media-icon"><KindIcon kind={asset.kind} /></div>
       )}
@@ -179,7 +185,6 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
   );
 }
 
-/** Modal grid to pick one image asset of the current project. */
 /** A searchable library menu: type to filter, click a tile to see it in the
  * preview (image, video playing, song playing), "Use" or a double click to
  * take it. `allProjects` adds the "all projects" scope. */

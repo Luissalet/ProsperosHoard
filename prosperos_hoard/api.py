@@ -30,6 +30,7 @@ from . import charkit
 from . import charpack
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
+from . import exporters
 from . import productions as productions_mod
 from . import qa as qa_mod
 from . import recipes as recipes_mod
@@ -162,6 +163,20 @@ class TrashBody(BaseModel):
     ids: Optional[list[str]] = None
     project: Optional[str] = None
     projects: Optional[list[str]] = None  # trashed projects to restore / delete for good
+
+
+class ProductionSettingsBody(BaseModel):
+    autopilot: Optional[bool] = None            # no pauses: the first take, no animatic review
+    animatic: Optional[bool] = None
+    animatic_autocontinue: Optional[bool] = None
+    song_review: Optional[bool] = None
+    qa: Optional[dict[str, Any]] = None
+
+
+class ExportTimelineBody(BaseModel):
+    timeline_id: Optional[str] = None
+    production: Optional[str] = None
+    aspect: Optional[str] = None
 
 
 class DeleteProjectBody(BaseModel):
@@ -2186,6 +2201,56 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def get_timeline(timeline_id: str):
         return store.get_timeline(timeline_id)
 
+    # ------------------------------------------------ export to editors
+    def _export_lookup(asset_id: str) -> Optional[dict[str, Any]]:
+        try:
+            a = store.get_asset(asset_id)
+            path = _asset_path(store, a["file_path"])
+        except (NotFound, KeyError):
+            return None
+        return {"path": path, "name": a.get("name") or path.name, "kind": a["kind"], "duration_s": a.get("duration_s"),
+                "width": a.get("width"), "height": a.get("height")}
+
+    def _export_timeline_id(body: ExportTimelineBody) -> str:
+        if body.timeline_id:
+            return body.timeline_id
+        if not body.production:
+            raise engine.EngineError("timeline_required", "give timeline_id, or production (and aspect)")
+        state = productions_mod.load_state(store.data_dir, body.production)
+        timelines = ((state.get("done") or {}).get("timeline") or {}).get("timelines") or {}
+        if not timelines:
+            raise engine.EngineError("no_cut_yet", "this production has no cut yet: continue it to the cut stage")
+        aspect = body.aspect if body.aspect in timelines else next(iter(timelines))
+        return timelines[aspect]["timeline_id"]
+
+    @app.get("/api/timelines/{timeline_id}/export")
+    def export_timeline(timeline_id: str, format: str = "zip", name: Optional[str] = None):
+        tl = store.get_timeline(timeline_id)
+        name = (name or "").strip()[:100] or tl.get("name") or timeline_id
+        base = re.sub(r"[^\w-]+", "_", name).strip("_")[:60] or "cut"
+        if format == "xml":
+            return Response(exporters.to_xmeml(tl, _export_lookup, name), media_type="application/xml",
+                            headers={"Content-Disposition": f'attachment; filename="{base}.xml"'})
+        if format == "edl":
+            return Response(exporters.to_edl(tl, _export_lookup, name), media_type="text/plain; charset=utf-8",
+                            headers={"Content-Disposition": f'attachment; filename="{base}.edl"'})
+        if format != "zip":
+            raise engine.EngineError("bad_format", "format must be zip, xml or edl")
+        return Response(exporters.package(tl, _export_lookup, name), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{base}_for_editors.zip"'})
+
+    @app.post("/api/agent/studio_export_timeline")
+    def agent_export_timeline(body: ExportTimelineBody):
+        def run():
+            tid = _export_timeline_id(body)
+            tl = store.get_timeline(tid)
+            visual = next((t for t in tl["tracks"] if t.get("type") == "visual"), {"clips": []})
+            return {"timeline_id": tid, "clips": len(visual["clips"]), "fps": tl.get("fps"),
+                    "download": f"/api/timelines/{tid}/export?format=zip",
+                    "xml": f"/api/timelines/{tid}/export?format=xml", "edl": f"/api/timelines/{tid}/export?format=edl",
+                    "note": "the media are referenced where they live on this computer; open the XML in Premiere or Resolve"}
+        return agent("studio_export_timeline", body.production or body.timeline_id or "", run)
+
     @app.patch("/api/timelines/{timeline_id}")
     def patch_timeline(timeline_id: str, body: dict[str, Any]):
         return engine.update_timeline(store, timeline_id, body)
@@ -2793,6 +2858,71 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.run:
             out["job"] = engine.job_view(queue_production(slug))
         return {**out, "production": production_view(slug)}
+
+    def op_production_settings(slug: str, body: ProductionSettingsBody) -> dict[str, Any]:
+        patch: dict[str, Any] = {k: v for k, v in body.model_dump().items() if v is not None and k != "autopilot"}
+        if body.autopilot is not None:
+            patch["animatic_autocontinue"] = bool(body.autopilot)
+            patch["song_review"] = not body.autopilot
+        settings = productions_mod.update_settings(store.data_dir, slug, patch)
+        return {"production": slug, "settings": settings,
+                "autopilot": bool(settings.get("animatic_autocontinue")) and not settings.get("song_review")}
+
+    @app.patch("/api/productions/{slug}/settings")
+    def production_settings(slug: str, body: ProductionSettingsBody):
+        return op_production_settings(slug, body)
+
+    @app.post("/api/agent/studio_production_settings")
+    def agent_production_settings(production: str, body: ProductionSettingsBody):
+        return agent("studio_production_settings", production, lambda: op_production_settings(production, body))
+
+    def production_preflight(slug: str) -> dict[str, Any]:
+        """What would stop the production's next run, before it starts:
+        ComfyUI down (and not started by itself), no music model for a song
+        still to compose, no ffmpeg, the GPUs held by another model."""
+        state = productions_mod.load_fresh(store.data_dir, slug)
+        stages = productions_mod.stages_for(state)
+        pending = [s for s in stages if productions_mod.stage_status(state, s) != "done"]
+        items: list[dict[str, Any]] = []
+        if not pending:
+            return {"ok": True, "items": []}
+        status = backend.status()
+        comfy_needed = any(s in pending for s in ("character", "song", "frames", "clips", "photocards", "visuals", "music"))
+        if comfy_needed and not status["comfy"].get("reachable"):
+            svc = next((i for i in status["services"]["items"] if i.get("role") == "main" or i.get("kind") == "comfyui"), None)
+            startable = bool(svc and svc.get("startable"))
+            if status["services"].get("autostart_comfy") and startable:
+                items.append({"level": "info", "code": "comfy_autostart",
+                              "message": "ComfyUI is not running; it starts by itself when the run needs it (about a minute)"})
+            else:
+                items.append({"level": "error", "code": "comfy_down", "startable": startable,
+                              "message": "ComfyUI is not running" + ("" if startable else
+                                                                    f": {(svc or {}).get('problem') or 'set its folder in Backends'}")})
+        song = (state.get("spec") or {}).get("song") or {}
+        if "song" in pending and state.get("kind") != "short" and not song.get("asset_id") and status["comfy"].get("reachable"):
+            if not any(m.get("available") for m in status.get("music") or []):
+                items.append({"level": "error", "code": "no_music_model",
+                              "message": "no music model is installed in ComfyUI to compose the song: pick a song of yours (Change song)"})
+        if not status["ffmpeg"]["found"]:
+            items.append({"level": "error", "code": "no_ffmpeg", "message": "ffmpeg was not found: the animatic and the cut need it"})
+        try:
+            mem = backend.memory()
+            need = int((mem.get("vram_estimates_mb") or {}).get("wan" if "clips" in pending and "frames" not in pending else "qwen21") or 0)
+            gpus = mem.get("gpus") or []
+            if gpus and need and max(int(g.get("free_mb") or 0) for g in gpus) < need:
+                holders = sorted({str(x.get("label") or x.get("id")) for x in mem.get("services") or []
+                                  if x.get("held_mb") and "comfy" not in str(x.get("id"))})
+                items.append({"level": "warn", "code": "gpu_busy",
+                              "message": f"no GPU has the ~{need // 1024} GB this needs free"
+                                         + (f"; {', '.join(holders)} holds memory (stop it in the header's GPU panel)" if holders else ""),
+                              "holders": holders})
+        except Exception:  # noqa: BLE001 - the memory view is a hint, never a blocker
+            pass
+        return {"ok": not any(i["level"] == "error" for i in items), "items": items}
+
+    @app.get("/api/productions/{slug}/preflight")
+    def production_preflight_route(slug: str):
+        return production_preflight(slug)
 
     @app.put("/api/productions/{slug}/song")
     def production_song(slug: str, body: ProductionSongBody):

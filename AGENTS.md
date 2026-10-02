@@ -59,6 +59,11 @@ Qué hacer cuando el usuario pide, con sus palabras:
   díselo y `studio_delete_project(project)` (papelera, con sus
   producciones). Para siempre solo si lo pide:
   `studio_trash(action="empty", projects=[id])`.
+- **«Hazlo todo sin pararte» / «piloto automático»**:
+  `studio_production_settings(production, autopilot=true)` y
+  `studio_production_continue`.
+- **«Pásalo a Premiere / DaVinci»**: `studio_export_timeline(production,
+  aspect)` y dale el enlace de descarga.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:
   `studio_assets(kind="audio")` en el proyecto o en otros para encontrarla y
   `studio_production_song(production, asset_id=...)`; «otra toma» →

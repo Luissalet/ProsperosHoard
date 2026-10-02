@@ -51,7 +51,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
   const [anchor, setAnchor] = useState<number | null>(null);
   const [changing, setChanging] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
-  const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null; span?: Sel; section?: string } | null>(null);
+  const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null; span?: Sel; section?: string; pinFromCut?: boolean } | null>(null);
   const [assignKey, setAssignKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Record<string, Span | null>>({});
@@ -92,12 +92,23 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
   const unplaced = shots.filter((s) => !spanOf(s.key));
   const autoAt = (key: string) => timing?.shots?.[key] || [];
   const linesIn = (a: number, b: number) => lines.filter((l) => l.time_s < b - 0.05 && (l.end_s ?? l.time_s + 1) > a + 0.05);
+  // the song's beat grid (bars and beats), for the ticks on the track and the snapping
+  const [beats, setBeats] = useState<{ beats: number[]; downbeats: number[]; bpm: number | null }>({ beats: [], downbeats: [], bpm: null });
+  useEffect(() => {
+    if (!songId) return;
+    let alive = true;
+    api.analyze(songId).then((a) => alive && setBeats({ beats: a.beat_times || [], downbeats: a.downbeats || [], bpm: a.tempo_bpm }))
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [songId]);
+  const barS = beats.bpm ? (60 / beats.bpm) * 4 : null;
   const snapPoints = useMemo(() => {
     const pts = new Set<number>([0, duration]);
     lines.forEach((l) => { pts.add(l.time_s); if (l.end_s != null) pts.add(l.end_s); });
     (timing?.sections || []).forEach((s) => { if (s.start_s != null) pts.add(s.start_s); });
+    beats.beats.forEach((b) => pts.add(Math.round(b * 100) / 100));
     return [...pts].sort((a, b) => a - b);
-  }, [lines, duration, timing]);
+  }, [lines, duration, timing, beats]);
   const snap = (v: number, free = false) => {
     if (!free && snapPoints.length) {
       const near = snapPoints.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
@@ -308,6 +319,9 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
               {Array.from({ length: Math.floor(duration / 5) + 1 }, (_, i) => i * 5).map((s) => (
                 <div key={s} className="track-tick" style={{ top: y(s) }}><span>{clock(s).replace(/\.0$/, "")}</span></div>
               ))}
+              {beats.downbeats.map((d, i) => (
+                <div key={`bar${i}`} className="track-bar" style={{ top: y(d) }}>{i % 4 === 0 && <span>{i + 1}</span>}</div>
+              ))}
               {(timing?.sections || []).filter((s) => s.start_s != null).map((s, i) => (
                 <div key={i} className={`track-section sec-${sectionValue(s.label) || "other"}`}
                   style={{ top: y(s.start_s!), height: Math.max(14, ((s.end_s ?? duration) - s.start_s!) * pps) }}>
@@ -347,6 +361,15 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
                 {blocks.length === 0 && <div className="track-lane-empty small muted">{t("trackLaneEmpty")}</div>}
               </div>
               {hover != null && <div className="track-ghost" style={{ top: y(hover) }}><span className="mono">{clock(hover)}</span></div>}
+              {/* where the cut put the shots that are not placed by hand (faint; click to pin one there) */}
+              {unplaced.flatMap((sh) => autoAt(sh.key).map((c, i) => (
+                <button key={`auto-${sh.key}-${i}`} className="track-auto" title={`${sh.key} · ${clock(c.start_s)} – ${clock(c.start_s + c.duration_s)} · ${t("trackAutoPin")}`}
+                  style={{ top: y(c.start_s), height: Math.max(8, c.duration_s * pps - 1) }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => !running && setEditing({ shot: sh, span: { start: c.start_s, end: c.start_s + c.duration_s }, pinFromCut: true })}>
+                  {c.duration_s * pps > 14 && <span>{sh.key}</span>}
+                </button>
+              )))}
               {blocks.map((b) => {
                 const shot = shots.find((s) => s.key === b.key)!;
                 const best = frames[b.key]?.best;
@@ -364,7 +387,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
                         <div className="row" style={{ gap: 4 }}>
                           <span className="pill badge-dark">{b.key}</span>
                           <span className="mono small">{clock(b.span.start)}–{clock(b.span.end)}</span>
-                          <span className="mono small muted">{(b.span.end - b.span.start).toFixed(1)}s</span>
+                          <span className="mono small muted">{(b.span.end - b.span.start).toFixed(1)}s{barS ? ` · ${((b.span.end - b.span.start) / barS).toFixed(1)} ${t("trackBars")}` : ""}</span>
                         </div>
                         {h > 34 && <div className="track-block-words">{words.length ? words.map((w) => `“${w.text}”`).join(" ") : <span className="muted">{t("trackInstrumental")}</span>}</div>}
                         {h > 70 && <div className="small muted ellipsis">{shot.prompt}</div>}
@@ -429,7 +452,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
 
       {editing && (
         <ShotEditor state={state} shot={editing.shot} after={editing.shot ? undefined : editing.after} running={running}
-          initialSpan={editing.shot ? undefined : editing.span} initialSection={editing.section}
+          initialSpan={editing.shot && !editing.pinFromCut ? undefined : editing.span} initialSection={editing.section}
           onPause={() => undefined} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setSel(null); onChanged(); }} />
       )}
       {changing && <SongChangeModal state={state} onClose={() => setChanging(false)} onChanged={() => { setChanging(false); onChanged(); }} />}
