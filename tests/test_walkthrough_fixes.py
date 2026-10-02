@@ -97,3 +97,17 @@ def test_a_render_server_that_is_off_is_known_at_once(backend_with_comfy):
     assert _port_open(f"http://127.0.0.1:{port}") is False
     assert backend.pool_server_ready(f"http://127.0.0.1:{port}", ttl_s=0.0) is False
     assert time.monotonic() - t0 < 2.0
+
+
+def test_a_picture_saved_without_a_thumbnail_gets_one_on_demand(client):
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Thumbs"}).json()["id"]
+    src = store.get_asset(_save(store, pid, Image.new("RGB", (300, 200), (120, 40, 200))))
+    bare = store.create_asset(project_id=pid, kind="image", file_path=src["file_path"], source="derived")["id"]
+    assert store.get_asset(bare)["thumb_path"] is None
+    r = c.get(f"/api/assets/{bare}/thumb")
+    assert r.status_code == 200 and r.content[:4] == b"RIFF"
+    assert store.get_asset(bare)["thumb_path"]
+    audio = store.create_asset(project_id=pid, kind="audio", file_path="assets/none.wav", source="import")["id"]
+    assert c.get(f"/api/assets/{audio}/thumb").status_code == 404

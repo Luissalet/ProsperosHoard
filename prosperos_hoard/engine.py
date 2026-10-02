@@ -1181,6 +1181,33 @@ def _video_thumbnail(path: Path, dest: Path) -> Optional[str]:
     return dest.relative_to(dest.parent.parent).as_posix()
 
 
+def ensure_thumbnail(store: Store, asset: dict[str, Any]) -> Optional[str]:
+    """The asset's thumbnail, made now when it has none (an asset some
+    operation saved without one): picture or clip; None for other kinds or
+    when it cannot be made."""
+    if asset.get("thumb_path"):
+        return asset["thumb_path"]
+    if asset["kind"] not in ("image", "video"):
+        return None
+    src = store.data_dir / asset["file_path"]
+    if not src.is_file():
+        return None
+    dest = store.path_for_thumb(asset["id"])
+    try:
+        if asset["kind"] == "image":
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            make_thumbnail(src, dest)
+            rel = dest.relative_to(store.data_dir).as_posix()
+        else:
+            rel = _video_thumbnail(src, dest)
+            rel = dest.relative_to(store.data_dir).as_posix() if rel and dest.is_file() else None
+    except Exception:  # noqa: BLE001 - an unreadable file has no preview
+        return None
+    if rel:
+        store.set_asset_media(asset["id"], thumb_path=rel)
+    return rel
+
+
 def frame_at(store: Store, asset_id: str, at_s: float, project_id: Optional[str] = None) -> dict[str, Any]:
     """The frame of a clip at `at_s` seconds (0 = its first frame) as an
     image asset: the picture to edit before propagating the edit through

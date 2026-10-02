@@ -2768,9 +2768,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.get("/api/assets/{asset_id}/thumb")
     def asset_thumb(asset_id: str):
         asset = store.get_asset(asset_id)
-        if not asset.get("thumb_path"):
+        thumb = asset.get("thumb_path") or engine.ensure_thumbnail(store, asset)
+        if not thumb:
             return JSONResponse({"error": "no_thumb", "message": "asset has no thumbnail"}, status_code=404)
-        return FileResponse(_asset_path(store, asset["thumb_path"]), media_type="image/webp")
+        return FileResponse(_asset_path(store, thumb), media_type="image/webp")
 
     @app.get("/api/agent/studio_show")
     def agent_show(asset_ids: str, size: int = 768):
