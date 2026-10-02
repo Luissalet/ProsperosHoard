@@ -24,10 +24,12 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urljoin
 
 import httpx
 
 from . import engine
+from .hoard_link.web import safety
 from .store import Store
 from .util import now_iso
 
@@ -235,19 +237,59 @@ def pick_file(item: dict[str, Any], short_side: int = 1080) -> dict[str, Any]:
     return max(files, key=lambda f: short(f))
 
 
-def _download(client: httpx.Client, url: str, dest: Path, should_cancel: Optional[Callable[[], bool]] = None) -> None:
-    size = 0
-    with client.stream("GET", url, timeout=DOWNLOAD_TIMEOUT_S) as r:
-        if r.status_code >= 400:
-            raise StockError("stock_download_failed", f"download answered HTTP {r.status_code}")
-        with dest.open("wb") as fh:
-            for chunk in r.iter_bytes(1 << 16):
-                size += len(chunk)
-                if size > MAX_DOWNLOAD_BYTES:
+MAX_REDIRECTS = 5
+
+
+def _guard(url: str) -> None:
+    """Refuse a file that is not on a public address (the shared SSRF rules). A name that does not resolve here passes: the download
+    itself reports it."""
+    reason = safety.check_url(url)
+    if reason and not reason.startswith(safety.UNRESOLVABLE_PREFIX):
+        raise StockError("stock_download_blocked", f"the stock file is not on a public address ({reason})")
+
+
+def _download(client: httpx.Client, url: str, dest: Path, should_cancel: Optional[Callable[[], bool]] = None, *,
+              pin: bool = False) -> None:
+    """Stream `url` into `dest`. Every address (the first and each redirect) is checked with the shared SSRF rules; with `pin` the
+    connection goes to the address that was checked (no DNS rebinding between the check and the connect). Over 400 MB is refused,
+    by the declared length before downloading and by the bytes received."""
+    for _ in range(MAX_REDIRECTS + 1):
+        _guard(url)
+        pinned = None
+        use = client
+        if pin:
+            try:
+                pinned = httpx.Client(transport=safety.pinned_transport(safety.resolve_public(url)[0]))
+            except safety.PolicyError as exc:
+                raise StockError("stock_download_blocked", f"the stock file is not on a public address ({exc})") from None
+            use = pinned
+        try:
+            with use.stream("GET", url, timeout=DOWNLOAD_TIMEOUT_S, follow_redirects=False) as r:
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                    url = urljoin(url, r.headers["location"])
+                    continue
+                if r.status_code >= 400:
+                    raise StockError("stock_download_failed", f"download answered HTTP {r.status_code}")
+                try:
+                    declared = int(r.headers.get("content-length") or 0)
+                except ValueError:
+                    declared = 0
+                if declared > MAX_DOWNLOAD_BYTES:
                     raise StockError("too_large", "the stock file is over 400 MB")
-                if should_cancel and should_cancel():
-                    raise StockError("cancelled", "cancelled")
-                fh.write(chunk)
+                size = 0
+                with dest.open("wb") as fh:
+                    for chunk in r.iter_bytes(1 << 16):
+                        size += len(chunk)
+                        if size > MAX_DOWNLOAD_BYTES:
+                            raise StockError("too_large", "the stock file is over 400 MB")
+                        if should_cancel and should_cancel():
+                            raise StockError("cancelled", "cancelled")
+                        fh.write(chunk)
+                return
+        finally:
+            if pinned is not None:
+                pinned.close()
+    raise StockError("stock_download_failed", "the download redirected too many times")
 
 
 def _ext_for(url: str, kind: str) -> str:
@@ -263,13 +305,13 @@ def fetch(store: Store, project_id: str, item: dict[str, Any], short_side: int =
     carries the credit (`operation: "stock"`)."""
     chosen = pick_file(item, short_side)
     own = client is None
-    client = client or httpx.Client(follow_redirects=True)
+    client = client or httpx.Client()
     tmp_dir = store.data_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=tmp_dir) as work:
         dest = Path(work) / f"{item['provider']}_{item['id']}{_ext_for(chosen['url'], item['kind'])}"
         try:
-            _download(client, chosen["url"], dest, should_cancel)
+            _download(client, chosen["url"], dest, should_cancel, pin=own)
         except httpx.HTTPError as exc:
             raise StockError("stock_download_failed", f"{type(exc).__name__}: {exc}"[:300]) from None
         finally:
