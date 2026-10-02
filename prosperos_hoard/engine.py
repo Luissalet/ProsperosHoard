@@ -784,7 +784,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
                  mask_asset_id: Optional[str] = None, driving_asset_id: Optional[str] = None,
-                 driving_start_s: float = 0.0,
+                 driving_start_s: float = 0.0, audio_asset_id: Optional[str] = None, audio_start_s: float = 0.0,
+                 audio_seconds: Optional[float] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -861,6 +862,20 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         uploads.append((clip, driving_name))
         input_ids.append(drive["id"])
 
+    audio_name: Optional[str] = None
+    if spec.get("audio_node"):
+        if not audio_asset_id:
+            raise EngineError("audio_required", f"template '{template_name}' needs the audio to sing or speak "
+                                                "(audio_asset_id, audio_start_s, audio_seconds)")
+        sound = store.get_asset(audio_asset_id)
+        if sound["kind"] not in ("audio", "video"):
+            raise EngineError("audio_not_audio", f"asset {sound['id']} is {sound['kind']}, not audio")
+        seconds = float(audio_seconds or 0) or (int(values.get("length") or 77) * int(values.get("chunks") or 1)
+                                                / float(values.get("fps") or 16))
+        audio_name = f"prospero_{sound['id']}_{int(float(audio_start_s or 0) * 1000)}_{int(seconds * 1000)}.wav"
+        uploads.append((_audio_clip(store, sound, float(audio_start_s or 0), seconds), audio_name))
+        input_ids.append(sound["id"])
+
     count = max(1, min(int(count or 1), 8))
     base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
     thash = comfy_driver.template_hash(workflow, spec)
@@ -885,6 +900,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if driving_name:
             node, _, inp = spec["driving_video_node"].partition(".")
             wf[node]["inputs"][inp] = driving_name
+        if audio_name:
+            node, _, inp = spec["audio_node"].partition(".")
+            wf[node]["inputs"][inp] = audio_name
+        if spec.get("chunks"):
+            comfy_driver.expand_chunks(wf, spec, int(run_values.get("chunks") or 1), seed)
         if i == 0 and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
@@ -948,6 +968,27 @@ def _driving_clip(store: Store, asset: dict[str, Any], start_s: float, seconds: 
         if not tmp.is_file() or tmp.stat().st_size < 1000:
             raise EngineError("driving_cut_failed", f"could not cut {seconds:.1f} s of the driving video at {start_s:.1f} s "
                                                     "(is it long enough?)")
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _audio_clip(store: Store, asset: dict[str, Any], start_s: float, seconds: float) -> bytes:
+    """`seconds` of a song (or a video's sound) from `start_s`, as a 16-bit
+    stereo WAV - what a lip-sync render listens to. Past the end of the
+    song it is padded with silence, so a short last line still renders."""
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to cut the audio")
+    src = store.data_dir / asset["file_path"]
+    tmp = store.data_dir / "tmp" / f"{new_id('aud')}.wav"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-ss", f"{max(0.0, start_s):.3f}", "-i", str(src),
+                  "-t", f"{seconds:.3f}", "-vn", "-af", f"apad=whole_dur={seconds:.3f}", "-ac", "2", "-ar", "44100",
+                  "-c:a", "pcm_s16le", str(tmp)], timeout=120)
+    try:
+        if not tmp.is_file() or tmp.stat().st_size < 1000:
+            raise EngineError("audio_cut_failed", f"could not cut {seconds:.1f} s of audio at {start_s:.1f} s")
         return tmp.read_bytes()
     finally:
         tmp.unlink(missing_ok=True)
@@ -1187,6 +1228,20 @@ def animate2_unet(object_info: dict[str, Any]) -> Optional[str]:
     return (distilled or fp8 or [None])[0]
 
 
+def s2v_installed(object_info: dict[str, Any]) -> bool:
+    """Lip sync is possible: the S2V node class, its diffusion file and an
+    audio encoder are all there."""
+    if "WanSoundImageToVideo" not in (object_info or {}):
+        return False
+    try:
+        enc = object_info["AudioEncoderLoader"]["input"]["required"]["audio_encoder_name"]
+        encoders = enc[1].get("options") if enc and enc[0] == "COMBO" else enc[0]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        encoders = []
+    return (_has_model_file(object_info, "UNETLoader", "unet_name", "s2v") and bool(encoders)
+            and _has_model_file(object_info, "LoraLoaderModelOnly", "lora_name", "lightx2v_4steps_lora_v1.1"))
+
+
 def clip_template(object_info: dict[str, Any], motion_ref: bool = False) -> str:
     """The clip template a still gets: motion copied from a driving video
     (Wan Animate 2) when there is one and it is installed, else the 14B
@@ -1249,6 +1304,11 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
             values["unet_name"] = unet
     if template == "qwen21_edit" and params.get("custom_size") is None and (params.get("width") or params.get("height")):
         values["custom_size"] = True
+    if spec.get("chunks"):
+        # one generation is `length` frames; a longer line chains extend steps
+        fps, length = float(values.get("fps") or 16), int(values.get("length") or 77)
+        wanted = float(params.get("audio_seconds") or 0) * fps
+        values["chunks"] = max(1, min(int(spec["chunks"].get("max") or 4), math.ceil((wanted + 3) / length) if wanted else 1))
     size_mode = spec.get("size_from_reference")
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])
@@ -1258,6 +1318,8 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         reference_asset_ids=params.get("reference_asset_ids"),
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
+        audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
+        audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
                       "image_engine": engine_name or "custom"},
@@ -2178,7 +2240,8 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
             if not isinstance(ids, list) or not ids or len(ids) > 20:
                 raise EngineError("bad_options", "each pinned span needs start_s, end_s and 1-20 asset_ids")
             spans.append({"start_s": span.get("start_s"), "end_s": span.get("end_s"),
-                          "assets": _pool(store, project_id, [str(i) for i in ids], None)})
+                          "assets": _pool(store, project_id, [str(i) for i in ids], None),
+                          "synced": bool(span.get("synced"))})
         options["pinned_spans"] = spans
     try:
         built = timeline_mod.build_auto_cut(

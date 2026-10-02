@@ -405,7 +405,10 @@ def pinned_spans(spec: dict[str, Any], assets_for: Callable[[str], list[str]]) -
         span = shot_span(shot)
         ids = [a for a in assets_for(shot["key"]) if a] if span else []
         if span and ids:
-            out.append({"start_s": span[0], "end_s": span[1], "asset_ids": list(dict.fromkeys(ids)), "shot": shot["key"]})
+            entry = {"start_s": span[0], "end_s": span[1], "asset_ids": list(dict.fromkeys(ids)), "shot": shot["key"]}
+            if shot.get("sing"):
+                entry["synced"] = True  # its clip sings this very stretch: played from its first second
+            out.append(entry)
     return sorted(out, key=lambda x: x["start_s"])
 
 
@@ -583,6 +586,12 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         shot.setdefault("motion_prompt", "subtle motion")
         shot["clip_seed"] = _int(shot.get("clip_seed", 5000 + number), f"spec.shots[{i}].clip_seed", 0, 2**31 - 2)
         shot["crowd"] = bool(shot.get("crowd", False))
+        if shot.get("sing"):
+            shot["sing"] = True
+            if not shot.get("clips"):
+                shot["clips"] = [0]
+        else:
+            shot.pop("sing", None)
         names = _shot_cast_names(shot.get("cast"), key)
         known = {m["name"].lower() for m in spec["cast"]}
         unknown = [n for n in names if n.lower() not in known]
@@ -1315,6 +1324,24 @@ class Run:
                      "creatures appear")
         body: dict[str, Any] = {"template": template, "reference_asset_id": self.still_for(key), "prompt": text,
                                 "seed": shot["clip_seed"] + (100 * variant)}
+        span = shot_span(shot)
+        song_id = ((self.state.get("done") or {}).get("song") or {}).get("song_asset_id")
+        if shot.get("sing"):
+            # lip sync (Wan 2.2 S2V): the still's character sings exactly the
+            # stretch of the song the shot is placed on
+            if not span:
+                raise ProductionError("sing_needs_span", f"shot {shot['key']} sings: place it on its lines in the "
+                                                         "song track first (a span)")
+            if not song_id:
+                raise ProductionError("no_song", "a singing shot needs the song")
+            lines = self.lines_in(span)
+            sung = f' The character sings: "{lines}".' if lines else " The character sings."
+            body.update({"template": "wan22_s2v", "audio_asset_id": song_id, "audio_start_s": span[0],
+                         "audio_seconds": round(min(19.0, span[1] - span[0] + 0.25), 3),
+                         "prompt": f"{shot.get('motion_prompt') or shot['prompt']}.{sung} Natural lip movement in time "
+                                   "with the words, expressive face, the camera and the body move a little."})
+            body.update(self.s2v_size(self.still_for(key)))
+            return body
         motion = shot.get("motion_ref") or {}
         if motion.get("asset_id") and template == "auto_clip":
             # copy the motion of a video (a dance, a stunt) onto the still's
@@ -1343,6 +1370,27 @@ class Run:
             if shot.get(f"clip_{k}") is not None:
                 body[k] = shot[f"clip_{k}"]
         return body
+
+    def lines_in(self, span: tuple[float, float]) -> str:
+        """The sung words inside a stretch of the song (from the timed lyrics)."""
+        try:
+            timing = shot_timing(self.store.data_dir, self.store, self.state)
+        except Exception:  # noqa: BLE001 - untimed lyrics: sing without the words in the prompt
+            return ""
+        words = [str(ln.get("text") or "").strip() for ln in timing.get("lines") or []
+                 if span[0] - 0.05 <= float(ln.get("time_s") or 0) < span[1] - 0.05 and not str(ln.get("text") or "").startswith("[")]
+        return " / ".join(w for w in words if w)[:300]
+
+    def s2v_size(self, still_id: Optional[str]) -> dict[str, int]:
+        """480p in the still's orientation (S2V 14B on a 16 GB card)."""
+        try:
+            a = self.store.get_asset(still_id) if still_id else {}
+        except NotFound:
+            a = {}
+        w, h = int(a.get("width") or 16), int(a.get("height") or 9)
+        if abs(w - h) < 0.1 * max(w, h):
+            return {"width": 640, "height": 640}
+        return {"width": 832, "height": 480} if w > h else {"width": 480, "height": 832}
 
     def stage_clips(self) -> None:
         pid = self.project_id
@@ -1576,6 +1624,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                         "clips": [0] if new.get("clip", new.get("motion") != "still") else [],
                         **({"section": section} if section in SHOT_SECTIONS else {}),
                         "crowd": bool(new.get("crowd", False)),
+                        **({"sing": True} if new.get("sing") else {}),
                         **({"refs": _shot_refs(new.get("refs"), key)} if new.get("refs") else {}),
                         **({"motion_ref": {"asset_id": str(new["motion_ref"]["asset_id"]),
                                            "start_s": max(0.0, float(new["motion_ref"].get("start_s") or 0)),
@@ -1614,7 +1663,22 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 changed.append(key)
             regenerate = bool(change.get("regenerate"))
             if "span" in change:
+                before = shot_span(shot)
                 _set_span(shot, _parse_span(change["span"], key))
+                if shot.get("sing") and shot_span(shot) != before:
+                    # it sang the old stretch: a new one is a new clip
+                    for ck in [k for k in clips if split_key(k)[0] == key]:
+                        clips.pop(ck, None)
+            if change.get("sing") is not None and bool(change["sing"]) != bool(shot.get("sing")):
+                if change["sing"]:
+                    shot["sing"] = True
+                    shot["motion"] = "move"
+                    if not shot.get("clips"):
+                        shot["clips"] = [0]
+                else:
+                    shot.pop("sing", None)
+                for ck in [k for k in clips if split_key(k)[0] == key]:
+                    clips.pop(ck, None)
             if change.get("lead") is not None and bool(change["lead"]) != bool(shot.get("lead")):
                 shot["lead"] = bool(change["lead"])
                 regenerate = True

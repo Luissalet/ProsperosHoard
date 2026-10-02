@@ -388,6 +388,36 @@ def apply_params(workflow: dict[str, Any], spec: dict[str, Any], values: dict[st
     return wf
 
 
+def expand_chunks(workflow: dict[str, Any], spec: dict[str, Any], chunks: int, seed: int) -> dict[str, Any]:
+    """Wan S2V past one generation's length: chain `chunks - 1`
+    WanSoundImageToVideoExtend + KSampler + LatentConcat steps after the
+    first sampler (the official template's extend subgraphs), each with the
+    next seed, and point the final cut/concat at the last one. In place;
+    a template without `chunks` in its spec, or chunks <= 1, is untouched."""
+    cfg = spec.get("chunks")
+    if not cfg or chunks <= 1:
+        return workflow
+    chunks = min(int(chunks), int(cfg.get("max") or 4))
+    first = cfg["first_sampler"]
+    sampler = workflow[first]["inputs"]
+    previous = [first, 0]
+    for n in range(1, chunks):
+        ext, ks, cat = f"ext{n}", f"ks{n}", f"cat{n}"
+        workflow[ext] = {"class_type": "WanSoundImageToVideoExtend", "inputs": {
+            "length": [cfg["length"], 0], "positive": [cfg["positive"], 0], "negative": [cfg["negative"], 0],
+            "vae": [cfg["vae"], 0], "video_latent": previous, "audio_encoder_output": [cfg["audio"], 0],
+            "ref_image": [cfg["ref"], 0]}}
+        workflow[ks] = {"class_type": "KSampler", "inputs": {
+            "seed": int(seed) + n, "steps": [cfg["steps"], 0], "cfg": [cfg["cfg"], 0],
+            "sampler_name": sampler.get("sampler_name", "uni_pc"), "scheduler": sampler.get("scheduler", "simple"),
+            "denoise": 1, "model": [cfg["model"], 0], "positive": [ext, 0], "negative": [ext, 1], "latent_image": [ext, 2]}}
+        workflow[cat] = {"class_type": "LatentConcat", "inputs": {"dim": "t", "samples1": previous, "samples2": [ks, 0]}}
+        previous = [cat, 0]
+    workflow[cfg["cut"]]["inputs"]["samples"] = previous
+    workflow[cfg["concat"]]["inputs"]["samples2"] = previous
+    return workflow
+
+
 def wire_reference_group(workflow: dict[str, Any], spec: dict[str, Any], filenames: list[str]) -> dict[str, Any]:
     """Mutate `workflow` in place for a multi-reference template's
     `reference_group` (an autogrow socket like Qwen-Image 2.1's

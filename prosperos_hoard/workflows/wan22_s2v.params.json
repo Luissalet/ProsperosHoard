@@ -1,0 +1,60 @@
+{
+  "template": "wan22_s2v",
+  "kind": "video",
+  "vram_class": "wan_s2v",
+  "min_card_mb": 15000,
+  "free_after": true,
+  "requires_reference": true,
+  "reference_node": "52.image",
+  "audio_node": "58.audio",
+  "map": {
+    "positive_prompt": "6.text",
+    "negative_prompt": "7.text",
+    "width": "93.width",
+    "height": "93.height",
+    "length": "104.value",
+    "seed": "3.seed",
+    "steps": "103.value",
+    "cfg": "105.value",
+    "shift": "54.shift",
+    "fps": "82.fps",
+    "unet_name": "37.unet_name",
+    "clip_name": "38.clip_name",
+    "vae_name": "39.vae_name",
+    "audio_encoder_name": "57.audio_encoder_name",
+    "lora_name": "107.lora_name"
+  },
+  "output_node": "113",
+  "model_params": [
+    "unet_name",
+    "clip_name",
+    "vae_name",
+    "audio_encoder_name"
+  ],
+  "chunks": {
+    "first_sampler": "3",
+    "cut": "94",
+    "concat": "95",
+    "positive": "6",
+    "negative": "7",
+    "vae": "39",
+    "audio": "56",
+    "ref": "52",
+    "model": "54",
+    "steps": "103",
+    "cfg": "105",
+    "length": "104",
+    "max": 4
+  },
+  "notes": "Wan 2.2 S2V 14B (fp8) + the lightx2v 4-step LoRA: the character of the reference image sings or speaks the audio clip (lip sync, head and body motion), 16 fps. One generation covers `length` frames (77 = 4.8 s); `chunks` > 1 chains WanSoundImageToVideoExtend steps the way the official template does (3 = 14.4 s), each with the next seed. Prospero cuts the audio clip (from audio_start_s, audio_seconds long) with ffmpeg and uploads it; the video keeps that audio (the cut uses the song). Converted from the official video_wan2_2_14B_s2v.json template through the real 0.37 frontend; its two extend subgraphs are rebuilt by comfy_driver.expand_chunks.",
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "length": 77,
+    "steps": 4,
+    "cfg": 1.0,
+    "shift": 8,
+    "fps": 16,
+    "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+  }
+}

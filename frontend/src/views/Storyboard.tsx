@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Box, Clapperboard, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
@@ -118,6 +118,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                   <span className="pill badge-dark">{shot.key}</span>
                   {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
                   {hasClip && <span className="pill badge-dark"><Film size={10} /> {t("clipBadge")}</span>}
+                  {shot.sing && <span className="pill badge-dark" title={t("sbSing")}><Mic size={10} /></span>}
                   {(shot.refs || []).length > 0 && <span className="pill badge-dark"><Images size={10} /> {shot.refs!.length}</span>}
                   {(shot.crowd || (shot.cast || []).length > 0) && castCount > 0 && <span className="pill badge-dark" title={t("castCrowd")}><Users size={10} /></span>}
                 </div>
@@ -175,6 +176,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
   const [refs, setRefs] = useState<ShotRef[]>(shot?.refs || []);
   const [motionRef, setMotionRef] = useState<MotionRef | null>(shot?.motion_ref || null);
   const [crowd, setCrowd] = useState(!!shot?.crowd);
+  const [sing, setSing] = useState(!!shot?.sing);
   const [castNames, setCastNames] = useState<string[]>(shot?.cast || []);
   const cast = state.spec.cast || [];
   const [motionStart, setMotionStart] = useState(shot?.motion_ref ? clock(shot.motion_ref.start_s) : "0:00");
@@ -235,6 +237,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
     if (isNew) {
       change = { insert: { after: after ?? "start", prompt: prompt.trim(), lead, motion, clip: motion === "move" && clip,
                            motion_prompt: motionPrompt.trim() || undefined, section: section || undefined, refs, crowd,
+                           sing: sing && !!span ? true : undefined,
                            motion_ref: motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : undefined,
                            span: span ? { start_s: span.start, end_s: span.end } : undefined } };
     } else {
@@ -247,6 +250,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
       if (section !== (shot!.section || "")) change.section = section;
       if (JSON.stringify(refs) !== JSON.stringify(shot!.refs || [])) change.refs = refs;
       if (crowd !== !!shot!.crowd) change.crowd = crowd;
+      if (sing !== !!shot!.sing) change.sing = sing;
       if (JSON.stringify(castNames) !== JSON.stringify(shot!.cast || [])) change.cast = castNames;
       const mr = motionRef ? { ...motionRef, start_s: parseClock(motionStart) } : null;
       if (JSON.stringify(mr) !== JSON.stringify(shot!.motion_ref || null)) change.motion_ref = mr;
@@ -333,7 +337,13 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
             </select>
           </label>
           {motion === "move" && <label className="check"><input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} /> {t("makeClip")}</label>}
+          <label className="check" title={span ? t("sbSingHint") : t("sbSingNeedsSpan")}>
+            <input type="checkbox" checked={sing} disabled={!span && !sing}
+              onChange={(e) => { setSing(e.target.checked); if (e.target.checked) { setMotion("move"); setClip(true); } }} />
+            <Mic size={13} /> {t("sbSing")}
+          </label>
         </div>
+        {sing && <p className="hint" style={{ marginTop: -6 }}>{span ? t("sbSingHint") : t("sbSingNeedsSpan")}</p>}
         <div className="field">{t("spanTitle")}
           <span className="hint">{span ? t("spanPinnedHint") : t("spanFreeHint")}</span>
           <div className="row wrap" style={{ gap: 8 }}>
