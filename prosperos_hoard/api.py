@@ -206,6 +206,7 @@ class SpaceAgentBody(BaseModel):
 class EnhancePromptBody(BaseModel):
     text: str
     kind: str = "image"   # image | video | music
+    project: Optional[str] = None  # its cast's looks keep the @Names as designed
 
 
 class CanvasBody(BaseModel):
@@ -2800,10 +2801,24 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         what = {"image": "a still image (subject, setting, framing, lens, light, colour)",
                 "video": "a short video clip (subject, action, camera move, light; one continuous shot)",
                 "music": "a song for a music model (genre, tempo, instruments, voice, mood, as comma-separated tags)"}.get(body.kind, "an image")
+        cast = ""
+        if body.project:
+            # the mentioned cast as designed, so the rewrite does not invent a face on a faceless design
+            _, matched, _ = engine._scan_mentions(store, body.project, text)
+            lines = []
+            for m in matched:
+                look = str(m.get("prompt") or "").strip()
+                avoid = str(m.get("negative") or "").strip()
+                if look or avoid:
+                    lines.append(f"- @{m['name']}: {look or 'as in its reference'}" + (f" (it must NOT have: {avoid})" if avoid else ""))
+            if lines:
+                cast = ("\n\nThe @names are designed like this; describe them only with these traits and never add "
+                        "features they lack:\n" + "\n".join(lines))
         messages = [{"role": "system", "content": "You rewrite prompts for local image, video and music models. Answer with the "
                                                   "improved prompt only, in English, one paragraph, no quotes, no preamble."},
                     {"role": "user", "content": f"Improve this prompt for {what}. Keep every name written as @Name and every "
-                                                f"<imageN> tag exactly as it is; keep the idea, add concrete visual detail.\n\n{text}"}]
+                                                f"<imageN> tag exactly as it is; keep the idea, add concrete visual detail "
+                                                f"about the scene, camera and light.{cast}\n\n{text}"}]
         # a rewrite needs no reasoning: a thinking model would spend the budget thinking and answer nothing
         out = studio.chat(messages, 600, 0.6, effort="off").strip().strip('"')
         if not out:

@@ -203,7 +203,7 @@ function Enhance({ text, kind, onDone }: { text: string; kind: "image" | "video"
     <button className="btn xs ghost nodrag" disabled={!text.trim() || busy} title={t("spEnhanceHint")}
       onClick={async () => {
         setBusy(true);
-        try { onDone((await api.enhancePrompt(text, kind)).text); } catch (e) {
+        try { onDone((await api.enhancePrompt(text, kind, app.projectId || undefined)).text); } catch (e) {
           app.toast(e instanceof ApiError && e.code === "llm_unavailable" ? t("spNoLlm") : (e as Error).message, "bad");
         }
         finally { setBusy(false); }

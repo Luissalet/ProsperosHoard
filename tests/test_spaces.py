@@ -175,3 +175,23 @@ def test_prompt_enhancer_keeps_mentions(client):
     r = c.post("/api/prompt/enhance", json={"text": "@Snow in snow", "kind": "image"}).json()
     assert r["text"] == "@Snow sitting in fresh snow at dawn, soft rim light, 50mm"
     assert "@Snow in snow" in seen["user"]
+
+
+def test_prompt_enhancer_tells_the_model_the_cast_design(client):
+    c, app, _ = client
+    pid = c.post("/api/projects", json={"name": "Enhance cast"}).json()["id"]
+    c.post(f"/api/agent/studio_cast?project={pid}", json={"action": "create", "name": "Ball",
+                                                          "fields": {"prompt": "a white ball head with no face",
+                                                                     "negative": "eyes, mouth"}})
+    seen = {}
+
+    def chat(messages, max_tokens, temperature):
+        seen["user"] = messages[-1]["content"]
+        return "@Ball on a stage"
+
+    app.state.short_hooks = {**(getattr(app.state, "short_hooks", None) or {}), "chat": chat}
+    c.post("/api/prompt/enhance", json={"text": "@Ball dancing", "kind": "image", "project": pid})
+    assert "a white ball head with no face" in seen["user"] and "must NOT have: eyes, mouth" in seen["user"]
+    empty = {"chat": lambda m, t, temp: "  "}
+    app.state.short_hooks = {**app.state.short_hooks, **empty}
+    assert c.post("/api/prompt/enhance", json={"text": "@Ball dancing"}).status_code >= 400

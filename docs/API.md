@@ -133,7 +133,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/spaces/{id}/restore` | back from the deleted spaces |
 | POST | `/api/spaces/{id}/run` | `{mode: node|downstream|all, node_ids, force}` -> `{job, nodes}`: one `space_run` job runs the generators in order, each waiting for its inputs |
 | PATCH | `/api/spaces/{id}/nodes/{node}` | `{excluded?}` (outputs that stop flowing downstream) or `{outputs?}` (pick an earlier run's outputs back) -> the space |
-| POST | `/api/prompt/enhance` | `{text, kind: image|video|music}` -> `{text}`; agent twin `POST /api/agent/studio_prompt_enhance` |
+| POST | `/api/prompt/enhance` | `{text, kind: image|video|music, project?}` -> `{text}`; agent twin `POST /api/agent/studio_prompt_enhance` |
 | POST | `/api/agent/studio_spaces?project=` | body: `studio_spaces` (list/get/create/edit ops/run/delete/restore) |
 | POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?, engine?, references?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, matched_elements, element_references, added_references[{name, element, asset_id, index}], unknown_mentions, reference_asset_id, style_defaults`); with `engine: "qwen21"` the mentioned places/objects with an image are numbered after the call's `references` exactly as the render will |
 | POST | `/api/projects/{id}/generate` | same body as the agent route; returns the full job |
