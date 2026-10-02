@@ -13,7 +13,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Aperture, ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
   Music, Play, Plus, RotateCcw, Sparkles, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
-  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2,
+  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload,
 } from "lucide-react";
 import {
   ApiError, api, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
@@ -36,31 +36,32 @@ const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
   edit: [["image", "image", true]],
   combine: [["clips", "video", true], ["audio", "audio", false]],
   variations: [["image", "image", true], ["prompt", "text", true]],
+  composite: [["background", "any", true], ["layers", "any", true]],
 };
-const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations"];
+const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite"];
 const APP_INPUTS: SpaceNodeType[] = ["text", "asset", "cast"];
 const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#f0a04b", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
-  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame,
+  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2,
 };
 const TYPE_LABEL: Record<SpaceNodeType, MessageKey> = {
   text: "spNodeText", asset: "spNodeAsset", cast: "spNodeCast", image: "spNodeImage", video: "spNodeVideo",
   music: "spNodeMusic", list: "spNodeList", note: "spNodeNote", assistant: "spNodeAssistant", edit: "spNodeEdit", combine: "spNodeCombine",
-  variations: "spNodeVariations", group: "spNodeGroup",
+  variations: "spNodeVariations", group: "spNodeGroup", composite: "spNodeComposite",
 };
-const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "variations", "edit", "combine", "list",
-  "note", "group"];
+const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "variations", "edit", "composite",
+  "combine", "list", "note", "group"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
   video: { prompt: "", quality: "draft" }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
   list: { unticked: [] }, note: { text: "" },
   assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
-  variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" },
+  variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" }, composite: { layers: [] },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
   text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220, assistant: 290, edit: 250, combine: 280,
-  variations: 270, group: 620,
+  variations: 270, group: 620, composite: 300,
 };
 
 type NodeData = { kind: SpaceNodeType; data: Record<string, any> };
@@ -73,6 +74,7 @@ function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: str
   if (kind === "image" || kind === "edit" || kind === "variations") return "image";
   if (kind === "assistant") return "text";
   if (kind === "combine") return "video";
+  if (kind === "composite") return "any";
   if (kind === "music") return "audio";
   if (kind === "asset") return (data.kind as Port) || "image";
   if (kind === "list") return "any";
@@ -144,7 +146,7 @@ interface Ctx {
   edges: Edge[];
   nodes: SpNode[];
   update: (id: string, patch: Record<string, unknown>) => void;
-  run: (id: string, mode: "node" | "downstream") => void;
+  run: (id: string, mode: "node" | "downstream" | "upto") => void;
   remove: (id: string) => void;
   duplicate: (id: string) => void;
   setExcluded: (id: string, excluded: string[]) => void;
@@ -152,6 +154,7 @@ interface Ctx {
   pickAssets: (id: string, kind: string) => void;
   open: (assetId: string, list: string[]) => void;
   touched: () => void;
+  exportTechnique: (group?: string) => void;
 }
 const SpaceCtx = createContext<Ctx>(null as unknown as Ctx);
 
@@ -524,6 +527,43 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         <div className="small muted sp-mode">{t("spVarHint")}</div>
       </>
     );
+  } else if (kind === "composite") {
+    const layerCount = ctx.edges.filter((e) => e.target === id && e.targetHandle === "layers")
+      .reduce((n, e) => n + Math.max(1, resolveOutputs(ctx, e.source, e.sourceHandle === "out" ? null : e.sourceHandle).length), 0);
+    const layers: Record<string, any>[] = Array.isArray(data.layers) ? data.layers : [];
+    const setLayer = (i: number, patch: Record<string, unknown>) => {
+      const next = Array.from({ length: Math.max(layers.length, i + 1) }, (_, k) => ({ ...(layers[k] || {}) }));
+      next[i] = { ...next[i], ...patch };
+      set({ layers: next });
+    };
+    body = (
+      <>
+        <div className="small muted">{t("spCompositeHint")}</div>
+        {Array.from({ length: Math.min(8, layerCount) }, (_, i) => {
+          const L = layers[i] || {};
+          return (
+            <div key={i} className="sp-layer nodrag">
+              <span className="small mono">{t("spLayerN", { n: i + 1 })}</span>
+              <select value={L.blend || "normal"} onChange={(e) => setLayer(i, { blend: e.target.value })} title={t("spBlend")}>
+                {["normal", "screen", "multiply", "overlay", "add", "lighten", "darken", "softlight", "difference"].map((m) =>
+                  <option key={m} value={m}>{t(`spBlend_${m}` as MessageKey)}</option>)}
+              </select>
+              <select value={L.key || ""} onChange={(e) => setLayer(i, { key: e.target.value || undefined })} title={t("spKeyHint")}>
+                <option value="">{t("spKeyNone")}</option><option value="black">{t("spKeyBlack")}</option><option value="white">{t("spKeyWhite")}</option>
+              </select>
+              <label className="sp-num" title={t("spOpacity")}>α<input type="number" min={0} max={1} step={0.05} value={L.opacity ?? 1}
+                onChange={(e) => setLayer(i, { opacity: Number(e.target.value) })} /></label>
+              <label className="sp-num" title={t("spScaleHint")}>⤢<input type="number" min={0.05} max={4} step={0.05} value={L.scale ?? 1}
+                onChange={(e) => setLayer(i, { scale: Number(e.target.value) })} /></label>
+              <label className="sp-num" title={t("spPosHint")}>x<input type="number" min={0} max={1} step={0.05} value={L.x ?? 0.5}
+                onChange={(e) => setLayer(i, { x: Number(e.target.value) })} /></label>
+              <label className="sp-num" title={t("spPosHint")}>y<input type="number" min={0} max={1} step={0.05} value={L.y ?? 0.5}
+                onChange={(e) => setLayer(i, { y: Number(e.target.value) })} /></label>
+            </div>
+          );
+        })}
+      </>
+    );
   } else if (kind === "combine") {
     body = (
       <>
@@ -617,6 +657,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         <span className="grow" />
         {runnable && <>
           <button className="btn xs icon ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} /></button>
+          <button className="btn xs icon ghost nodrag" title={t("spRunUpto")} disabled={busy} onClick={() => ctx.run(id, "upto")}><ListEnd size={13} /></button>
           <button className="btn xs icon ghost nodrag" title={t("spRunDown")} disabled={busy} onClick={() => ctx.run(id, "downstream")}><FastForward size={13} /></button>
         </>}
         {APP_INPUTS.includes(kind) && <button className={`btn xs icon ghost nodrag${data.app_input ? " sp-on" : ""}`}
@@ -668,6 +709,7 @@ const GroupNodeView = memo(function GroupNodeView({ id, data: nd, selected }: No
         {["#b48cf0", "#7fa6d9", "#5bbf86", "#f0a04b", "#e07a6e", "#9a95a6"].map((c) => (
           <button key={c} className="sp-group-dot nodrag" style={{ background: c }} onClick={() => ctx.update(id, { color: c })} />
         ))}
+        <button className="btn xs icon ghost nodrag" title={t("spExportGroup")} onClick={() => ctx.exportTechnique(id)}><Download size={12} /></button>
         <button className="btn xs icon ghost nodrag" title={t("delete")} onClick={() => ctx.remove(id)}><Trash2 size={12} /></button>
       </div>
     </div>
@@ -877,7 +919,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     return () => clearInterval(id);
   }, [polling, spaceId]);
 
-  const run = useCallback(async (mode: "node" | "downstream" | "all", ids: string[] = [], force = false) => {
+  const run = useCallback(async (mode: "node" | "downstream" | "upto" | "all", ids: string[] = [], force = false) => {
     await flush();
     try {
       const res = await api.runSpace(spaceId, mode, ids, force);
@@ -1007,6 +1049,19 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     pickAssets: (id, kind) => setPicking({ id, kind }),
     open: (aid, list) => app.openAsset(aid, list),
     touched: markDirty,
+    exportTechnique: async (group) => {
+      try {
+        await flush();
+        const bundle = await api.exportSpace(spaceId, group);
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${String(bundle.name || "technique").replace(/[^\w\- ]+/g, "").trim() || "technique"}.technique.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        app.toast(t("spExported", { models: (bundle.models || []).length }), "ok");
+      } catch (e) { app.toast((e as Error).message, "bad"); }
+    },
   };
 
   // a group carries the nodes that sit inside it when dragged
@@ -1156,6 +1211,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
             try { await api.stopSpace(spaceId); app.toast(t("spStopped"), "info"); setState((await api.space(spaceId)).state); }
             catch (e) { app.toast((e as Error).message, "bad"); }
           }}><Square size={12} /> {t("spStop")}</button>}
+          <button className="btn sm ghost icon" title={t("spExportHint")} onClick={() => ctx.exportTechnique()}><Download size={15} /></button>
           <button className="btn sm ghost icon" title={t("spFit")} onClick={() => flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 })}><Maximize size={15} /></button>
           <button className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
           <button className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}><Play size={14} /> {t("spRunAll")}</button>
@@ -1251,6 +1307,17 @@ export function SpacesView() {
       <div className="page-head">
         <div><h1>{t("spTitle")}</h1><p>{t("spLead")}</p></div>
         <div className="actions">
+          {!trash && <label className="btn sm" title={t("spImportHint")}><Upload size={13} /> {t("spImport")}
+            <input type="file" accept=".json,application/json" hidden onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              try {
+                const r = await api.importSpace(pid, JSON.parse(await f.text()));
+                app.toast(t("spImported", { fill: r.to_fill.length, missing: r.cast_missing.join(", ") || "—" }), "ok");
+                app.go("spaces", r.space.id);
+              } catch (err) { app.toast((err as Error).message, "bad"); }
+            }} /></label>}
           <div className="seg">
             <button className={!trash ? "on" : ""} onClick={() => setTrash(false)}>{t("spMine")}</button>
             <button className={trash ? "on" : ""} onClick={() => setTrash(true)}>{t("spTrash")}</button>

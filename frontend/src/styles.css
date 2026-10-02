@@ -811,3 +811,15 @@ table.list tr.selected td { background: var(--accent-soft); }
 
 .critic-card { padding: 10px 12px; border-color: var(--accent-soft); }
 .critic-card ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+
+.sb-take { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.sb-take .tile { position: relative; }
+.sb-take.current .tile { outline: 2px solid var(--ok); outline-offset: 1px; }
+.sb-take.picked .tile { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sb-take-kind { position: absolute; top: 4px; left: 4px; font-size: 10px; gap: 3px; }
+.sb-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sb-compare video, .sb-compare img { width: 100%; border-radius: var(--radius-sm); background: #000; }
+
+.sp-layer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 0; border-top: 1px dashed var(--border); }
+.sp-layer select { flex: 1 1 110px; min-width: 0; }
+.sp-layer .sp-num input { width: 46px; }

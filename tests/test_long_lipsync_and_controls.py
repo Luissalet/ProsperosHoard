@@ -116,3 +116,57 @@ def test_the_gpu_lease_is_sized_by_operation_and_template():
     assert gpu_lease.estimate_mb(gen("wan21_infinitetalk"), est) == 10000
     assert gpu_lease.estimate_mb(gen("auto_sing"), est) == 12000
     assert gpu_lease.vram_class({"type": "generate_image", "params": {"engine": "qwen21"}}) == "qwen21"
+
+
+def test_a_retake_redoes_only_its_stretch(store, backend_with_comfy, fake_comfy, project):
+    import numpy as np
+    from prosperos_hoard import engine
+    from test_new_templates import _last_prompt, _run_job
+    from test_qa import _clip
+    server, _ = fake_comfy
+    server.motion_models = True
+    plan = engine.retake_plan(5.0, 2.0, 3.0)
+    assert plan["a"] == 32 and plan["b"] == 48 and plan["start"] == 24 and (plan["length"] - 1) % 4 == 0 and plan["length"] >= 32
+    with pytest.raises(engine.EngineError):
+        engine.retake_plan(10.0, 1.0, 8.0)
+    frames = np.zeros((80, 72, 128), dtype=np.uint8)
+    frames[:, :, :] = np.arange(80, dtype=np.uint8)[:, None, None] * 3
+    clip = _clip(store, project["id"], frames)  # 80 frames at 24 fps
+    asset = store.get_asset(clip)
+    done = _run_job(store, backend_with_comfy, "retake", {"asset_id": clip, "start_s": 1.0, "end_s": 2.0,
+                                                          "prompt": "she turns", "quality": "draft"}, project["id"])
+    assert done["state"] == "done", done
+    wf = _last_prompt(fake_comfy)
+    vace = next(n for n in wf.values() if n["class_type"] == "WanVaceToVideo")["inputs"]
+    assert (vace["length"] - 1) % 4 == 0 and vace["control_video"] and vace["control_masks"]
+    loads = [n["inputs"]["file"] for n in wf.values() if n["class_type"] == "LoadVideo"]
+    assert any(f.endswith("_control.mp4") for f in loads) and any(f.endswith("_mask.mp4") for f in loads)
+    out = store.get_asset(done["outputs"]["asset_ids"][0])
+    assert out["kind"] == "video" and out["recipe"]["operation"] == "retake" and out["recipe"]["retake_of"] == clip
+    assert abs(float(out.get("duration_s") or 0) - asset["duration_s"]) < 0.25  # same length: only the stretch changed
+
+
+def test_the_final_retake_uses_both_experts(store, backend_with_comfy, fake_comfy, project):
+    import numpy as np
+    from test_new_templates import _last_prompt, _run_job
+    from test_qa import _clip
+    server, _ = fake_comfy
+    server.motion_models = True
+    clip = _clip(store, project["id"], np.full((48, 72, 128), 50, dtype=np.uint8))
+    done = _run_job(store, backend_with_comfy, "retake", {"asset_id": clip, "start_s": 0.0, "end_s": 1.0,
+                                                          "quality": "final", "seed": 5}, project["id"])
+    assert done["state"] == "done", done
+    names = {n["inputs"].get("unet_name") for n in _last_prompt(fake_comfy).values() if n["class_type"] == "UNETLoader"}
+    assert names == {"wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors", "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors"}
+
+
+def test_retake_over_http_checks_the_stretch(client):
+    import numpy as np
+    from test_qa import _clip
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Retake"}).json()["id"]
+    clip = _clip(store, pid, np.full((48, 72, 128), 50, dtype=np.uint8))
+    assert c.post("/api/agent/studio_retake", json={"asset_id": clip, "start_s": 1.5, "end_s": 1.0}).status_code == 400
+    assert c.post(f"/api/assets/{clip}/retake", json={"asset_id": clip, "start_s": 0.2, "end_s": 1.2,
+                                                      "quality": "best"}).status_code == 400

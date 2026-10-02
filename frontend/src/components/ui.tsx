@@ -119,14 +119,28 @@ export function Progress({ value, waiting }: { value: number; waiting?: boolean 
   );
 }
 
+// open modals, newest last: Escape closes only the one on top
+const modalStack: symbol[] = [];
+
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
 }) {
+  const [me] = useState(() => Symbol("modal"));
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    modalStack.push(me);
+    return () => { const i = modalStack.indexOf(me); if (i >= 0) modalStack.splice(i, 1); };
+  }, [me]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // one Escape closes one modal (the top one is unmounted before the next listener runs)
+      if (e.key !== "Escape" || (e as KeyboardEvent & { modalDone?: boolean }).modalDone) return;
+      if (modalStack[modalStack.length - 1] !== me) return;
+      (e as KeyboardEvent & { modalDone?: boolean }).modalDone = true;
+      onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, me]);
   return (
     <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" style={wide ? { width: "min(980px, 100%)" } : undefined} role="dialog" aria-label={title}>

@@ -1,0 +1,40 @@
+{
+ "template": "wan22_vace_retake",
+ "kind": "video",
+ "control_video_node": "6.file",
+ "control_mask_node": "8.file",
+ "output_node": "17",
+ "vram_class": "wan14b",
+ "free_after": true,
+ "map": {
+  "positive_prompt": "4.text",
+  "negative_prompt": "5.text",
+  "width": "11.width",
+  "height": "11.height",
+  "length": "11.length",
+  "seed": "26.noise_seed",
+  "fps": "16.fps",
+  "unet_high": "20.unet_name",
+  "unet_low": "21.unet_name",
+  "lora_high": "22.lora_name",
+  "lora_low": "23.lora_name",
+  "clip_name": "2.clip_name",
+  "vae_name": "3.vae_name"
+ },
+ "model_params": [
+  "unet_high",
+  "unet_low",
+  "lora_high",
+  "lora_low",
+  "clip_name",
+  "vae_name"
+ ],
+ "notes": "Retake (final): Wan 2.2 Fun VACE 14B (high + low noise experts, fp8) with the lightx2v 4-step text-to-video LoRAs redoes a stretch of a clip from a control video (real frames around it, grey in it) and a mask (white = paint). Same inputs as wan21_vace_retake.",
+ "defaults": {
+  "width": 832,
+  "height": 480,
+  "length": 81,
+  "fps": 16,
+  "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+ }
+}

@@ -794,7 +794,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  driving_start_s: float = 0.0, audio_asset_id: Optional[str] = None, audio_start_s: float = 0.0,
                  audio_seconds: Optional[float] = None, end_asset_id: Optional[str] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
-                 use_vocals: bool = True) -> dict[str, Any]:
+                 use_vocals: bool = True, control_video: Optional[tuple[bytes, bytes]] = None,
+                 postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
     project_id = job["project_id"]
@@ -885,6 +886,14 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         uploads.append((clip, driving_name))
         input_ids.append(drive["id"])
 
+    control_names: Optional[tuple[str, str]] = None
+    if spec.get("control_video_node"):
+        if not control_video:
+            raise EngineError("control_required", f"template '{template_name}' needs a control video and its mask")
+        tag = new_id("ctl")
+        control_names = (f"prospero_{tag}_control.mp4", f"prospero_{tag}_mask.mp4")
+        uploads += [(control_video[0], control_names[0]), (control_video[1], control_names[1])]
+
     audio_name: Optional[str] = None
     vocals_name: Optional[str] = None
     if spec.get("audio_node"):
@@ -948,6 +957,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if end_name:
             node, _, inp = spec["end_image_node"].partition(".")
             wf[node]["inputs"][inp] = end_name
+        if control_names:
+            for key, fname in zip(("control_video_node", "control_mask_node"), control_names):
+                node, _, inp = spec[key].partition(".")
+                wf[node]["inputs"][inp] = fname
         if i == 0 and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
@@ -973,6 +986,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             if audio_name and audio_seconds and spec.get("kind") == "video":
                 # a lip-sync render is made in whole generations: keep exactly the line
                 data = _trim_video_bytes(data, float(audio_seconds))
+            if postprocess:
+                data = postprocess(data)
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
     free_after(backend, spec)
     progress(0.97, "imported outputs")
@@ -1286,6 +1301,154 @@ def reframe_job(store: Store, job: dict[str, Any], progress) -> dict[str, Any]:
     return {"asset_id": new["id"], "asset_ids": [new["id"]], "aspect": aspect, "framing": framing}
 
 
+RETAKE_FPS = 16
+RETAKE_CONTEXT = 8      # real frames kept on each side of the stretch, so it joins without a jump
+RETAKE_MAX_FRAMES = 81
+
+
+def retake_installed(object_info: dict[str, Any]) -> dict[str, bool]:
+    return {"draft": _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.1_vace_1.3B"),
+            "final": _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_fun_vace_high_noise")
+            and _has_model_file(object_info, "UNETLoader", "unet_name", "wan2.2_fun_vace_low_noise")}
+
+
+def _video_fps(exe: str, path: Path) -> float:
+    probe = procutil.run([exe, "-nostdin", "-hide_banner", "-i", str(path)], text=True, timeout=60)
+    m = re.search(r"(\d+(?:\.\d+)?) fps", probe.stderr or "")
+    return float(m.group(1)) if m else 24.0
+
+
+def retake_plan(duration_s: float, start_s: float, end_s: float, fps: int = RETAKE_FPS) -> dict[str, int]:
+    """The frames a retake renders: the stretch [a, b) plus up to
+    RETAKE_CONTEXT real frames on each side, grown to Wan's 4n+1 length.
+    SpaceError-like EngineError when the stretch is too short or long."""
+    total = max(1, int(round(duration_s * fps)))
+    a = max(0, int(round(start_s * fps)))
+    b = min(total, int(round(end_s * fps)))
+    if b - a < 4:
+        raise EngineError("retake_too_short", "pick at least a quarter of a second to redo")
+    if b - a > RETAKE_MAX_FRAMES - 2 * RETAKE_CONTEXT:
+        raise EngineError("retake_too_long", f"a retake redoes at most {(RETAKE_MAX_FRAMES - 2 * RETAKE_CONTEXT) / fps:.1f} s "
+                                             "at a time: split it in two")
+    s0 = max(0, a - RETAKE_CONTEXT)
+    s1 = min(total, b + RETAKE_CONTEXT)
+    length = s1 - s0
+    length = min(RETAKE_MAX_FRAMES, length + (-(length - 1)) % 4)
+    return {"a": a, "b": b, "start": s0, "length": length, "total": total}
+
+
+def retake_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
+    """Redo a stretch of a clip (Wan VACE): the frames around it stay, the
+    stretch is painted again from `prompt`, and the new stretch is spliced
+    back into the clip at its own fps (the rest of the clip is untouched).
+    quality "draft" uses Wan 2.1 VACE 1.3B, "final" Wan 2.2 Fun VACE 14B."""
+    p = job["params"]
+    clip = store.get_asset(p["asset_id"])
+    if clip["kind"] != "video":
+        raise EngineError("not_video", "a retake redoes part of a clip")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed for a retake")
+    src = store.data_dir / clip["file_path"]
+    duration = float(clip.get("duration_s") or 0) or _probe_duration(exe, src)
+    plan = retake_plan(duration, float(p["start_s"]), float(p["end_s"]))
+    sw, sh = int(clip.get("width") or 832), int(clip.get("height") or 480)
+    W, H = (832, 480) if sw > sh * 1.1 else ((480, 832) if sh > sw * 1.1 else (640, 640))
+    F = RETAKE_FPS
+    progress(0.03, "reading the clip")
+    raw = procutil.run([exe, "-nostdin", "-loglevel", "error", "-i", str(src), "-vf",
+                        f"fps={F},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], timeout=600)
+    data = raw.stdout if isinstance(raw.stdout, (bytes, bytearray)) else b""
+    frames = np.frombuffer(bytes(data[: len(data) // (W * H * 3) * W * H * 3]), dtype=np.uint8).reshape(-1, H, W, 3)
+    if len(frames) < plan["b"]:
+        plan["b"] = min(plan["b"], len(frames))
+        if plan["b"] - plan["a"] < 4:
+            raise EngineError("retake_too_short", "that stretch is past the end of the clip")
+    s0, L, a, b = plan["start"], plan["length"], plan["a"], plan["b"]
+    control = np.full((L, H, W, 3), 127, dtype=np.uint8)
+    mask = np.zeros((L, H, W, 3), dtype=np.uint8)
+    for i in range(L):
+        f = s0 + i
+        if a <= f < b or f >= len(frames):
+            mask[i] = 255  # painted again (frames past the end are thrown away)
+        else:
+            control[i] = frames[f]
+
+    def encode(arr: np.ndarray) -> bytes:
+        tmp = store.data_dir / "tmp" / f"{new_id('rtk')}.mp4"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            res = procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                                "-s", f"{W}x{H}", "-r", str(F), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
+                                "-crf", "12", "-pix_fmt", "yuv420p", str(tmp)], input=arr.tobytes(), timeout=600)
+            if res.returncode != 0 or not tmp.is_file():
+                raise EngineError("retake_failed", "could not prepare the control video")
+            return tmp.read_bytes()
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    control_bytes, mask_bytes = encode(control), encode(mask)
+    fps_src = _video_fps(exe, src)
+    t0, t1 = a / F, b / F
+    has_audio = _has_audio(exe, src)
+
+    def splice(generated: bytes) -> bytes:
+        """The clip with its stretch replaced: before and after from the
+        original, the middle from the render (its own frames a..b)."""
+        work = store.data_dir / "tmp" / new_id("rtk")
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            gen = work / "gen.mp4"
+            gen.write_bytes(generated)
+            out = work / "out.mp4"
+            ga, gb = a - s0, b - s0
+            norm = f"scale={sw // 2 * 2}:{sh // 2 * 2},setsar=1,fps={fps_src:g},format=yuv420p"
+            parts, labels = [], []
+            if t0 > 0.02:
+                parts.append(f"[0:v]trim=start=0:end={t0:.4f},setpts=PTS-STARTPTS,{norm}[p1]")
+                labels.append("[p1]")
+            parts.append(f"[1:v]trim=start_frame={ga}:end_frame={gb},setpts=PTS-STARTPTS,{norm}[p2]")
+            labels.append("[p2]")
+            if t1 < duration - 0.02:
+                parts.append(f"[0:v]trim=start={t1:.4f},setpts=PTS-STARTPTS,{norm}[p3]")
+                labels.append("[p3]")
+            graph = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]"
+            cmd = [exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-i", str(gen), "-filter_complex", graph,
+                   "-map", "[v]"]
+            if has_audio:
+                cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+            cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-movflags", "+faststart", str(out)]
+            res = procutil.run(cmd, text=True, timeout=900)
+            if res.returncode != 0 or not out.is_file():
+                raise EngineError("retake_failed", f"could not splice the retake: {(res.stderr or '')[-300:]}")
+            return out.read_bytes()
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    quality = "final" if p.get("quality") == "final" else "draft"
+    template = "wan22_vace_retake" if quality == "final" else "wan21_vace_retake"
+    workflow, spec = comfy_driver.load_template(template)
+    values = {**(spec.get("defaults") or {}), "positive_prompt": str(p.get("prompt") or "the scene continues naturally"),
+              "width": W, "height": H, "length": L, "fps": F}
+    if p.get("negative"):
+        values["negative_prompt"] = p["negative"]
+    if p.get("seed") is not None:
+        values["seed"] = int(p["seed"])
+    return run_template(store, backend, job, progress, template_name=template, values=values, operation="retake",
+                        control_video=(control_bytes, mask_bytes), postprocess=splice,
+                        extra_recipe={"retake_of": clip["id"], "start_s": round(t0, 3), "end_s": round(t1, 3),
+                                      "prompt": p.get("prompt"), "quality": quality, "derived_from": clip["id"],
+                                      "input_asset_ids": [clip["id"]]},
+                        name=f"{clip.get('name') or clip['id']} retake {t0:.1f}-{t1:.1f}s")
+
+
+def _probe_duration(exe: str, path: Path) -> float:
+    probe = procutil.run([exe, "-nostdin", "-hide_banner", "-i", str(path)], text=True, timeout=60)
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", probe.stderr or "")
+    return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
+
+
 def last_frame(store: Store, asset_id: str, project_id: Optional[str] = None) -> dict[str, Any]:
     """The last frame of a clip as an image asset: the start of the next
     shot when shots are chained (a space's clip "last frame" output)."""
@@ -1368,6 +1531,92 @@ def combine_clips(store: Store, project_id: str, clip_ids: list[str], audio_asse
         return import_asset(store, project_id, out, "video", original_name=f"joined {len(paths)} clips.mp4",
                             recipe={"operation": "combine", "backend": "local", "input_asset_ids": clip_ids
                                     + ([audio_asset_id] if audio_asset_id else []), "audio_start_s": audio_start_s},
+                            source="derived")
+    finally:
+        out.unlink(missing_ok=True)
+
+
+BLEND_MODES = ("normal", "screen", "multiply", "overlay", "add", "lighten", "darken", "softlight", "difference")
+
+
+def composite_media(store: Store, project_id: str, background_id: str, layers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Layers over a background, like a compositor: each layer (a picture,
+    a cutout with transparency or a clip) is scaled to `scale` of the
+    background's width, centred at x/y (0-1), with `opacity` and a blend
+    mode; `key` "black" or "white" drops that colour (light effects shot on
+    black, line art on white). The result is a clip when any input is one
+    (as long as the longest, pictures held), else a picture."""
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to composite")
+    if not layers:
+        raise EngineError("no_layers", "wire at least one layer over the background")
+    bg = store.get_asset(background_id)
+    items = [(store.get_asset(str(l["asset_id"])), l) for l in layers[:8]]
+    for a in [bg] + [a for a, _ in items]:
+        if a["kind"] not in ("image", "video"):
+            raise EngineError("not_visual", f"asset {a['id']} is {a['kind']}; only pictures and clips can be layered")
+    W = int(bg.get("width") or 1280) // 2 * 2
+    H = int(bg.get("height") or 720) // 2 * 2
+    videos = [a for a in [bg] + [a for a, _ in items] if a["kind"] == "video"]
+    duration = max([float(a.get("duration_s") or 0) for a in videos] or [0]) or 5.0
+    as_video = bool(videos)
+    cmd = [exe, "-nostdin", "-y", "-loglevel", "error"]
+    for a in [bg] + [a for a, _ in items]:
+        if a["kind"] == "image" and as_video:
+            cmd += ["-loop", "1", "-t", f"{duration:.3f}"]
+        cmd += ["-i", str(store.data_dir / a["file_path"])]
+    parts = [f"[0:v]scale={W}:{H},setsar=1,format=rgba[b0]"]
+    cur = "b0"
+    for i, (a, l) in enumerate(items, start=1):
+        mode = str(l.get("blend") or "normal")
+        if mode not in BLEND_MODES:
+            raise EngineError("bad_blend", f"blend must be one of {', '.join(BLEND_MODES)}")
+        opacity = min(1.0, max(0.0, float(l.get("opacity", 1.0))))
+        scale = min(4.0, max(0.02, float(l.get("scale", 1.0))))
+        cx = min(1.5, max(-0.5, float(l.get("x", 0.5)))) * W
+        cy = min(1.5, max(-0.5, float(l.get("y", 0.5)))) * H
+        lw = max(2, int(W * scale) // 2 * 2)
+        chain = f"[{i}:v]scale={lw}:-2,setsar=1,format=rgba"
+        key = l.get("key")
+        if key in ("black", "white"):
+            chain += f",colorkey={'0x000000' if key == 'black' else '0xFFFFFF'}:0.25:0.12"
+        if mode == "normal":
+            if opacity < 1.0:
+                chain += f",colorchannelmixer=aa={opacity:.3f}"
+            parts.append(f"{chain}[l{i}]")
+            parts.append(f"[{cur}][l{i}]overlay=x={cx:.1f}-w/2:y={cy:.1f}-h/2:eof_action=pass:format=auto[b{i}]")
+        else:
+            # blend needs two frames of one size: the layer on a neutral canvas
+            # (black for lightening modes, white for darkening ones)
+            neutral = "white" if mode in ("multiply", "darken") else ("gray" if mode in ("overlay", "softlight") else "black")
+            parts.append(f"{chain}[l{i}]")
+            parts.append(f"color=c={neutral}:s={W}x{H}:d={duration:.3f},format=rgba[c{i}]")
+            parts.append(f"[c{i}][l{i}]overlay=x={cx:.1f}-w/2:y={cy:.1f}-h/2:eof_action=pass:format=auto[p{i}]")
+            parts.append(f"[{cur}][p{i}]blend=all_mode={mode}:all_opacity={opacity:.3f}:shortest=0[b{i}]")
+        cur = f"b{i}"
+    tmp_dir = store.data_dir / "tmp" / "composite"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    out = tmp_dir / f"{new_id('cmp')}{'.mp4' if as_video else '.png'}"
+    if as_video:
+        parts.append(f"[{cur}]format=yuv420p[v]")
+        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-t", f"{duration:.3f}"]
+        if bg["kind"] == "video" and _has_audio(exe, store.data_dir / bg["file_path"]):
+            cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-r", "24", "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-movflags", "+faststart", str(out)]
+    else:
+        cmd += ["-filter_complex", ";".join(parts), "-map", f"[{cur}]", "-frames:v", "1", str(out)]
+    res = procutil.run(cmd, text=True, timeout=1800)
+    if res.returncode != 0 or not out.is_file():
+        out.unlink(missing_ok=True)
+        raise EngineError("composite_failed", (res.stderr or "ffmpeg failed")[-500:])
+    try:
+        return import_asset(store, project_id, out, "video" if as_video else "image",
+                            original_name=f"composite of {len(items) + 1}{'.mp4' if as_video else '.png'}",
+                            recipe={"operation": "composite", "backend": "local",
+                                    "input_asset_ids": [background_id] + [a["id"] for a, _ in items],
+                                    "layers": [{k: l.get(k) for k in ("blend", "opacity", "scale", "x", "y", "key") if k in l}
+                                               for _, l in items]},
                             source="derived")
     finally:
         out.unlink(missing_ok=True)
@@ -2651,12 +2900,15 @@ def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], pro
     started = time.monotonic()
     try:
         drums = None
+        stem_paths: dict[str, Path] = {}
         if tl.get("audio_asset_id") and ((tl.get("finishing") or {}).get("beat_fx") or {}):
             from . import stems as stems_mod
-            drums_id = stems_mod.existing(store, tl["audio_asset_id"]).get("drums")
-            drums = store.data_dir / store.get_asset(drums_id)["file_path"] if drums_id else None
+            stem_paths = {k: store.data_dir / store.get_asset(v)["file_path"]
+                          for k, v in stems_mod.existing(store, tl["audio_asset_id"]).items()}
+            drums = stem_paths.get("drums")
         result = video_mod.render_timeline(tl, asset_path_for, work_dir, out_path, quality=quality, progress=progress,
-                                           should_cancel=getattr(progress, "cancelled", None), beat_audio_path=drums)
+                                           should_cancel=getattr(progress, "cancelled", None), beat_audio_path=drums,
+                                           stem_paths=stem_paths)
     except video_mod.RenderCancelled:
         out_path.unlink(missing_ok=True)
         raise JobCancelled("cancelled") from None

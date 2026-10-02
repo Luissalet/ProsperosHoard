@@ -200,3 +200,15 @@ def test_the_build_uses_the_cast_and_the_projects_song(client):
     assert nodes["a1"]["data"]["prompt"] == "Wide shot of @Vera on stage" and "@Vera" in nodes["a2"]["data"]["prompt"]
     assert nodes["v1"]["data"]["prompt"] == "VERA sways"
     assert nodes["tune"]["data"] == {"kind": "audio", "asset_ids": [song]} and ("tune", None, "film", "audio") in edges
+
+
+def test_an_unknown_at_name_becomes_plain_words(client):
+    c, app, _ = client
+    pid = c.post("/api/projects", json={"name": "No cast"}).json()["id"]
+    sp = c.post(f"/api/projects/{pid}/spaces", json={"name": "b"}).json()
+    plan = {"nodes": [{"id": "s", "type": "image", "prompt": "Reference sheet for @VERA", "sheet": True},
+                      {"id": "i", "type": "image", "prompt": "@VERA on stage", "refs": ["s"]}]}
+    app.state.short_hooks = {**(getattr(app.state, "short_hooks", None) or {}), "chat": lambda m, t, temp: json.dumps(plan)}
+    assert c.post(f"/api/spaces/{sp['id']}/build", json={"request": "Vera on stage"}).status_code == 200
+    g = c.get(f"/api/spaces/{sp['id']}").json()["graph"]
+    assert {n["id"]: n["data"]["prompt"] for n in g["nodes"]}["i"] == "VERA on stage"

@@ -53,8 +53,8 @@ from .store import NotFound, Store
 from .util import now_iso
 
 NODE_TYPES = ("text", "asset", "cast", "image", "video", "music", "list", "note", "assistant", "edit", "combine",
-              "variations", "group")
-GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations")
+              "variations", "group", "composite")
+GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations", "composite")
 INPUTS: dict[str, dict[str, str]] = {
     "image": {"prompt": "text", "refs": "image", "pose": "image", "layout": "image"},
     "video": {"start": "image", "end": "image", "prompt": "text", "motion": "video", "audio": "audio"},
@@ -64,6 +64,7 @@ INPUTS: dict[str, dict[str, str]] = {
     "edit": {"image": "image"},
     "combine": {"clips": "video", "audio": "audio"},
     "variations": {"image": "image", "prompt": "text"},
+    "composite": {"background": "any", "layers": "any"},
 }
 SINGLE_INPUTS = {("video", "motion"), ("video", "audio"), ("video", "end"), ("combine", "audio"), ("image", "pose"),
                  ("image", "layout")}
@@ -111,6 +112,8 @@ def output_type(node: dict[str, Any], store: Optional[Store] = None, handle: Opt
         return "text"
     if t == "combine":
         return "video"
+    if t == "composite":
+        return "any"  # a picture, or a clip when a clip went in
     if t == "music":
         return "audio"
     if t == "asset":
@@ -213,6 +216,19 @@ def downstream(graph: dict[str, Any], node_id: str) -> set[str]:
     return seen
 
 
+def upstream(graph: dict[str, Any], node_id: str) -> set[str]:
+    parents: dict[str, list[str]] = {}
+    for e in graph["edges"]:
+        parents.setdefault(e["target"], []).append(e["source"])
+    seen, todo = {node_id}, [node_id]
+    while todo:
+        for p in parents.get(todo.pop(), []):
+            if p not in seen:
+                seen.add(p)
+                todo.append(p)
+    return seen
+
+
 # ------------------------------------------------------------ resolution
 
 def node_outputs(store: Store, graph: dict[str, Any], state: dict[str, Any], node_id: str,
@@ -259,6 +275,14 @@ def node_outputs(store: Store, graph: dict[str, Any], state: dict[str, Any], nod
         if t == "video" and handle == "last":
             frames = st.get("last_frames") or {}
             return [("image", frames[a]) for a in kept if frames.get(a)]
+        if t == "composite":
+            out = []
+            for a in kept:
+                try:
+                    out.append((store.get_asset(a)["kind"], a))
+                except NotFound:
+                    continue
+            return out
         kind = {"music": "audio", "edit": "image", "combine": "video", "variations": "image"}.get(t, t)
         return [(kind, a) for a in kept]
     if t == "list":
@@ -441,6 +465,19 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
         audio = next((v for k, v in ins.get("audio", []) if k == "audio"), None)
         return [{"op": "combine", "body": {"clips": clips[:60], "audio_asset_id": audio,
                                             "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0))}}]
+    if t == "composite":
+        backs = [v for k, v in ins.get("background", []) if k in ("image", "video")][:MAX_FANOUT]
+        layers = [v for k, v in ins.get("layers", []) if k in ("image", "video")][:8]
+        if not backs:
+            raise SpaceError("needs_background", "wire a picture or a clip into the background")
+        if not layers:
+            raise SpaceError("needs_layers", "wire the pictures or clips to lay over it into layers")
+        settings = data.get("layers") if isinstance(data.get("layers"), list) else []
+        stack = []
+        for i, aid in enumerate(layers):
+            cfg = settings[i] if i < len(settings) and isinstance(settings[i], dict) else {}
+            stack.append({"asset_id": aid, **{k: cfg[k] for k in ("blend", "opacity", "scale", "x", "y", "key") if k in cfg}})
+        return [{"op": "composite", "body": {"background": b, "layers": stack}} for b in backs]
     if t == "variations":
         images = list(dict.fromkeys(v for k, v in ins.get("image", []) if k == "image"))[:4]
         if not images:
@@ -478,14 +515,17 @@ def plan_hash(ops: list[dict[str, Any]]) -> str:
 
 def run_order(graph: dict[str, Any], mode: str, node_ids: Optional[list[str]] = None) -> list[str]:
     """The generators to run, in dependency order: the given nodes only
-    ("node"), them and everything fed by them ("downstream"), or the whole
-    space ("all")."""
+    ("node"), them and everything fed by them ("downstream"), them and
+    everything that feeds them ("upto": run to here), or the whole space
+    ("all"). "all" and "upto" skip nodes whose inputs did not change."""
     types = {n["id"]: n["type"] for n in graph["nodes"]}
     order = topo_order(graph["nodes"], graph["edges"])
     if mode == "all":
         wanted = set(types)
     elif mode == "downstream":
         wanted = set().union(*(downstream(graph, n) for n in node_ids or [])) if node_ids else set()
+    elif mode == "upto":
+        wanted = set().union(*(upstream(graph, n) for n in node_ids or [] if n in types)) if node_ids else set()
     else:
         wanted = set(node_ids or [])
     missing = [n for n in node_ids or [] if n not in types]
@@ -573,7 +613,7 @@ def run_space(store: Store, studio: Any, space_id: str, mode: str = "node", node
                     continue
                 h = plan_hash(ops)
                 prev = state.get(nid) or {}
-                if mode == "all" and not force and prev.get("ok_hash") == h and (prev.get("outputs") or prev.get("texts")):
+                if mode in ("all", "upto") and not force and prev.get("ok_hash") == h and (prev.get("outputs") or prev.get("texts")):
                     store.patch_space_state(space_id, nid, {"status": "done", "error": None})
                     skipped.append(nid)
                     continue
@@ -619,6 +659,8 @@ def run_space(store: Store, studio: Any, space_id: str, mode: str = "node", node
                                 errors.append("the assistant gave no answer")
                         elif op["op"] == "combine":
                             outputs.append(studio.combine(pid, op["body"])["id"])
+                        elif op["op"] == "composite":
+                            outputs.append(studio.composite(pid, op["body"])["id"])
                     except Exception as exc:  # noqa: BLE001
                         errors.append(str(getattr(exc, "message", exc))[:300])
                 results[nid] = (outputs, texts, errors)
@@ -717,7 +759,7 @@ def _op_template(op: dict[str, Any]) -> tuple[str, float]:
         return "ace15_song", max(1, int(b.get("count") or 1)) * max(0.3, float(b.get("duration") or 60) / 60)
     if op["op"] == "edit":
         return _EDIT_OP_TEMPLATE.get(b.get("operation") or "upscale", "esrgan_upscale"), 1
-    if op["op"] in ("chat", "combine"):
+    if op["op"] in ("chat", "combine", "composite"):
         return op["op"], 1
     t = b.get("template")
     n = max(1, int(b.get("count") or 1))
@@ -768,8 +810,8 @@ def _rough_estimate(graph: dict[str, Any], nid: str, per_node: dict[str, int]) -
         return _EDIT_OP_TEMPLATE.get(d.get("operation") or "upscale", "esrgan_upscale"), fan("image")
     if kind == "music":
         return "ace15_song", max(1, int(d.get("count") or 1)) * max(0.3, float(d.get("duration") or 60) / 60)
-    if kind in ("assistant", "combine"):
-        return ("chat" if kind == "assistant" else "combine"), 1
+    if kind in ("assistant", "combine", "composite"):
+        return ("chat" if kind == "assistant" else kind), 1
     return None
 
 
@@ -800,7 +842,7 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
             tpl, units = rough
             if tpl == "chat":
                 secs, n_r = 15.0, 0
-            elif tpl == "combine":
+            elif tpl in ("combine", "composite"):
                 secs, n_r = 10.0, 0
             else:
                 secs = (medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)) * units
@@ -813,7 +855,7 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
             renders += n_r
             continue
         prev = state.get(nid) or {}
-        if mode == "all" and not force and prev.get("ok_hash") == plan_hash(ops) and (prev.get("outputs") or prev.get("texts")):
+        if mode in ("all", "upto") and not force and prev.get("ok_hash") == plan_hash(ops) and (prev.get("outputs") or prev.get("texts")):
             nodes.append({"node": nid, "skipped": True, "renders": 0, "seconds": 0})
             continue
         secs = 0.0
@@ -826,6 +868,9 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
                 continue
             if tpl == "combine":
                 secs += 3 * len(op["body"].get("clips") or [])
+                continue
+            if tpl == "composite":
+                secs += 5
                 continue
             per = medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)
             secs += per * units
@@ -1001,6 +1046,12 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
                 wires.append((ref(src), None, nid, "clips"))
     kept_set = set(kept) | existing
     _attach_cast(store, project_id, ops, wires, kept_set, existing)
+    # an @Name nobody in the cast answers to loads no reference: plain words then
+    names = [c["name"].lower() for c in store.list_characters(project_id)]
+    for o in ops:
+        if o["op"] == "add_node" and isinstance((o.get("data") or {}).get("prompt"), str):
+            o["data"]["prompt"] = re.sub(r"@([\w][\w'-]*)", lambda m: m.group(0) if any(
+                n.startswith(m.group(1).lower()) for n in names) else m.group(1), o["data"]["prompt"])
     seen_wires = set()
     for src, sh, dst, th in wires:
         if src in kept_set and dst in kept_set and (src, sh, dst, th) not in seen_wires:
@@ -1148,3 +1199,129 @@ def template_graph(name: str) -> dict[str, Any]:
 
 
 TEMPLATES = ("blank", "reference_film", "singing_shot", "short_film")
+
+
+# ---------------------------------------------------------------- techniques
+
+TECHNIQUE_FORMAT = "prospero-technique/1"
+
+
+def _inside(group: dict[str, Any], node: dict[str, Any]) -> bool:
+    gx, gy = float(group.get("x") or 0), float(group.get("y") or 0)
+    gw, gh = float(group.get("w") or 620), float(group.get("h") or 380)
+    x, y = float(node.get("x") or 0), float(node.get("y") or 0)
+    return gx <= x <= gx + gw - 40 and gy <= y <= gy + gh - 40
+
+
+def needed_models(graph: dict[str, Any]) -> list[str]:
+    """What a graph will ask ComfyUI for, in words a person can install."""
+    need: set[str] = set()
+    for n in graph["nodes"]:
+        d = n.get("data") or {}
+        t = n["type"]
+        if t in ("image", "variations"):
+            need.add("image engine (Qwen-Image 2.1 or another installed one)")
+        elif t == "video":
+            ins = {e["target_handle"] for e in graph["edges"] if e["target"] == n["id"]}
+            if "audio" in ins:
+                need.add({"infinitetalk": "Wan 2.1 InfiniteTalk", "s2v": "Wan 2.2 S2V"}.get(d.get("sing_engine"),
+                                                                                       "Wan 2.2 S2V or InfiniteTalk"))
+            elif "motion" in ins:
+                need.add("Wan Animate 2")
+            elif "end" in ins:
+                need.add("Wan 2.2 14B image-to-video (first-last frame)")
+            else:
+                need.add("Wan 2.2 5B (draft)" if d.get("quality") == "draft" else "Wan 2.2 14B image-to-video")
+        elif t == "music":
+            need.add("ACE-Step")
+        elif t == "assistant":
+            need.add("a local language model")
+        elif t == "edit":
+            need.add({"upscale": "an upscale model (RealESRGAN)", "remove_background": "BiRefNet",
+                      "pose_map": "SDPose", "depth_map": "Depth Anything 3"}.get(d.get("operation") or "upscale", "upscale"))
+    return sorted(need)
+
+
+def export_technique(store: Store, space: dict[str, Any], group_id: Optional[str] = None) -> dict[str, Any]:
+    """A space (or one group of it) as a reusable technique: the nodes and
+    wires without this project's media (asset nodes keep their kind and are
+    left empty to fill), cast nodes by name (bound again on import), the app
+    form it declares and the models it needs."""
+    graph = space["graph"]
+    nodes = list(graph["nodes"])
+    title = space["name"]
+    if group_id:
+        group = next((n for n in nodes if n["id"] == group_id and n["type"] == "group"), None)
+        if not group:
+            raise SpaceError("no_group", f"no group {group_id} in this space")
+        nodes = [group] + [n for n in nodes if n["type"] != "group" and _inside(group, n)]
+        title = str((group.get("data") or {}).get("title") or title)
+    ids = {n["id"] for n in nodes}
+    names: dict[str, str] = {}
+    out_nodes = []
+    for n in nodes:
+        n = json.loads(json.dumps(n))
+        d = n.setdefault("data", {})
+        if n["type"] == "asset":
+            if d.get("asset_ids"):
+                d["was_filled"] = len(d["asset_ids"])
+            d["asset_ids"] = []
+        if n["type"] == "cast" and d.get("character_id"):
+            try:
+                c = store.get_character(d["character_id"])
+                d["cast_name"] = c["name"]
+                d["cast_kind"] = c.get("element") or "character"
+                names[c["name"]] = d["cast_kind"]
+            except NotFound:
+                pass
+            d.pop("character_id", None)
+        out_nodes.append(n)
+    edges = [e for e in graph["edges"] if e["source"] in ids and e["target"] in ids]
+    sub = {"nodes": out_nodes, "edges": edges}
+    return {"format": TECHNIQUE_FORMAT, "name": title, "description": str((graph.get("app") or {}).get("description") or ""),
+            "graph": sub, "models": needed_models(sub), "cast": [{"name": k, "kind": v} for k, v in sorted(names.items())],
+            "inputs": [n["id"] for n in out_nodes if (n.get("data") or {}).get("app_input")
+                       or (n["type"] == "asset" and not (n.get("data") or {}).get("asset_ids"))],
+            "exported_at": now_iso()}
+
+
+def import_technique(store: Store, project_id: str, bundle: Any, into: Optional[dict[str, Any]] = None
+                     ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A technique's graph made ready for a project: node ids made unique
+    against `into` (an existing space's graph), cast nodes bound to the
+    project's cast by name, laid out to the right of what is there.
+    Returns (graph, report)."""
+    if not isinstance(bundle, dict) or bundle.get("format") != TECHNIQUE_FORMAT or not isinstance(bundle.get("graph"), dict):
+        raise SpaceError("bad_technique", f"not a technique (format {TECHNIQUE_FORMAT})")
+    sub = validate_graph({"nodes": bundle["graph"].get("nodes") or [], "edges": bundle["graph"].get("edges") or []})
+    base = into or {"nodes": [], "edges": []}
+    taken = {n["id"] for n in base["nodes"]}
+    remap: dict[str, str] = {}
+    for n in sub["nodes"]:
+        nid, k = n["id"], 2
+        while nid in taken or nid in remap.values():
+            nid, k = f"{n['id']}{k}", k + 1
+        remap[n["id"]] = nid
+    cast = {c["name"].lower(): c["id"] for c in store.list_characters(project_id)}
+    bound, missing = [], []
+    dx = (max([n["x"] for n in base["nodes"]] or [-500]) + 500) - min([n["x"] for n in sub["nodes"]] or [0])
+    nodes = []
+    for n in sub["nodes"]:
+        n = json.loads(json.dumps(n))
+        n["id"] = remap[n["id"]]
+        n["x"] = float(n.get("x") or 0) + (dx if base["nodes"] else 0)
+        d = n.setdefault("data", {})
+        if n["type"] == "cast" and d.get("cast_name"):
+            cid = cast.get(str(d["cast_name"]).lower())
+            if cid:
+                d["character_id"] = cid
+                bound.append(d["cast_name"])
+            else:
+                missing.append(d["cast_name"])
+        nodes.append(n)
+    edges = [{**e, "id": f"{e.get('id') or 'e'}-{remap[e['source']]}-{remap[e['target']]}"[:120],
+              "source": remap[e["source"]], "target": remap[e["target"]]} for e in sub["edges"]]
+    graph = validate_graph({"nodes": base["nodes"] + nodes, "edges": base["edges"] + edges, "viewport": base.get("viewport")})
+    return graph, {"added": [remap[k] for k in remap], "cast_bound": bound, "cast_missing": missing,
+                   "to_fill": [remap[n["id"]] for n in sub["nodes"] if n["type"] == "asset" and not (n.get("data") or {}).get("asset_ids")],
+                   "models": bundle.get("models") or needed_models(sub)}

@@ -414,6 +414,7 @@ export interface LyricClip {
   karaoke: boolean;
 }
 
+export type BeatSource = "kick" | "beats" | "downbeats" | "drums" | "bass" | "vocals" | "other";
 export interface Finishing {
   color_grade?: "teal_orange" | "sodium_night" | "bleach_bypass";
   grain?: number;
@@ -422,7 +423,7 @@ export interface Finishing {
   glitch_on_downbeats?: boolean;
   lyric_style?: "default" | "horror" | "bold" | "pop" | "pulse" | "typewriter" | "handwritten" | "cinema";
   framing?: "fill" | "blur" | "fit";
-  beat_fx?: { source?: "kick" | "beats" | "downbeats"; zoom?: number; flash?: number; shake?: number };
+  beat_fx?: { source?: BeatSource; zoom?: number; flash?: number; shake?: number };
 }
 
 export interface Timeline {
@@ -779,6 +780,11 @@ export interface ProductionShot {
 }
 
 export interface ShotRef { asset_id: string; use: string }
+export interface ShotTakes {
+  key: string;
+  stills: { variants: string[]; seed?: number; at?: string; current: boolean; best?: string | null }[];
+  clips: Record<string, { asset_id: string; quality?: string; seed?: number; at?: string; current: boolean; retake?: boolean }[]>;
+}
 export interface CastMember { asset_id: string; name: string; note?: string }
 export interface MotionRef { asset_id: string; start_s: number; prompt: string }
 
@@ -944,7 +950,7 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 // ------------------------------------------------------------- spaces
 
 export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine"
-  | "variations" | "group";
+  | "variations" | "group" | "composite";
 
 export interface SpaceNode {
   id: string;
@@ -1258,11 +1264,15 @@ export const api = {
   videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),
   reframeProduction: (slug: string, aspects: string[], framing?: string, run = true) =>
     request<{ aspects: string[]; new: string[]; rerender: string[]; job?: Job }>("POST", `/api/productions/${slug}/reframe`, { aspects, framing, run }),
+  retake: (assetId: string, body: { start_s: number; end_s: number; prompt?: string; quality?: "draft" | "final" }) =>
+    request<{ job: Job }>("POST", `/api/assets/${assetId}/retake`, { asset_id: assetId, ...body }),
   assetStems: (assetId: string) => request<{ stems: Record<string, string> }>("GET", `/api/assets/${assetId}/stems`),
   makeStems: (assetId: string, force = false) =>
     request<{ job?: Job; stems: Record<string, string>; reused?: boolean }>("POST", `/api/assets/${assetId}/stems`, { asset_id: assetId, force }),
   reframeAsset: (assetId: string, aspect: string, framing = "fill", quality = "final") =>
     request<{ job: Job }>("POST", `/api/assets/${assetId}/reframe`, { asset_id: assetId, aspect, framing, quality }),
+  productionTakes: (slug: string, key?: string) =>
+    request<{ shots: ShotTakes[] }>("GET", `/api/productions/${slug}/takes${q({ key })}`),
   regenerateUnlocked: (slug: string, stage: "frames" | "clips", keys?: string[], run = true) =>
     request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/regenerate`, { stage, keys, run }),
   promoteClips: (slug: string, keys?: string[], run = true) =>
@@ -1369,7 +1379,11 @@ export const api = {
     request<Space>("PUT", `/api/spaces/${id}`, { graph, version, name }),
   deleteSpace: (id: string) => request<Space>("DELETE", `/api/spaces/${id}`),
   restoreSpace: (id: string) => request<Space>("POST", `/api/spaces/${id}/restore`),
-  runSpace: (id: string, mode: "node" | "downstream" | "all", nodeIds: string[] = [], force = false) =>
+  exportSpace: (id: string, group?: string) => request<Record<string, any>>("GET", `/api/spaces/${id}/export${q({ group })}`),
+  importSpace: (pid: string, bundle: unknown, name?: string, space?: string) =>
+    request<{ space: { id: string }; added: string[]; cast_bound: string[]; cast_missing: string[]; to_fill: string[]; models: string[] }>(
+      "POST", `/api/projects/${pid}/spaces/import`, { bundle, name, space }),
+  runSpace: (id: string, mode: "node" | "downstream" | "upto" | "all", nodeIds: string[] = [], force = false) =>
     request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
   spaceEstimate: (id: string, mode = "all", nodeIds: string[] = []) =>
     request<SpaceEstimate>("GET", `/api/spaces/${id}/estimate${q({ mode, node_ids: nodeIds.join(",") || undefined })}`),

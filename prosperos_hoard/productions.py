@@ -1276,6 +1276,8 @@ class Run:
             shot = next((s for s in self.spec["shots"] if s["key"] == key), {})
             items[key] = {"variants": ids, "best": ids[min(shot.get("best", 0), len(ids) - 1)] if ids else None,
                           "seed": shot.get("seed")}
+            if ids:
+                remember_take(self.state, "frames", key, {"variants": ids, "seed": shot.get("seed"), "prompt": shot.get("prompt")})
             self.log("frame", key=key, asset_ids=ids)
 
         self.wait_jobs("frames", done, "frames")
@@ -1487,6 +1489,10 @@ class Run:
             ids = _asset_ids(job)
             if ids:
                 items[key] = ids[0]
+                base = shots.get(split_key(key)[0]) or {}
+                remember_take(self.state, "clips", key, {"asset_id": ids[0], "quality": quality.get(key, "final"),
+                                                         "seed": base.get("clip_seed"), "motion_prompt": base.get("motion_prompt"),
+                                                         **({"from": chained[key]["from"]} if key in chained else {})})
                 self.log("clip", key=key, asset_id=ids[0])
 
         while True:
@@ -1646,6 +1652,78 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
 
 
 # ----------------------------------------------------------- change shots
+
+TAKES_KEPT = 12
+
+
+def remember_take(state: dict[str, Any], stage: str, key: str, take: dict[str, Any]) -> None:
+    """Every still set and clip a shot ever had, newest last (at most
+    TAKES_KEPT): regenerating no longer loses the take that was better."""
+    entry = state["done"].setdefault(stage, {"complete": False, "items": {}})
+    hist = entry.setdefault("history", {}).setdefault(key, [])
+    ident = take.get("asset_id") or tuple(take.get("variants") or [])
+    hist[:] = [t for t in hist if (t.get("asset_id") or tuple(t.get("variants") or [])) != ident]
+    hist.append({**take, "at": now_iso()})
+    del hist[:-TAKES_KEPT]
+
+
+def shot_takes(state: dict[str, Any], key: str) -> dict[str, Any]:
+    """The takes of one shot: its still sets and its clips, each marked
+    `current` when it is the one in use."""
+    done = state.get("done") or {}
+    frames = done.get("frames") or {}
+    clips = done.get("clips") or {}
+    current_still = ((frames.get("items") or {}).get(key) or {})
+    stills = list((frames.get("history") or {}).get(key) or [])
+    if current_still.get("variants") and not any(t.get("variants") == current_still["variants"] for t in stills):
+        stills.append({"variants": current_still["variants"], "seed": current_still.get("seed")})
+    out_stills = [{**t, "current": t.get("variants") == current_still.get("variants"),
+                   "best": current_still.get("best") if t.get("variants") == current_still.get("variants") else None}
+                  for t in stills]
+    out_clips: dict[str, list[dict[str, Any]]] = {}
+    keys = {k for k in (clips.get("history") or {}) if split_key(k)[0] == key} | \
+        {k for k in (clips.get("items") or {}) if split_key(k)[0] == key}
+    for ck in sorted(keys):
+        now = (clips.get("items") or {}).get(ck)
+        hist = list((clips.get("history") or {}).get(ck) or [])
+        if now and not any(t.get("asset_id") == now for t in hist):
+            hist.append({"asset_id": now, "quality": (clips.get("quality") or {}).get(ck, "final")})
+        out_clips[ck] = [{**t, "current": t.get("asset_id") == now} for t in hist]
+    return {"key": key, "stills": out_stills, "clips": out_clips}
+
+
+def _use_take(state: dict[str, Any], key: str, asset_id: str) -> str:
+    """Put an earlier take of shot `key` back in use: a still (its whole set
+    comes back, with that picture as the best one; the clips made from the
+    other still go) or a clip. Returns "still" or "clip"."""
+    takes = shot_takes(state, key)
+    for t in takes["stills"]:
+        if asset_id in (t.get("variants") or []):
+            frames = state["done"].setdefault("frames", {"complete": False, "items": {}}).setdefault("items", {})
+            before = (frames.get(key) or {}).get("best")
+            frames[key] = {"variants": t["variants"], "best": asset_id, "seed": t.get("seed")}
+            if before != asset_id:
+                clips = (state["done"].get("clips") or {}).get("items") or {}
+                for ck in [k for k in clips if split_key(k)[0] == key]:
+                    clips.pop(ck, None)
+            return "still"
+    for ck, hist in takes["clips"].items():
+        for t in hist:
+            if t.get("asset_id") == asset_id:
+                entry = state["done"].setdefault("clips", {"complete": False, "items": {}})
+                entry.setdefault("items", {})[ck] = asset_id
+                entry.setdefault("quality", {})[ck] = t.get("quality") or "final"
+                # a continuation chosen by hand stays, even if it was made
+                # from an earlier take of the shot it continues
+                shot = next((s for s in (state.get("spec") or {}).get("shots") or [] if s["key"] == key), {})
+                src = (entry.get("items") or {}).get(shot_key(shot["continue_from"], 0)) if shot.get("continue_from") else None
+                if src and split_key(ck)[1] == 0:
+                    entry.setdefault("chained", {})[ck] = {"from": src, "chosen": True}
+                else:
+                    entry.setdefault("chained", {}).pop(ck, None)
+                return "clip"
+    raise ProductionError("bad_changes", f"shot {key}: {asset_id} is not one of its takes (see studio_production_takes)")
+
 
 def drop_stale_chains(state: dict[str, Any]) -> list[str]:
     """Clips that continue another one start on its last frame: when that
@@ -1854,6 +1932,9 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
             if shot.get("locked") and touches:
                 raise ProductionError("shot_locked", f"shot {key} is approved (locked); unlock it to change "
                                                      f"{', '.join(sorted(touches))}")
+            if change.get("take"):
+                used = _use_take(state, key, str(change["take"]))
+                log(state, "review", "used_take", key=key, take=str(change["take"]), what=used)
             if "continue_from" in change:
                 cont = change["continue_from"]
                 cont = str(cont) if cont not in (None, "") else None

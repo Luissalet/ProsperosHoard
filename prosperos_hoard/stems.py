@@ -123,9 +123,34 @@ def existing(store: Store, song_id: str) -> dict[str, str]:
         return out
     for a in store.list_assets(song["project_id"], kind="audio", query=song_id, tag="stem", limit=60)["items"]:
         r = a.get("recipe") or {}
-        if r.get("operation") == "stems" and r.get("derived_from") == song_id and r.get("stem") in STEMS:
+        if r.get("operation") == "stems" and r.get("derived_from") == song_id and r.get("stem") in STEMS + ("instrumental",):
             out.setdefault(r["stem"], a["id"])
     return out
+
+
+def mix_instrumental(store: Store, song: dict[str, Any], stems: dict[str, str]) -> str:
+    """The song without its voice (drums + bass + other), for karaoke or a
+    version to sing over; a derived audio asset like the stems."""
+    exe = ffmpeg_path()
+    if not exe:
+        raise StemsError("no_ffmpeg", "ffmpeg is needed to mix the instrumental")
+    parts = [store.data_dir / store.get_asset(stems[k])["file_path"] for k in ("drums", "bass", "other")]
+    aid = new_id("a")
+    out = store.path_for_asset_file(aid, ".flac")
+    cmd = [exe, "-nostdin", "-y", "-loglevel", "error"]
+    for p in parts:
+        cmd += ["-i", str(p)]
+    cmd += ["-filter_complex", "amix=inputs=3:normalize=0:duration=longest", "-c:a", "flac", str(out)]
+    proc = procutil.run(cmd, timeout=600)
+    if proc.returncode != 0 or not out.is_file():
+        raise StemsError("encode_failed", "could not mix the instrumental")
+    return store.create_asset(
+        project_id=song["project_id"], kind="audio", file_path=out.relative_to(store.data_dir).as_posix(), mime="audio/flac",
+        duration_s=song.get("duration_s"), source="derived", asset_id=aid,
+        name=f"{Path(song.get('name') or song['id']).stem} - instrumental"[:100], tags=["stem", "instrumental"],
+        recipe={"operation": "stems", "stem": "instrumental", "derived_from": song["id"],
+                "input_asset_ids": [stems[k] for k in ("drums", "bass", "other")], "backend": "local",
+                "created_at": now_iso()})["id"]
 
 
 def separate(store: Store, song_id: str, python: Optional[Path], progress: Callable[[float, str], None],
@@ -137,6 +162,8 @@ def separate(store: Store, song_id: str, python: Optional[Path], progress: Calla
         raise StemsError("not_audio", f"asset {song_id} is {song['kind']}: stems come out of a song or a video's sound")
     have = existing(store, song_id)
     if not force and all(s in have for s in STEMS):
+        if "instrumental" not in have:
+            have["instrumental"] = mix_instrumental(store, song, have)
         return {"song_asset_id": song_id, "stems": have, "reused": True}
     exe = ffmpeg_path()
     if not exe:
@@ -185,6 +212,9 @@ def separate(store: Store, song_id: str, python: Optional[Path], progress: Calla
                         "backend": "local", "created_at": now_iso()})["id"]
         if not made:
             raise StemsError("split_failed", "Demucs gave no stems")
+        if all(k in made for k in ("drums", "bass", "other")):
+            progress(0.97, "mixing the instrumental")
+            made["instrumental"] = mix_instrumental(store, song, made)
         return {"song_asset_id": song_id, "stems": made, "device": info.get("device"), "reused": False}
     finally:
         shutil.rmtree(work, ignore_errors=True)

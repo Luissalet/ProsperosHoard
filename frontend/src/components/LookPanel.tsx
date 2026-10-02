@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { useT, type MessageKey } from "../i18n";
-import type { Finishing } from "../api";
+import type { BeatSource, Finishing } from "../api";
 
 // One-click looks: a starting point the sliders below then adjust.
 const PRESETS: { key: MessageKey; look: Finishing }[] = [
@@ -62,10 +62,14 @@ export function LookPanel({ value, onApply, note, compact }: {
         <div className="stack" style={{ gap: 8 }}>
           <span className="panel-title">{t("lookBeatTitle")}</span>
           <label className="field">{t("lookBeatSource")}
-            <select value={fx.source || "kick"} onChange={(e) => setFx({ source: e.target.value as "kick" | "beats" | "downbeats" })}>
+            <select value={fx.source || "kick"} onChange={(e) => setFx({ source: e.target.value as BeatSource })} title={t("lookSourceStemHint")}>
               <option value="kick">{t("lookSourceKick")}</option>
               <option value="beats">{t("lookSourceBeats")}</option>
               <option value="downbeats">{t("lookSourceBars")}</option>
+              <option value="drums">{t("lookSourceDrums")}</option>
+              <option value="bass">{t("lookSourceBass")}</option>
+              <option value="vocals">{t("lookSourceVocals")}</option>
+              <option value="other">{t("lookSourceOther")}</option>
             </select></label>
           {slider(t("lookZoom"), fx.zoom, (n) => setFx({ zoom: n }))}
           {slider(t("lookFlash"), fx.flash, (n) => setFx({ flash: n }))}

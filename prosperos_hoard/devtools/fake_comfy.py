@@ -118,7 +118,10 @@ MOTION_FILES = {
                                   "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
                                   "wan_animate_2_distill_int8_convrot.safetensors",
                                   "wan2.2_s2v_14B_fp8_scaled.safetensors",
-                                  "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors"],
+                                  "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+                                  "wan2.1_vace_1.3B_fp16.safetensors",
+                                  "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+                                  "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors"],
     ("AudioEncoderLoader", "audio_encoder_name"): ["wav2vec2_large_english_fp16.safetensors",
                                                    "wav2vec2-chinese-base_fp16.safetensors"],
     ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
@@ -129,6 +132,7 @@ MOTION_FILES = {
     ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
                                            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
                                            "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+                                           "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
                                            "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"],
 }
 
@@ -607,6 +611,9 @@ class FakeComfyServer:
         seed = int(k_inputs.get("seed", 0))
         prompt_text = self._positive_prompt_text(workflow, k_inputs)
         reference = self._find_reference(workflow)
+        vace = _first(workflow, "WanVaceToVideo")
+        if vace is not None:
+            return self._render_vace(prompt_id, workflow, vace, save_node, outputs)
         latent = _first(workflow, "Wan22ImageToVideoLatent") or {}
         width = int(latent.get("inputs", {}).get("width", 1280)) // 4
         height = int(latent.get("inputs", {}).get("height", 704)) // 4
@@ -620,6 +627,25 @@ class FakeComfyServer:
         filename = f"{prompt_id}.webp"
         path = self.output_dir / filename
         frames[0].save(path, save_all=True, append_images=frames[1:], duration=max(1, 1000 // max(1, fps)), loop=0)
+        node_id = [k for k, v in workflow.items() if v is save_node][0]
+        outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}], "animated": [True]}
+        return node_id
+
+    def _render_vace(self, prompt_id: str, workflow: dict[str, Any], vace: dict, save_node: dict, outputs: dict) -> str:
+        """Wan VACE (a retake): a real mp4 of exactly `length` frames at the
+        requested size, so the splice back into the clip can be checked."""
+        import subprocess
+        from ..backend import ffmpeg_path
+        inp = vace.get("inputs", {})
+        w, h, n = int(inp.get("width", 832)) // 4 // 2 * 2, int(inp.get("height", 480)) // 4 // 2 * 2, int(inp.get("length", 81))
+        fps = int((_first(workflow, "CreateVideo") or {}).get("inputs", {}).get("fps", 16))
+        frames = bytearray()
+        for i in range(n):
+            frames += bytes([(40 + 7 * i) % 256, 200, 90]) * (w * h)
+        filename = f"{prompt_id}.mp4"
+        subprocess.run([ffmpeg_path() or "ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                        "-r", str(fps), "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(self.output_dir / filename)],
+                       input=bytes(frames), check=True)
         node_id = [k for k, v in workflow.items() if v is save_node][0]
         outputs[node_id] = {"images": [{"filename": filename, "subfolder": "", "type": "output"}], "animated": [True]}
         return node_id
