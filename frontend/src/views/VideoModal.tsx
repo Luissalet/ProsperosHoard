@@ -12,7 +12,7 @@ const blankShot = (): VideoShot => ({ prompt: "", lead: true, motion: "move", mo
 // New music video, in the app: concept + lead + song -> a shot list the local
 // model drafts (or you write) -> edit it -> the production runs (stills,
 // animatic for review, Wan clips, the cut on the beat).
-export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStarted: (slug: string) => void }) {
+export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose: () => void; onStarted: (slug: string) => void; projectId?: string }) {
   const { t } = useT();
   const app = useApp();
   const [chars, setChars] = useState<(Character & { projectName: string })[]>([]);
@@ -50,13 +50,15 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
         .then((c) => c.items.map((x) => ({ ...x, projectName: p.name }))).catch(() => [])));
       const all = lists.flat();
       setChars(all);
-      const here = all.find((c) => c.project_id === app.projectId && c.canonical_asset_id) || all.find((c) => c.project_id === app.projectId);
+      const home = forced || app.projectId;
+      const here = all.find((c) => c.project_id === home && c.canonical_asset_id) || all.find((c) => c.project_id === home);
       if (here) setCharId(here.id);
     }).catch((e) => app.toast((e as Error).message, "bad"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lead = chars.find((c) => c.id === charId);
-  const projectId = lead?.project_id || app.projectId || "";
+  // made from a project's page, the video lives in that project (its lead can come from any)
+  const projectId = forced || lead?.project_id || app.projectId || "";
   useEffect(() => {
     if (!projectId) return;
     api.assets(projectId, { kind: "audio", limit: 60 }).then((r) => setSongs(r.items)).catch(() => setSongs([]));
@@ -90,7 +92,7 @@ export function VideoModal({ onClose, onStarted }: { onClose: () => void; onStar
     setBusy("create");
     try {
       const r = await api.videoFromPlan({
-        name: name || draft.title || "Music video", draft, ...leadBody(), clips, aspects, song_takes: takes,
+        name: name.trim() || draft.title || [lead?.name || newName.trim(), concept.trim().split(/[,.;\n]/)[0].slice(0, 40)].filter(Boolean).join(" - ") || "Music video", draft, ...leadBody(), clips, aspects, song_takes: takes,
         song_asset_id: songMode === "asset" ? songId || null : null, project: projectId || null, brief: concept || null,
         lyrics: songMode === "asset" ? lyrics || null : null,
       });

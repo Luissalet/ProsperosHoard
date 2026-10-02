@@ -704,11 +704,34 @@ def summary_view(state: dict[str, Any]) -> dict[str, Any]:
         return {"slug": state["slug"], "name": state.get("name") or state["slug"], "legacy": True,
                 "status": "done" if "9" in done else "partial", "project_id": done.get("1", {}).get("project_id"),
                 "updated_at": state.get("updated_at"), "stages_done": sorted(done, key=lambda k: int(k) if k.isdigit() else 99)}
+    stages = stages_for(state)
     return {"slug": state["slug"], "name": state.get("name"), "status": state.get("status"), "stage": state.get("stage"),
             "project_id": state.get("project_id"), "updated_at": state.get("updated_at"),
             "recipe": (state.get("recipe") or {}).get("name"), "message": state.get("message"),
             "animatic": bool((state.get("done", {}).get("animatic") or {}).get("renders")),
-            "kind": state.get("kind") or "music_video"}
+            "kind": state.get("kind") or "music_video", "cover": _cover(state),
+            "progress": {"done": sum(1 for s in stages if stage_status(state, s) == "done"), "total": len(stages)},
+            "shot_count": len((state.get("spec") or {}).get("shots") or [])}
+
+
+def _cover(state: dict[str, Any]) -> Optional[dict[str, str]]:
+    """The picture a production shows in a list: its final cut, else its
+    animatic, else its first still."""
+    done = state.get("done") or {}
+    for info in ((done.get("timeline") or {}).get("timelines") or {}).values():
+        renders = info.get("renders") or {}
+        rid = renders.get("final") or renders.get("preview")
+        if rid:
+            return {"asset_id": rid, "kind": "video"}
+    for rid in ((done.get("animatic") or {}).get("renders") or {}).values():
+        if rid:
+            return {"asset_id": rid, "kind": "video"}
+    frames = (done.get("frames") or {}).get("items") or {}
+    for shot in (state.get("spec") or {}).get("shots") or []:
+        best = (frames.get(shot.get("key")) or {}).get("best")
+        if best:
+            return {"asset_id": best, "kind": "image"}
+    return None
 
 
 def compact_view(state: dict[str, Any]) -> dict[str, Any]:
