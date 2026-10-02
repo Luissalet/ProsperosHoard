@@ -1312,6 +1312,7 @@ export const api = {
     request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
   spaceNode: (id: string, nodeId: string, patch: { excluded?: string[]; outputs?: string[] }) =>
     request<Space>("PATCH", `/api/spaces/${id}/nodes/${nodeId}`, patch),
-  enhancePrompt: (text: string, kind: "image" | "video" | "music") => request<{ text: string }>("POST", "/api/prompt/enhance", { text, kind }),
+  enhancePrompt: (text: string, kind: "image" | "video" | "music", project?: string) =>
+    request<{ text: string }>("POST", "/api/prompt/enhance", { text, kind, project }),
   libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
 };

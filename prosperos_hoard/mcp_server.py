@@ -1178,14 +1178,15 @@ def studio_spaces(
 
 
 @tool(_ro(readOnlyHint=True))
-def studio_prompt_enhance(text: str, kind: str = "image") -> dict[str, Any]:
+def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str] = None) -> dict[str, Any]:
     """Improve a prompt with the local language model (keeps @Name and <imageN> tags) / mejorar prompt.
 
-    kind: "image" | "video" | "music". Returns {"text"}.
+    kind: "image" | "video" | "music". With `project`, the mentioned cast's look and negative are given to
+    the model so it does not invent traits they lack (a face on a faceless design). Returns {"text"}.
 
     Keywords: enhance prompt, improve prompt, rewrite prompt, mejorar prompt, reescribir prompt
     """
-    return _call("POST", "/api/agent/studio_prompt_enhance", json={"text": text, "kind": kind})
+    return _call("POST", "/api/agent/studio_prompt_enhance", json={"text": text, "kind": kind, "project": project})
 
 
 @tool(_ro(readOnlyHint=True))
