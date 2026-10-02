@@ -70,6 +70,14 @@ Qué hacer cuando el usuario pide, con sus palabras:
 - **«Hazme el Canvas de Spotify» / «un bucle para Spotify»**:
   `studio_canvas(production)` (estribillo, 8 s, sin letra) y dale el
   enlace de descarga.
+- **«Móntame un espacio / un lienzo» / «hazlo con nodos» / «conecta las
+  fichas al plano»**: `studio_spaces(action="create", template=...)`
+  (`reference_film` para personaje+criatura+lugar → fotograma → clip,
+  `singing_shot` para lip sync) o en blanco y `action="edit"` con `ops`
+  (`add_node`, `connect`...). Ejecuta con `action="run", mode="all"` y
+  sigue el job; lee `state` con `action="get"` y enséñale las salidas con
+  `studio_show`. Un `cast` da `image` (su referencia) y `text` (`@Nombre`).
+  Para mejorar un prompt: `studio_prompt_enhance`.
 - **«Pásalo a Premiere / DaVinci»**: `studio_export_timeline(production,
   aspect)` y dale el enlace de descarga.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:

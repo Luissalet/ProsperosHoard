@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
-  Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2,
+  Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/jetbrains-mono";
@@ -28,9 +28,13 @@ import { ProductionsView } from "./views/Productions";
 import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
 
+// the node canvas pulls in its graph library: loaded when first opened
+const SpacesView = lazy(() => import("./views/Spaces").then((m) => ({ default: m.SpacesView })));
+
 const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "overview", key: "navOverview", icon: LayoutDashboard },
   { id: "video", key: "navVideo", icon: Film },
+  { id: "spaces", key: "navSpaces", icon: Workflow },
   { id: "cast", key: "navCast", icon: Users },
   { id: "generate", key: "navGenerate", icon: Wand2 },
   { id: "library", key: "navLibrary", icon: Images },
@@ -164,6 +168,7 @@ export default function App() {
   if (needsProject && !projectId) view = <ProjectsView projects={projects} reload={loadProjects} />;
   else if (section === "overview") view = <OverviewView key={projectId} />;
   else if (section === "video") view = <ProductionsView key={`${projectId}/${route.arg || ""}`} projectId={projectId!} />;
+  else if (section === "spaces") view = <Suspense fallback={null}><SpacesView key={projectId} /></Suspense>;
   else if (section === "cast") view = <CastView key={projectId} />;
   else if (section === "generate") view = <GenerateView key={projectId} />;
   else if (section === "library") view = <LibraryView key={projectId} />;

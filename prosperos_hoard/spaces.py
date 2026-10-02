@@ -430,14 +430,14 @@ def template_graph(name: str) -> dict[str, Any]:
     "blank": nothing."""
     if name == "reference_film":
         nodes = [
-            {"id": "style", "type": "text", "x": 0, "y": 0, "data": {"text": "STYLE: realistic live-action feature film, "
+            {"id": "style", "type": "text", "x": 0, "y": -140, "data": {"text": "STYLE: realistic live-action feature film, "
                                                                             "natural light, 35mm lens, shallow depth of field"}},
-            {"id": "hero", "type": "image", "x": 0, "y": 200, "data": {"preset": "sheet", "prompt": "a young man in a teal t-shirt and jeans"}},
-            {"id": "buddy", "type": "image", "x": 0, "y": 520, "data": {"preset": "sheet", "prompt": "a scruffy white dog"}},
-            {"id": "place", "type": "image", "x": 0, "y": 840, "data": {"aspect": "16:9", "prompt": "a misty pine forest clearing at dawn, empty"}},
-            {"id": "frame", "type": "image", "x": 520, "y": 380, "data": {"aspect": "16:9", "prompt": "medium shot: the man kneels and offers the dog a piece of food, the dog sniffs it"}},
-            {"id": "clip", "type": "video", "x": 1040, "y": 380, "data": {"prompt": "slow push-in, the dog takes the food and wags its tail", "quality": "draft"}},
-            {"id": "tip", "type": "note", "x": 520, "y": 0, "data": {"text": "Make the three sheets, untick the takes you do not want, then run the frame and the clip. Draft clips are quick; switch to final for the keeper."}},
+            {"id": "hero", "type": "image", "x": 0, "y": 140, "data": {"preset": "sheet", "prompt": "a young man in a teal t-shirt and jeans"}},
+            {"id": "buddy", "type": "image", "x": 0, "y": 600, "data": {"preset": "sheet", "prompt": "a scruffy white dog"}},
+            {"id": "place", "type": "image", "x": 0, "y": 1060, "data": {"aspect": "16:9", "prompt": "a misty pine forest clearing at dawn, empty"}},
+            {"id": "frame", "type": "image", "x": 520, "y": 480, "data": {"aspect": "16:9", "prompt": "medium shot: the man kneels and offers the dog a piece of food, the dog sniffs it"}},
+            {"id": "clip", "type": "video", "x": 1040, "y": 480, "data": {"prompt": "slow push-in, the dog takes the food and wags its tail", "quality": "draft"}},
+            {"id": "tip", "type": "note", "x": 520, "y": -140, "data": {"text": "Make the three sheets, untick the takes you do not want, then run the frame and the clip. Draft clips are quick; switch to final for the keeper."}},
         ]
         edges = [
             {"source": "style", "target": "frame", "target_handle": "prompt"},
