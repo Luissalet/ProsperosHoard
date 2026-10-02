@@ -266,16 +266,19 @@ function NextStep({ state, active, onChanged, setTab }: {
   if (state.status === "awaiting_review") {
     const plan = (state.done?.animatic as { plan?: { clips_planned: number; gpu_minutes: number } } | undefined)?.plan;
     const animatic = state.stage === "animatic" && !isShort;
+    // a video without clips goes straight from the animatic to the cut
+    const noClips = animatic && !!plan && plan.clips_planned === 0;
     return (
       <div className="next-step gold">
         <PauseIcon size={18} />
         <div className="grow">
-          <strong>{animatic ? t("nsAnimatic") : t("nsReview", { stage: stageName })}</strong>
-          <div className="small muted">{animatic && plan ? t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes }) : state.message}</div>
+          <strong>{animatic ? (noClips ? t("nsAnimaticNoClips") : t("nsAnimatic")) : t("nsReview", { stage: stageName })}</strong>
+          <div className="small muted">{animatic && plan ? (noClips ? t("nsAnimaticNoClipsLead")
+            : t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes })) : state.message}</div>
           <Preflight slug={state.slug} />
         </div>
         {animatic && <button className="btn sm" onClick={() => setTab("preview")}><Film size={13} /> {t("nsWatch")}</button>}
-        <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {animatic ? t("nsAnimaticGo") : t("continueProduction")}</button>
+        <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {animatic ? (noClips ? t("nsAnimaticFinish") : t("nsAnimaticGo")) : t("continueProduction")}</button>
       </div>
     );
   }

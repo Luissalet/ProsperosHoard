@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Columns2, Dices, ImagePlus, Loader2, Lock, LockOpen, Upload, Wand2, X } from "lucide-react";
+import { Box, Columns2, Dices, ImagePlus, Loader2, Lock, LockOpen, MapPin, Upload, Wand2, X } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Asset, type Character, type Composed, type Job, type WorkflowSpec } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
@@ -89,10 +89,6 @@ export function GenerateView() {
   // live final-prompt preview
   const dPrompt = useDebounced(prompt, 300);
   const dNegative = useDebounced(negative, 300);
-  useEffect(() => {
-    if (!dPrompt.trim()) { setComposed(null); return; }
-    api.compose(pid, dPrompt, dNegative, style || null).then(setComposed).catch(() => setComposed(null));
-  }, [dPrompt, dNegative, style, pid]);
 
   useEffect(() => { setEngineSel(null); }, [pid]);
   useEffect(() => {
@@ -108,6 +104,12 @@ export function GenerateView() {
   const defaults = ENGINE_DEFAULTS[resolved] || ENGINE_DEFAULTS.sdxl;
   useEffect(() => { if (refs.length > maxRefs) setRefs(refs.slice(0, maxRefs)); }, [maxRefs]);
   const refSized = !sdLike && refs.length > 0;
+  useEffect(() => {
+    if (!dPrompt.trim()) { setComposed(null); return; }
+    api.compose(pid, dPrompt, dNegative, style || null, { engine: resolved, references: refs.length })
+      .then(setComposed).catch(() => setComposed(null));
+  }, [dPrompt, dNegative, style, pid, resolved, refs.length]);
+  const autoRefs = useCharRef ? [] : composed?.added_references || [];
   // a multi-reference edit only uses the references its instruction names
   const unnamedRefs = refs.map((_, i) => `<image${i + 1}>`).filter((tag) => !prompt.includes(tag));
   const hadRefs = useRef(false);
@@ -304,7 +306,7 @@ export function GenerateView() {
                     <button key={c.id} className={i === menu.index ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); insertMention(c); }}>
                       {c.canonical_asset_id ? <img src={thumbUrl({ id: c.canonical_asset_id, thumb_path: "x", kind: "image" })} alt="" />
                         : <span className="chip" style={{ background: c.palette[0], borderRadius: "50%" }} />}
-                      <span><strong>{c.name}</strong> <span className="muted small">{c.role}</span></span>
+                      <span><strong>{c.name}</strong> <span className="muted small">{c.element === "location" ? t("elementLocation") : c.element === "prop" ? t("elementProp") : c.role}</span></span>
                     </button>
                   ))}
                 </div>
@@ -313,7 +315,9 @@ export function GenerateView() {
             <div className="row wrap">
               <span className="muted small">{t("mention")}:</span>
               {characters.map((c) => (
-                <button key={c.id} className="btn sm ghost" onClick={() => setPrompt((p) => `${p}${p && !p.endsWith(" ") ? " " : ""}@${c.name} `)}>@{c.name}</button>
+                <button key={c.id} className="btn sm ghost" title={c.element === "location" ? t("elementLocation") : c.element === "prop" ? t("elementProp") : c.role || ""}
+                  onClick={() => setPrompt((p) => `${p}${p && !p.endsWith(" ") ? " " : ""}@${c.name} `)}>
+                  {c.element === "location" ? <MapPin size={12} /> : c.element === "prop" ? <Box size={12} /> : null}@{c.name}</button>
               ))}
             </div>
             <div className="grid-2">
@@ -332,6 +336,11 @@ export function GenerateView() {
                 <div className="row small">
                   <span className="muted">{t("finalPrompt")}</span>
                   {composed.matched_characters.length > 0 && <span className="pill accent">{t("matched", { names: composed.matched_characters.join(", ") })}</span>}
+                  {(composed.matched_elements || []).length > 0 && (
+                    <span className="pill accent" title={t("elementRefNote")}>
+                      {t("matchedElements", { names: composed.matched_elements!.map((n) => (composed.element_references || []).some((r) => r.name === n) ? `${n} ▣` : n).join(", ") })}
+                    </span>
+                  )}
                   {composed.unknown_mentions.length > 0 && <span className="pill bad">{t("unknownMentions", { names: composed.unknown_mentions.join(", ") })}</span>}
                 </div>
                 <div className="final-prompt">{highlight(composed.positive_prompt, [], fragments)}</div>
@@ -419,6 +428,17 @@ export function GenerateView() {
                 </span>
                 {refs.length < maxRefs && <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
               </div>
+              {autoRefs.length > 0 && (
+                <div className="row wrap small" style={{ gap: 6, marginTop: 6 }}>
+                  <span className="muted">{t("autoRefs")}</span>
+                  {autoRefs.map((r) => (
+                    <span key={r.asset_id} className="ref-chip" title={t("elementRefNote")}>
+                      <img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 6 }} />
+                      <span className="mono small">{`<image${r.index}>`}</span> {r.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {!sdLike && refs.length > 0 && <span className="hint">{maxRefs > 1 ? t("referenceEditHintMulti") : t("referenceEditHint")}</span>}
               {!sdLike && refs.length > 1 && unnamedRefs.length > 0 && (
                 <span className="hint warn-text">{t("referenceUnnamed", { tags: unnamedRefs.join(", ") })}</span>

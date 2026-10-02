@@ -167,24 +167,30 @@ def _mention_aliases(characters: list[dict[str, Any]]) -> list[tuple[str, dict[s
     return sorted(unique, key=lambda ac: -len(ac[0]))
 
 
-def expand_mentions(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
-    """Replace @Name with the character's prompt fragment. Returns
-    {"expanded_prompt", "negative_extra", "reference_asset_id",
-    "matched_characters", "unknown_mentions"}.
+ELEMENTS = ("character", "location", "prop")
+_ELEMENT_WORD = {"character": "character", "location": "place", "prop": "object"}
 
-    An `@` only starts a mention at the start of the text or after a
-    non-word character, so e-mail addresses are left alone; the longest
-    matching name wins ("@Iris Volt" over "@Iris"), and the match must end
-    at a word boundary ("@Irisa" is not "@Iris")."""
-    characters = store.list_characters(project_id)
-    aliases = _mention_aliases(characters)
-    negatives: list[str] = []
-    reference_asset_id: Optional[str] = None
-    matched: list[str] = []
+
+def element_of(char: dict[str, Any]) -> str:
+    """What a cast entry is: a character (default), a location or a prop.
+    All three are @mentionable and carry a look and a reference image."""
+    value = char.get("element") or "character"
+    return value if value in ELEMENTS else "character"
+
+
+def _scan_mentions(store: Store, project_id: str, prompt: str) -> tuple[list[Any], list[dict[str, Any]], list[str]]:
+    """Split a prompt into text pieces and mention hits. Returns (pieces,
+    matched entries in first-mention order, unknown names); a piece is a
+    str or a cast entry dict. An `@` only starts a mention at the start of
+    the text or after a non-word character, so e-mail addresses are left
+    alone; the longest matching name wins ("@Iris Volt" over "@Iris"), and
+    the match must end at a word boundary ("@Irisa" is not "@Iris")."""
+    aliases = _mention_aliases(store.list_characters(project_id))
+    pieces: list[Any] = []
+    matched: list[dict[str, Any]] = []
     unknown: list[str] = []
-    out: list[str] = []
-    i = 0
-    n = len(prompt)
+    buf: list[str] = []
+    i, n = 0, len(prompt)
     while i < n:
         ch = prompt[i]
         if ch == "@" and (i == 0 or not _WORD.match(prompt[i - 1])):
@@ -197,27 +203,77 @@ def expand_mentions(store: Store, project_id: str, prompt: str) -> dict[str, Any
                     break
             if hit:
                 alias, char = hit
-                if char["name"] not in matched:
-                    matched.append(char["name"])
-                    if char.get("negative"):
-                        negatives.append(char["negative"])
-                if reference_asset_id is None and char.get("canonical_asset_id"):
-                    reference_asset_id = char["canonical_asset_id"]
-                out.append((char.get("prompt") or char["name"]).strip())
+                if buf:
+                    pieces.append("".join(buf))
+                    buf = []
+                pieces.append(char)
+                if all(m["id"] != char["id"] for m in matched):
+                    matched.append(char)
                 i += 1 + len(alias)
                 continue
             m = re.match(r"[\w-]+", rest, re.UNICODE)
             if m:
                 unknown.append(m.group(0))
-        out.append(ch)
+        buf.append(ch)
         i += 1
+    if buf:
+        pieces.append("".join(buf))
+    return pieces, matched, sorted(set(unknown))
+
+
+def expand_mentions(store: Store, project_id: str, prompt: str) -> dict[str, Any]:
+    """Replace @Name with the cast entry's prompt fragment (its look).
+    Returns {"expanded_prompt", "negative_extra", "reference_asset_id",
+    "matched_characters", "matched_elements", "element_references",
+    "unknown_mentions"}: `matched_characters` are the characters,
+    `matched_elements` the locations and props, `element_references` the
+    reference images of the mentioned locations/props ({name, element,
+    asset_id}), and `reference_asset_id` the first mentioned character's
+    canonical image (else the first element's)."""
+    pieces, matched, unknown = _scan_mentions(store, project_id, prompt)
+    out = [p if isinstance(p, str) else (p.get("prompt") or p["name"]).strip() for p in pieces]
+    chars = [m for m in matched if element_of(m) == "character"]
+    others = [m for m in matched if element_of(m) != "character"]
+    reference = next((m["canonical_asset_id"] for m in chars if m.get("canonical_asset_id")), None) \
+        or next((m["canonical_asset_id"] for m in others if m.get("canonical_asset_id")), None)
     return {
         "expanded_prompt": "".join(out),
-        "negative_extra": ", ".join(negatives),
-        "reference_asset_id": reference_asset_id,
-        "matched_characters": matched,
-        "unknown_mentions": sorted(set(unknown)),
+        "negative_extra": ", ".join(m["negative"] for m in matched if m.get("negative")),
+        "reference_asset_id": reference,
+        "matched_characters": [m["name"] for m in chars],
+        "matched_elements": [m["name"] for m in others],
+        "element_references": [{"name": m["name"], "element": element_of(m), "asset_id": m["canonical_asset_id"]}
+                               for m in others if m.get("canonical_asset_id")],
+        "unknown_mentions": unknown,
     }
+
+
+def element_reference_notes(refs: list[dict[str, Any]], first_index: int) -> str:
+    """'<image3>: the place Stage - keep its layout...; ...' for the
+    location/prop references added after a prompt's own images."""
+    notes = []
+    for i, ref in enumerate(refs):
+        what = ("the place {n}: keep its layout, architecture, lighting and colours" if ref["element"] == "location"
+                else "the object {n}: keep its exact design, shape and colours")
+        notes.append(f"<image{first_index + i}>: " + what.format(n=ref["name"]))
+    return "; ".join(notes)
+
+
+def add_element_references(composed: dict[str, Any], refs: list[str], engine_name: str,
+                           template: Optional[str] = None, use: bool = True) -> list[dict[str, Any]]:
+    """Put the mentioned places/props with an image after the call's own
+    references (`refs`, image_1 first) and number them in the positive
+    prompt - on Qwen-Image 2.1 only, which reads several references; the
+    same rule for a real render and for the Generate screen's preview.
+    Mutates `composed["positive_prompt"]`; returns the references added."""
+    if not use or engine_name != "qwen21" or (template and template != "qwen21_edit"):
+        return []
+    added = [r for r in composed.get("element_references") or [] if r["asset_id"] not in refs]
+    added = added[:max(0, 10 - len(refs))]
+    if added:
+        notes = element_reference_notes(added, len(refs) + 1)
+        composed["positive_prompt"] = composed["positive_prompt"].rstrip(" .,") + ". " + notes
+    return added
 
 
 def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optional[str], style_id: Optional[str]) -> dict[str, Any]:
@@ -253,6 +309,8 @@ def compose_prompt(store: Store, project_id: str, prompt: str, negative: Optiona
         "negative_prompt": ", ".join(negative_parts),
         "reference_asset_id": expansion["reference_asset_id"],
         "matched_characters": expansion["matched_characters"],
+        "matched_elements": expansion["matched_elements"],
+        "element_references": expansion["element_references"],
         "unknown_mentions": expansion["unknown_mentions"],
         "style": style_name,
         "style_defaults": defaults,
@@ -322,67 +380,79 @@ def apply_canonical_crop(store: Store, project_id: str, fields: dict[str, Any],
     return fields
 
 
-def build_kontext_instruction(store: Store, project_id: str, prompt: str, engine: str = "flux") -> dict[str, Any]:
+def build_kontext_instruction(store: Store, project_id: str, prompt: str, engine: str = "flux",
+                              extra_count: int = 0) -> dict[str, Any]:
     """For `consistent=true` generation ("Cast -> Reference sheet"): turn
     "@Name doing X" into an edit instruction ("the same character from the
     reference, now doing X") instead of inlining the character's full look
     description the way `compose_prompt` does for a fresh txt2img - the
     reference image already carries the look, so the instruction should
-    describe only the change. Mentions are still resolved the same way
-    (longest name, word boundaries, unknowns kept) so the caller gets the
-    same `matched_characters`/`unknown_mentions` bookkeeping and the first
-    mentioned character's canonical image.
+    describe only the change. Mentions are resolved the same way (longest
+    name, word boundaries, unknowns kept).
 
-    `engine="qwen21"` phrases it Qwen-Image 2.1's way (references addressed
-    as `<image1>`, `<image2>`...) instead of Flux Kontext's ("the reference
-    image"); the caller still only gets one `reference_asset_id` back here
-    (the canonical crop, always image_1) - extra references (a location
-    plate, a prop) are the caller's own `reference_asset_ids` to add after
-    it, in the order they should be numbered."""
-    characters = store.list_characters(project_id)
-    aliases = _mention_aliases(characters)
-    reference_asset_id: Optional[str] = None
-    matched: list[str] = []
-    unknown: list[str] = []
-    out: list[str] = []
-    i, n = 0, len(prompt)
-    while i < n:
-        ch = prompt[i]
-        if ch == "@" and (i == 0 or not _WORD.match(prompt[i - 1])):
-            rest = prompt[i + 1:]
-            low = rest.lower()
-            hit = None
-            for alias, char in aliases:
-                if low.startswith(alias) and (len(rest) == len(alias) or not _WORD.match(rest[len(alias)])):
-                    hit = (alias, char)
-                    break
-            if hit:
-                alias, char = hit
-                if char["name"] not in matched:
-                    matched.append(char["name"])
-                if reference_asset_id is None and char.get("canonical_asset_id"):
-                    reference_asset_id = char["canonical_asset_id"]
-                i += 1 + len(alias)
+    The first mentioned character with a canonical image is the reference
+    (`reference_asset_id`, image_1). `engine="qwen21"` phrases it
+    Qwen-Image 2.1's way (`<image1>`, `<image2>`...) and gives every other
+    mentioned entry with an image - a second character, a location, a prop
+    - its own numbered reference: they come back in `reference_asset_ids`
+    and number after image_1 and the caller's own `extra_count` references
+    (which sit right after image_1). Entries without an image, and every
+    extra entry on a single-reference engine, are inlined by their look."""
+    pieces, matched, unknown = _scan_mentions(store, project_id, prompt)
+    chars = [m for m in matched if element_of(m) == "character"]
+    primary = next((m for m in chars if m.get("canonical_asset_id")), None)
+    multi = engine == "qwen21"
+    numbered: dict[str, int] = {}
+    refs: list[str] = []
+    if multi:
+        nxt = 2 + max(0, extra_count)
+        for m in matched:
+            if m is primary or not m.get("canonical_asset_id") or nxt > 10:
                 continue
-            m = re.match(r"[\w-]+", rest, re.UNICODE)
-            if m:
-                unknown.append(m.group(0))
-        out.append(ch)
-        i += 1
+            numbered[m["id"]] = nxt
+            refs.append(m["canonical_asset_id"])
+            nxt += 1
+    several = bool(numbered)
+    out: list[str] = []
+    for piece in pieces:
+        if isinstance(piece, str):
+            out.append(piece)
+        elif primary is not None and piece["id"] == primary["id"]:
+            # alone, the reference is implied ("now dancing"); with others
+            # in the scene it has to be named so each one keeps its action
+            out.append("the character from <image1>" if several else "")
+        elif piece["id"] in numbered:
+            out.append(f"the {_ELEMENT_WORD[element_of(piece)]} from <image{numbered[piece['id']]}>")
+        else:
+            out.append((piece.get("prompt") or piece["name"]).strip())
     scene = re.sub(r"\s+", " ", "".join(out)).strip(" ,")
     # both engines follow explicit preservation best ("keep X, change Y"):
     # name what must not drift, then the new scene
-    if engine == "qwen21":
+    if multi:
         # the design must not drift, the pose must: "silhouette" here used
         # to freeze every shot in the reference image's stance
         keep = ("Keep the character from <image1> exactly the same design (face, body shape, colours, props), "
                 "in a new pose and action as described")
+        keeps = [keep] if primary is not None else []
+        for m in matched:
+            if m["id"] not in numbered:
+                continue
+            k, word = numbered[m["id"]], _ELEMENT_WORD[element_of(m)]
+            if word == "character":
+                keeps.append(f"keep the character from <image{k}> exactly the same design too")
+            elif word == "place":
+                keeps.append(f"set it in the place from <image{k}> (same layout, architecture, lighting and colours)")
+            else:
+                keeps.append(f"the object from <image{k}> keeps its exact design, shape and colours")
+        keep = "; ".join(keeps)
     else:
         keep = "the same character from the reference image, with exactly the same design, proportions and colours"
-    instruction = f"{keep}, now {scene}" if scene else keep
+    instruction = (f"{keep}, now {scene}" if keep else scene) if scene else keep
     return {
-        "instruction": instruction, "reference_asset_id": reference_asset_id,
-        "matched_characters": matched, "unknown_mentions": sorted(set(unknown)),
+        "instruction": instruction, "reference_asset_id": primary["canonical_asset_id"] if primary else None,
+        "reference_asset_ids": refs, "matched_characters": [m["name"] for m in chars],
+        "matched_elements": [m["name"] for m in matched if element_of(m) != "character"],
+        "unknown_mentions": unknown,
     }
 
 

@@ -214,7 +214,7 @@ label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; col
   padding: 42px 24px; text-align: center; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; gap: 12px;
 }
-.empty svg { color: var(--accent); opacity: 0.8; }
+.empty > svg { color: var(--accent); opacity: 0.8; }
 .empty p { margin: 0; max-width: 460px; }
 
 .toast-host { position: fixed; right: 22px; bottom: 22px; display: flex; flex-direction: column; gap: 8px; z-index: 90; }

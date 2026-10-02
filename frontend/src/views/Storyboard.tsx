@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Clapperboard, Film, Images, Link2, Loader2, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import { Box, Clapperboard, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
-import { AssetPicker, Modal, useApp } from "../components/ui";
+import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
 
 // the song sections a shot can illustrate (what the planner writes)
@@ -186,6 +186,17 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
   const [framesOf, setFramesOf] = useState<Asset[] | null>(null);
   const [busy, setBusy] = useState(false);
   const projectId = state.project_id || app.projectId || "";
+  const castOfProject = useAsync(() => (projectId ? api.characters(projectId) : Promise.resolve({ items: [] })), [projectId]);
+  const elements = (castOfProject.data?.items || []).filter((c) => c.element === "location" || c.element === "prop");
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const mentioned = (name: string) => new RegExp(`(^|[^\\w])@${esc(name)}(?![\\w])`, "iu").test(prompt);
+  // one click puts ", @Stage" at the end of the prompt and a second click
+  // takes that back; a mention written inside a sentence is left alone
+  const toggleElement = (name: string) => setPrompt((p) => {
+    if (!mentioned(name)) return `${p.trim()}${p.trim() ? ", " : ""}@${name}`;
+    const tail = new RegExp(`(^|,\\s*)@${esc(name)}\\s*$`, "iu");
+    return tail.test(p.trim()) ? p.trim().replace(tail, "").trim() : p;
+  });
   const lines = (state.timing?.sections || []).filter((s) => sectionMatches(s.label, s.kind, section));
   const spanLines = span ? (state.timing?.lines || []).filter((l) => l.time_s < span.end - 0.05 && (l.end_s ?? l.time_s + 1) > span.start + 0.05) : [];
   const applySpanText = (a: string, b: string) => {
@@ -296,6 +307,17 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
           <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t("sbPromptPh")} />
           <span className="hint">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
         </label>
+        {elements.length > 0 && (
+          <div className="row wrap" style={{ gap: 6, marginTop: -4 }}>
+            <span className="muted small">{t("sbElements")}</span>
+            {elements.map((c) => (
+              <button key={c.id} type="button" className={`btn sm ${mentioned(c.name) ? "primary" : "ghost"}`}
+                title={c.canonical_asset_id ? t("elementRefNote") : c.prompt || ""} onClick={() => toggleElement(c.name)}>
+                {c.element === "location" ? <MapPin size={12} /> : <Box size={12} />} @{c.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="row wrap" style={{ gap: 16 }}>
           <label className="check"><input type="checkbox" checked={lead} onChange={(e) => setLead(e.target.checked)} /> {t("sbLead")}</label>
           <label className="field" style={{ minWidth: 170 }}>{t("sbSection")}

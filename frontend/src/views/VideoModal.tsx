@@ -74,6 +74,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
       const r = await api.planVideo({
         concept, ...leadBody(), shots, language, genre: genre || null, duration_s: duration,
         song_asset_id: songMode === "asset" ? songId || null : null, lyrics: songMode === "asset" ? lyrics || null : null,
+        project: projectId || null,
       }, ctl.signal);
       setDraft(r.draft);
       if (!name && r.draft.title) setName(r.draft.title);

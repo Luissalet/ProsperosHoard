@@ -197,11 +197,12 @@ class UpdateProjectBody(BaseModel):
 
 
 class CastBody(BaseModel):
-    action: str = "list"
-    kind: str = "character"  # "character" | "group"
+    action: str = "list"     # list | create | update | delete | restore | deleted
+    kind: str = "character"  # "character" | "location" | "prop" | "group"
     id: Optional[str] = None
     name: Optional[str] = None
     fields: dict[str, Any] = Field(default_factory=dict)
+    force: bool = False      # delete: even when a production still to run uses it as its lead
 
 
 class CharacterBody(BaseModel):
@@ -213,6 +214,8 @@ class ComposePromptBody(BaseModel):
     prompt: str
     negative: Optional[str] = None
     style: Optional[str] = None
+    engine: Optional[str] = None   # the engine the render will use: on "qwen21" places/props add their images
+    references: int = 0            # how many reference images the call brings (they number first)
 
 
 class GenerateImageBody(BaseModel):
@@ -243,6 +246,9 @@ class GenerateImageBody(BaseModel):
     template_params: Optional[dict[str, Any]] = None  # the template's own knobs (see its params.json map)
     engine: Optional[str] = None  # "auto" | "qwen21" | "flux" | "sdxl" - defaults to the project's
     use_character_reference: bool = False
+    # mentioned locations/props with a reference image go in as numbered
+    # references (an edit) on engines that read several (Qwen-Image 2.1)
+    use_element_references: bool = True
     consistent: bool = False
     # character adapters (LoRAs): injected for every @mentioned character
     # (and every id in `characters`) that has one for the render's
@@ -454,6 +460,7 @@ class VideoPlanBody(BaseModel):
     lyrics: Optional[str] = None       # the existing song's lyrics, for the shot plan
     genre: Optional[str] = None
     duration_s: float = 120
+    project: Optional[str] = None  # its places and objects are offered to the planner as @Name
 
 
 class VideoFromPlanBody(BaseModel):
@@ -792,18 +799,28 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         available_loras = comfy_driver.lora_choices(object_info) if object_info else None
         adapter_route = False
-        if body.consistent and body.prefer_adapter and body.use_adapters and not body.template:
+        kontext: Optional[dict[str, Any]] = None
+        if body.consistent:
+            kontext = engine.build_kontext_instruction(store, project, body.prompt, engine=engine_name,
+                                                       extra_count=len(extra_refs))
+            if not (body.reference_asset_id or kontext["reference_asset_id"]) and kontext["reference_asset_ids"]:
+                # only places/objects have images: no character to keep,
+                # so it is an ordinary render that reads their references
+                kontext = None
+        if kontext is not None and body.prefer_adapter and body.use_adapters and not body.template \
+                and not kontext["reference_asset_ids"]:
             txt_template = engine.ENGINE_TEMPLATES[engine_name]["txt2img"]
-            names = engine.build_kontext_instruction(store, project, body.prompt, engine=engine_name)["matched_characters"]
+            names = kontext["matched_characters"]
             if names:
                 probe = charkit.resolve_adapters(store, project, names, [], comfy_driver.template_arch(txt_template),
                                                  available_loras)
                 adapter_route = len(probe["used"]) == len(names)
-        if body.consistent and not adapter_route:
+        if kontext is not None and not adapter_route:
             # "Cast -> Reference sheet": route through an edit template with
             # the canonical reference as input (image_1, for Qwen) and the
-            # scene as the instruction, instead of a fresh txt2img.
-            kontext = engine.build_kontext_instruction(store, project, body.prompt, engine=engine_name)
+            # scene as the instruction, instead of a fresh txt2img; other
+            # mentioned characters, places and props with an image follow
+            # the caller's own references, numbered in the instruction.
             primary = body.reference_asset_id or kontext["reference_asset_id"]
             if not primary:
                 raise engine.EngineError(
@@ -812,8 +829,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     "reference image (studio_cast update canonical_asset_id), or pass reference_asset_id",
                 )
             all_refs = [primary] + [r for r in extra_refs if r != primary]
+            all_refs += [r for r in kontext["reference_asset_ids"] if r not in all_refs][:max(0, 10 - len(all_refs))]
             composed = {"positive_prompt": kontext["instruction"], "negative_prompt": "", "style": None,
                        "style_defaults": {}, "matched_characters": kontext["matched_characters"],
+                       "matched_elements": kontext["matched_elements"],
                        "unknown_mentions": kontext["unknown_mentions"], "reference_asset_id": primary}
             template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit"]
         else:
@@ -822,6 +841,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if not reference and body.use_character_reference:
                 reference = composed["reference_asset_id"]
             all_refs = extra_refs or ([reference] if reference else [])
+            added = engine.add_element_references(composed, all_refs, engine_name, body.template,
+                                                  body.use_element_references)
+            all_refs = all_refs + [r["asset_id"] for r in added]
             template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit" if all_refs else "txt2img"]
         reference = all_refs[0] if all_refs else None
         strength = body.strength
@@ -872,6 +894,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             **({"unet_name": body.model} if body.model and engine.TEMPLATE_TO_ENGINE.get(template) == "qwen21" else {}),
             "style": composed["style"], "style_defaults": composed["style_defaults"],
             "matched_characters": composed["matched_characters"],
+            **({"matched_elements": composed["matched_elements"]} if composed.get("matched_elements") else {}),
             **({"loras": adapters["loras"]} if adapters["loras"] else {}),
         }
         if body.driving_asset_id:
@@ -893,6 +916,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         job = wait(job, body.wait_s)
         return {"job": job, "final_prompt": composed["positive_prompt"], "negative_prompt": composed["negative_prompt"],
                 "matched_characters": composed["matched_characters"], "unknown_mentions": composed["unknown_mentions"],
+                **({"matched_elements": composed["matched_elements"]} if composed.get("matched_elements") else {}),
                 "template": template, "engine": engine_name, "seed": seed,
                 **({"adapters": adapters["used"]} if adapters["used"] else {}),
                 **({"adapter_notes": adapters["notes"]} if adapters["notes"] else {}),
@@ -1016,10 +1040,36 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_cast(project: str, body: CastBody) -> Any:
         store.get_project(project)
-        if body.kind not in ("character", "group"):
-            raise engine.EngineError("bad_kind", "kind must be 'character' or 'group'")
+        if body.kind not in ("character", "location", "prop", "group"):
+            raise engine.EngineError("bad_kind", "kind must be 'character', 'location', 'prop' or 'group'")
+        if body.kind in ("location", "prop"):
+            # places and objects are cast entries too (@mention, look,
+            # reference image): a character row with its element set
+            body = body.model_copy(update={"kind": "character",
+                                           "fields": {**body.fields, **({"element": body.kind} if body.action == "create" else {})}})
         if body.action == "list":
             return {"characters": store.list_characters(project), "groups": store.list_groups(project)}
+        if body.action == "deleted":
+            return {"characters": store.list_characters(project, deleted=True), "groups": []}
+        if body.action in ("delete", "restore"):
+            if not body.id:
+                raise engine.EngineError("id_required", f"{body.action} needs the {body.kind}'s id")
+            target = store.get_group(body.id) if body.kind == "group" else store.get_character(body.id)
+            if target["project_id"] != project:
+                raise engine.EngineError("wrong_project", f"{body.kind} {body.id} belongs to another project")
+            if body.kind == "group":
+                if body.action == "restore":
+                    raise engine.EngineError("bad_action", "a deleted group cannot be restored; make it again")
+                store.delete_group(body.id)
+                return {"deleted": body.id, "name": target["name"]}
+            if body.action == "restore":
+                return store.restore_character(body.id)
+            users = productions_mod.productions_led_by(store.data_dir, body.id)
+            if users and not body.force:
+                raise engine.EngineError("in_use", f"{target['name']} is the lead of {', '.join(users)}, which has not "
+                                                   "finished. Deleting it anyway is safe: the production keeps its look.")
+            store.delete_character(body.id)
+            return {"deleted": body.id, "name": target["name"], "restore": "studio_cast action=restore"}
         if body.action == "create":
             if not body.name:
                 raise engine.EngineError("name_required", f"creating a {body.kind} needs a name")
@@ -1042,7 +1092,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 fields.setdefault("reference_asset_ids", existing_refs)
                 fields = engine.apply_canonical_crop(store, project, fields, target.get("canonical_asset_id"))
             return store.update_character(body.id, **fields)
-        raise engine.EngineError("bad_action", f"unknown cast action '{body.action}'; use list, create or update")
+        raise engine.EngineError("bad_action", f"unknown cast action '{body.action}'; use list, create, update, delete, "
+                                               "restore or deleted")
 
     # ---------------------------------------------------------------- health
     @app.get("/api/health")
@@ -1244,9 +1295,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 return {
                     "characters": [_character_view(c) for c in result["characters"]],
                     "groups": result["groups"],
-                    "hint": "mention characters in prompts as @Name",
+                    "hint": "mention characters, places (element=location) and objects (element=prop) in prompts as @Name; "
+                            "their reference images go in as numbered references on Qwen-Image 2.1",
                 }
-            return _character_view(result) if body.kind == "character" else result
+            if body.action == "deleted":
+                return {"characters": [_character_view(c) for c in result["characters"]]}
+            if body.action == "delete" or body.kind == "group":
+                return result
+            return _character_view(result)
         return agent("studio_cast", f"{body.action}:{body.kind}:{body.name or body.id or ''}", run)
 
     @app.get("/api/projects/{project_id}/characters")
@@ -1261,6 +1317,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/projects/{project_id}/characters")
     def create_character(project_id: str, body: CharacterBody):
         return op_cast(project_id, CastBody(action="create", kind="character", name=body.name, fields=body.fields))
+
+    @app.delete("/api/characters/{character_id}")
+    def delete_character(character_id: str, force: bool = False):
+        character = store.get_character(character_id)
+        return op_cast(character["project_id"], CastBody(action="delete", id=character_id, force=force))
+
+    @app.post("/api/characters/{character_id}/restore")
+    def restore_character(character_id: str):
+        character = store.get_character(character_id)
+        return op_cast(character["project_id"], CastBody(action="restore", id=character_id))
+
+    @app.get("/api/projects/{project_id}/characters/deleted")
+    def deleted_characters(project_id: str):
+        return {"items": store.list_characters(project_id, deleted=True)}
+
+    @app.delete("/api/groups/{group_id}")
+    def delete_group(group_id: str):
+        group = store.get_group(group_id)
+        return op_cast(group["project_id"], CastBody(action="delete", kind="group", id=group_id))
 
     @app.patch("/api/characters/{character_id}")
     def update_character(character_id: str, body: CharacterBody):
@@ -1645,7 +1720,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/projects/{project_id}/compose-prompt")
     def compose(project_id: str, body: ComposePromptBody):
-        return engine.compose_prompt(store, project_id, body.prompt, body.negative, body.style)
+        composed = engine.compose_prompt(store, project_id, body.prompt, body.negative, body.style)
+        added = engine.add_element_references(composed, ["_"] * max(0, min(body.references, 10)), body.engine or "")
+        return {**composed, "added_references": [{**r, "index": max(0, min(body.references, 10)) + 1 + i}
+                                                 for i, r in enumerate(added)]}
 
     # -------------------------------------------------------------- generate
     @app.post("/api/agent/studio_generate_image")
@@ -2649,11 +2727,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
         chat = ((getattr(app.state, "short_hooks", None) or {}).get("chat")
                 or mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus))
+        project = body.project or (store.get_character(body.character_id)["project_id"] if body.character_id else None)
+        elements = [{"name": c["name"], "element": c["element"], "look": c.get("prompt") or ""}
+                    for c in (store.list_characters(project) if project else []) if c["element"] != "character"]
         draft = mv_planner.plan(chat, concept=body.concept, lead_name=lead["name"], lead_look=lead.get("look") or "",
                                 n_shots=body.shots, language=body.language, compose_song=not body.song_asset_id,
                                 duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre,
-                                on_bad_reply=_keep_bad_plan_reply)
-        return {"draft": draft, "lead": lead}
+                                on_bad_reply=_keep_bad_plan_reply, elements=elements)
+        return {"draft": draft, "lead": lead, **({"elements": [e["name"] for e in elements]} if elements else {})}
 
     def op_video_from_plan(body: VideoFromPlanBody) -> dict[str, Any]:
         lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
@@ -3332,7 +3413,8 @@ def _lyrics_text(body: LyricsBody) -> str:
 
 def _character_view(c: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in {
-        "id": c["id"], "name": c["name"], "role": c.get("role"), "prompt": engine._clip(c.get("prompt"), 240),
+        "id": c["id"], "name": c["name"], "element": None if c.get("element") in (None, "character") else c["element"],
+        "role": c.get("role"), "prompt": engine._clip(c.get("prompt"), 240),
         "negative": engine._clip(c.get("negative"), 160), "palette": c.get("palette") or None,
         "canonical_asset_id": c.get("canonical_asset_id"), "voice": c.get("voice"), "bio": engine._clip(c.get("bio"), 200),
         "adapters": [f"{a['arch']}{'' if a.get('enabled') else ' (off)'}" for a in (c.get("kit") or {}).get("adapters") or []]
