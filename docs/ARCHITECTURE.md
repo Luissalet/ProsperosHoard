@@ -5,7 +5,7 @@
 ```
 prosperos_hoard/
   __main__.py      CLI: --port, --data-dir, --demo, --no-browser; uvicorn on 127.0.0.1
-  api.py           FastAPI app: guard middleware, JSON errors, /api/agent/* (compact,
+  api.py           FastAPI app: shared guard (hoard_link.guard), JSON errors, /api/agent/* (compact,
                    logged) and the richer UI routes, SPA serving
   engine.py        the business logic behind every route (no FastAPI imports)
   store.py, db.py  SQLite (WAL, per-thread connections, schema v2 with in-place upgrade)
@@ -61,7 +61,7 @@ prosperos_hoard/
   timeline.py      auto-cut, edit validation, clip updates, compact view (pure Python)
   video.py         ffmpeg command builders, ASS subtitles and escaping, renderer,
                    animated WebP -> mp4
-  procutil.py      subprocess helpers: CREATE_NO_WINDOW on Windows, UTF-8 decoding
+  procutil.py      subprocess helpers (over hoard_link.proc): CREATE_NO_WINDOW on Windows, UTF-8, tree kill
   mcp_server.py    standalone stdio MCP adapter (stdlib + httpx + mcp only)
   devtools/        fake_comfy.py (procedural ComfyUI stand-in), demo_seed.py (--demo data)
 frontend/          React 19 + Vite + TypeScript UI, built to frontend/dist

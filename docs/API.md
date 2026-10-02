@@ -9,10 +9,10 @@ raise `charkit.KitError`, `charpack.PackError` or `trainers.TrainingError`,
 which all answer 400 with their own `code` the same way (e.g. `no_canonical`,
 `bad_pack`, `trainer_unavailable`).
 
-**Guard (every route):** the `Host` header must be `127.0.0.1:<port>`,
-`localhost:<port>` or `[::1]:<port>` (DNS rebinding); writes (not
-GET/HEAD/OPTIONS) with a foreign `Origin` or `Sec-Fetch-Site: cross-site` are
-refused. No CORS headers are sent. Unknown `/api/...` paths answer JSON 404;
+**Guard (every route, websockets too; `hoard_link.guard`):** the `Host` header must be `127.0.0.1`,
+`localhost` or `[::1]` on this app's port (DNS rebinding), or a name in `PROSPERO_ALLOWED_HOSTS`; an `Origin` must pass the same rule (or be a Vite
+dev origin); a cross-site request is refused unless it is a top-level navigation, and a form post is never accepted. A refused request
+answers `403 {"error": "<message>"}`. No CORS headers are sent. Unknown `/api/...` paths answer JSON 404;
 everything else serves `frontend/dist` with an SPA fallback that never leaves
 that folder.
 
@@ -102,7 +102,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/agent/production_export_lumiere` | `{production, aspect?, timeline_id?}` |
 | POST | `/api/agent/cast_import_character` | `{name, description?, look?, images?, source_ref?, project?}` |
 | POST | `/api/agent/production_from_storyboard` | `{title, shots[{text, duration_s?, image?}], source_ref?, project?, character_id?, lead_name?, lead_look?, song_asset_id?}` |
-| POST | `/api/agent/voice_tts` | `{text, voice?, lang?}` |
+| POST | `/api/agent/voice_tts` | `{text, voice?, lang?, engine?, speed?}` (`engine`: an installed engine id, else 400 `unknown_engine`; a saved voice's own engine wins; `speed` 0.5-2.0, else 400 `bad_speed`) |
 | GET / PUT | `/api/family/settings` | `{"notify.via": auto\|hub\|off, "notify.language": es\|en}` |
 
 `/api/health` also carries a `hoard_link` block (the app's family id and whether it found the hub).
@@ -231,7 +231,7 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | GET | `/api/assets` | `kind?, query?, limit, offset, project?`: assets across every project, each with `project_name` (the pickers' "all projects") |
 | PUT | `/api/productions/{slug}/lyrics` | `{lyrics, run}`: the song's lyrics with section tags |
 | PUT | `/api/productions/{slug}/cast` | `{cast [{asset_id, name, note}], per_shot?, run}` -> `{cast, cast_per_shot, redraw, status}`: the background cast; crowd shots take only these |
-| POST | `/api/projects/{id}/download` | `{url, audio_only?, start_s?, end_s?}` -> `{job}` (`download_media`, yt-dlp) |
+| POST | `/api/projects/{id}/download` | `{url, audio_only?, start_s?, end_s?}` -> `{job}` (`download_media`: Links Hoard first, yt-dlp here without it; 400 `bad_url` for a non-public address) |
 | POST | `/api/assets/{id}/frames?count=` | stills taken out of a video or GIF |
 | GET | `/api/productions/{slug}/report` | `REPORT.md` (written on demand when missing) |
 | POST | `/api/productions/{slug}/recipe` | `{name?}` -> recipe summary |
