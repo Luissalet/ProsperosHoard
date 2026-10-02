@@ -30,7 +30,20 @@ import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
 
 // the node canvas pulls in its graph library: loaded when first opened
-const SpacesView = lazy(() => import("./views/Spaces").then((m) => ({ default: m.SpacesView })));
+// After an update the old page asks for chunks that no longer exist: load
+// the new version once instead of showing a blank screen.
+function reloadOnStale<T>(load: () => Promise<T>): () => Promise<T> {
+  return () => load().catch((err) => {
+    let reloaded = false;
+    try { reloaded = sessionStorage.getItem("prospero.chunk-reload") === "1"; sessionStorage.setItem("prospero.chunk-reload", "1"); }
+    catch { /* no storage: try once anyway */ }
+    if (!reloaded) { window.location.reload(); return new Promise<T>(() => undefined); }
+    throw err;
+  });
+}
+try { window.addEventListener("load", () => setTimeout(() => sessionStorage.removeItem("prospero.chunk-reload"), 5000)); }
+catch { /* ignore */ }
+const SpacesView = lazy(reloadOnStale(() => import("./views/Spaces").then((m) => ({ default: m.SpacesView }))));
 
 const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "overview", key: "navOverview", icon: LayoutDashboard },
