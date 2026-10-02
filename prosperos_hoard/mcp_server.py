@@ -173,7 +173,7 @@ def studio_services() -> dict[str, Any]:
 def studio_video_plan(
     concept: str, character_id: Optional[str] = None, lead_name: Optional[str] = None, lead_look: Optional[str] = None,
     shots: int = 10, language: str = "en", song_asset_id: Optional[str] = None, lyrics: Optional[str] = None,
-    genre: Optional[str] = None, duration_s: float = 120, project: Optional[str] = None,
+    genre: Optional[str] = None, duration_s: float = 120, project: Optional[str] = None, critic: bool = True,
 ) -> dict[str, Any]:
     """Draft a music video: the local model plans the shot list (and song tags + lyrics) from a concept.
 
@@ -183,13 +183,17 @@ def studio_video_plan(
     (pass its lyrics to follow them) instead of composing one. genre: the sound (e.g. "80s disco-funk").
     project: the video's project (default: the lead's); its places and objects (studio_cast kind
     location/prop) are offered to the planner, which writes them in the shots as @Name.
+    critic=true (default) reviews the shot list in a second pass (variety of shot sizes, concrete filmable
+    pictures, story order, the lead's look, simple motions) and rewrites the weak shots: the draft's
+    `critique` lists the issues and `first_shots` keeps the list before the review. Tell the user the issues.
 
-    Keywords: music video, videoclip, plan shots, storyboard, write lyrics, planificar videoclip, guion de planos, letra
+    Keywords: music video, videoclip, plan shots, storyboard, write lyrics, review shot list, planificar videoclip,
+    guion de planos, letra, revisar planos, critica del guion
     """
     return _call("POST", "/api/agent/studio_video_plan", json={
         "concept": concept, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look, "shots": shots,
         "language": language, "song_asset_id": song_asset_id, "lyrics": lyrics, "genre": genre, "duration_s": duration_s,
-        "project": project})
+        "project": project, "critic": critic})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
@@ -654,8 +658,10 @@ def studio_timeline(
     "lyrics_asset_id", "karaoke", "finishing"}. Transitions: cut, crossfade, dip_black, flash_white.
     finishing (applied once at render, all optional): {"color_grade": "teal_orange"|"sodium_night"|
     "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
-    "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)|"bold",
-    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1}}.
+    "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)|"bold"|
+    "pop" (one big word at a time)|"pulse" (the line swells on every beat)|"typewriter"|"handwritten"|"cinema",
+    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1},
+    "framing": "fill"|"blur"|"fit" (how clips of another shape fill the frame)}.
     Returns a compact view: duration, clips_total, finishing and one page of clips with their index.
 
     Keywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, colour grade, color grade, vignette, film grain, letterbox, glitch flash, horror captions, linea de tiempo, montaje al ritmo, video musical, editar clips, gradacion de color
@@ -1184,17 +1190,72 @@ def studio_production_finishing(production: str, finishing: dict[str, Any], rend
 
     finishing (all optional; {} = plain): {"color_grade": "teal_orange"|"sodium_night"|"bleach_bypass",
     "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
-    "lyric_style": "default"|"horror"|"bold", "beat_fx": {"source": "kick"|"beats"|"downbeats",
-    "zoom": 0-1, "flash": 0-1, "shake": 0-1}} - beat_fx punches in, flashes and shakes the picture on
-    the bass drum (kick), every beat or every bar. The animatic and the cut use it; a cut already
+    "lyric_style": "default"|"horror"|"bold"|"pop"|"pulse"|"typewriter"|"handwritten"|"cinema",
+    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1},
+    "framing": "fill"|"blur"|"fit"} - beat_fx punches in, flashes and shakes the picture on
+    the bass drum (kick), every beat or every bar. Lyric styles: pop = one huge word at a time popping in,
+    pulse = the whole line in caps swelling on every beat, typewriter = letters typed out, handwritten =
+    hand lettering, cinema = film-title serif with slow fades. framing: how a clip of another shape fills
+    the frame (fill crops, blur fits it over a blurred copy, fit adds bars). The animatic and the cut use it; a cut already
     rendered is re-rendered (render=true queues it; nothing else is redone). Returns the clean look and
     the aspects that will render again.
 
     Keywords: look, colour grade, film grain, beat effects, zoom on the kick, flash on the beat, camera shake,
-    music video style, efectos al ritmo, zoom al bombo, destellos, temblor, gradacion de color, estilo del videoclip
+    music video style, lyric typography, word by word captions, efectos al ritmo, zoom al bombo, destellos, temblor,
+    gradacion de color, estilo del videoclip, tipografia de la letra, letra palabra a palabra
     """
     return _call("POST", "/api/agent/studio_production_finishing", params={"production": production},
                  json={"finishing": finishing, "render": render})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_reframe(production: str, aspects: list[str], framing: Optional[str] = None,
+                              run: bool = True) -> dict[str, Any]:
+    """The music video in other shapes without generating anything again / reencuadrar el videoclip.
+
+    aspects: ["16:9", "1:1"] are added to the cuts it renders (9:16, 16:9, 1:1); framing "fill" crops the
+    clips to the new shape, "blur" fits each whole over a blurred copy of itself, "fit" adds bars. Only the
+    cut renders again (run=true queues it). Returns aspects, new and rerender.
+
+    Keywords: reframe, vertical version, horizontal version, square version, change aspect ratio, reencuadrar,
+    version vertical, version horizontal, cuadrado, cambiar formato
+    """
+    return _call("POST", "/api/agent/studio_production_reframe", params={"production": production},
+                 json={"aspects": aspects, "framing": framing, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_stems(asset_id: str, force: bool = False, device: Optional[str] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Split a song into vocals, drums, bass and other (Demucs) / separar pistas.
+
+    Each stem becomes an audio asset of the song's project. Once split, lip sync (wan22_s2v, InfiniteTalk)
+    reads the clean vocals instead of the mix (the clip keeps the full mix as its sound) and "kick" beat
+    effects read the drums. Runs in ComfyUI's Python on the card with most free memory (else the CPU,
+    slower); installs Demucs into the data folder the first time. Existing stems are returned unless
+    force=true. Returns the job and the stems found so far ({stem: asset_id}).
+
+    Keywords: stems, separate vocals, isolate voice, acapella, drums only, karaoke track, separar voz,
+    pistas separadas, aislar la voz, solo bateria, instrumental
+    """
+    return _call("POST", "/api/agent/studio_stems", json={"asset_id": asset_id, "force": force, "device": device,
+                                                         "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_reframe(asset_id: str, aspect: str = "9:16", framing: str = "fill", focus_x: Optional[float] = None,
+                   focus_y: Optional[float] = None, quality: str = "final", wait_s: float = 0) -> dict[str, Any]:
+    """A picture or clip in another shape (9:16, 16:9, 1:1, 4:5, 2:3, 3:2, 21:9) without regenerating it / reencuadrar.
+
+    framing "fill" crops it around the subject (found on its own from the sharpest detail, or at
+    focus_x/focus_y 0-1), "blur" fits it whole over a blurred copy of itself, "fit" adds black bars.
+    quality "preview" makes a 720p clip faster. A new asset (the original stays); returns the job.
+
+    Keywords: reframe, crop to vertical, make it square, 9:16, aspect ratio, blur background, letterbox,
+    reencuadrar, recortar a vertical, hacerlo cuadrado, cambiar proporcion, fondo desenfocado
+    """
+    return _call("POST", "/api/agent/studio_reframe", json={"asset_id": asset_id, "aspect": aspect, "framing": framing,
+                                                           "focus_x": focus_x, "focus_y": focus_y, "quality": quality,
+                                                           "wait_s": wait_s})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

@@ -41,7 +41,8 @@ def test_plan_and_create_through_the_api(client):
     seen = {}
 
     def chat(messages, max_tokens, temperature):
-        seen["user"] = messages[-1]["content"]
+        seen.setdefault("user", messages[-1]["content"])  # the planner; the critic asks second
+        seen["calls"] = seen.get("calls", 0) + 1
         return REPLY
 
     app.state.short_hooks = {"chat": chat}
@@ -55,6 +56,7 @@ def test_plan_and_create_through_the_api(client):
     body = r.json()
     assert body["lead"]["name"] == "Nova" and body["draft"]["song"]["language"] == "es"
     assert "Spanish (Spain)" in seen["user"] and "disco" in seen["user"] and "Plan 2 shots" in seen["user"]
+    assert seen["calls"] == 2 and "issues" in body["draft"]["critique"]  # the director's review ran
     draft = body["draft"]
     draft["shots"][0]["prompt"] = "dancing alone on a lit floor, wide shot"  # the person edits the draft
     r = c.post("/api/productions/from-plan", json={"name": "Disco Night", "draft": draft, "character_id": char_id,

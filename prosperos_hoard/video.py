@@ -60,7 +60,7 @@ COLOR_GRADE_PRESETS = {
                     "colorbalance=rs=0.1:bs=-0.22:rm=0.18:gm=0.03:bm=-0.22:rh=0.1:bh=-0.12,format=yuv420p",
     "bleach_bypass": "format=rgb24,curves=preset=strong_contrast,format=yuv420p,eq=saturation=0.35:contrast=1.18",
 }
-FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style", "beat_fx"}
+FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_downbeats", "lyric_style", "beat_fx", "framing"}
 # Beat effects ("beat_fx"): a punch-in zoom, a brightness flash and a camera
 # shake that fire on the song's hits ({"source": "kick"|"beats"|"downbeats",
 # "zoom"|"flash"|"shake": 0-1}). They are applied per clip, with only that
@@ -68,7 +68,10 @@ FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_do
 # command line longer than Windows allows.
 BEAT_FX_SOURCES = ("kick", "beats", "downbeats")
 BEAT_FX_TAU = {"zoom": 0.14, "flash": 0.09, "shake": 0.10}
-LYRIC_STYLES = ("default", "horror", "bold")
+LYRIC_STYLES = ("default", "horror", "bold", "pop", "pulse", "typewriter", "handwritten", "cinema")
+# how a clip of another shape fills the frame: cropped to fill, fitted over a
+# blurred copy of itself, or fitted between black bars
+FRAMINGS = ("fill", "blur", "fit")
 
 
 def validate_finishing(finishing: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -124,6 +127,11 @@ def validate_finishing(finishing: Optional[dict[str, Any]]) -> dict[str, Any]:
                     clean[key] = round(value, 3)
         if any(k in clean for k in ("zoom", "flash", "shake")):
             out["beat_fx"] = clean
+    framing = finishing.get("framing")
+    if framing and framing != "fill":
+        if framing not in FRAMINGS:
+            raise RenderError(f"framing must be one of {', '.join(FRAMINGS)}")
+        out["framing"] = framing
     style = finishing.get("lyric_style")
     if style and style != "default":
         if style not in LYRIC_STYLES:
@@ -258,16 +266,35 @@ def _zoompan_expr(zoom_start: float, zoom_end: float, pan: str, n_frames: int) -
     return z, x, y
 
 
+def framing_vf(width: int, height: int, framing: str = "fill", focus_x: float = 0.5, focus_y: float = 0.5) -> str:
+    """The filter that puts a picture of any shape into width x height:
+    "fill" crops it (around focus_x/focus_y, 0-1, the subject's place),
+    "blur" fits it whole over a blurred, darkened fill of itself, "fit"
+    fits it between black bars."""
+    fx = min(1.0, max(0.0, float(focus_x)))
+    fy = min(1.0, max(0.0, float(focus_y)))
+    if framing == "blur":
+        return (f"split[fb_bg][fb_fg];[fb_bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},boxblur=24:3,eq=brightness=-0.08[fb_b];"
+                f"[fb_fg]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fb_f];"
+                f"[fb_b][fb_f]overlay=(W-w)/2:(H-h)/2")
+    if framing == "fit":
+        return (f"scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")
+    return (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-{width})*{fx:.3f}:(ih-{height})*{fy:.3f}")
+
+
 def build_image_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float,
-    ken_burns: Optional[dict[str, Any]] = None, extra_vf: str = "",
+    ken_burns: Optional[dict[str, Any]] = None, extra_vf: str = "", framing: str = "fill",
+    focus: tuple[float, float] = (0.5, 0.5),
 ) -> list[str]:
     ken_burns = ken_burns or {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"}
     n_frames = max(1, round(duration_s * fps))
     z, x, y = _zoompan_expr(ken_burns.get("zoom_start", 1.0), ken_burns.get("zoom_end", 1.0), ken_burns.get("pan", "none"), n_frames)
     vf = (
-        f"scale={width*2}:{height*2}:force_original_aspect_ratio=increase,"
-        f"crop={width*2}:{height*2},"
+        f"{framing_vf(width * 2, height * 2, framing, *focus)},"
         f"zoompan=z='{z}':d={n_frames}:s={width}x{height}:fps={fps}:x='{x}':y='{y}',"
         f"format=yuv420p"
     ) + (f",{extra_vf}" if extra_vf else "")
@@ -280,12 +307,12 @@ def build_image_clip_cmd(
 
 def build_video_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float, trim_start_s: float,
-    extra_vf: str = "",
+    extra_vf: str = "", framing: str = "fill", focus: tuple[float, float] = (0.5, 0.5),
 ) -> list[str]:
     # tpad clones the last frame when the source is shorter than the clip
     # (a 2 s SVD animation placed on a 3 s beat slot) so every clip has the
     # exact length the timeline says.
-    vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps},"
+    vf = (f"{framing_vf(width, height, framing, *focus)},fps={fps},"
           f"tpad=stop_mode=clone:stop_duration={duration_s:.3f},format=yuv420p") + (f",{extra_vf}" if extra_vf else "")
     return [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-ss", f"{trim_start_s:.3f}", "-i", str(src),
@@ -439,6 +466,21 @@ _LYRIC_STYLE_ASS = {
     # the lower half, the word being said in yellow and a touch bigger
     "bold": {"fontname": "Inter", "primary": "&H00FFFFFF", "secondary": "&H00FFFFFF", "outline": "&H00000000",
              "back": "&H99000000", "bold": 1, "border": 7, "shadow": 3, "spacing": 0},
+    # "pop": one word at a time, huge, in the middle, popping in on its beat
+    "pop": {"fontname": "Space Grotesk", "primary": "&H00FFFFFF", "secondary": "&H00FFFFFF", "outline": "&H00140A1E",
+            "back": "&H80000000", "bold": 1, "border": 6, "shadow": 2, "spacing": 1},
+    # "pulse": the whole line, condensed caps, that swells on every beat
+    "pulse": {"fontname": "Bebas Neue", "primary": "&H00FFFFFF", "secondary": "&H00FFFFFF", "outline": "&H00000000",
+              "back": "&H80000000", "bold": 0, "border": 4, "shadow": 2, "spacing": 3},
+    # "typewriter": letters typed out one by one in a typewriter face
+    "typewriter": {"fontname": "Special Elite", "primary": "&H00E8F0F2", "secondary": "&HFF000000", "outline": "&H00101010",
+                   "back": "&H80000000", "bold": 0, "border": 2, "shadow": 1, "spacing": 0},
+    # "handwritten": a hand-lettered line that drifts in softly
+    "handwritten": {"fontname": "Caveat", "primary": "&H00F4F8FF", "secondary": "&H00F4F8FF", "outline": "&H00302020",
+                    "back": "&H60000000", "bold": 1, "border": 2, "shadow": 2, "spacing": 0},
+    # "cinema": film-title serif, wide letter spacing, slow fades in the lower third
+    "cinema": {"fontname": "Playfair Display", "primary": "&H00F0F0F0", "secondary": "&H00F0F0F0", "outline": "&H00000000",
+               "back": "&H00000000", "bold": 0, "border": 1, "shadow": 0, "spacing": 4},
 }
 
 # the highlighted word of a "bold" caption: ASS colour &HBBGGRR (yellow #FFD400)
@@ -488,10 +530,32 @@ def ass_escape(text: str) -> str:
     return text[:500]
 
 
-def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style: str = "default") -> str:
+def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style: str = "default",
+              beats: Optional[list[float]] = None) -> str:
+    """The lyric captions as an ASS script. `beats` (seconds) drive the
+    "pulse" style; the others ignore them."""
     if style not in LYRIC_STYLES:
         raise RenderError(f"lyric_style must be one of {', '.join(LYRIC_STYLES)}")
     style_vars = _LYRIC_STYLE_ASS[style]
+    short = min(width, height)
+    if style in ("pop", "pulse", "typewriter", "handwritten", "cinema"):
+        fontsize = {"pop": short // 6, "pulse": short // 8, "typewriter": short // 13, "handwritten": short // 8,
+                    "cinema": short // 15}[style]
+        margin_h = int(width * 0.08)
+        margin_v = int(height * {"pop": 0.0, "pulse": 0.24, "typewriter": 0.18, "handwritten": 0.2, "cinema": 0.1}[style]
+                       * (1.0 if height > width else 0.6))
+        header = _ASS_HEADER.format(width=width, height=height, fontsize=max(24, fontsize), margin_v=margin_v, margin_h=margin_h,
+                                    **style_vars)
+        if style == "pop":
+            header = header.replace(",2,{0},{0},{1},1\n".format(margin_h, margin_v), ",5,{0},{0},{1},1\n".format(margin_h, margin_v))
+        lines = [header]
+        for clip in lyric_clips:
+            start, end = float(clip["start_s"]), float(clip["end_s"])
+            text = str(clip.get("text", ""))
+            if end <= start or not text.strip():
+                continue
+            lines.extend(_styled_events(style, clip, start, end, text, beats or []))
+        return "\n".join(lines) + "\n"
     if style == "horror":
         # sized from the short side so 16:9 captions are not tiny; lifted
         # above the bottom fifth on vertical video, where the short-video
@@ -546,6 +610,44 @@ def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style:
             text_out = f"{{\\frz{frz}\\fax{fax}\\blur1.2\\fad(90,{fade_out})}}{text_out}"
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Lyrics,,0,0,0,,{text_out}")
     return "\n".join(lines) + "\n"
+
+
+def _styled_events(style: str, clip: dict[str, Any], start: float, end: float, text: str, beats: list[float]) -> list[str]:
+    """Dialogue events of the typographic styles (pop, pulse, typewriter,
+    handwritten, cinema)."""
+    ev = "Dialogue: 0,{},{},Lyrics,,0,0,0,,{}"
+    if style == "pop":
+        words = [w for w in (clip.get("words") or estimate_word_times(text, start, end)) if str(w.get("text", "")).strip()]
+        out = []
+        for i, w in enumerate(words):
+            ws = max(start, float(w["start_s"]))
+            we = min(end, float(words[i + 1]["start_s"]) if i + 1 < len(words) else end)
+            if we - ws < 0.04:
+                continue
+            word = ass_escape(str(w["text"]).strip().upper())
+            out.append(ev.format(_ass_time(ws), _ass_time(we),
+                                 f"{{\\fscx135\\fscy135\\t(0,90,\\fscx100\\fscy100)\\fad(0,40)}}{word}"))
+        return out
+    if style == "pulse":
+        tags = []
+        for b in beats:
+            if start <= b < end - 0.05:
+                t0 = int(round((b - start) * 1000))
+                tags.append(f"\\t({t0},{t0 + 70},\\fscx114\\fscy114)\\t({t0 + 70},{t0 + 260},\\fscx100\\fscy100)")
+        return [ev.format(_ass_time(start), _ass_time(end), f"{{\\fad(80,80){''.join(tags)}}}{ass_escape(text.upper())}")]
+    if style == "typewriter":
+        chars = list(text.strip())
+        type_s = min(0.75 * (end - start), 0.06 * len(chars))
+        cs = max(1, int(round(type_s * 100 / max(1, len(chars)))))
+        typed = "".join(f"{{\\ko{cs}}}{ass_escape(c)}" if c.strip() else " " for c in chars)
+        return [ev.format(_ass_time(start), _ass_time(end), f"{{\\fad(0,120)}}{typed}")]
+    if style == "handwritten":
+        rng = random.Random(f"hand:{start}:{text}")
+        frz = round(rng.uniform(-3.0, 3.0), 1)
+        return [ev.format(_ass_time(start), _ass_time(end),
+                          f"{{\\frz{frz}\\fad(260,200)\\blur0.6}}{ass_escape(text)}")]
+    # cinema: lower-case title serif, slow fade
+    return [ev.format(_ass_time(start), _ass_time(end), f"{{\\fad(400,400)}}{ass_escape(text)}")]
 
 
 def estimate_word_times(text: str, start: float, end: float) -> list[dict[str, Any]]:
@@ -660,7 +762,10 @@ def render_timeline(
     quality: str = "preview",
     progress: Optional[Callable[[float, Optional[str]], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    beat_audio_path: Optional[Path] = None,
 ) -> dict[str, Any]:
+    """`beat_audio_path`: the song's drums stem, when it was split - the
+    "kick" beat effects read the bass drum there instead of in the mix."""
     ffmpeg = ffmpeg_path()
     if not ffmpeg:
         raise RenderError("ffmpeg not found (install ffmpeg or the imageio-ffmpeg wheel)")
@@ -712,8 +817,10 @@ def render_timeline(
     if fx and timeline.get("audio_asset_id"):
         from . import audio as audio_mod  # numpy-only; only a render with beat effects pays for it
         try:
-            samples = audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"]))
-            hits = audio_mod.beat_hits(samples, fx.get("source") or "kick")
+            source = fx.get("source") or "kick"
+            beat_src = beat_audio_path if (beat_audio_path and source == "kick") else asset_path_for(timeline["audio_asset_id"])
+            samples = audio_mod.decode_to_mono(beat_src)
+            hits = audio_mod.beat_hits(samples, source)
         except Exception:  # noqa: BLE001 - an unreadable song renders without the effect, not at all
             hits = []
 
@@ -727,11 +834,14 @@ def render_timeline(
             frames += overlap_frames[i + 1] + 1
         duration = frames / fps
         extra = build_beat_fx_vf(fx, clip_hits(hits, start_frames[i] / fps, duration), width, height, fps) if hits else ""
+        framing = finishing.get("framing") or "fill"
+        focus = (float(clip.get("focus_x", 0.5)), float(clip.get("focus_y", 0.5)))
         if clip["kind"] == "video":
             cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)),
-                                       extra_vf=extra)
+                                       extra_vf=extra, framing=framing, focus=focus)
         else:
-            cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"), extra_vf=extra)
+            cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"), extra_vf=extra,
+                                       framing=framing, focus=focus)
         _run(cmd)
         clip_paths.append(out_clip)
         report(0.05 + 0.55 * (i + 1) / len(clips), f"rendered clip {i + 1}/{len(clips)}")
@@ -751,7 +861,15 @@ def render_timeline(
     if lyrics_track and lyrics_track["clips"]:
         ass_name = "lyrics.ass"
         lyric_style = finishing.get("lyric_style", "default")
-        (work_dir / ass_name).write_text(build_ass(width, height, lyrics_track["clips"], style=lyric_style), encoding="utf-8")
+        beats: list[float] = []
+        if lyric_style == "pulse" and timeline.get("audio_asset_id"):
+            try:
+                from . import audio as audio_mod
+                beats = [t for t, _ in audio_mod.beat_hits(audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"])), "beats")]
+            except Exception:  # noqa: BLE001 - an unreadable song: the line just doesn't pulse
+                beats = []
+        (work_dir / ass_name).write_text(build_ass(width, height, lyrics_track["clips"], style=lyric_style, beats=beats),
+                                         encoding="utf-8")
         fonts_out = work_dir / "fonts"
         fonts_out.mkdir(exist_ok=True)
         for ttf in FONTS_DIR.glob("*/*.ttf"):

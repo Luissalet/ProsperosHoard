@@ -420,7 +420,8 @@ export interface Finishing {
   vignette?: boolean;
   letterbox?: boolean;
   glitch_on_downbeats?: boolean;
-  lyric_style?: "default" | "horror" | "bold";
+  lyric_style?: "default" | "horror" | "bold" | "pop" | "pulse" | "typewriter" | "handwritten" | "cinema";
+  framing?: "fill" | "blur" | "fit";
   beat_fx?: { source?: "kick" | "beats" | "downbeats"; zoom?: number; flash?: number; shake?: number };
 }
 
@@ -533,6 +534,8 @@ export interface VideoDraft {
   song?: { tags: string; lyrics: string; bpm: number; key: string; language: string; duration: number };
   shots: VideoShot[];
   warnings?: string[];
+  critique?: { issues: string[]; revised: boolean };
+  first_shots?: VideoShot[];   // the shot list before the critic's rewrite
 }
 
 export interface TrashItem {
@@ -1253,6 +1256,13 @@ export const api = {
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
     request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
   videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),
+  reframeProduction: (slug: string, aspects: string[], framing?: string, run = true) =>
+    request<{ aspects: string[]; new: string[]; rerender: string[]; job?: Job }>("POST", `/api/productions/${slug}/reframe`, { aspects, framing, run }),
+  assetStems: (assetId: string) => request<{ stems: Record<string, string> }>("GET", `/api/assets/${assetId}/stems`),
+  makeStems: (assetId: string, force = false) =>
+    request<{ job?: Job; stems: Record<string, string>; reused?: boolean }>("POST", `/api/assets/${assetId}/stems`, { asset_id: assetId, force }),
+  reframeAsset: (assetId: string, aspect: string, framing = "fill", quality = "final") =>
+    request<{ job: Job }>("POST", `/api/assets/${assetId}/reframe`, { asset_id: assetId, aspect, framing, quality }),
   regenerateUnlocked: (slug: string, stage: "frames" | "clips", keys?: string[], run = true) =>
     request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/regenerate`, { stage, keys, run }),
   promoteClips: (slug: string, keys?: string[], run = true) =>

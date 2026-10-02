@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
@@ -792,7 +793,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  mask_asset_id: Optional[str] = None, driving_asset_id: Optional[str] = None,
                  driving_start_s: float = 0.0, audio_asset_id: Optional[str] = None, audio_start_s: float = 0.0,
                  audio_seconds: Optional[float] = None, end_asset_id: Optional[str] = None,
-                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
+                 extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
+                 use_vocals: bool = True) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
     project_id = job["project_id"]
@@ -884,6 +886,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         input_ids.append(drive["id"])
 
     audio_name: Optional[str] = None
+    vocals_name: Optional[str] = None
     if spec.get("audio_node"):
         if not audio_asset_id:
             raise EngineError("audio_required", f"template '{template_name}' needs the audio to sing or speak "
@@ -896,6 +899,15 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         audio_name = f"prospero_{sound['id']}_{int(float(audio_start_s or 0) * 1000)}_{int(seconds * 1000)}.wav"
         uploads.append((_audio_clip(store, sound, float(audio_start_s or 0), seconds), audio_name))
         input_ids.append(sound["id"])
+        if use_vocals:
+            # the song's own vocals stem, when it was split: the lips follow a
+            # clean voice, while the clip keeps the full mix as its sound
+            from . import stems as stems_mod
+            vocals = stems_mod.existing(store, sound["id"]).get("vocals")
+            if vocals:
+                vocals_name = f"prospero_{vocals}_{int(float(audio_start_s or 0) * 1000)}_{int(seconds * 1000)}.wav"
+                uploads.append((_audio_clip(store, store.get_asset(vocals), float(audio_start_s or 0), seconds), vocals_name))
+                input_ids.append(vocals)
 
     count = max(1, min(int(count or 1), 8))
     base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
@@ -924,6 +936,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if audio_name:
             node, _, inp = spec["audio_node"].partition(".")
             wf[node]["inputs"][inp] = audio_name
+            if vocals_name:
+                wf["vocals_in"] = {"class_type": "LoadAudio", "inputs": {"audio": vocals_name}}
+                for n in wf.values():
+                    if n.get("class_type") == "AudioEncoderEncode" and n["inputs"].get("audio") == [node, 0]:
+                        n["inputs"]["audio"] = ["vocals_in", 0]
         if spec.get("chunks"):
             comfy_driver.expand_chunks(wf, spec, int(run_values.get("chunks") or 1), seed)
         if spec.get("talk_chunks"):
@@ -1166,6 +1183,107 @@ def extract_frames(store: Store, asset_id: str, count: int = 6, project_id: Opti
     if not out:
         raise EngineError("no_frames", "no frame could be read from that video")
     return out
+
+
+REFRAME_ASPECTS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350),
+                   "2:3": (1080, 1620), "3:2": (1620, 1080), "21:9": (2520, 1080)}
+
+
+def subject_focus(store: Store, asset: dict[str, Any]) -> tuple[float, float]:
+    """Where the subject sits in a picture or clip, as (x, y) 0-1: the
+    centre of the sharpest detail (subjects are in focus, backgrounds soft)
+    over a few frames, pulled a little towards the middle. (0.5, 0.5) when
+    nothing can be read."""
+    exe = ffmpeg_path()
+    if not exe:
+        return 0.5, 0.5
+    src = store.data_dir / asset["file_path"]
+    w, h = 192, 108
+    seeks = [0.0]
+    if asset["kind"] == "video" and float(asset.get("duration_s") or 0) > 0.5:
+        d = float(asset["duration_s"])
+        seeks = [d * 0.2, d * 0.5, d * 0.8]
+    acc = None
+    for t in seeks:
+        cmd = [exe, "-nostdin", "-loglevel", "error", *(["-ss", f"{t:.2f}"] if t else []), "-i", str(src), "-frames:v", "1",
+               "-vf", f"scale={w}:{h},format=gray", "-f", "rawvideo", "-"]
+        proc = procutil.run(cmd, timeout=60, text=False)
+        data = proc.stdout if isinstance(proc.stdout, (bytes, bytearray)) else b""
+        if len(data) < w * h:
+            continue
+        img = np.frombuffer(bytes(data[: w * h]), dtype=np.uint8).reshape(h, w).astype(np.float32)
+        gx = np.abs(np.diff(img, axis=1))[:-1, :]
+        gy = np.abs(np.diff(img, axis=0))[:, :-1]
+        g = gx + gy
+        acc = g if acc is None else acc + g
+    if acc is None or float(acc.sum()) <= 0:
+        return 0.5, 0.5
+    acc = acc ** 2  # the sharpest edges dominate
+    cols, rows = acc.sum(axis=0), acc.sum(axis=1)
+    cx = float((cols * np.arange(len(cols))).sum() / cols.sum()) / len(cols)
+    cy = float((rows * np.arange(len(rows))).sum() / rows.sum()) / len(rows)
+    return round(0.5 + (cx - 0.5) * 0.85, 3), round(0.5 + (cy - 0.5) * 0.85, 3)
+
+
+def reframe_job(store: Store, job: dict[str, Any], progress) -> dict[str, Any]:
+    """A picture or clip in another shape without generating it again:
+    `framing` "fill" crops around the subject (found on its own, or at
+    focus_x/focus_y 0-1), "blur" fits it whole over a blurred fill of
+    itself, "fit" puts black bars around it."""
+    p = job["params"]
+    asset = store.get_asset(p["asset_id"])
+    if asset["kind"] not in ("image", "video"):
+        raise EngineError("not_visual", f"asset {asset['id']} is {asset['kind']}; only pictures and clips can be reframed")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to reframe")
+    aspect = p.get("aspect") or "9:16"
+    if aspect not in REFRAME_ASPECTS:
+        raise EngineError("bad_aspect", f"aspect must be one of {', '.join(REFRAME_ASPECTS)}")
+    framing = p.get("framing") or "fill"
+    W, H = REFRAME_ASPECTS[aspect]
+    if asset["kind"] == "image" or p.get("quality") == "preview":
+        scale = 720 / min(W, H) if p.get("quality") == "preview" else 1.0
+        W, H = int(W * scale) // 2 * 2, int(H * scale) // 2 * 2
+    sw, sh = int(asset.get("width") or 0), int(asset.get("height") or 0)
+    focus_x, focus_y = p.get("focus_x"), p.get("focus_y")
+    found = None
+    if framing == "fill" and (focus_x is None or focus_y is None):
+        found = subject_focus(store, asset)
+        focus_x = found[0] if focus_x is None else focus_x
+        focus_y = found[1] if focus_y is None else focus_y
+    fx, fy = 0.5, 0.5
+    if framing == "fill" and sw and sh:
+        # the crop window centred on the subject, kept inside the picture
+        k = max(W / sw, H / sh)
+        iw, ih = sw * k, sh * k
+        fx = 0.5 if iw - W < 1 else min(1.0, max(0.0, (float(focus_x) * iw - W / 2) / (iw - W)))
+        fy = 0.5 if ih - H < 1 else min(1.0, max(0.0, (float(focus_y) * ih - H / 2) / (ih - H)))
+    vf = video_mod.framing_vf(W, H, framing, fx, fy)
+    src = store.data_dir / asset["file_path"]
+    out_id = new_id("a")
+    ext = ".mp4" if asset["kind"] == "video" else ".png"
+    out = store.path_for_asset_file(out_id, ext)
+    progress(0.1, f"reframing to {aspect}")
+    if asset["kind"] == "video":
+        cmd = [exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-vf", f"{vf},format=yuv420p",
+               "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-c:a", "copy", "-movflags", "+faststart", str(out)]
+    else:
+        cmd = [exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-vf", vf, "-frames:v", "1", str(out)]
+    proc = procutil.run(cmd, timeout=3600)
+    if proc.returncode != 0 or not out.is_file():
+        out.unlink(missing_ok=True)
+        raise EngineError("reframe_failed", (proc.stderr or "ffmpeg failed")[-400:] if isinstance(proc.stderr, str) else "ffmpeg failed")
+    thumb = _video_thumbnail(out, store.path_for_thumb(out_id)) if asset["kind"] == "video" else None
+    recipe = {"operation": "reframe", "aspect": aspect, "framing": framing, "focus": [fx, fy],
+              **({"subject": list(found)} if found else {}), "input_asset_ids": [asset["id"]], "derived_from": asset["id"],
+              "backend": "local", "created_at": now_iso()}
+    new = store.create_asset(project_id=p.get("project_id") or asset["project_id"], kind=asset["kind"],
+                             file_path=_rel(store, out), mime="video/mp4" if ext == ".mp4" else "image/png", width=W, height=H,
+                             duration_s=asset.get("duration_s"), thumb_path=thumb, source="derived", recipe=recipe,
+                             asset_id=out_id, name=_clip(f"{asset.get('name') or asset['id']} {aspect}", 100),
+                             tags=["reframe", aspect])
+    return {"asset_id": new["id"], "asset_ids": [new["id"]], "aspect": aspect, "framing": framing}
 
 
 def last_frame(store: Store, asset_id: str, project_id: Optional[str] = None) -> dict[str, Any]:
@@ -1503,7 +1621,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
-        end_asset_id=params.get("end_asset_id"),
+        end_asset_id=params.get("end_asset_id"), use_vocals=params.get("use_vocals", True) is not False,
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
                       "image_engine": engine_name or "custom"},
@@ -2532,8 +2650,13 @@ def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], pro
     out_path = store.path_for_asset_file(out_id, ".mp4")
     started = time.monotonic()
     try:
+        drums = None
+        if tl.get("audio_asset_id") and ((tl.get("finishing") or {}).get("beat_fx") or {}):
+            from . import stems as stems_mod
+            drums_id = stems_mod.existing(store, tl["audio_asset_id"]).get("drums")
+            drums = store.data_dir / store.get_asset(drums_id)["file_path"] if drums_id else None
         result = video_mod.render_timeline(tl, asset_path_for, work_dir, out_path, quality=quality, progress=progress,
-                                           should_cancel=getattr(progress, "cancelled", None))
+                                           should_cancel=getattr(progress, "cancelled", None), beat_audio_path=drums)
     except video_mod.RenderCancelled:
         out_path.unlink(missing_ok=True)
         raise JobCancelled("cancelled") from None

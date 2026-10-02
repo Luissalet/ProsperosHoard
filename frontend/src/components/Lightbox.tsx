@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn, Ratio, AudioLines, Scissors } from "lucide-react";
 import { api, fileUrl, type Asset, type Board } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, Stars, useApp, useAsync } from "./ui";
@@ -87,6 +87,12 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
     }
   };
 
+  const [reframeHow, setReframeHow] = useState("fill");
+  const [stemList, setStemList] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setStemList({});
+    if (asset && (asset.kind === "audio" || asset.kind === "video")) api.assetStems(asset.id).then((r) => setStemList(r.stems)).catch(() => undefined);
+  }, [asset?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (label: string, fn: () => Promise<{ job: { id: string } }>) => {
     setBusy(true);
     try {
@@ -217,6 +223,46 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
           </div>
         )}
 
+        {(asset.kind === "audio" || asset.kind === "video") && asset.recipe?.operation !== "stems" && (
+          <div className="stack" style={{ gap: 6 }}>
+            <div className="row wrap" style={{ gap: 6 }}>
+              <span className="small muted grow"><AudioLines size={13} /> {t("stemsTitle")}</span>
+              <button className="btn sm" disabled={busy} title={t("stemsHint")} onClick={async () => {
+                setBusy(true);
+                try {
+                  const r = await api.makeStems(asset.id, Object.keys(stemList).length === 4);
+                  if (r.job) { app.toast(t("stemsQueued"), "ok"); app.refreshJobs(); }
+                  setStemList(r.stems);
+                } catch (e) { app.toast((e as Error).message, "bad"); }
+                finally { setBusy(false); }
+              }}><Scissors size={13} /> {Object.keys(stemList).length === 4 ? t("stemsAgain") : t("stemsMake")}</button>
+            </div>
+            {Object.keys(stemList).length > 0 && (
+              <div className="stack" style={{ gap: 4 }}>
+                {["vocals", "drums", "bass", "other"].filter((k) => stemList[k]).map((k) => (
+                  <div key={k} className="row" style={{ gap: 6 }}>
+                    <span className="small mono" style={{ width: 60 }}>{t(`stem_${k}` as never)}</span>
+                    <audio controls preload="none" src={`/api/assets/${stemList[k]}/file`} style={{ flex: 1, height: 30 }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {(asset.kind === "image" || asset.kind === "video") && (
+          <div className="row wrap" style={{ gap: 6 }} title={t("assetReframeHint")}>
+            <span className="small muted"><Ratio size={13} /> {t("assetReframe")}</span>
+            <select value={reframeHow} onChange={(e) => setReframeHow(e.target.value)} style={{ width: "auto" }}>
+              <option value="fill">{t("lookFramingFill")}</option>
+              <option value="blur">{t("lookFramingBlur")}</option>
+              <option value="fit">{t("lookFramingFit")}</option>
+            </select>
+            {["9:16", "16:9", "1:1", "4:5"].map((a) => (
+              <button key={a} className="btn sm" disabled={busy} onClick={() => run(t("assetReframeQueued", { aspect: a }),
+                () => api.reframeAsset(asset.id, a, reframeHow))}>{a}</button>
+            ))}
+          </div>
+        )}
         <label className="field">{t("tags")} <span className="hint">{t("tagsHint")}</span>
           <input value={tags} onChange={(e) => setTags(e.target.value)}
             onBlur={() => patch({ tags: tags.split(",").map((x) => x.trim()).filter(Boolean) })} />

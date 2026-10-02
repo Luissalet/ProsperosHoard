@@ -118,7 +118,7 @@ def test_the_planner_is_offered_the_projects_places_and_objects(client):
     seen = {}
 
     def chat(messages, max_tokens, temperature):
-        seen["user"] = messages[-1]["content"]
+        seen.setdefault("user", messages[-1]["content"])  # the planner; the critic comes second
         return ('{"title": "T", "world_look": "neon", "world_negative": "text", "song": {"tags": "pop", "lyrics": '
                 '"[Verse]\\nla la", "bpm": 120, "key": "C major"}, "shots": [{"prompt": "@Aria on @Neon Stage", '
                 '"lead": true, "motion": "move", "motion_prompt": "push in", "section": "verse"}, {"prompt": '

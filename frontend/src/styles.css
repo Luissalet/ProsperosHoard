@@ -808,3 +808,6 @@ table.list tr.selected td { background: var(--accent-soft); }
 .sb-approve.on { border-color: var(--ok); background: rgba(91, 191, 134, 0.08); color: var(--ok); }
 .sb-approve .hint { color: var(--muted); }
 .sb-takes .seg button { padding: 3px 10px; font-size: 12px; }
+
+.critic-card { padding: 10px 12px; border-color: var(--accent-soft); }
+.critic-card ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }

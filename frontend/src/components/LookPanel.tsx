@@ -91,6 +91,17 @@ export function LookPanel({ value, onApply, note, compact }: {
               <option value="">{t("lookLyricsDefault")}</option>
               <option value="bold">{t("lookLyricsBold")}</option>
               <option value="horror">{t("lookLyricsHorror")}</option>
+              <option value="pop">{t("lookLyricsPop")}</option>
+              <option value="pulse">{t("lookLyricsPulse")}</option>
+              <option value="typewriter">{t("lookLyricsTypewriter")}</option>
+              <option value="handwritten">{t("lookLyricsHand")}</option>
+              <option value="cinema">{t("lookLyricsCinema")}</option>
+            </select></label>
+          <label className="field" title={t("lookFramingHint")}>{t("lookFraming")}
+            <select value={look.framing || "fill"} onChange={(e) => set("framing", e.target.value === "fill" ? undefined : e.target.value)}>
+              <option value="fill">{t("lookFramingFill")}</option>
+              <option value="blur">{t("lookFramingBlur")}</option>
+              <option value="fit">{t("lookFramingFit")}</option>
             </select></label>
         </div>
       </div>
