@@ -225,3 +225,40 @@ def test_ffmpeg_lookup_is_the_shared_one_and_procutil_decodes_text():
     done = procutil.run([exe, "-version"], text=True, timeout=10, capture_output=True)   # old keyword still accepted
     assert done.returncode == 0 and isinstance(done.stdout, str)
     assert isinstance(procutil.run([exe, "-version"], timeout=10).stdout, bytes)         # bytes unless text=True
+
+
+def _transcript(**over):
+    base = {"ok": True, "via": "funes", "language": "es", "text": "hola mundo", "duration_s": 2.0, "model": "small", "device": "cuda",
+            "segments": [{"start_s": 0.0, "end_s": 2.0, "text": " hola mundo ", "words": [
+                {"start_s": 0.0, "end_s": 0.9, "word": "hola", "p": 0.9}, {"start_s": 1.0, "end_s": 2.0, "word": "mundo", "p": 0.8}]}]}
+    base.update(over)
+    return base
+
+
+def test_the_faster_whisper_engine_asks_the_family_and_keeps_its_old_result_shape(monkeypatch, tmp_path):
+    asked = {}
+    monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, **kw: asked.update(path=path, **kw) or _transcript())
+    out = ve.FasterWhisperEngine(model_size="tiny").transcribe(tmp_path / "a.wav", language=None, word_timestamps=True)
+    assert asked["language"] == "auto" and asked["model"] == "tiny" and asked["word_timestamps"] is True
+    assert out == {"language": "es", "text": "hola mundo", "segments": [{"start_s": 0.0, "end_s": 2.0, "text": "hola mundo", "words": [
+        {"start_s": 0.0, "end_s": 0.9, "word": "hola"}, {"start_s": 1.0, "end_s": 2.0, "word": "mundo"}]}]}
+    plain = ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav", language="es", word_timestamps=False)
+    assert plain["segments"][0]["words"] == [] and asked["language"] == "es"
+
+
+def test_the_faster_whisper_engine_tells_apart_nobody_to_ask_from_a_failed_job(monkeypatch, tmp_path):
+    for kind in ("hub_down", "app_down", "app_missing", "tool_missing"):
+        monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, _k=kind, **kw: {"ok": False, "kind": _k, "error": "x", "via": "local"})
+        with pytest.raises(ve.EngineNotInstalled):
+            ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav")
+    monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, **kw: {"ok": False, "kind": "tool_error", "error": "bad audio", "via": "funes"})
+    with pytest.raises(ve.TranscriptionFailed, match="bad audio"):
+        ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav")
+
+
+def test_the_engine_counts_as_installed_when_funes_can_do_it(monkeypatch):
+    monkeypatch.setattr(ve, "_spec_installed", lambda name: False)
+    monkeypatch.setattr(ve.fam_media, "available", lambda service="media", timeout=1.0: service == "stt")
+    assert ve.FasterWhisperEngine().is_installed() is True
+    monkeypatch.setattr(ve.fam_media, "available", lambda service="media", timeout=1.0: False)
+    assert ve.FasterWhisperEngine().is_installed() is False
