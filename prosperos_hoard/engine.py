@@ -791,7 +791,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
                  mask_asset_id: Optional[str] = None, driving_asset_id: Optional[str] = None,
                  driving_start_s: float = 0.0, audio_asset_id: Optional[str] = None, audio_start_s: float = 0.0,
-                 audio_seconds: Optional[float] = None,
+                 audio_seconds: Optional[float] = None, end_asset_id: Optional[str] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -852,6 +852,21 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         uploads.append((mask_path.read_bytes(), mask_name))
         input_ids.append(mask["id"])
 
+    end_name: Optional[str] = None
+    if spec.get("end_image_node"):
+        if not end_asset_id:
+            if spec.get("requires_end_image"):
+                raise EngineError("end_image_required", f"template '{template_name}' needs the image the clip ends on "
+                                                        "(end_asset_id)")
+        else:
+            end = store.get_asset(end_asset_id)
+            if end["kind"] != "image":
+                raise EngineError("end_not_image", f"end frame {end['id']} is {end['kind']}, not an image")
+            end_path = store.data_dir / end["file_path"]
+            end_name = f"prospero_{end['id']}_end{end_path.suffix}"
+            uploads.append((end_path.read_bytes(), end_name))
+            input_ids.append(end["id"])
+
     driving_name: Optional[str] = None
     if spec.get("driving_video_node"):
         if not driving_asset_id:
@@ -911,6 +926,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             wf[node]["inputs"][inp] = audio_name
         if spec.get("chunks"):
             comfy_driver.expand_chunks(wf, spec, int(run_values.get("chunks") or 1), seed)
+        if spec.get("talk_chunks"):
+            comfy_driver.expand_talk_chunks(wf, spec, int(run_values.get("chunks") or 1), seed)
+        if end_name:
+            node, _, inp = spec["end_image_node"].partition(".")
+            wf[node]["inputs"][inp] = end_name
         if i == 0 and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
@@ -933,10 +953,36 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
                 **(extra_recipe or {}),
             }
+            if audio_name and audio_seconds and spec.get("kind") == "video":
+                # a lip-sync render is made in whole generations: keep exactly the line
+                data = _trim_video_bytes(data, float(audio_seconds))
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
     free_after(backend, spec)
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
+
+
+def _trim_video_bytes(data: bytes, seconds: float) -> bytes:
+    """The first `seconds` of an encoded video (re-encoded, so the cut is
+    frame exact); the bytes unchanged when ffmpeg is missing or fails, or
+    the video is already short enough."""
+    exe = ffmpeg_path()
+    if not exe or seconds <= 0:
+        return data
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = Path(tmp) / "in.mp4", Path(tmp) / "out.mp4"
+        src.write_bytes(data)
+        probe = procutil.run([exe, "-nostdin", "-hide_banner", "-i", str(src)], text=True, timeout=60)
+        m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", probe.stderr or "")
+        if m and int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) <= seconds + 0.05:
+            return data
+        res = procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-t", f"{seconds:.3f}",
+                            "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                            "-b:a", "192k", "-movflags", "+faststart", str(dst)], timeout=600)
+        if res.returncode != 0 or not dst.is_file() or not dst.stat().st_size:
+            return data
+        return dst.read_bytes()
 
 
 def free_after(backend: Any, spec: dict[str, Any]) -> bool:
@@ -1335,6 +1381,41 @@ def s2v_installed(object_info: dict[str, Any]) -> bool:
             and _has_model_file(object_info, "LoraLoaderModelOnly", "lora_name", "lightx2v_4steps_lora_v1.1"))
 
 
+def _combo_options(object_info: dict[str, Any], node: str, field: str) -> list[str]:
+    try:
+        spec = object_info[node]["input"]["required"][field]
+        opts = spec[1].get("options") if spec and spec[0] in ("COMBO", "COMFY_COMBO") else spec[0]
+        return [str(o) for o in (opts or [])]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return []
+
+
+def infinitetalk_installed(object_info: dict[str, Any]) -> bool:
+    """InfiniteTalk (long lip sync): the core node, its model patch, the
+    Wan 2.1 I2V 14B model and the Chinese wav2vec2 encoder it was trained on."""
+    if "WanInfiniteTalkToVideo" not in (object_info or {}):
+        return False
+    return (any("infinitetalk" in o.lower() for o in _combo_options(object_info, "ModelPatchLoader", "name"))
+            and _has_model_file(object_info, "UNETLoader", "unet_name", "i2v-14b-480p")
+            and any("chinese" in o.lower() for o in _combo_options(object_info, "AudioEncoderLoader", "audio_encoder_name")))
+
+
+def flf_installed(object_info: dict[str, Any]) -> bool:
+    """A clip that ends on a given frame: Wan 2.2 14B with WanFirstLastFrameToVideo."""
+    return "WanFirstLastFrameToVideo" in (object_info or {}) and wan14b_installed(object_info)
+
+
+def sing_template(object_info: dict[str, Any], seconds: float, prefer: Optional[str] = None) -> str:
+    """The lip-sync template for a line: InfiniteTalk for long ones (or when
+    asked) when it is installed, else S2V."""
+    talk = infinitetalk_installed(object_info)
+    if prefer == "infinitetalk" and talk:
+        return "wan21_infinitetalk"
+    if prefer == "s2v" or not talk:
+        return "wan22_s2v"
+    return "wan21_infinitetalk" if seconds > 10 else "wan22_s2v"
+
+
 def clip_template(object_info: dict[str, Any], motion_ref: bool = False) -> str:
     """The clip template a still gets: motion copied from a driving video
     (Wan Animate 2) when there is one and it is installed, else the 14B
@@ -1407,6 +1488,10 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
             # a whole last chunk for a few frames (Wan lengths are 4n+1)
             per = math.ceil((wanted + 3) / values["chunks"])
             values["length"] = min(length, max(33, (per - 1 + 3) // 4 * 4 + 1))
+    if spec.get("talk_chunks"):
+        fps, length = float(values.get("fps") or 25), int(values.get("length") or 81)
+        values["chunks"] = comfy_driver.talk_chunks_for(spec, float(params.get("audio_seconds") or 0), fps, length,
+                                                        int(values.get("motion_frames") or 9))
     size_mode = spec.get("size_from_reference")
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])
@@ -1418,6 +1503,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
+        end_asset_id=params.get("end_asset_id"),
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
                       "image_engine": engine_name or "custom"},
@@ -1426,11 +1512,12 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
 
 
 _EDIT_TEMPLATES = {"img2img": "sdxl_img2img", "inpaint": "sdxl_inpaint", "hires": "sdxl_hires",
-                   "upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background"}
+                   "upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background",
+                   "pose_map": "control_pose", "depth_map": "control_depth"}
 
 # The two operations that run on ComfyUI core nodes with a model file and no
 # prompt: they take the source asset as reference and always make one output.
-MODEL_EDIT_OPERATIONS = ("upscale", "remove_background")
+MODEL_EDIT_OPERATIONS = ("upscale", "remove_background", "pose_map", "depth_map")
 UPSCALE_SCALES = (2, 4)
 UPSCALE_MODEL_DEFAULT = "RealESRGAN_x4plus.safetensors"
 UPSCALE_MODEL_FACTOR = 4  # the ESRGAN model enlarges 4x; ImageScaleBy brings it down to the asked factor
@@ -1441,7 +1528,12 @@ _MODEL_FILES = {
                 "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged"),
     "remove_background": ("LoadBackgroundRemovalModel", "bg_removal_name", "models/background_removal",
                           "https://huggingface.co/Comfy-Org/BiRefNet"),
+    "pose_map": ("CheckpointLoaderSimple", "ckpt_name", "models/checkpoints",
+                 "https://huggingface.co/Comfy-Org/SDPose (checkpoints/sdpose_wholebody_fp16.safetensors)"),
+    "depth_map": ("LoadDA3Model", "model_name", "models/geometry_estimation",
+                  "https://huggingface.co/Comfy-Org/Depth-Anything-3 (geometry_estimation/depth_anything_3_mono_large.safetensors)"),
 }
+CONTROL_MODELS = {"pose_map": "sdpose_wholebody_fp16.safetensors", "depth_map": "depth_anything_3_mono_large.safetensors"}
 
 
 def _source_size(store: Store, src: dict[str, Any]) -> Optional[tuple[int, int]]:
@@ -1508,6 +1600,13 @@ def _edit_with_model(store: Store, backend: Backend, job: dict[str, Any], progre
         return run_template(store, backend, job, progress, template_name=template, values=values,
                             operation="edit_image:upscale", count=1, reference_asset_id=src["id"],
                             extra_recipe={"derived_from": src["id"]}, name=f"upscaled x{scale}: {label}")
+    if operation in CONTROL_MODELS:
+        model = require_model_file(backend, operation, CONTROL_MODELS[operation])
+        key = "pose_model" if operation == "pose_map" else "depth_model"
+        return run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation],
+                            values={key: model, "seed": params.get("seed")}, operation=f"edit_image:{operation}", count=1,
+                            reference_asset_id=src["id"], extra_recipe={"derived_from": src["id"]},
+                            name=f"{'pose' if operation == 'pose_map' else 'depth'}: {label}")
     model = require_model_file(backend, operation, backend.bg_removal_model())
     result = run_template(store, backend, job, progress, template_name=_EDIT_TEMPLATES[operation],
                           values={"bg_model": model, "seed": params.get("seed")},

@@ -52,18 +52,35 @@ from .jobs import JobCancelled
 from .store import NotFound, Store
 from .util import now_iso
 
-NODE_TYPES = ("text", "asset", "cast", "image", "video", "music", "list", "note", "assistant", "edit", "combine")
-GENERATORS = ("image", "video", "music", "assistant", "edit", "combine")
+NODE_TYPES = ("text", "asset", "cast", "image", "video", "music", "list", "note", "assistant", "edit", "combine",
+              "variations", "group")
+GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations")
 INPUTS: dict[str, dict[str, str]] = {
-    "image": {"prompt": "text", "refs": "image"},
-    "video": {"start": "image", "prompt": "text", "motion": "video", "audio": "audio"},
+    "image": {"prompt": "text", "refs": "image", "pose": "image", "layout": "image"},
+    "video": {"start": "image", "end": "image", "prompt": "text", "motion": "video", "audio": "audio"},
     "music": {"prompt": "text"},
     "list": {"items": "any"},
     "assistant": {"prompt": "text"},
     "edit": {"image": "image"},
     "combine": {"clips": "video", "audio": "audio"},
+    "variations": {"image": "image", "prompt": "text"},
 }
-SINGLE_INPUTS = {("video", "motion"), ("video", "audio"), ("combine", "audio")}
+SINGLE_INPUTS = {("video", "motion"), ("video", "audio"), ("video", "end"), ("combine", "audio"), ("image", "pose"),
+                 ("image", "layout")}
+VARIATIONS: dict[str, list[str]] = {
+    "angles": ["front view, facing the camera", "three-quarter view from the left", "profile view from the right",
+               "seen from behind", "low angle looking up at it", "high angle looking down at it",
+               "close-up of the face", "full body wide shot", "over-the-shoulder view"],
+    "expressions": ["a warm smile", "laughing out loud", "surprised, eyes wide", "angry, frowning", "sad, eyes wet",
+                    "scared", "thoughtful, looking away", "determined", "a smirk"],
+    "ages": ["as a child of about eight", "as a teenager", "in their twenties", "in their forties", "in their sixties",
+             "in their eighties", "as a toddler", "in their thirties", "in their fifties"],
+    "lighting": ["at golden hour", "at night under neon light", "in soft overcast daylight", "lit by a single candle",
+                 "in harsh midday sun", "under cold blue moonlight", "backlit, rim light", "in a foggy morning",
+                 "under stage spotlights"],
+    "storyboard": ["the opening moment", "a moment later", "the action builds", "the turning point", "the reaction",
+                   "the climax", "the aftermath", "a quiet beat", "the final image"],
+}
 MAX_FANOUT = 24
 MAX_NODES, MAX_EDGES = 300, 900
 SHEET_SUFFIX = ("character turnaround reference sheet: full body front view, full body side view and a face close-up, "
@@ -88,7 +105,7 @@ def output_type(node: dict[str, Any], store: Optional[Store] = None, handle: Opt
         return "text" if handle == "text" else "image"
     if t == "video":
         return "image" if handle == "last" else "video"
-    if t in ("image", "edit"):
+    if t in ("image", "edit", "variations"):
         return "image"
     if t == "assistant":
         return "text"
@@ -242,7 +259,7 @@ def node_outputs(store: Store, graph: dict[str, Any], state: dict[str, Any], nod
         if t == "video" and handle == "last":
             frames = st.get("last_frames") or {}
             return [("image", frames[a]) for a in kept if frames.get(a)]
-        kind = {"music": "audio", "edit": "image", "combine": "video"}.get(t, t)
+        kind = {"music": "audio", "edit": "image", "combine": "video", "variations": "image"}.get(t, t)
         return [(kind, a) for a in kept]
     if t == "list":
         items: list[tuple[str, str]] = []
@@ -321,7 +338,9 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
     own = str(data.get("prompt") or "").strip()
     if t == "image":
         common, items = prompt_parts(store, graph, state, node_id)
-        refs = list(dict.fromkeys(v for k, v in ins.get("refs", []) if k == "image"))[:10]
+        refs = list(dict.fromkeys(v for k, v in ins.get("refs", []) if k == "image"))[:8]
+        pose = next((v for k, v in ins.get("pose", []) if k == "image"), None)
+        layout = next((v for k, v in ins.get("layout", []) if k == "image"), None)
         if not common and not items and not own and not refs:
             raise SpaceError("needs_prompt", "write what the picture shows or wire a text into its prompt")
         ops = []
@@ -335,13 +354,22 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                 prompt = f"{prompt}. {SHEET_SUFFIX}"
             if refs and "<image" not in prompt:
                 prompt += _refs_note(len(refs))
+            all_refs = list(refs)
+            if pose:
+                all_refs.append(pose)
+                prompt += (f" <image{len(all_refs)}> is a pose map: give the person exactly that body pose, head angle and "
+                           "hand positions, and take nothing else from it.")
+            if layout:
+                all_refs.append(layout)
+                prompt += (f" <image{len(all_refs)}> is a depth map of the layout: keep that composition, camera angle and "
+                           "the depth of every shape, and take no colours from it.")
             body: dict[str, Any] = {"prompt": prompt[:3900], "count": max(1, min(int(data.get("count") or 1), 8)),
                                     "aspect": data.get("aspect") or ("16:9" if data.get("preset") == "sheet" else "1:1"),
                                     "engine": data.get("engine") or None}
             if data.get("seed") not in (None, ""):
                 body["seed"] = int(data["seed"])
-            if refs:
-                body["reference_asset_ids"] = refs
+            if all_refs:
+                body["reference_asset_ids"] = all_refs
             ops.append({"op": "generate", "body": body})
         return ops
     if t == "video":
@@ -352,6 +380,7 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
         cam = cinema.camera_prompt(data.get("camera"), video=True)
         audio = next((v for k, v in ins.get("audio", []) if k == "audio"), None)
         motion = next((v for k, v in ins.get("motion", []) if k == "video"), None)
+        end = next((v for k, v in ins.get("end", []) if k == "image"), None)
         quality = data.get("quality") or "final"
         ops = []
         pairs = [(st_, it) for st_ in starts for it in (items or [None])][:MAX_FANOUT]
@@ -364,12 +393,17 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             if data.get("seed") not in (None, ""):
                 body["seed"] = int(data["seed"]) + i
             if audio:
-                seconds = max(1.0, min(float(data.get("seconds") or 4.8), 19.0))
-                body.update({"template": "wan22_s2v", "audio_asset_id": audio,
-                             "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0)), "audio_seconds": seconds})
+                engine_pick = data.get("sing_engine") or "auto"
+                longest = 19.0 if engine_pick == "s2v" else 90.0
+                seconds = max(1.0, min(float(data.get("seconds") or 4.8), longest))
+                body.update({"template": "auto_sing", "audio_asset_id": audio,
+                             "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0)), "audio_seconds": seconds,
+                             **({"template_params": {"sing_engine": engine_pick}} if engine_pick != "auto" else {})})
             elif motion:
                 body.update({"template": "auto_clip", "driving_asset_id": motion,
                              "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0))})
+            elif end:
+                body.update({"template": "auto_clip", "end_asset_id": end})
             else:
                 body["template"] = "wan22_ti2v" if quality == "draft" else "auto_clip"
             ops.append({"op": "generate", "body": body})
@@ -396,8 +430,8 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
         if not images:
             raise SpaceError("needs_image", "wire pictures into it")
         op = data.get("operation") or "upscale"
-        if op not in ("upscale", "remove_background"):
-            raise SpaceError("bad_operation", "edit nodes upscale or remove the background")
+        if op not in ("upscale", "remove_background", "pose_map", "depth_map"):
+            raise SpaceError("bad_operation", "edit nodes upscale, remove the background or make a pose or depth map")
         body_extra = {"scale": 4 if str(data.get("scale")) == "4" else 2} if op == "upscale" else {}
         return [{"op": "edit", "body": {"asset_id": a, "operation": op, **body_extra}} for a in images]
     if t == "combine":
@@ -407,6 +441,32 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
         audio = next((v for k, v in ins.get("audio", []) if k == "audio"), None)
         return [{"op": "combine", "body": {"clips": clips[:60], "audio_asset_id": audio,
                                             "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0))}}]
+    if t == "variations":
+        images = list(dict.fromkeys(v for k, v in ins.get("image", []) if k == "image"))[:4]
+        if not images:
+            raise SpaceError("needs_image", "wire the picture to vary")
+        mode = data.get("mode") or "angles"
+        extra = ". ".join(_texts(ins.get("prompt", [])) + ([own] if own else []))
+        if mode == "custom":
+            wanted = [x.strip() for x in str(data.get("custom") or "").splitlines() if x.strip()]
+            if not wanted:
+                raise SpaceError("needs_prompt", "write one change per line")
+        else:
+            wanted = VARIATIONS.get(mode) or VARIATIONS["angles"]
+        count = max(1, min(int(data.get("count") or 4), len(wanted), 9))
+        ops = []
+        for img in images:
+            for i, change in enumerate(wanted[:count]):
+                if mode == "storyboard":
+                    what = f"storyboard panel {i + 1} of {count}, {change}" + (f": {extra}" if extra else "")
+                else:
+                    what = change + (f". {extra}" if extra else "")
+                prompt = (f"Keep everything about <image1> exactly the same - the identity, design, clothes, colours and "
+                          f"art style - and change only this: {what}.")
+                ops.append({"op": "generate", "body": {"prompt": prompt[:3900], "count": 1, "reference_asset_ids": [img],
+                                                       "aspect": data.get("aspect") or None,
+                                                       **({"seed": int(data["seed"]) + i} if data.get("seed") not in (None, "") else {})}})
+        return ops
     raise SpaceError("not_runnable", f"{t} nodes do not run")
 
 
@@ -633,6 +693,329 @@ def _wait(studio: Any, jobs: list[str], poll_s: float, timeout_s: float,
     if pending:
         errors.append("timed out")
     return outputs, errors
+
+
+# ----------------------------------------------------------- estimate
+
+# seconds per render when this computer has no history of the template yet
+DEFAULT_SECONDS = {"qwen21_txt2img": 60, "qwen21_edit": 90, "wan22_ti2v": 180, "wan22_i2v_14b": 300, "wan22_flf2v": 320,
+                   "wan22_s2v": 380, "wan21_infinitetalk": 700, "ace15_song": 60, "esrgan_upscale": 15,
+                   "birefnet_remove_background": 15, "control_pose": 20, "control_depth": 20}
+TEMPLATE_VRAM = {"qwen21_txt2img": "qwen21", "qwen21_edit": "qwen21", "wan22_ti2v": "wan", "wan22_i2v_14b": "wan14b",
+                 "wan22_flf2v": "wan14b", "wan22_s2v": "wan_s2v", "wan21_infinitetalk": "wan14b", "ace15_song": "ace",
+                 "esrgan_upscale": "esrgan", "birefnet_remove_background": "birefnet", "control_pose": "control",
+                 "control_depth": "control"}
+_EDIT_OP_TEMPLATE = {"upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background",
+                     "pose_map": "control_pose", "depth_map": "control_depth"}
+
+
+def _op_template(op: dict[str, Any]) -> tuple[str, float]:
+    """The template an op will most likely run on, and how many of its
+    usual lengths it takes (a 15 s line is three 5 s renders)."""
+    b = op["body"]
+    if op["op"] == "compose":
+        return "ace15_song", max(1, int(b.get("count") or 1)) * max(0.3, float(b.get("duration") or 60) / 60)
+    if op["op"] == "edit":
+        return _EDIT_OP_TEMPLATE.get(b.get("operation") or "upscale", "esrgan_upscale"), 1
+    if op["op"] in ("chat", "combine"):
+        return op["op"], 1
+    t = b.get("template")
+    n = max(1, int(b.get("count") or 1))
+    if t == "auto_sing":
+        secs = float(b.get("audio_seconds") or 4.8)
+        pick = (b.get("template_params") or {}).get("sing_engine")
+        tpl = "wan21_infinitetalk" if pick == "infinitetalk" or (pick != "s2v" and secs > 10) else "wan22_s2v"
+        return tpl, n * max(1.0, secs / (10.0 if tpl == "wan21_infinitetalk" else 4.8))
+    if t == "auto_clip":
+        return ("wan22_flf2v" if b.get("end_asset_id") else "wan22_i2v_14b"), n
+    if t:
+        return t, n
+    return ("qwen21_edit" if b.get("reference_asset_ids") or b.get("reference_asset_id") else "qwen21_txt2img"), n
+
+
+def _rough_estimate(graph: dict[str, Any], nid: str, per_node: dict[str, int]) -> Optional[tuple[str, float]]:
+    """A node that can't be planned yet because what feeds it hasn't run:
+    its likely template and how many renders, from what this run will give
+    it (the renders counted for the nodes upstream). None when nothing
+    upstream will run, so the planning error stands."""
+    node = next((n for n in graph["nodes"] if n["id"] == nid), None)
+    if not node:
+        return None
+    wires = [e for e in graph["edges"] if e["target"] == nid]
+    if not any(e["source"] in per_node for e in wires):
+        return None
+    d = node.get("data") or {}
+
+    def fan(handle: str) -> int:
+        return max(1, sum(per_node.get(e["source"], 1) for e in wires if e.get("target_handle") == handle))
+
+    handles = {e.get("target_handle") for e in wires}
+    kind = node["type"]
+    if kind == "image":
+        tpl = "qwen21_edit" if handles & {"refs", "pose", "layout"} else "qwen21_txt2img"
+        return tpl, max(1, int(d.get("count") or 1))
+    if kind == "video":
+        if "audio" in handles:
+            secs = float(d.get("seconds") or 4.8)
+            pick = d.get("sing_engine") or "auto"
+            tpl = "wan21_infinitetalk" if pick == "infinitetalk" or (pick != "s2v" and secs > 10) else "wan22_s2v"
+            return tpl, fan("start") * max(1.0, secs / (10.0 if tpl == "wan21_infinitetalk" else 4.8))
+        return ("wan22_flf2v" if "end" in handles else "wan22_i2v_14b"), fan("start")
+    if kind == "variations":
+        n = len([x for x in str(d.get("custom") or "").splitlines() if x.strip()]) if d.get("mode") == "custom" else int(d.get("count") or 4)
+        return "qwen21_edit", max(1, n) * fan("image")
+    if kind == "edit":
+        return _EDIT_OP_TEMPLATE.get(d.get("operation") or "upscale", "esrgan_upscale"), fan("image")
+    if kind == "music":
+        return "ace15_song", max(1, int(d.get("count") or 1)) * max(0.3, float(d.get("duration") or 60) / 60)
+    if kind in ("assistant", "combine"):
+        return ("chat" if kind == "assistant" else "combine"), 1
+    return None
+
+
+def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[list[str]] = None,
+             force: bool = False, vram_mb: Optional[dict[str, int]] = None) -> dict[str, Any]:
+    """Before a run: per generator, how many renders it queues, the seconds
+    they should take on this computer (median of its recent renders of the
+    same template, else a default) and the VRAM they need; nodes "all"
+    would skip are counted as skipped. `minutes` adds every render up (GPU
+    time); a render pool shares it out."""
+    space = store.get_space(space_id)
+    graph, state = space["graph"], space["state"]
+    timings = store.render_timings()
+    medians = {k: sorted(v)[len(v) // 2] for k, v in timings.items() if v}
+    nodes = []
+    total = 0.0
+    renders = 0
+    peak = 0
+    per_node: dict[str, int] = {}
+    for nid in run_order(graph, mode, node_ids):
+        try:
+            ops = plan_node(store, graph, state, nid)
+        except SpaceError as exc:
+            rough = _rough_estimate(graph, nid, per_node)
+            if not rough:
+                nodes.append({"node": nid, "error": exc.message})
+                continue
+            tpl, units = rough
+            if tpl == "chat":
+                secs, n_r = 15.0, 0
+            elif tpl == "combine":
+                secs, n_r = 10.0, 0
+            else:
+                secs = (medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)) * units
+                n_r = max(1, int(round(units)))
+                peak = max(peak, int((vram_mb or {}).get(TEMPLATE_VRAM.get(tpl, ""), 0)))
+            per_node[nid] = max(1, n_r)
+            nodes.append({"node": nid, "renders": n_r, "seconds": round(secs), "templates": [tpl] if n_r else [],
+                          "measured": tpl in medians, "rough": True})
+            total += secs
+            renders += n_r
+            continue
+        prev = state.get(nid) or {}
+        if mode == "all" and not force and prev.get("ok_hash") == plan_hash(ops) and (prev.get("outputs") or prev.get("texts")):
+            nodes.append({"node": nid, "skipped": True, "renders": 0, "seconds": 0})
+            continue
+        secs = 0.0
+        node_renders = 0
+        templates = set()
+        for op in ops:
+            tpl, units = _op_template(op)
+            if tpl == "chat":
+                secs += 15
+                continue
+            if tpl == "combine":
+                secs += 3 * len(op["body"].get("clips") or [])
+                continue
+            per = medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)
+            secs += per * units
+            node_renders += max(1, int(round(units))) if op["op"] != "compose" else max(1, int(op["body"].get("count") or 1))
+            templates.add(tpl)
+            peak = max(peak, int((vram_mb or {}).get(TEMPLATE_VRAM.get(tpl, ""), 0)))
+        per_node[nid] = max(1, node_renders or len(ops))
+        nodes.append({"node": nid, "renders": node_renders, "seconds": round(secs), "templates": sorted(templates),
+                      "measured": all(t in medians for t in templates)})
+        total += secs
+        renders += node_renders
+    return {"nodes": nodes, "renders": renders, "seconds": round(total), "minutes": round(total / 60, 1),
+            "vram_mb": peak or None}
+
+
+# ---------------------------------------------------------------- apps
+
+APP_INPUT_TYPES = ("text", "asset", "cast")
+
+
+def app_view(store: Store, space: dict[str, Any]) -> dict[str, Any]:
+    """A space as an app: the nodes marked as inputs (texts, media, cast
+    with `data.app_input`) become form fields and the generators marked
+    `data.app_output` (else the last generators of the graph) its results."""
+    graph, state = space["graph"], space["state"]
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    inputs = []
+    for n in graph["nodes"]:
+        d = n.get("data") or {}
+        if n["type"] in APP_INPUT_TYPES and d.get("app_input"):
+            field: dict[str, Any] = {"node": n["id"], "type": n["type"], "label": str(d.get("app_label") or n["id"])}
+            if n["type"] == "text":
+                field["value"] = d.get("text") or ""
+            elif n["type"] == "asset":
+                field.update({"kind": d.get("kind") or "image", "value": d.get("asset_ids") or []})
+            else:
+                field["value"] = d.get("character_id")
+            inputs.append(field)
+    outs = [n["id"] for n in graph["nodes"] if n["type"] in GENERATORS and (n.get("data") or {}).get("app_output")]
+    if not outs:
+        feeding = {e["source"] for e in graph["edges"]}
+        outs = [n["id"] for n in graph["nodes"] if n["type"] in GENERATORS and n["id"] not in feeding]
+    outputs = []
+    for nid in outs:
+        st = state.get(nid) or {}
+        kind = output_type(nodes[nid]) or "image"
+        excluded = set(st.get("excluded") or [])
+        outputs.append({"node": nid, "label": str((nodes[nid].get("data") or {}).get("app_label") or nid),
+                        "kind": "audio" if kind == "audio" else kind, "status": st.get("status"),
+                        "outputs": [a for a in st.get("outputs") or [] if a not in excluded],
+                        **({"texts": st.get("texts")} if st.get("texts") else {}), "error": st.get("error")})
+    return {"id": space["id"], "name": space["name"], "inputs": inputs, "outputs": outputs,
+            "description": str((graph.get("app") or {}).get("description") or "") if isinstance(graph.get("app"), dict) else ""}
+
+
+def apply_app_values(store: Store, graph: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    """The graph with an app's form values written into its input nodes;
+    SpaceError for a node that is not an input or a value of the wrong shape."""
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    for nid, value in (values or {}).items():
+        n = nodes.get(nid)
+        if not n or n["type"] not in APP_INPUT_TYPES or not (n.get("data") or {}).get("app_input"):
+            raise SpaceError("not_an_input", f"{nid} is not an input of this app")
+        d = dict(n.get("data") or {})
+        if n["type"] == "text":
+            d["text"] = str(value or "")[:6000]
+        elif n["type"] == "asset":
+            ids = [value] if isinstance(value, str) else list(value or [])
+            for aid in ids:
+                a = store.get_asset(aid)
+                if a["kind"] != (d.get("kind") or "image"):
+                    raise SpaceError("wrong_kind", f"{nid} takes {d.get('kind') or 'image'}, not {a['kind']}")
+            d["asset_ids"] = ids[:20]
+        else:
+            store.get_character(str(value))
+            d["character_id"] = str(value)
+        n["data"] = d
+    return graph
+
+
+# ------------------------------------------------------------ assistant
+
+BUILD_GUIDE = """You design node graphs for a local AI film studio. Answer with JSON only:
+{"note": "one sentence for the user", "nodes": [...]}
+Each node is an object with an "id" (short, letters/digits), a "type" and fields:
+- {"id","type":"text","text"}: a prompt or a STYLE line shared by several nodes
+- {"id","type":"cast","name"}: a character, place or object of the project's cast by name
+- {"id","type":"image","prompt","aspect":"1:1|16:9|9:16","count":1-4,"sheet":true|false,
+   "prompt_from":[ids of text/cast/assistant/list nodes],"refs":[ids of image/cast/variations nodes]}
+- {"id","type":"variations","mode":"angles|expressions|ages|lighting|storyboard","count":4,"image":[ids]}
+- {"id","type":"video","prompt","quality":"draft|final","start":[ids of image nodes],"after":"id of a video node to continue from its last frame","end":"id of an image node to end on","audio":"id of a music node","prompt_from":[ids]}
+- {"id","type":"music","tags","lyrics","duration":10-240}
+- {"id","type":"assistant","prompt","as_list":true,"items":3}: writes ideas; wire it into an image's prompt_from to make one picture per idea
+- {"id","type":"combine","clips":[ids of video nodes in order],"audio":"id of a music node"}
+- {"id","type":"note","text"}
+Rules: reuse the cast names the user mentions; use a reference sheet image ("sheet": true) for each new character
+and wire it as refs into the scene pictures; one picture feeds each clip's start; keep it small (at most 14 nodes)."""
+
+
+def _cast_by_name(store: Store, project_id: str) -> dict[str, str]:
+    return {c["name"].lower(): c["id"] for c in store.list_characters(project_id)}
+
+
+def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: set[str]) -> list[dict[str, Any]]:
+    """The assistant's compact plan as graph edit ops: nodes laid out in
+    columns by dependency, wires from its fields; unknown ids, unknown cast
+    names and wires of the wrong kind are dropped rather than failing."""
+    raw = [n for n in (plan.get("nodes") or []) if isinstance(n, dict) and n.get("type") in NODE_TYPES]
+    cast = _cast_by_name(store, project_id)
+    ids: dict[str, str] = {}
+    for n in raw:
+        base = re.sub(r"[^A-Za-z0-9_-]", "", str(n.get("id") or n["type"]))[:30] or n["type"]
+        nid, k = base, 2
+        while nid in existing or nid in ids.values():
+            nid, k = f"{base}{k}", k + 1
+        ids[str(n.get("id") or base)] = nid
+    ops: list[dict[str, Any]] = []
+    wires: list[tuple[str, Optional[str], str, str]] = []
+    types = {ids[str(n.get("id") or n["type"])]: n["type"] for n in raw}
+    data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality"),
+                 "music": ("tags", "lyrics", "duration", "bpm"), "assistant": ("prompt", "as_list", "items"),
+                 "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",)}
+    kept = []
+    for n in raw:
+        nid = ids[str(n.get("id") or n["type"])]
+        t = n["type"]
+        data = {k: n[k] for k in data_keys.get(t, ()) if n.get(k) not in (None, "")}
+        if t == "image" and n.get("sheet"):
+            data["preset"] = "sheet"
+        if t == "cast":
+            cid = cast.get(str(n.get("name") or "").lower())
+            if not cid:
+                continue
+            data = {"character_id": cid}
+        if t == "group":
+            continue
+        kept.append(nid)
+        ops.append({"op": "add_node", "id": nid, "type": t, "data": data})
+
+        def ref(x: Any) -> Optional[str]:
+            return ids.get(str(x)) if x is not None else None
+        for src in n.get("prompt_from") or []:
+            if ref(src):
+                wires.append((ref(src), "text" if types.get(ref(src)) == "cast" else None, nid, "prompt"))
+        for src in n.get("refs") or []:
+            if ref(src):
+                wires.append((ref(src), "image" if types.get(ref(src)) == "cast" else None, nid, "refs"))
+        for src in n.get("start") or []:
+            if ref(src):
+                wires.append((ref(src), None, nid, "start"))
+        for src in n.get("image") or []:
+            if ref(src):
+                wires.append((ref(src), None, nid, "image"))
+        if t == "video" and ref(n.get("after")):
+            wires.append((ref(n.get("after")), "last", nid, "start"))
+        if t == "video" and ref(n.get("end")):
+            wires.append((ref(n.get("end")), None, nid, "end"))
+        if ref(n.get("audio")):
+            wires.append((ref(n.get("audio")), None, nid, "audio"))
+        for src in n.get("clips") or []:
+            if ref(src):
+                wires.append((ref(src), None, nid, "clips"))
+    kept_set = set(kept) | existing
+    for src, sh, dst, th in wires:
+        if src in kept_set and dst in kept_set:
+            ops.append({"op": "connect", "source": src, "source_handle": sh, "target": dst, "target_handle": th})
+    return ops
+
+
+def layout_new_nodes(graph: dict[str, Any], new_ids: set[str], origin_x: float = 0, origin_y: float = 0) -> None:
+    """Columns by dependency depth, rows in order, for nodes just added."""
+    parents: dict[str, set[str]] = {n["id"]: set() for n in graph["nodes"]}
+    for e in graph["edges"]:
+        parents[e["target"]].add(e["source"])
+    depth: dict[str, int] = {}
+
+    def d(nid: str, seen: frozenset = frozenset()) -> int:
+        if nid in depth:
+            return depth[nid]
+        if nid in seen:
+            return 0
+        depth[nid] = 0 if not parents[nid] else 1 + max(d(p, seen | {nid}) for p in parents[nid])
+        return depth[nid]
+    rows: dict[int, int] = {}
+    for n in graph["nodes"]:
+        if n["id"] in new_ids:
+            col = d(n["id"])
+            row = rows.get(col, 0)
+            rows[col] = row + 1
+            n["x"], n["y"] = origin_x + col * 420, origin_y + row * 380
 
 
 # ------------------------------------------------------------ templates

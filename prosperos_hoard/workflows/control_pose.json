@@ -1,0 +1,74 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "source.png"
+    },
+    "_meta": {
+      "title": "LoadImage"
+    }
+  },
+  "2": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sdpose_wholebody_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "CheckpointLoaderSimple"
+    }
+  },
+  "3": {
+    "class_type": "SDPoseKeypointExtractor",
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "batch_size": 16
+    },
+    "_meta": {
+      "title": "SDPoseKeypointExtractor"
+    }
+  },
+  "4": {
+    "class_type": "SDPoseDrawKeypoints",
+    "inputs": {
+      "keypoints": [
+        "3",
+        0
+      ],
+      "draw_body": true,
+      "draw_hands": true,
+      "draw_face": true,
+      "draw_feet": true,
+      "stick_width": 4,
+      "face_point_size": 2,
+      "score_threshold": 0.3,
+      "draw_head": true
+    },
+    "_meta": {
+      "title": "SDPoseDrawKeypoints"
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "prospero/pose",
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SaveImage"
+    }
+  }
+}

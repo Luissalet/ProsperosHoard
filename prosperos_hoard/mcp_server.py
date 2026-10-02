@@ -361,7 +361,8 @@ def studio_generate_image(
     wait_s: float = 0, use_character_reference: bool = False, use_element_references: bool = True,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
     characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
-    model: Optional[str] = None, camera: Optional[dict[str, str]] = None,
+    model: Optional[str] = None, camera: Optional[dict[str, str]] = None, end_asset_id: Optional[str] = None,
+    audio_asset_id: Optional[str] = None, audio_start_s: Optional[float] = None, audio_seconds: Optional[float] = None,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
@@ -401,6 +402,11 @@ def studio_generate_image(
     lists `adapters`; use_adapters=false renders without. prefer_adapter=true with consistent=true renders
     txt2img + adapter (free poses) instead of an edit of the canonical image when every mentioned
     character has one.
+    Clips: template "auto_clip" with reference_asset_id = the start picture (Wan 2.2 14B when installed);
+    end_asset_id = the picture the clip must end on (Wan 2.2 14B first+last frame, template wan22_flf2v).
+    Lip sync: template "auto_sing" (or "wan22_s2v" / "wan21_infinitetalk") with reference_asset_id = the
+    singer, audio_asset_id = the song, audio_start_s and audio_seconds = the line (S2V up to 20 s,
+    InfiniteTalk up to 90 s; auto picks InfiniteTalk past 10 s when installed); the clip is trimmed to the line.
     camera: film language picked by id from studio_cinema - {"shot": "close_up", "angle": "low_angle",
     "lens": "telephoto", "light": "rim_light", "composition": "rule_of_thirds"} (+ "move" for clip
     templates); their English terms are added to the prompt.
@@ -416,7 +422,8 @@ def studio_generate_image(
         "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
         "use_element_references": use_element_references,
         "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
-        "use_adapters": use_adapters, "prefer_adapter": prefer_adapter, "camera": camera,
+        "use_adapters": use_adapters, "prefer_adapter": prefer_adapter, "camera": camera, "end_asset_id": end_asset_id,
+        "audio_asset_id": audio_asset_id, "audio_start_s": audio_start_s, "audio_seconds": audio_seconds,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)
@@ -451,6 +458,10 @@ def studio_edit_image(
     file of ComfyUI/models/upscale_models (default RealESRGAN_x4plus.safetensors);
     "remove_background" - BiRefNet matting: a PNG of the subject on a transparent background
     (needs ComfyUI/models/background_removal/birefnet.safetensors);
+    "pose_map" - the people's pose (body, hands, face keypoints on black; SDPose, needs
+    models/checkpoints/sdpose_wholebody_fp16.safetensors) to give another picture that pose;
+    "depth_map" - a depth map (near = bright; Depth Anything 3, needs
+    models/geometry_estimation/depth_anything_3_mono_large.safetensors) to keep a layout;
     "reuse" - re-run the exact recipe (same seed: reproduces the asset);
     "vary" - same recipe with a new seed (or `seed`), `count` variations.
     upscale and remove_background always make one image; a missing model file fails with model_missing and
@@ -1168,23 +1179,34 @@ def studio_canvas(production: str, seconds: float = 8.0, start_s: Optional[float
 def studio_spaces(
     project: str, action: str = "list", space: Optional[str] = None, name: Optional[str] = None,
     template: str = "blank", ops: Optional[list[dict[str, Any]]] = None, mode: str = "node",
-    node_ids: Optional[list[str]] = None, force: bool = False,
+    node_ids: Optional[list[str]] = None, force: bool = False, request: Optional[str] = None,
+    values: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
 
     action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot"|"short_film") | "get"
     (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"all", node_ids, force) | "stop"
-    (cancel a run and its renders) | "delete" | "restore".
+    (cancel a run and its renders) | "estimate" (space, mode, node_ids: renders, seconds and VRAM before a run,
+    from this computer's own render times) | "build" (space, request: the local model draws or extends the graph
+    from words) | "app" (space: its form - input nodes marked data.app_input, results marked data.app_output) |
+    "app_run" (space, values {input node id: text | asset id(s) | character id}: fill the form and run it) |
+    "delete" | "restore". list marks the spaces usable as apps (`app`).
     Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
     "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
-    count, engine, seed, camera} with inputs prompt (text) and refs (image); video {prompt, quality
-    "draft"|"final", seconds, audio_start_s, motion_start_s, seed, camera} with inputs start (image: one clip
-    per image), prompt, motion (video: copy its moves) and audio (audio: the character sings it, lip sync),
-    and two outputs: the clips, and source_handle "last" = each clip's last frame (wire it into another
+    count, engine, seed, camera} with inputs prompt (text), refs (image), pose (a pose map: the body pose to
+    copy) and layout (a depth map: the composition to keep); video {prompt, quality "draft"|"final", seconds,
+    audio_start_s, motion_start_s, seed, camera, sing_engine "auto"|"s2v"|"infinitetalk"} with inputs start
+    (image: one clip per image), end (image: the frame the clip ends on, Wan 2.2 14B), prompt, motion (video:
+    copy its moves) and audio (audio: the character sings it, lip sync; S2V up to 19 s, InfiniteTalk up to
+    90 s, "auto" takes InfiniteTalk past 10 s when installed), and two outputs: the clips, and source_handle "last" = each clip's last frame (wire it into another
     clip's start to continue the shot); music {tags, lyrics, duration, bpm, count} with input prompt;
     assistant {prompt, as_list, items} - the local model writes a text, or a list of `items` lines;
-    edit {operation "upscale" (scale 2|4) | "remove_background"} with input image (many); combine
+    edit {operation "upscale" (scale 2|4) | "remove_background" | "pose_map" | "depth_map"} with input image
+    (many); combine
     {audio_start_s} joins the clips wired into "clips" in wire order, with input audio (a song under them);
+    variations {mode "angles"|"expressions"|"ages"|"lighting"|"storyboard"|"custom" (data.custom: one change per
+    line), count 1-9} edits each wired image (input image) once per change, keeping everything else; group
+    {title, color} with w/h is a frame that holds nodes together (no wires);
     list (items: anything; data.unticked drops items); note {text}.
     camera: film language ids from studio_cinema, {"shot", "angle", "move" (clips), "lens", "light",
     "composition"} - their terms join the prompt.
@@ -1203,7 +1225,7 @@ def studio_spaces(
     """
     return _call("POST", "/api/agent/studio_spaces", params={"project": project}, json={
         "action": action, "space": space, "name": name, "template": template, "ops": ops or [], "mode": mode,
-        "node_ids": node_ids or [], "force": force})
+        "node_ids": node_ids or [], "force": force, "request": request, "values": values or {}})
 
 
 @tool(_ro(readOnlyHint=True))

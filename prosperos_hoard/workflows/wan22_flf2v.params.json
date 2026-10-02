@@ -1,0 +1,46 @@
+{
+  "template": "wan22_flf2v",
+  "kind": "video",
+  "vram_class": "wan14b",
+  "requires_reference": true,
+  "reference_node": "97.image",
+  "map": {
+    "positive_prompt": "129:93.text",
+    "negative_prompt": "129:89.text",
+    "width": "129:98.width",
+    "height": "129:98.height",
+    "seconds": "129:161.value",
+    "fps": "129:162.value",
+    "seed": "129:86.noise_seed",
+    "lightning": "129:131.value",
+    "unet_high": "129:95.unet_name",
+    "unet_low": "129:96.unet_name",
+    "lora_high": "129:101.lora_name",
+    "lora_low": "129:102.lora_name",
+    "clip_name": "129:84.clip_name",
+    "vae_name": "129:90.vae_name",
+    "shift": "129:104.shift"
+  },
+  "output_node": "108",
+  "model_params": [
+    "unet_high",
+    "unet_low",
+    "lora_high",
+    "lora_low",
+    "clip_name",
+    "vae_name"
+  ],
+  "notes": "Wan 2.2 14B first-and-last-frame to video (high + low noise experts, fp8, lightx2v 4-step LoRAs): the clip starts on the reference image and ends on the end image, inventing the motion between them - a shot that lands exactly on a planned frame, or two stills joined by a move. 832x480 at 16 fps, `seconds` long. Built from Prospero's wan22_i2v_14b graph with WanImageToVideo swapped for the core WanFirstLastFrameToVideo node (as in the official video_wan2_2_14B_flf2v.json template).",
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "seconds": 5,
+    "fps": 16,
+    "lightning": true,
+    "shift": 5,
+    "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+  },
+  "size_from_reference": "wan480",
+  "end_image_node": "99.image",
+  "requires_end_image": true
+}

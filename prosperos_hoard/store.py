@@ -851,6 +851,19 @@ class Store:
     # (nodes, wires, positions) and saves with an optimistic `version`;
     # `state` is what runs write (per node: status, jobs, outputs, history),
     # kept apart so a run never fights an edit of the canvas.
+    def render_timings(self, limit: int = 600) -> dict[str, list[float]]:
+        """Seconds each recent render took, by template (from the recipes):
+        what an estimate of a run is made from."""
+        out: dict[str, list[float]] = {}
+        rows = self.conn.execute("SELECT recipe_json FROM assets WHERE recipe_json IS NOT NULL AND source != 'import' "
+                                 "ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+        for r in rows:
+            rec = loads(r["recipe_json"], None) or {}
+            t, el = rec.get("template"), rec.get("elapsed_s")
+            if t and isinstance(el, (int, float)) and el > 0:
+                out.setdefault(str(t), []).append(float(el))
+        return out
+
     def create_space(self, project_id: str, name: str, graph: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         self.get_project(project_id)
         name = (name or "").strip()[:80] or "Space"

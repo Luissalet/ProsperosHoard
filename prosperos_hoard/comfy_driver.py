@@ -10,6 +10,8 @@ touches raw node ids. Custom workflows imported by the user live in
 
 from __future__ import annotations
 
+import math
+
 import copy
 import hashlib
 import json
@@ -415,6 +417,47 @@ def expand_chunks(workflow: dict[str, Any], spec: dict[str, Any], chunks: int, s
         previous = [cat, 0]
     workflow[cfg["cut"]]["inputs"]["samples"] = previous
     workflow[cfg["concat"]]["inputs"]["samples2"] = previous
+    return workflow
+
+
+def talk_chunks_for(spec: dict[str, Any], seconds: float, fps: float, length: int, motion: int) -> int:
+    """How many InfiniteTalk generations a line of `seconds` needs: the first
+    makes `length` frames, every extension `length - motion` new ones."""
+    cfg = spec.get("talk_chunks")
+    if not cfg or seconds <= 0:
+        return 1
+    frames = math.ceil(seconds * fps)
+    extra = max(0, frames - length)
+    return max(1, min(int(cfg.get("max") or 24), 1 + math.ceil(extra / max(1, length - motion))))
+
+
+def expand_talk_chunks(workflow: dict[str, Any], spec: dict[str, Any], chunks: int, seed: int) -> dict[str, Any]:
+    """InfiniteTalk past one generation: each extension is a copy of the
+    talk -> guider/scheduler -> sampler -> decode chain whose
+    `previous_frames` are all the frames made so far (the node reads the
+    audio window from their count), and whose decode loses its first
+    `trim_image` frames (the repeated motion context) before it joins the
+    rest. The video node then takes the joined frames. In place."""
+    cfg = spec.get("talk_chunks")
+    if not cfg or chunks <= 1:
+        return workflow
+    chunks = min(int(chunks), int(cfg.get("max") or 24))
+    talk, guider, sched, noise, sampler, decode = (cfg[k] for k in ("talk", "guider", "scheduler", "noise", "sampler", "decode"))
+    frames_so_far: list = [decode, 0]
+    for n in range(1, chunks):
+        t, g, sc, no, sa, de, tr, jo = (f"{x}_x{n}" for x in (talk, guider, sched, noise, sampler, decode, "trim", "join"))
+        workflow[t] = {"class_type": workflow[talk]["class_type"], "inputs": {**workflow[talk]["inputs"], "previous_frames": frames_so_far}}
+        workflow[g] = {"class_type": workflow[guider]["class_type"], "inputs": {**workflow[guider]["inputs"], "model": [t, 0],
+                                                                                "positive": [t, 1], "negative": [t, 2]}}
+        workflow[sc] = {"class_type": workflow[sched]["class_type"], "inputs": {**workflow[sched]["inputs"], "model": [t, 0]}}
+        workflow[no] = {"class_type": workflow[noise]["class_type"], "inputs": {**workflow[noise]["inputs"], "noise_seed": int(seed) + n}}
+        workflow[sa] = {"class_type": workflow[sampler]["class_type"], "inputs": {**workflow[sampler]["inputs"], "noise": [no, 0],
+                                                                                  "guider": [g, 0], "sigmas": [sc, 0], "latent_image": [t, 3]}}
+        workflow[de] = {"class_type": "VAEDecode", "inputs": {**workflow[decode]["inputs"], "samples": [sa, 0]}}
+        workflow[tr] = {"class_type": "ImageFromBatch", "inputs": {"image": [de, 0], "batch_index": [t, 4], "length": 4096}}
+        workflow[jo] = {"class_type": "ImageBatch", "inputs": {"image1": frames_so_far, "image2": [tr, 0]}}
+        frames_so_far = [jo, 0]
+    workflow[cfg["video"]]["inputs"]["images"] = frames_so_far
     return workflow
 
 

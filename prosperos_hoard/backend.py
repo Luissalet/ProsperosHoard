@@ -44,6 +44,7 @@ DEFAULT_VRAM_ESTIMATES_MB = {
     "wan_animate": 10000,
     # Wan 2.2 S2V 14B fp8 (16.4 GB) + wav2vec2: streams partly from RAM on 16 GB
     "wan_s2v": 12000,
+    "control": 3000,
 }
 
 
