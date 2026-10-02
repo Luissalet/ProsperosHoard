@@ -703,7 +703,8 @@ def summary_view(state: dict[str, Any]) -> dict[str, Any]:
         done = state.get("done", {})
         return {"slug": state["slug"], "name": state.get("name") or state["slug"], "legacy": True,
                 "status": "done" if "9" in done else "partial", "project_id": done.get("1", {}).get("project_id"),
-                "updated_at": state.get("updated_at"), "stages_done": sorted(done, key=lambda k: int(k) if k.isdigit() else 99)}
+                "updated_at": state.get("updated_at"), "stages_done": sorted(done, key=lambda k: int(k) if k.isdigit() else 99),
+                "cover": _legacy_cover(done), "shot_count": len((done.get("4") or {}).get("stills") or {})}
     stages = stages_for(state)
     return {"slug": state["slug"], "name": state.get("name"), "status": state.get("status"), "stage": state.get("stage"),
             "project_id": state.get("project_id"), "updated_at": state.get("updated_at"),
@@ -712,6 +713,18 @@ def summary_view(state: dict[str, Any]) -> dict[str, Any]:
             "kind": state.get("kind") or "music_video", "cover": _cover(state),
             "progress": {"done": sum(1 for s in stages if stage_status(state, s) == "done"), "total": len(stages)},
             "shot_count": len((state.get("spec") or {}).get("shots") or [])}
+
+
+def _legacy_cover(done: dict[str, Any]) -> Optional[dict[str, str]]:
+    """A scripted production's cover: its final cut, else its album cover."""
+    timelines = (done.get("8") or {}).get("timelines") or {}
+    for aspect in ("16:9", "9:16", "1:1"):
+        renders = (timelines.get(aspect) or {}).get("renders") or {}
+        rid = renders.get("final") or renders.get("preview")
+        if rid:
+            return {"asset_id": rid, "kind": "video"}
+    cover = (done.get("7") or {}).get("cover_id")
+    return {"asset_id": cover, "kind": "image"} if cover else None
 
 
 def _cover(state: dict[str, Any]) -> Optional[dict[str, str]]:
