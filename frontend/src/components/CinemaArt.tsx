@@ -102,7 +102,7 @@ const CROP: Record<string, [number, number, number]> = {
   medium_close: [480, 420, 37.3],
   close_up: [480, 420.6, 21.3],
   extreme_close_up: [480, 423.4, 6.4],
-  detail: [482.6, 418.8, 12],
+  detail: [483.4, 431.5, 13],
 };
 
 function Frame({ children, viewBox = "0 0 160 90", label }: { children: ReactNode; viewBox?: string; label?: string }) {
