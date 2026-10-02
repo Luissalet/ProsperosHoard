@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AudioLines, FileText, Film, Heart, Star, Type, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type Job } from "../api";
 import { useT, type MessageKey } from "../i18n";
+import { kindName } from "../messages";
 
 // ------------------------------------------------------------ app context
 
@@ -166,6 +167,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
   asset: Asset; onClick?: () => void; selected?: boolean; focused?: boolean; square?: boolean; draggable?: boolean; selecting?: boolean;
 }) {
   const src = thumbUrl(asset);
+  const { lang } = useT();
   return (
     <button
       className={`tile${selected ? " selected" : ""}${focused ? " focused" : ""}`}
@@ -186,8 +188,8 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
         <div className="media-icon"><KindIcon kind={asset.kind} /></div>
       )}
       <div className="tile-badges">
-        {asset.kind !== "image" && <span className="pill badge-dark">{asset.kind}</span>}
-        {asset.source === "rendered" && asset.kind === "image" && <span className="pill badge-dark">design</span>}
+        {asset.kind !== "image" && <span className="pill badge-dark">{kindName(asset.kind, lang)}</span>}
+        {asset.source === "rendered" && asset.kind === "image" && <span className="pill badge-dark">{kindName("design", lang)}</span>}
       </div>
       {selecting && <span className="tile-select">{selected ? "✓" : ""}</span>}
       {asset.favourite && <Heart className="fav" size={16} fill="currentColor" />}

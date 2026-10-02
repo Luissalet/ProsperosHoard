@@ -1,4 +1,6 @@
 // Thin typed client for the Prospero's Hoard HTTP API (see docs/API.md).
+import { detectLang } from "./i18n";
+import { errorText } from "./messages";
 
 export type Kind = "image" | "video" | "audio" | "lyrics" | "font" | "layout";
 
@@ -74,6 +76,7 @@ export interface Project {
   name: string;
   brief: string | null;
   cover_asset_id: string | null;
+  auto_cover_asset_id?: string | null;   // the newest favourite / image when no cover was chosen
   created_at: string;
   updated_at: string;
   counts: Record<string, number>;
@@ -908,10 +911,13 @@ export interface RecipeSummary {
 export class ApiError extends Error {
   code: string;
   status: number;
-  constructor(code: string, message: string, status: number) {
+  /** The message exactly as the backend sent it (`message` is translated when the UI is in Spanish). */
+  original: string;
+  constructor(code: string, message: string, status: number, original?: string) {
     super(message);
     this.code = code;
     this.status = status;
+    this.original = original ?? message;
   }
 }
 
@@ -933,7 +939,8 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
       code = data.error || code;
       message = data.message || message;
     }
-    throw new ApiError(code, message, res.status);
+    // every toast reads the error message: in Spanish it is translated here, once
+    throw new ApiError(code, errorText(code, message, detectLang()), res.status, message);
   }
   if (type.includes("json")) return (await res.json()) as T;
   return (await res.blob()) as unknown as T;
@@ -1289,6 +1296,8 @@ export const api = {
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
     request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
+  critiquePlan: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<{ issues: string[]; revised: boolean; shots?: VideoShot[] }>("POST", "/api/productions/plan/critique", body, signal),
   planVideo: (body: Record<string, unknown>, signal?: AbortSignal) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/api/productions/plan", body, signal),
   videoFromPlan: (body: Record<string, unknown>) => request<{ production: ProductionView; job: Job }>("POST", "/api/productions/from-plan", body),
   createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;

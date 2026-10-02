@@ -3,11 +3,12 @@ import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximi
 import { api, fileUrl, type Asset, type Board, type ClipEditMode, type ClipEditPlan, type ClipEditRequest } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Stars, useApp, useAsync } from "./ui";
+import { kindName, sourceName } from "../messages";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [zoom, setZoom] = useState(false);
@@ -145,8 +146,8 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
       <aside className="lightbox-side">
         <div>
           <div className="row" style={{ marginBottom: 6 }}>
-            <span className="pill">{asset.kind}</span>
-            <span className="pill">{asset.source}</span>
+            <span className="pill">{kindName(asset.kind, lang)}</span>
+            <span className="pill">{sourceName(asset.source, lang)}</span>
             {list.length > 1 && <span className="muted small">{idx + 1} / {list.length}</span>}
           </div>
           <h2>{asset.name || asset.id}</h2>
@@ -326,7 +327,7 @@ function CastReference({ asset }: { asset: Asset }) {
     <div className="row wrap" style={{ gap: 6 }}>
       {using.length > 0 ? <span className="pill ok">{t("refOf", { names: using.map((c) => c.name).join(", ") })}</span> : (
         <>
-          <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ maxWidth: 200 }}>
+          <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
             <option value="">{t("refPick")}</option>
             {items.map((c) => <option key={c.id} value={c.id}>{c.name}{c.canonical_asset_id ? "" : ` · ${t("refNone")}`}</option>)}
           </select>

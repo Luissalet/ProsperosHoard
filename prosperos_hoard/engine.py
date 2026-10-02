@@ -73,9 +73,17 @@ def _first(*values: Any) -> Any:
 
 
 def _clip(text: Optional[str], n: int) -> Optional[str]:
+    """`text` cut to `n` characters at a word boundary when one is near
+    (a name never ends in half a word: "...four on the floor…", not "...dru")."""
     if text is None:
         return None
-    return text if len(text) <= n else text[: n - 1] + "…"
+    if len(text) <= n:
+        return text
+    cut = text[: n - 1]
+    word = cut.rsplit(" ", 1)[0] if " " in cut else cut
+    if len(word) >= n * 0.6:
+        cut = word
+    return cut.rstrip(" ,;:-·") + "…"
 
 
 def random_seed() -> int:
@@ -2282,12 +2290,17 @@ def compose_song(store: Store, backend: Backend, job: dict[str, Any], progress) 
         "language": _first(params.get("language"), "en"), "key": _first(params.get("key"), "C major"),
         "seed": params.get("seed"), "steps": 8, "cfg": 1,
     }
-    return run_template(
+    base_name = params.get("name") or _clip(params["tags"], 60)
+    out = run_template(
         store, backend, job, progress, template_name="ace15_song", values=values, operation="compose_song",
         count=params.get("count", 1),
         extra_recipe={"tags": params["tags"], "bpm": bpm, "key": values["key"], "language": values["language"]},
-        name=params.get("name") or params["tags"][:60],
+        name=base_name,
     )
+    if len(out["asset_ids"]) > 1:  # takes to choose from: each its own name
+        for i, aid in enumerate(out["asset_ids"]):
+            store.update_asset(aid, name=f"{base_name} #{i + 1}")
+    return out
 
 
 # ------------------------------------------------------------------ i/o --
@@ -2955,7 +2968,7 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     if fps not in (24, 25, 30):
         raise EngineError("bad_fps", "fps must be 24, 25 or 30")
     return {"tracks": built["tracks"], "fps": fps, "sections": sections, "duration_s": analysis["duration_s"],
-            "song_name": song.get("name") or song["id"]}
+            "song_name": re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac|opus)$", "", song.get("name") or song["id"], flags=re.I)}
 
 
 def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> dict[str, Any]:

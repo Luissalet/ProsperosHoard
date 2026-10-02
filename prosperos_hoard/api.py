@@ -446,6 +446,7 @@ class ComposeSongBody(BaseModel):
     seed: Optional[int] = None
     checkpoint: Optional[str] = None
     count: int = 1
+    name: Optional[str] = None                  # the song's name (default: its sound tags)
     wait_s: float = 0
 
 
@@ -551,6 +552,16 @@ class VideoPlanBody(BaseModel):
     duration_s: float = 120
     project: Optional[str] = None  # its places and objects are offered to the planner as @Name
     critic: bool = True            # a second pass that reviews the shot list and rewrites the weak shots
+    notes_language: Optional[str] = None  # the language of the critic's notes (the app's language; default English)
+
+
+class VideoCritiqueBody(BaseModel):
+    concept: str
+    draft: dict[str, Any]                # the plan as the planner wrote it (or as the person edited it)
+    character_id: Optional[str] = None
+    lead_name: Optional[str] = None
+    lead_look: Optional[str] = None
+    notes_language: Optional[str] = None
 
 
 class VideoFromPlanBody(BaseModel):
@@ -1419,9 +1430,22 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             return res
         return agent("studio_projects", query or "", run)
 
+    def _with_auto_cover(p: dict[str, Any]) -> dict[str, Any]:
+        """A project without a chosen cover shows its best picture: the
+        newest favourite, else the newest image (`auto_cover_asset_id`)."""
+        if p.get("cover_asset_id"):
+            return p
+        try:
+            pick = (store.list_assets(p["id"], kind="image", favourite=True, limit=1)["items"]
+                    or store.list_assets(p["id"], kind="image", limit=1)["items"])
+        except Exception:  # noqa: BLE001 - no cover is fine
+            pick = []
+        return {**p, "auto_cover_asset_id": pick[0]["id"] if pick else None}
+
     @app.get("/api/projects")
     def list_projects(query: Optional[str] = None, limit: int = 50, offset: int = 0):
-        return store.list_projects(query, limit, offset)
+        out = store.list_projects(query, limit, offset)
+        return {**out, "items": [_with_auto_cover(p) for p in out["items"]]}
 
     @app.post("/api/projects")
     def create_project(body: CreateProjectBody):
@@ -1429,7 +1453,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str):
-        return store.get_project(project_id)
+        return _with_auto_cover(store.get_project(project_id))
 
     # ------------------------------------------------- project trash
     def project_delete_preview(project_id: str) -> dict[str, Any]:
@@ -2422,14 +2446,36 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_time_lyrics", body.song_asset_id,
                      lambda: engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name))
 
+    def _with_lyric_sections(asset_id: str, analysis: dict[str, Any]) -> dict[str, Any]:
+        """The song's sections from its own timed lyrics ([Verse], [Chorus]...)
+        when it has some: they are what the song really is, the audio-only
+        sections are guesses from energy changes."""
+        try:
+            song = store.get_asset(asset_id)
+            items = store.list_assets(song["project_id"], kind="lyrics", query=asset_id, limit=20)["items"]
+        except Exception:  # noqa: BLE001 - no lyrics: the audio sections as they are
+            return analysis
+        for lyr in items:
+            if (lyr.get("recipe") or {}).get("derived_from") != asset_id:
+                continue
+            try:
+                lines = audio_mod.parse_lrc(engine.read_lyrics(store, lyr["id"])["text"])
+            except Exception:  # noqa: BLE001
+                continue
+            _, sections = audio_mod.lrc_sections(lines, float(analysis.get("duration_s") or 0))
+            if len(sections) >= 2:
+                return {**analysis, "sections": sections, "sections_source": "lyrics", "lyrics_asset_id": lyr["id"],
+                        "notes": "sections from the song's timed lyrics; downbeats are estimates"}
+        return analysis
+
     @app.post("/api/agent/studio_analyze_audio")
     def agent_analyze_audio(asset_id: str):
         return agent("studio_analyze_audio", asset_id,
-                     lambda: engine.analysis_view(asset_id, engine.analyze_audio(store, asset_id)))
+                     lambda: engine.analysis_view(asset_id, _with_lyric_sections(asset_id, engine.analyze_audio(store, asset_id))))
 
     @app.post("/api/assets/{asset_id}/analyze")
     def ui_analyze(asset_id: str, force: bool = False):
-        return engine.analyze_audio(store, asset_id, force=force)
+        return _with_lyric_sections(asset_id, engine.analyze_audio(store, asset_id, force=force))
 
     @app.get("/api/assets/{asset_id}/lyrics")
     def get_lyrics(asset_id: str):
@@ -3327,7 +3373,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                 on_bad_reply=_keep_bad_plan_reply, elements=elements)
         if body.critic:
             review = mv_planner.critique(chat, draft, concept=body.concept, lead_name=lead["name"],
-                                         lead_look=lead.get("look") or "")
+                                         lead_look=lead.get("look") or "", notes_language=body.notes_language)
             if review.get("revised"):
                 draft["first_shots"] = draft["shots"]
                 draft["shots"] = review.pop("shots")
@@ -3519,6 +3565,17 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/productions/plan")
     def production_plan(body: VideoPlanBody):
         return op_video_plan(body)
+
+    @app.post("/api/productions/plan/critique")
+    def production_plan_critique(body: VideoCritiqueBody):
+        """The director's pass over a plan already shown to the person (the
+        app asks for it after the plan, so the shot list is editable at once):
+        {issues, revised, shots?} - shots only when it rewrote weak ones."""
+        lead = _plan_lead(body.character_id, body.lead_name, body.lead_look)
+        chat = ((getattr(app.state, "short_hooks", None) or {}).get("chat")
+                or mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus))
+        return mv_planner.critique(chat, body.draft, concept=body.concept, lead_name=lead["name"],
+                                   lead_look=lead.get("look") or "", notes_language=body.notes_language)
 
     @app.post("/api/productions/from-plan")
     def production_from_plan(body: VideoFromPlanBody):

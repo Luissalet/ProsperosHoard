@@ -746,15 +746,28 @@ def stages_for(state: dict[str, Any]) -> list[str]:
     return list(state.get("stages") or STAGES)
 
 
+def display_name(state: dict[str, Any]) -> str:
+    """The name shown for a production: its own, the spec's title, or its
+    slug made readable ("dont_look_back" -> "Dont look back")."""
+    name = str(state.get("name") or "").strip()
+    if name and name != state.get("slug"):
+        return name
+    title = str((state.get("spec") or {}).get("title") or "").strip()
+    if title:
+        return title
+    words = re.sub(r"[_-]+", " ", str(state.get("slug") or "")).strip()
+    return words[:1].upper() + words[1:] if words else "Production"
+
+
 def summary_view(state: dict[str, Any]) -> dict[str, Any]:
     if is_legacy(state):
         done = state.get("done", {})
-        return {"slug": state["slug"], "name": state.get("name") or state["slug"], "legacy": True,
+        return {"slug": state["slug"], "name": display_name(state), "legacy": True,
                 "status": "done" if "9" in done else "partial", "project_id": done.get("1", {}).get("project_id"),
                 "updated_at": state.get("updated_at"), "stages_done": sorted(done, key=lambda k: int(k) if k.isdigit() else 99),
                 "cover": _legacy_cover(done), "shot_count": len((done.get("4") or {}).get("stills") or {})}
     stages = stages_for(state)
-    return {"slug": state["slug"], "name": state.get("name"), "status": state.get("status"), "stage": state.get("stage"),
+    return {"slug": state["slug"], "name": display_name(state), "status": state.get("status"), "stage": state.get("stage"),
             "project_id": state.get("project_id"), "updated_at": state.get("updated_at"),
             "recipe": (state.get("recipe") or {}).get("name"), "message": state.get("message"),
             "animatic": bool((state.get("done", {}).get("animatic") or {}).get("renders")),
@@ -1183,6 +1196,8 @@ class Run:
         if "takes" not in pending and not partial.get("song_asset_ids"):
             body = {k: song.get(k) for k in ("tags", "lyrics", "bpm", "duration", "key", "language", "time_signature", "seed")}
             body["count"] = song["count"]
+            # the song is the video's: named after it, not after its sound tags
+            body["name"] = str(self.spec.get("title") or self.state.get("name") or "")[:80] or None
             pending["takes"] = self.studio.compose(pid, body)["id"]
             self.save()
 

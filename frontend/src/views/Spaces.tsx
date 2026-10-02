@@ -12,7 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Aperture, ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
-  Music, Play, Plus, RotateCcw, Sparkles, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
+  Music, Play, Plus, RotateCcw, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
   Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload,
 } from "lucide-react";
 import {
@@ -22,6 +22,7 @@ import {
 import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "../components/ui";
 import { useCinemaGuide, useSlashMenu } from "../components/Slash";
+import { Enhance } from "../components/Enhance";
 
 // ------------------------------------------------------------ the node model
 
@@ -231,24 +232,6 @@ function StatusChip({ st }: { st?: SpaceNodeState }) {
       {busy && <Loader2 size={11} className="spin" />}
       {t(label[st.status])}{st.status === "running" && progress > 0 ? ` ${Math.round(progress * 100)}%` : ""}
     </span>
-  );
-}
-
-function Enhance({ text, kind, onDone }: { text: string; kind: "image" | "video" | "music"; onDone: (s: string) => void }) {
-  const { t } = useT();
-  const app = useApp();
-  const [busy, setBusy] = useState(false);
-  return (
-    <button className="btn xs ghost nodrag" disabled={!text.trim() || busy} title={t("spEnhanceHint")}
-      onClick={async () => {
-        setBusy(true);
-        try { onDone((await api.enhancePrompt(text, kind, app.projectId || undefined)).text); } catch (e) {
-          app.toast(e instanceof ApiError && e.code === "llm_unavailable" ? t("spNoLlm") : (e as Error).message, "bad");
-        }
-        finally { setBusy(false); }
-      }}>
-      {busy ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />} {t("spEnhance")}
-    </button>
   );
 }
 
@@ -1115,11 +1098,13 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   // what a full run would cost: renders, minutes and the biggest engine
   const [est, setEst] = useState<SpaceEstimate | null>(null);
   const runningKey = Object.entries(state).map(([k, v]) => `${k}:${v.status}:${(v.outputs || []).length}`).join("|");
+  // the graph itself (a build or an import changes it without an edit of ours)
+  const graphKey = `${nodes.map((n) => n.id).join(",")}|${edges.length}`;
   useEffect(() => {
     if (save !== "saved") return;
     const id = setTimeout(() => { api.spaceEstimate(spaceId).then(setEst).catch(() => setEst(null)); }, 500);
     return () => clearTimeout(id);
-  }, [save, spaceId, runningKey]);
+  }, [save, spaceId, runningKey, graphKey]);
 
   // the assistant that builds part of the graph from one sentence
   const [building, setBuilding] = useState<{ open: boolean; text: string; busy: boolean }>({ open: false, text: "", busy: false });

@@ -163,6 +163,20 @@ class HttpMusic(MusicBackend):
 _FFMPEG_CACHE: dict[str, Optional[str]] = {}
 
 
+
+def _port_open(url: str, timeout_s: float = 0.4) -> bool:
+    """Whether something listens at a server URL's host and port (a quick
+    TCP connect, no HTTP)."""
+    import socket
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+        host, port = u.hostname or "127.0.0.1", u.port or (443 if u.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
 def ffmpeg_path() -> str | None:
     """ffmpeg on PATH first (the user's install), then the imageio-ffmpeg
     bundled binary. Cached: `shutil.which` is not free on Windows."""
@@ -380,11 +394,12 @@ class Backend:
         cached = self._pool_health.get(url)
         if cached and now - cached[0] < ttl_s:
             return cached[1]
-        try:
-            self.run_async(self._pool_client(url).system_stats())
-            ok = True
-        except Exception:
-            ok = False
+        ok = _port_open(url)  # a server that is off answers nothing: no client retries to wait through
+        if ok:
+            try:
+                self.run_async(self._pool_client(url).system_stats())
+            except Exception:
+                ok = False
         self._pool_health[url] = (now, ok)
         return ok
 
@@ -929,7 +944,7 @@ class Backend:
             "demo": self.demo,
             "hoard_link": link_status,
             "comfy": comfy_info,
-            "render_pool": [{"url": u, "reachable": self.pool_server_ready(u, ttl_s=0.0)} for u in self.render_pool()],
+            "render_pool": [{"url": u, "reachable": self.pool_server_ready(u, ttl_s=3.0)} for u in self.render_pool()],
             "comfy_dedicated": self._raw_config().get("comfy_dedicated") is True,
             "ffmpeg": {"found": bool(exe), "path": exe, "version": ffmpeg_version(exe)},
             "piper": {"installed": _piper_installed()},

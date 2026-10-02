@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ImagePlus, Loader2, Printer, Stamp, X } from "lucide-react";
 import { api, thumbUrl, type DesignTemplate } from "../api";
 import { useT } from "../i18n";
+import { fieldHint, fieldName, variantName } from "../messages";
 import { AssetPicker, useApp, useAsync, useDebounced } from "../components/ui";
 
 const LABELS: Record<string, Record<string, string>> = {
@@ -111,13 +112,13 @@ export function DesignerView() {
           {tpl?.variants.length ? (
             <label className="field">{t("variant")}
               <div className="segmented">
-                {tpl.variants.map((v) => <button key={v} className={variant === v ? "on" : ""} onClick={() => setVariant(v)}>{v.replace("_", " ")}</button>)}
+                {tpl.variants.map((v) => <button key={v} className={variant === v ? "on" : ""} onClick={() => setVariant(v)}>{variantName(v, lang)}</button>)}
               </div>
             </label>
           ) : null}
           {tpl?.fields.map((f) => (
             <div key={f.name} className="field">
-              <span><strong style={{ fontWeight: 550, color: "var(--text)" }}>{f.name.replace("_", " ")}{f.required ? " *" : ""}</strong> <span className="hint">· {f.description}</span></span>
+              <span><strong style={{ fontWeight: 550, color: "var(--text)" }}>{fieldName(f.name, lang)}{f.required ? " *" : ""}</strong> <span className="hint">· {fieldHint(f.description, lang)}</span></span>
               {f.type === "image" ? (
                 <div className="drop-slot" onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => { const id = e.dataTransfer.getData("text/prospero-asset"); if (id) setField(f.name, id); }}>
