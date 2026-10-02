@@ -913,6 +913,7 @@ BUILD_GUIDE = """You design node graphs for a local AI film studio. Answer with 
 Each node is an object with an "id" (short, letters/digits), a "type" and fields:
 - {"id","type":"text","text"}: a prompt or a STYLE line shared by several nodes
 - {"id","type":"cast","name"}: a character, place or object of the project's cast by name
+- {"id","type":"asset","asset_id"}: a picture, clip or song already in the project (from the list given)
 - {"id","type":"image","prompt","aspect":"1:1|16:9|9:16","count":1-4,"sheet":true|false,
    "prompt_from":[ids of text/cast/assistant/list nodes],"refs":[ids of image/cast/variations nodes]}
 - {"id","type":"variations","mode":"angles|expressions|ages|lighting|storyboard","count":4,"image":[ids]}
@@ -921,8 +922,10 @@ Each node is an object with an "id" (short, letters/digits), a "type" and fields
 - {"id","type":"assistant","prompt","as_list":true,"items":3}: writes ideas; wire it into an image's prompt_from to make one picture per idea
 - {"id","type":"combine","clips":[ids of video nodes in order],"audio":"id of a music node"}
 - {"id","type":"note","text"}
-Rules: reuse the cast names the user mentions; use a reference sheet image ("sheet": true) for each new character
-and wire it as refs into the scene pictures; one picture feeds each clip's start; keep it small (at most 14 nodes)."""
+Rules: a name the user mentions that is in the project cast is a cast node wired as refs into every picture
+that shows it (never draw a new reference sheet for it), and prompts write it as @Name; a reference sheet image
+("sheet": true) only for a new character; "the song" or "my song" is the newest project song as an asset node;
+one picture feeds each clip's start; keep it small (at most 14 nodes)."""
 
 
 def _cast_by_name(store: Store, project_id: str) -> dict[str, str]:
@@ -956,10 +959,18 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
         if t == "image" and n.get("sheet"):
             data["preset"] = "sheet"
         if t == "cast":
-            cid = cast.get(str(n.get("name") or "").lower())
+            cid = cast.get(str(n.get("name") or "").lower().lstrip("@"))
             if not cid:
                 continue
             data = {"character_id": cid}
+        if t == "asset":
+            try:
+                a = store.get_asset(str(n.get("asset_id") or ""))
+            except NotFound:
+                continue
+            if a["project_id"] != project_id or a["kind"] not in ("image", "video", "audio"):
+                continue
+            data = {"kind": a["kind"], "asset_ids": [a["id"]]}
         if t == "group":
             continue
         kept.append(nid)
@@ -989,10 +1000,59 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
             if ref(src):
                 wires.append((ref(src), None, nid, "clips"))
     kept_set = set(kept) | existing
+    _attach_cast(store, project_id, ops, wires, kept_set, existing)
+    seen_wires = set()
     for src, sh, dst, th in wires:
-        if src in kept_set and dst in kept_set:
+        if src in kept_set and dst in kept_set and (src, sh, dst, th) not in seen_wires:
+            seen_wires.add((src, sh, dst, th))
             ops.append({"op": "connect", "source": src, "source_handle": sh, "target": dst, "target_handle": th})
     return ops
+
+
+def _attach_cast(store: Store, project_id: str, ops: list[dict[str, Any]], wires: list[tuple[str, Optional[str], str, str]],
+                 kept: set[str], existing: set[str]) -> None:
+    """What a small local model gets wrong, fixed by hand: a cast member
+    named in a picture's or clip's prompt gets its cast node (added when
+    missing) wired into the picture's refs and is written @Name; a
+    reference sheet drawn for someone already in the cast is replaced by
+    that cast node."""
+    members = [c for c in store.list_characters(project_id) if c.get("canonical_asset_id")]
+    if not members:
+        return
+    adds = {o["id"]: o for o in ops if o["op"] == "add_node"}
+    cast_node = {o["data"].get("character_id"): o["id"] for o in adds.values() if o["type"] == "cast"}
+
+    def mentions(text: str, name: str) -> bool:
+        return bool(re.search(rf"(?<![\w@])@?{re.escape(name)}(?![\w])", text or "", re.I))
+
+    for c in members:
+        name = c["name"]
+        users = [o for o in adds.values() if o["type"] in ("image", "video") and mentions(o["data"].get("prompt", ""), name)]
+        sheets = [o for o in adds.values() if o["type"] == "image" and o["data"].get("preset") == "sheet"
+                  and mentions(o["data"].get("prompt", ""), name)]
+        if not users and not sheets:
+            continue
+        cid = cast_node.get(c["id"])
+        if not cid:
+            base = re.sub(r"[^A-Za-z0-9]", "", name.lower())[:20] or "cast"
+            cid, k = base, 2
+            while cid in adds or cid in existing:
+                cid, k = f"{base}{k}", k + 1
+            op = {"op": "add_node", "id": cid, "type": "cast", "data": {"character_id": c["id"]}}
+            ops.insert(0, op)
+            adds[cid] = op
+            cast_node[c["id"]] = cid
+            kept.add(cid)
+        for sheet in sheets:
+            # its consumers take the cast's picture instead; the sheet goes
+            ops.remove(sheet)
+            adds.pop(sheet["id"], None)
+            kept.discard(sheet["id"])
+            wires[:] = [(cid, "image", d, th) if src == sheet["id"] else (src, sh, d, th) for src, sh, d, th in wires]
+            users = [u for u in users if u is not sheet]
+        for o in [u for u in users if u["type"] == "image"]:
+            o["data"]["prompt"] = re.sub(rf"(?<![\w@]){re.escape(name)}(?![\w])", f"@{name}", o["data"]["prompt"], flags=re.I)
+            wires.append((cid, "image", o["id"], "refs"))
 
 
 def layout_new_nodes(graph: dict[str, Any], new_ids: set[str], origin_x: float = 0, origin_y: float = 0) -> None:

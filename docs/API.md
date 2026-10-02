@@ -27,6 +27,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_create_project` | `{name, brief?, image_engine?}` |
 | POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields, force?}`; `action` is `list`, `create`, `update`, `delete`, `restore` or `deleted`; `kind` is `character`, `location`, `prop` or `group` (a place or an object is a cast entry with `element` set) |
 | POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, use_element_references (true), consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `matched_elements` (places/objects mentioned; on Qwen-Image 2.1 their images go in as numbered references after the call's own), `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
+| POST | `/api/agent/studio_video_plan` | `{concept, character_id?, lead_name?, lead_look?, shots=10, language="en", song_asset_id?, lyrics?, genre?, duration_s=120, project?, critic=true}` -> `{draft{..., shots[], critique{issues[], revised}, first_shots[]}, lead}`; with `critic` the shot list gets a rubric check that needs no model and a director's review pass that rewrites weak shots (`first_shots` keeps the list before the review); UI twin `POST /api/productions/plan` |
+| POST | `/api/agent/studio_reframe` | `{asset_id, aspect="9:16", framing="fill"\|"blur"\|"fit", focus_x?, focus_y?, quality="final"\|"preview", project?, wait_s=0}` -> `{job}`; `aspect` is 9:16, 16:9, 1:1, 4:5, 2:3, 3:2 or 21:9; `focus_x`/`focus_y` (0-1) default to the sharpest detail of the picture; a new asset (job type `reframe`, cpu lane) |
+| POST | `/api/agent/studio_stems` | `{asset_id, force=false, device?, wait_s=0}` -> `{job, stems{vocals, drums, bass, other}}` or `{stems, reused: true}`; `device` is `cpu` or `cuda:N` (default the card with most free memory, at least 3 GB, else the CPU) |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, scale?, model?, wait_s}`; `operation` is `img2img`, `inpaint`, `hires`, `upscale` (`scale` 2 or 4, default 2, at most 8192 px on a side; `model`), `remove_background`, `reuse` or `vary` |
 | POST | `/api/agent/studio_animate` | `{asset_id, prompt?, engine (auto\|wan14b\|wan\|animate\|svd), driving_asset_id?, driving_start_s?, pose_prompt?, seconds?, frames, fps, motion, seed?, wait_s}`: with `driving_asset_id` the image's character performs that video's motion (Wan Animate 2) |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
@@ -48,7 +51,10 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_production` | `?production=<slug>` -> compact view: `{slug, status, stages{stage: done\|partial\|pending}, character_id, song_asset_id, renders, animatic?, qa?, next}` |
 | POST | `/api/agent/studio_production_create` | `{name, spec, settings?, project?}` -> `{production, job}` |
 | POST | `/api/agent/studio_production_continue?production=` | - -> `{production, job}` (approves a paused production, resumes a failed/cancelled one) |
-| POST | `/api/agent/studio_production_shots?production=` | `{changes:[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?}], run}` -> `{changed, status, job?, production}` |
+| POST | `/api/agent/studio_production_shots?production=` | `{changes:[{key, best?, clip?, prompt?, motion_prompt?, motion?, seed?, regenerate?, continue_from?, locked?}], run}` -> `{changed, status, job?, production}`; `continue_from` (an earlier shot's key; null cuts again) makes the clip start on the last frame of that shot's clip and end on its own still, `locked: true` approves the shot |
+| POST | `/api/agent/studio_production_regenerate?production=` | `{stage="clips"\|"frames", keys?, run=true}` -> `{slug, stage, regenerated[], kept[], chained[], status, production, job?}`: redoes only the shots not locked, with new seeds |
+| POST | `/api/agent/studio_production_promote?production=` | `{keys?, run=true}` -> `{slug, promoted[], chained[], status, production, job?}`: draft clips re-rendered as final (14B, same seeds) |
+| POST | `/api/agent/studio_production_reframe?production=` | `{aspects[], framing?="fill"\|"blur"\|"fit", run=true}` -> `{aspects, new[], rerender[], production, job?}` |
 | POST | `/api/agent/studio_recipe_export` | `{production, name?}` -> recipe summary + `cast`, `warnings`, `notes` |
 | GET | `/api/agent/studio_recipes_list` | - -> `{items:[recipe summary]}` |
 | GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
@@ -148,12 +154,18 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/spaces/{id}/stop` | cancel the space's run (its queued renders too); waiting nodes go back to idle -> `{stopped, space}` |
 | GET | `/api/cinema?q=&category=` | the film-language guide: `{categories[{id, name{en, es}, aliases}], items[{id, category, name, what, when, prompt, aliases, video_only}]}`; agent twin `GET /api/agent/studio_cinema` |
 | POST | `/api/spaces/{id}/run` | `{mode: node|downstream|all, node_ids, force}` -> `{job, nodes}`: one `space_run` job runs the generators in order, each waiting for its inputs |
+| GET | `/api/spaces/{id}/estimate` | `?mode=all&node_ids=a,b&force=false` -> `{nodes[{node, renders, seconds, templates, measured, rough?, skipped?}], renders, seconds, minutes, vram_mb}`: the toolbar's "≈ N min · M renders", from the median past render time of each template on this computer |
+| GET | `/api/spaces/{id}/app` | the space as a form `{id, name, inputs[{node, type, label, value}], outputs[{node, label, kind, status, outputs, texts?, error}]}`: nodes with `data.app_input` (text, asset, cast; label `data.app_label`) and generators with `data.app_output` |
+| POST | `/api/spaces/{id}/app/run` | `{values: {input node id: text \| asset id(s) \| character id}}` -> the run (`{job, nodes, version, app}`): the values go into the input nodes and the whole space runs |
+| POST | `/api/spaces/{id}/build` | `{request}`: the local model adds nodes and wires from one sentence (laid out next to what is there, validated, saved); `empty_request`, `build_failed` |
 | PATCH | `/api/spaces/{id}/nodes/{node}` | `{excluded?}` (outputs that stop flowing downstream) or `{outputs?}` (pick an earlier run's outputs back) -> the space |
 | POST | `/api/prompt/enhance` | `{text, kind: image|video|music, project?}` -> `{text}`; agent twin `POST /api/agent/studio_prompt_enhance` |
-| POST | `/api/agent/studio_spaces?project=` | body: `studio_spaces` (list/get/create/edit ops/run/delete/restore) |
+| POST | `/api/agent/studio_spaces?project=` | body: `studio_spaces` (list/get/create/edit ops/run/stop/estimate/build/app/app_run/delete/restore); node types in [MCP.md](MCP.md): text, asset, cast, image (inputs prompt, refs, `pose`, `layout`), video (inputs start, `end`, prompt, motion, audio; `sing_engine` auto\|s2v\|infinitetalk), music, assistant, edit (`upscale`, `remove_background`, `pose_map`, `depth_map`), variations, combine, list, group, note |
 | POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?, engine?, references?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, matched_elements, element_references, added_references[{name, element, asset_id, index}], unknown_mentions, reference_asset_id, style_defaults`); with `engine: "qwen21"` the mentioned places/objects with an image are numbered after the call's `references` exactly as the render will |
 | POST | `/api/projects/{id}/generate` | same body as the agent route (`camera: {shot, angle, move, lens, light, composition}` adds those terms to the prompt); returns the full job |
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
+| POST | `/api/assets/{id}/reframe` | the body of `studio_reframe` without `asset_id` -> `{job}` |
+| GET / POST | `/api/assets/{id}/stems` | the stems found so far `{stems{vocals, drums, bass, other: asset_id}}` / split the song (body of `studio_stems` without `asset_id`; Demucs `htdemucs` in ComfyUI's own Python, installed once into `tools/demucs-lib` in the data folder) -> `{job, stems}`; lip sync (S2V, InfiniteTalk) feeds the vocals to the audio encoder and `kick` beat effects read the drums when the stems exist |
 | POST | `/api/assets/{id}/animate` | same body as `studio_animate` |
 | GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` (built-ins now include `flux_schnell_txt2img`, `flux_kontext_edit`, `wan22_ti2v`, `ace15_song` alongside SDXL/SD1.5/SVD) |
 | POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first, against the live `/object_info` or, with ComfyUI off, the copy cached in `data/comfy/object_info.json`) -> proposed spec with `map` (and `converted_from: "ui"`) |
@@ -217,7 +229,7 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/productions` | `{name, spec, settings?, project?}`: create and queue |
 | GET | `/api/productions/{slug}` | the full `state.json` plus `view` (the compact agent view) |
 | POST | `/api/productions/{slug}/continue` | approve / resume |
-| PATCH | `/api/productions/{slug}/shots` | `{changes, run}`; a change may set `span {start_s, end_s}` (null frees it; no overlaps), `refs`, `motion_ref {asset_id, start_s, prompt}`, `crowd`, `cast [names]`, `section`, `lead`, `after`, `delete`, or `insert` a shot |
+| PATCH | `/api/productions/{slug}/shots` | `{changes, run}`; a change may set `span {start_s, end_s}` (null frees it; no overlaps), `continue_from` (an earlier shot's key; null cuts again), `locked` (approves the shot; a locked shot refuses other changes), `refs`, `motion_ref {asset_id, start_s, prompt}`, `crowd`, `cast [names]`, `section`, `lead`, `after`, `delete`, or `insert` a shot |
 | PUT | `/api/productions/{slug}/song` | `{asset_id? \| take? \| compose?, lyrics?, time_lyrics=true, run}`: change the song (also `POST /api/agent/studio_production_song?production=`) |
 | POST | `/api/productions/{slug}/time-lyrics` | time the lyrics to the current song now (the lyrics stage without a run) |
 | GET | `/api/agent/studio_production_timing?production=` | timed lines, sections, spans, animatic positions |
@@ -225,7 +237,10 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | DELETE | `/api/projects/{id}` | to the trash (with its productions); 409 `project_busy` with live jobs (also `POST /api/agent/studio_delete_project {project}`) |
 | GET | `/api/trash/projects` | deleted projects |
 | POST | `/api/projects/{id}/restore` / `/purge` | bring it back / delete it for good (only from the trash); `studio_trash` takes `projects=[...]` for both |
-| PATCH | `/api/productions/{slug}/settings` | `{autopilot?, animatic?, animatic_autocontinue?, song_review?, qa?}` (also `POST /api/agent/studio_production_settings?production=`) |
+| PATCH | `/api/productions/{slug}/settings` | `{autopilot?, animatic?, animatic_autocontinue?, song_review?, qa?, clip_quality?="draft"\|"final"}` (also `POST /api/agent/studio_production_settings?production=`) |
+| POST | `/api/productions/{slug}/regenerate` | `{stage="clips"\|"frames", keys?, run=true}`: redo only the unapproved (not `locked`) shots with new seeds (agent twin `POST /api/agent/studio_production_regenerate?production=`) |
+| POST | `/api/productions/{slug}/promote` | `{keys?, run=true}`: draft clips (`clip_quality: draft`, fast on the 5B model, no end frames) re-rendered as final on the 14B model with the same seeds (agent twin `studio_production_promote`) |
+| POST | `/api/productions/{slug}/reframe` | `{aspects[], framing?, run=true}`: adds cut shapes (9:16, 16:9, 1:1) and sets `finishing.framing`; only the cut renders again (agent twin `studio_production_reframe`) |
 | GET | `/api/productions/{slug}/preflight` | `{ok, items:[{level: error\|warn\|info, code: comfy_down\|comfy_autostart\|no_music_model\|no_ffmpeg\|gpu_busy, message, startable?}]}` |
 | GET | `/api/timelines/{id}/export?format=zip\|xml\|edl&name=` | the cut for Premiere / Resolve: FCP7 XML (lyrics as markers), CMX 3600 EDL, or a zip with both and a README (also `POST /api/agent/studio_export_timeline {production, aspect} \| {timeline_id}`) |
 | GET | `/api/assets` | `kind?, query?, limit, offset, project?`: assets across every project, each with `project_name` (the pickers' "all projects") |
@@ -286,7 +301,7 @@ feature existed:
 
 ```json
 {"color_grade": "teal_orange", "grain": 0.3, "vignette": true,
- "letterbox": true, "glitch_on_downbeats": true, "lyric_style": "horror"}
+ "letterbox": true, "glitch_on_downbeats": true, "lyric_style": "horror", "framing": "blur"}
 ```
 
 `color_grade` is one of `teal_orange`, `sodium_night`, `bleach_bypass`
@@ -295,7 +310,14 @@ feature existed:
 flash (`chromashift`) to the clips the auto-cut already marks as strong
 downbeats. `lyric_style: "horror"` swaps the caption font for a condensed
 uppercase face with a small per-line rotation/shear jitter, seeded from
-each line's own text so a re-render is byte-identical.
+each line's own text so a re-render is byte-identical. The other
+styles are `bold`, `pop` (one big word at a time, popping in), `pulse` (the
+whole line in caps, swelling on every beat), `typewriter` (letters typed
+out), `handwritten` (hand lettering) and `cinema` (film-title serif, slow
+fades); `default` is the plain caption. `framing` is how a clip of another
+shape fills the frame: `fill` (crop, the default), `blur` (the whole clip over
+a blurred copy of itself) or `fit` (bars). `beat_fx` with `source: "kick"` reads
+the drums stem when the song has been split (`/api/assets/{id}/stems`).
 
 ## Configuration file
 
