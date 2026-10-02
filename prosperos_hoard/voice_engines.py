@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from . import procutil
 from . import voices as voices_mod
+from .hoard_link.media import subs
 
 
 class EngineNotInstalled(RuntimeError):
@@ -462,53 +463,16 @@ def best_installed_stt(engines: list[STTEngine], prefer: Optional[str] = None) -
 
 # ---------------------------------------------------------- subtitle export
 
-def _split_ms(t: float) -> tuple[int, int, int, int]:
-    """`t` seconds -> (hours, minutes, seconds, milliseconds), rounded to the
-    nearest millisecond *before* splitting into fields so a value like
-    59.9996s carries into the next second (and, at a minute/hour boundary,
-    into the next minute/hour) instead of producing an out-of-range field
-    such as "59,1000" or "01:60.000" (both invalid in SRT/VTT)."""
-    total_ms = int(round(max(0.0, t) * 1000))
-    ms = total_ms % 1000
-    total_s = total_ms // 1000
-    s = total_s % 60
-    total_m = total_s // 60
-    m = total_m % 60
-    h = total_m // 60
-    return h, m, s, ms
-
-
-def _srt_time(t: float) -> str:
-    h, m, s, ms = _split_ms(t)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def _vtt_time(t: float) -> str:
-    h, m, s, ms = _split_ms(t)
-    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-
-
 def segments_to_srt(segments: list[dict[str, Any]]) -> str:
-    lines = []
-    for i, seg in enumerate(segments, 1):
-        lines.append(str(i))
-        lines.append(f"{_srt_time(seg['start_s'])} --> {_srt_time(seg['end_s'])}")
-        lines.append(seg.get("text", "").strip())
-        lines.append("")
-    return "\n".join(lines)
+    return subs.to_srt(subs.cues_from_segments(segments))
 
 
 def segments_to_vtt(segments: list[dict[str, Any]]) -> str:
-    lines = ["WEBVTT", ""]
-    for seg in segments:
-        lines.append(f"{_vtt_time(seg['start_s'])} --> {_vtt_time(seg['end_s'])}")
-        lines.append(seg.get("text", "").strip())
-        lines.append("")
-    return "\n".join(lines)
+    return subs.to_vtt(subs.cues_from_segments(segments))
 
 
 def segments_to_txt(segments: list[dict[str, Any]]) -> str:
-    return "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip())
+    return subs.to_txt(subs.cues_from_segments(segments), speakers=False).rstrip("\n")
 
 
 def install_engine(engine: Any, python: Optional[str] = None) -> dict[str, Any]:
