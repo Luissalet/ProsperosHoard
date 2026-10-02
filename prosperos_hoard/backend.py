@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import procutil
+from .hoard_link.atomic import write_text_atomic
 from .hoard_link import Link, LinkConfig, Unavailable
 from .hoard_link.launch import Launcher, _port_open, comfy_port_from_url, list_gpus
 
@@ -443,7 +444,7 @@ class Backend:
         if import_roots is not None:
             raw["import_roots"] = [str(Path(r).expanduser()) for r in import_roots if str(r).strip()]
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        write_text_atomic(self.config_path, json.dumps(raw, indent=2))
         self.reload()
 
     def training(self) -> dict[str, Any]:
@@ -490,7 +491,7 @@ class Backend:
         raw = self._raw_config()
         raw["training"] = clean
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        write_text_atomic(self.config_path, json.dumps(raw, indent=2))
         return clean
 
     def stock_keys(self) -> dict[str, str]:
@@ -521,7 +522,7 @@ class Backend:
                 block.pop(provider, None)
         raw["stock"] = block
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        write_text_atomic(self.config_path, json.dumps(raw, indent=2))
 
     def vram_estimates_mb(self) -> dict[str, int]:
         raw = self._raw_config()
@@ -852,7 +853,7 @@ class Backend:
             raw = self._raw_config()
             raw.setdefault("launch", {})["autostart_comfy"] = bool(autostart_comfy)
             self.data_dir.mkdir(parents=True, exist_ok=True)
-            self.config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+            write_text_atomic(self.config_path, json.dumps(raw, indent=2))
         return self.services()
 
     def wants_comfy_autostart(self, explicit: Optional[bool] = None) -> bool:

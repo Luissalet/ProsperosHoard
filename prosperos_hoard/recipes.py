@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from . import productions as prod
 from .store import NotFound, Store
-from .util import now_iso, replace_with_retry
+from .util import now_iso, write_text_atomic
 
 FORMAT = "prospero.recipe/1"
 REUSABLE = ("song", "frames", "clips")
@@ -244,9 +244,7 @@ def export_recipe(store: Store, slug: str, name: Optional[str] = None) -> dict[s
         "stages": list(prod.STAGES),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(recipe, indent=2, ensure_ascii=False), encoding="utf-8")
-    replace_with_retry(tmp, path)
+    write_text_atomic(path, json.dumps(recipe, indent=2, ensure_ascii=False))
     return recipe
 
 

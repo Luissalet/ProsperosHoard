@@ -42,7 +42,7 @@ from . import engine
 from .ids import new_id
 from .jobs import JobCancelled
 from .store import NotFound, Store
-from .util import now_iso, replace_with_retry
+from .util import now_iso, write_text_atomic
 
 FORMAT = "prospero.production/1"
 STAGES = ("character", "song", "frames", "lyrics", "animatic", "clips", "photocards", "album", "timeline", "report")
@@ -190,9 +190,7 @@ def save_state(data_dir: Path, state: dict[str, Any]) -> None:
     folder = production_dir(data_dir, state["slug"])
     folder.mkdir(parents=True, exist_ok=True)
     state["updated_at"] = now_iso()
-    tmp = folder / f"state.{os.getpid()}.{threading.get_ident()}.tmp"
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    replace_with_retry(tmp, folder / "state.json")
+    write_text_atomic(folder / "state.json", json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def is_legacy(state: dict[str, Any]) -> bool:
