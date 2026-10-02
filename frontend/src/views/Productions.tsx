@@ -436,7 +436,7 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
           {Object.entries(entry.renders).map(([aspect, id]) => (
             <div key={aspect} className="stack" style={{ gap: 4 }}>
               <span className="small muted">{aspect}</span>
-              <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
+              <div className="video-frame" style={{ width: aspect === "16:9" ? 560 : 300 }}>
                 <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
               </div>
             </div>
@@ -628,8 +628,8 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
           {!compact && <StatusPill status={p.status} />}
         </div>
         <span className="small muted ellipsis">
-          {p.kind === "short" ? t("shortBadge") : t("prodShotsN", { n: p.shot_count || 0 })}
-          {projectName ? ` · ${projectName}` : ""} · {timeAgo(p.updated_at, lang)}
+          {[p.kind === "short" ? t("shortBadge") : p.shot_count ? t("prodShotsN", { n: p.shot_count }) : "",
+            projectName || "", timeAgo(p.updated_at, lang)].filter(Boolean).join(" · ")}
         </span>
         {!p.legacy && (
           <>
