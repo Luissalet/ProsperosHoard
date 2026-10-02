@@ -3639,6 +3639,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise engine.EngineError("not_audio", "stems come out of a song (or a video's sound)")
         have = stems_mod.existing(store, asset["id"])
         if not body.force and all(k in have for k in stems_mod.STEMS):
+            if "instrumental" not in have:  # split before the instrumental existed
+                try:
+                    have["instrumental"] = stems_mod.mix_instrumental(store, asset, have)
+                except stems_mod.StemsError as exc:
+                    raise engine.EngineError(exc.code, exc.message) from None
             return {"stems": have, "reused": True}
         if body.device and not re.fullmatch(r"cpu|cuda:\d", body.device):
             raise engine.EngineError("bad_device", "device is cpu or cuda:N")

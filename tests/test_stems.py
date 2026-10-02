@@ -120,3 +120,16 @@ def test_the_instrumental_is_mixed_from_the_stems(store, project, fake_python):
     assert inst["recipe"]["stem"] == "instrumental" and set(inst["recipe"]["input_asset_ids"]) == {
         out["stems"]["drums"], out["stems"]["bass"], out["stems"]["other"]}
     assert stems.existing(store, song)["instrumental"] == inst["id"]
+
+
+def test_an_older_split_gets_its_instrumental_on_the_next_ask(client, tmp_path):
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Old split"}).json()["id"]
+    song = _song(store, {"id": pid}, 2.0)
+    src = store.get_asset(song)
+    for k in stems.STEMS:
+        store.create_asset(project_id=pid, kind="audio", file_path=src["file_path"], source="derived", tags=["stem", k],
+                           recipe={"operation": "stems", "stem": k, "derived_from": song})
+    out = c.post("/api/agent/studio_stems", json={"asset_id": song}).json()
+    assert out["reused"] and "instrumental" in out["stems"]
