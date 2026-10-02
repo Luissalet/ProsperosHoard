@@ -448,8 +448,14 @@ def build_kontext_instruction(store: Store, project_id: str, prompt: str, engine
     else:
         keep = "the same character from the reference image, with exactly the same design, proportions and colours"
     instruction = (f"{keep}, now {scene}" if keep else scene) if scene else keep
+    # what a character must never get (a faceless head given eyes, an
+    # extra limb): the edit has no other place to hear it than the text
+    avoid = ", ".join(dict.fromkeys(p.strip() for m in matched for p in str(m.get("negative") or "").split(",") if p.strip()))
+    if avoid:
+        instruction = f"{instruction}. Do not add: {avoid}"
     return {
-        "instruction": instruction, "reference_asset_id": primary["canonical_asset_id"] if primary else None,
+        "instruction": instruction, "negative_extra": avoid,
+        "reference_asset_id": primary["canonical_asset_id"] if primary else None,
         "reference_asset_ids": refs, "matched_characters": [m["name"] for m in chars],
         "matched_elements": [m["name"] for m in matched if element_of(m) != "character"],
         "unknown_mentions": unknown,

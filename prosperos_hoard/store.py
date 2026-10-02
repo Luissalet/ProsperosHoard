@@ -12,6 +12,7 @@ import re
 import shutil
 import sqlite3
 from pathlib import Path
+import threading
 from typing import Any, Iterable, Optional
 
 from .db import connect, dumps, loads, row_to_dict
@@ -111,6 +112,7 @@ class Store:
         for d in (self.assets_dir, self.thumbs_dir, self.projects_dir):
             d.mkdir(parents=True, exist_ok=True)
         self._seed_builtin_presets()
+        self._space_lock = threading.Lock()  # runs patch a space's state from worker threads
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -844,6 +846,76 @@ class Store:
         return d
 
     # -------------------------------------------------------------- boards
+    # -------------------------------------------------------------- spaces
+    # A Space is a node canvas (spaces.py): `graph` is what the person draws
+    # (nodes, wires, positions) and saves with an optimistic `version`;
+    # `state` is what runs write (per node: status, jobs, outputs, history),
+    # kept apart so a run never fights an edit of the canvas.
+    def create_space(self, project_id: str, name: str, graph: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        self.get_project(project_id)
+        name = (name or "").strip()[:80] or "Space"
+        sid = new_id("space")
+        ts = now_iso()
+        self.conn.execute(
+            "INSERT INTO spaces (id, project_id, name, graph_json, state_json, version, created_at, updated_at)"
+            " VALUES (?,?,?,?,'{}',1,?,?)",
+            (sid, project_id, name, dumps(graph or {"nodes": [], "edges": []}), ts, ts),
+        )
+        self.conn.commit()
+        return self.get_space(sid)
+
+    def get_space(self, space_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM spaces WHERE id=?", (space_id,)).fetchone()
+        if not row:
+            raise NotFound("space", space_id)
+        d = row_to_dict(row)
+        d["graph"] = loads(d.pop("graph_json"), {}) or {"nodes": [], "edges": []}
+        d["state"] = loads(d.pop("state_json"), {}) or {}
+        return d
+
+    def list_spaces(self, project_id: str, deleted: bool = False) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT id FROM spaces WHERE project_id=? AND deleted_at IS {'NOT ' if deleted else ''}NULL "
+            "ORDER BY updated_at DESC", (project_id,)).fetchall()
+        return [self.get_space(r["id"]) for r in rows]
+
+    def save_space_graph(self, space_id: str, graph: dict[str, Any], version: Optional[int] = None,
+                         name: Optional[str] = None) -> dict[str, Any]:
+        """Replace the drawn graph. With `version`, refused (ValueError
+        'stale') when someone saved a newer one in between."""
+        current = self.get_space(space_id)
+        if version is not None and int(version) != int(current["version"]):
+            raise ValueError(f"stale: the space is at version {current['version']}, not {version}")
+        self.conn.execute("UPDATE spaces SET graph_json=?, version=version+1, updated_at=?"
+                          + (", name=?" if name else "") + " WHERE id=?",
+                          (dumps(graph), now_iso(), *( [name.strip()[:80]] if name else []), space_id))
+        self.conn.commit()
+        return self.get_space(space_id)
+
+    def patch_space_state(self, space_id: str, node_id: str, patch: Optional[dict[str, Any]]) -> dict[str, Any]:
+        """Merge `patch` into one node's run state (None removes it)."""
+        with self._space_lock:
+            state = self.get_space(space_id)["state"]
+            if patch is None:
+                state.pop(node_id, None)
+            else:
+                state[node_id] = {**(state.get(node_id) or {}), **patch}
+            self.conn.execute("UPDATE spaces SET state_json=?, updated_at=? WHERE id=?", (dumps(state), now_iso(), space_id))
+            self.conn.commit()
+            return state
+
+    def delete_space(self, space_id: str) -> dict[str, Any]:
+        self.get_space(space_id)
+        self.conn.execute("UPDATE spaces SET deleted_at=?, updated_at=? WHERE id=?", (now_iso(), now_iso(), space_id))
+        self.conn.commit()
+        return self.get_space(space_id)
+
+    def restore_space(self, space_id: str) -> dict[str, Any]:
+        self.get_space(space_id)
+        self.conn.execute("UPDATE spaces SET deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), space_id))
+        self.conn.commit()
+        return self.get_space(space_id)
+
     def create_board(self, project_id: str, name: str, kind: str = "moodboard") -> dict[str, Any]:
         self.get_project(project_id)
         if not isinstance(name, str) or not name.strip():

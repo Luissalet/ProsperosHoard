@@ -40,7 +40,7 @@ Handler = Callable[[dict[str, Any], "ProgressFn"], dict[str, Any]]
 ProgressFn = Callable[..., None]
 
 GPU_WAIT_POLL_S = 15.0
-ORCHESTRATOR_TYPES = ("production", "production_qa")
+ORCHESTRATOR_TYPES = ("production", "production_qa", "space_run")
 GPU_WAIT_TIMEOUT_S = 30 * 60.0
 
 

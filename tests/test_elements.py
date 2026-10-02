@@ -180,3 +180,10 @@ def test_the_lead_of_an_unfinished_production_needs_force(scene, data_dir):
     r = c.delete(f"/api/characters/{s['aria']['id']}")
     assert r.status_code == 400 and r.json()["error"] == "in_use" and "Gig" in r.json()["message"]
     assert c.delete(f"/api/characters/{s['aria']['id']}?force=true").status_code == 200
+
+
+def test_a_characters_negative_reaches_a_consistent_edit(store, project):
+    store.create_character(project["id"], "Ball", prompt="a clown with a polka-dot ball head",
+                           negative="face, eyes, mouth")
+    k = engine.build_kontext_instruction(store, project["id"], "@Ball dancing", engine="qwen21")
+    assert k["instruction"].endswith("Do not add: face, eyes, mouth") and k["negative_extra"] == "face, eyes, mouth"
