@@ -69,8 +69,8 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `studio_production_continue`.
 - **«Que pegue con la música» / «zoom en el bombo» / «dale un look de
   terror»**: `studio_production_finishing(production, finishing={...})`
-  con `beat_fx` (`source` kick/beats/downbeats; `zoom`, `flash`, `shake`
-  de 0 a 1) y el resto del look; si ya estaba renderizado, se renderiza de
+  con `beat_fx` (`source` kick/beats/downbeats o, con la canción ya separada,
+  drums/bass/vocals/other; `zoom`, `flash`, `shake` de 0 a 1) y el resto del look; si ya estaba renderizado, se renderiza de
   nuevo solo el montaje. Enséñale el resultado con `studio_show`.
 - **«Hazme el Canvas de Spotify» / «un bucle para Spotify»**:
   `studio_canvas(production)` (estribillo, 8 s, sin letra) y dale el
@@ -199,8 +199,9 @@ Qué hacer cuando el usuario pide, con sus palabras:
   take=N)`; cuenta de quién es cada clip (`author`).
 - **«Sepárame la voz» / «dame solo la batería» / «una pista instrumental»**:
   `studio_stems(asset_id)` (voz, batería, bajo y resto como recursos de
-  audio; la primera vez instala Demucs y tarda). Después el lip sync usa la
-  voz limpia solo y los efectos `kick` leen la batería. Si no hay GPU con
+  audio, más la mezcla `instrumental`; la primera vez instala Demucs y
+  tarda). Después el lip sync usa la voz limpia solo y los efectos `kick`
+  leen la batería. Si no hay GPU con
   3 GB libres, va a la CPU: díselo.
 - **«Hazlo vertical» / «ahora cuadrado» / «versión horizontal»**: una
   imagen o un clip, `studio_reframe(asset_id, aspect, framing)`; un
@@ -215,6 +216,37 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `{"key": "4", "continue_from": "3"}` (su clip empieza en el último
   fotograma del 3 y acaba en su propio fotograma; hace falta el modelo de
   primer a último fotograma, si no el final se descarta).
+- **«Quédate con la toma anterior» / «compara tomas»**:
+  `studio_production_takes(production, key)` lista las tomas de un plano
+  (fotogramas y clips, la actual marcada; se guardan hasta 12 por plano);
+  enséñaselas con `studio_show` y devuelve la elegida con
+  `studio_production_shots` y `{"key": "3", "take": asset_id}` (un
+  fotograma trae su juego y descarta los clips hechos con el otro; un clip
+  sustituye al actual).
+- **«Arregla el segundo 2 al 3 del clip»**: `studio_retake(asset_id,
+  start_s=2, end_s=3, prompt, quality="draft"|"final")`: rehace solo ese
+  tramo (hasta ~4 s) con Wan VACE y empalma un clip nuevo; el original se
+  queda. Enséñalo con `studio_show` y, si es el clip de un plano, aparece
+  como toma suya. Si da `no_vace`, faltan los modelos en ComfyUI. Todavía
+  no se ha ejecutado en una GPU real (los modelos están instalados, pero
+  las tarjetas estaban ocupadas): avísale de que es la primera vez.
+- **«Pon este recorte encima» / «un logo sobre el vídeo»**: en un espacio,
+  un nodo `composite` (Capas) con el fondo en `background` y lo que va
+  encima en `layers` (hasta 8); por capa `data.layers[i]` con `blend`,
+  `opacity`, `scale`, `x`/`y` y `key` (black/white para quitar un fondo
+  liso). Sale un clip si alguna entrada lo es y, si no, una imagen. Para
+  probarlo sin rehacer lo de arriba: `action="run", mode="upto"`.
+- **«Guárdalo como técnica» / «úsalo en otro proyecto»**:
+  `studio_spaces(action="export", space, group?)` da la técnica (sin los
+  medios del proyecto; el reparto por nombre) y
+  `studio_spaces(project=otro, action="import", bundle, name?, space?)` la
+  crea o la añade a un espacio; revisa `to_fill` (medios por poner),
+  `cast_missing` (personajes que faltan en ese proyecto) y `models`.
+- **«Que el zoom vaya con la voz»**: separa antes con `studio_stems` y usa
+  `studio_production_finishing` con `beat_fx` `source` `vocals` (o `drums`,
+  `bass`, `other`); sin separar, vuelve al bombo.
+- **«La versión instrumental»**: `studio_stems(asset_id)`; el recurso
+  `instrumental` es la canción sin voz.
 - **«Haz borradores rápidos»**: `studio_production_settings(production,
   clip_quality="draft")` y, cuando le guste el montaje,
   `studio_production_promote(production)` para pasarlos a final con las
