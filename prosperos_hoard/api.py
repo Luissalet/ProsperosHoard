@@ -2602,6 +2602,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.project:
             store.get_project(body.project)
         state = productions_mod.create_production(store.data_dir, body.name, body.spec, body.settings, project_id=body.project)
+        productions_mod.adopt_lead(store, state)
         job = queue_production(state["slug"])
         return {"production": production_view(state["slug"]), "job": engine.job_view(job)}
 

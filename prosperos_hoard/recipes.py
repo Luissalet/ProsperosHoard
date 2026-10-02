@@ -419,4 +419,5 @@ def run_recipe(store: Store, recipe_name: str, cast: Any, name: Optional[str] = 
     prod.log(state, "recipe", "created_from_recipe", recipe=recipe.get("name"), lead=spec["lead"]["name"],
              reuse=meta["reuse"], notes=meta["notes"] or None)
     prod.save_state(store.data_dir, state)
+    prod.adopt_lead(store, state)
     return state

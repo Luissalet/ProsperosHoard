@@ -28,3 +28,23 @@ def test_a_scripted_production_shows_its_cut_or_album_cover():
     assert view["legacy"] and view["shot_count"] == 2 and view["cover"] == {"asset_id": "a_cover", "kind": "image"}
     legacy["done"]["8"] = {"timelines": {"9:16": {"renders": {"final": "a_cut"}}}}
     assert prod.summary_view(legacy)["cover"] == {"asset_id": "a_cut", "kind": "video"}
+
+
+def test_a_lead_from_another_project_joins_this_projects_cast_at_creation(store):
+    from test_productions import _asset
+    home = store.create_project("Home", "where the lead was made")
+    video = store.create_project("Video", "where the video is made")
+    canon_id = _asset(store, home["id"])
+    lead = store.create_character(home["id"], "WISP", prompt="a moth spirit", palette=["#F28C28"], canonical_asset_id=canon_id)
+    spec = tiny_spec()
+    spec["lead"] = {"character_id": lead["id"], "name": "WISP", "look": "a moth spirit"}
+    state = prod.create_production(store.data_dir, "Adopt", prod.normalise_spec(spec), {}, project_id=video["id"])
+    char = prod.adopt_lead(store, state)
+    cast = store.list_characters(video["id"])
+    assert [c["name"] for c in cast] == ["WISP"] and char["id"] == cast[0]["id"] != lead["id"]
+    assert cast[0]["canonical_asset_id"] and cast[0]["canonical_asset_id"] != canon_id  # its own copy of the image
+    saved = prod.load_state(store.data_dir, state["slug"])
+    assert saved["spec"]["lead"]["character_id"] == char["id"]
+    assert any(e["event"] == "copied_character" for e in saved["lineage"])
+    assert prod.adopt_lead(store, saved) is None  # already in this project: nothing to do
+    assert len(store.list_characters(video["id"])) == 1

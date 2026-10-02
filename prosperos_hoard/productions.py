@@ -840,6 +840,52 @@ def _asset_ok(store: Store, asset_id: Optional[str]) -> bool:
         return False
 
 
+def copy_character(store: Store, src: dict[str, Any], project_id: str) -> tuple[dict[str, Any], bool]:
+    """Bring a character from another project into `project_id` (its cast):
+    same name, look, palette, voice and canonical image; adapters are files
+    shared by every project, so the copy keeps them and the trigger, not the
+    dataset/sheet, whose images belong to the other project. A character of
+    that name already in the project is reused. Returns (character, copied)."""
+    existing = next((c for c in store.list_characters(project_id) if c["name"].lower() == src["name"].lower()), None)
+    if existing:
+        return existing, False
+    canonical = copy_asset(store, src["canonical_asset_id"], project_id)["id"] if _asset_ok(store, src.get("canonical_asset_id")) else None
+    char = store.create_character(project_id, src["name"], role=src.get("role"), bio=src.get("bio"), prompt=src.get("prompt"),
+                                  negative=src.get("negative"), palette=src.get("palette") or [],
+                                  canonical_asset_id=canonical, voice=src.get("voice"))
+    src_kit = src.get("kit") or {}
+    if src_kit:
+        kit = {k: src_kit[k] for k in ("trigger", "use_adapters", "identity", "good_seeds", "library") if k in src_kit}
+        kit["adapters"] = [dict(a) for a in src_kit.get("adapters") or []]
+        kit["history"] = [{"at": now_iso(), "event": "copied", "detail": f"from {src['id']}"}]
+        char = store.set_character_kit(char["id"], kit)
+    return char, True
+
+
+def adopt_lead(store: Store, state: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """When a production made in an existing project takes its lead from
+    another project's cast, copy the lead into this project right away, so
+    the project's Cast shows who the video is about (and @mentions there
+    resolve) before the run reaches its character stage. Saves the state."""
+    lead = (state.get("spec") or {}).get("lead") or {}
+    pid = state.get("project_id")
+    if not pid or not lead.get("character_id") or (state.get("done") or {}).get("character"):
+        return None
+    try:
+        src = store.get_character(lead["character_id"])
+    except NotFound:
+        return None
+    if src["project_id"] == pid:
+        return None
+    char, copied = copy_character(store, src, pid)
+    lead["character_id"] = char["id"]
+    if copied:
+        log(state, "character", "copied_character", character_id=char["id"], from_character_id=src["id"],
+            canonical_asset_id=char.get("canonical_asset_id"))
+    save_state(store.data_dir, state)
+    return char
+
+
 # ----------------------------------------------------------------- runner
 
 class Run:
@@ -1062,24 +1108,10 @@ class Run:
         self.state["done"]["character"] = entry
 
     def _copy_character(self, src: dict[str, Any]) -> dict[str, Any]:
-        pid = self.project_id
-        existing = next((c for c in self.store.list_characters(pid) if c["name"].lower() == src["name"].lower()), None)
-        if existing:
-            return existing
-        canonical = copy_asset(self.store, src["canonical_asset_id"], pid)["id"] if _asset_ok(self.store, src.get("canonical_asset_id")) else None
-        char = self.store.create_character(pid, src["name"], role=src.get("role"), bio=src.get("bio"), prompt=src.get("prompt"),
-                                           negative=src.get("negative"), palette=src.get("palette") or [],
-                                           canonical_asset_id=canonical, voice=src.get("voice"))
-        src_kit = src.get("kit") or {}
-        if src_kit:
-            # adapters are files in ComfyUI's loras folder, shared by every
-            # project: the copy keeps them (and the trigger), not the
-            # dataset/sheet, whose images belong to the other project
-            kit = {k: src_kit[k] for k in ("trigger", "use_adapters", "identity", "good_seeds", "library") if k in src_kit}
-            kit["adapters"] = [dict(a) for a in src_kit.get("adapters") or []]
-            kit["history"] = [{"at": now_iso(), "event": "copied", "detail": f"from {src['id']}"}]
-            char = self.store.set_character_kit(char["id"], kit)
-        self.log("copied_character", character_id=char["id"], from_character_id=src["id"], canonical_asset_id=canonical)
+        char, copied = copy_character(self.store, src, self.project_id)
+        if copied:
+            self.log("copied_character", character_id=char["id"], from_character_id=src["id"],
+                     canonical_asset_id=char.get("canonical_asset_id"))
         return char
 
     def stage_song(self) -> Optional[str]:
