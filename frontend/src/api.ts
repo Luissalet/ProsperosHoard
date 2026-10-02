@@ -935,6 +935,70 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
   return text ? `?${text}` : "";
 };
 
+
+// ------------------------------------------------------------- spaces
+
+export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note";
+
+export interface SpaceNode {
+  id: string;
+  type: SpaceNodeType;
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  data: Record<string, any>;
+}
+
+export interface SpaceEdge {
+  id: string;
+  source: string;
+  source_handle?: string | null;
+  target: string;
+  target_handle: string;
+}
+
+export interface SpaceGraph {
+  nodes: SpaceNode[];
+  edges: SpaceEdge[];
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+export interface SpaceNodeState {
+  status?: "queued" | "running" | "done" | "failed" | "partial";
+  outputs?: string[];
+  excluded?: string[];
+  error?: string | null;
+  jobs?: string[];
+  job_states?: { id: string; state: string; progress: number }[];
+  runs?: { at: string; outputs: string[]; jobs: string[]; hash: string }[];
+  hash?: string;
+  ok_hash?: string | null;
+  started_at?: string;
+  finished_at?: string;
+}
+
+export interface Space {
+  id: string;
+  project_id: string;
+  name: string;
+  version: number;
+  updated_at: string;
+  graph: SpaceGraph;
+  state: Record<string, SpaceNodeState>;
+  deleted_at?: string;
+}
+
+export interface SpaceSummary {
+  id: string;
+  name: string;
+  updated_at: string;
+  version: number;
+  nodes: number;
+  cover: string | null;
+  deleted_at?: string;
+}
+
 export const fileUrl = (id: string) => `/api/assets/${id}/file`;
 export const thumbUrl = (a: Pick<Asset, "id" | "thumb_path" | "kind">) =>
   a.thumb_path ? `/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
@@ -1237,5 +1301,17 @@ export const api = {
     request<LibraryHistory>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "history", id: libId }),
   libraryDelete: (projectId: string, libId: string) =>
     request<{ deleted: string }>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "delete", id: libId }),
+  spaces: (pid: string, deleted = false) => request<{ items: SpaceSummary[] }>("GET", `/api/projects/${pid}/spaces${deleted ? "?deleted=true" : ""}`),
+  createSpace: (pid: string, name: string, template: string) => request<Space>("POST", `/api/projects/${pid}/spaces`, { name, template }),
+  space: (id: string) => request<Space>("GET", `/api/spaces/${id}`),
+  saveSpace: (id: string, graph: SpaceGraph, version: number | null, name?: string) =>
+    request<Space>("PUT", `/api/spaces/${id}`, { graph, version, name }),
+  deleteSpace: (id: string) => request<Space>("DELETE", `/api/spaces/${id}`),
+  restoreSpace: (id: string) => request<Space>("POST", `/api/spaces/${id}/restore`),
+  runSpace: (id: string, mode: "node" | "downstream" | "all", nodeIds: string[] = [], force = false) =>
+    request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
+  spaceNode: (id: string, nodeId: string, patch: { excluded?: string[]; outputs?: string[] }) =>
+    request<Space>("PATCH", `/api/spaces/${id}/nodes/${nodeId}`, patch),
+  enhancePrompt: (text: string, kind: "image" | "video" | "music") => request<{ text: string }>("POST", "/api/prompt/enhance", { text, kind }),
   libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
 };
