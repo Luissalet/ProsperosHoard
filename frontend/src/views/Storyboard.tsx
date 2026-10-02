@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
 import { useSlashMenu } from "../components/Slash";
+import { Enhance } from "../components/Enhance";
 
 // the song sections a shot can illustrate (what the planner writes)
 export const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
@@ -150,7 +151,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 <div className="tile-badges">
                   <span className="pill badge-dark">{shot.key}</span>
                   {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
-                  {hasClip && <span className="pill badge-dark"><Film size={10} /> {t("clipBadge")}</span>}
+                  {hasClip && <span className="pill badge-dark" title={t("clipBadge")}><Film size={10} /></span>}
                   {shot.sing && <span className="pill badge-dark" title={t("sbSing")}><Mic size={10} /></span>}
 
                   {(shot.refs || []).length > 0 && <span className="pill badge-dark"><Images size={10} /> {shot.refs!.length}</span>}
@@ -438,7 +439,8 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
               onKeyDown={(e) => { slash.onKeyDown(e); }} />
             {slash.menu}
           </div>
-          <span className="hint">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
+          <span className="row" style={{ gap: 8 }}><span className="hint grow">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
+            <Enhance text={prompt} kind="image" onDone={setPrompt} className="btn xs" /></span>
         </label>
         {elements.length > 0 && (
           <div className="row wrap" style={{ gap: 6, marginTop: -4 }}>

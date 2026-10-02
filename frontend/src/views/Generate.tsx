@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
 import { EngineBar } from "./EngineBar";
 import { useSlashMenu } from "../components/Slash";
+import { Enhance } from "../components/Enhance";
 import { useDeleteAssets } from "../components/useDeleteAssets";
 import { Trash2 } from "lucide-react";
 
@@ -294,6 +295,7 @@ export function GenerateView() {
                   } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) queue();
                 }} />
               {slash.menu}
+              <div className="prompt-enhance"><Enhance text={prompt} kind="image" onDone={(v) => setPrompt(v)} className="btn xs" /></div>
               {menu?.kind === "<" && refSuggestions.length > 0 && (
                 <div className="mention-menu">
                   {refSuggestions.map((r, i) => (

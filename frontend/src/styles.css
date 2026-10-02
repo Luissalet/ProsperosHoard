@@ -249,7 +249,7 @@ label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; col
   opacity: 0; transition: opacity 0.15s;
 }
 .tile:hover .tile-meta, .tile.focused .tile-meta { opacity: 1; }
-.tile .tile-badges { position: absolute; top: 8px; left: 8px; display: flex; gap: 5px; }
+.tile .tile-badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 5px; pointer-events: none; }
 .tile .fav { position: absolute; top: 8px; right: 8px; color: var(--gold); filter: drop-shadow(0 1px 2px #000); }
 .tile .media-icon {
   aspect-ratio: 16 / 10; display: grid; place-items: center; color: var(--muted);
@@ -830,3 +830,13 @@ table.list tr.selected td { background: var(--accent-soft); }
 .clipedit-ref img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; }
 .clipedit-ref-label { font-size: 11px; opacity: .8; }
 .clipedit-plan textarea { font-size: 12px; }
+
+/* project cover (overview) */
+.cover-card { position: relative; }
+.cover-card .cover-pick { position: absolute; right: 20px; bottom: 20px; opacity: 0; transition: opacity .15s; }
+.cover-card:hover .cover-pick, .cover-card .cover-pick:focus-visible { opacity: 1; }
+.cover-card .cover-img { max-height: 520px; object-fit: cover; }
+
+/* "improve prompt" in the Generate prompt box */
+.prompt-wrap { position: relative; }
+.prompt-wrap .prompt-enhance { position: absolute; right: 10px; bottom: 10px; }

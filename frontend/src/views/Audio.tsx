@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioLines, Download, Loader2, Mic, Music, Pause, Play, RefreshCw, Save, Sparkles, Square, Timer, Upload, Wand2 } from "lucide-react";
 import { api, fileUrl, type Analysis, type Asset } from "../api";
-import { useT } from "../i18n";
+import { useT, type Lang } from "../i18n";
+import { energyWord, sectionLabel, translateText } from "../messages";
 import { Empty, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
 
 const ENERGY_COLOURS: Record<string, string> = { low: "rgba(122,167,255,0.10)", mid: "rgba(245,194,107,0.10)", high: "rgba(255,77,141,0.16)" };
 
-function Waveform({ peaks, analysis, duration, time, onSeek }: {
-  peaks: number[]; analysis: Analysis | null | undefined; duration: number; time: number; onSeek: (t: number) => void;
+function Waveform({ peaks, analysis, duration, time, onSeek, lang }: {
+  peaks: number[]; analysis: Analysis | null | undefined; duration: number; time: number; onSeek: (t: number) => void; lang: Lang;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -30,7 +31,7 @@ function Waveform({ peaks, analysis, duration, time, onSeek }: {
         ctx.fillRect((s.start_s / duration) * w, 0, ((s.end_s - s.start_s) / duration) * w, h);
         ctx.fillStyle = muted;
         ctx.font = "11px 'Space Grotesk Variable', sans-serif";
-        ctx.fillText(`${s.label} · ${s.energy}`, (s.start_s / duration) * w + 6, 14);
+        ctx.fillText(`${sectionLabel(s.label, lang)} · ${energyWord(s.energy, lang)}`, (s.start_s / duration) * w + 6, 14);
       }
     }
     const mid = h / 2 + 6;
@@ -55,7 +56,7 @@ function Waveform({ peaks, analysis, duration, time, onSeek }: {
       ctx.fillStyle = "#fff";
       ctx.fillRect((time / duration) * w, 0, 1.5, h);
     }
-  }, [peaks, analysis, duration, time]);
+  }, [peaks, analysis, duration, time, lang]);
   return (
     <div className="wave-wrap" onClick={(e) => {
       const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -113,7 +114,7 @@ function ComposeModal({ pid, onClose }: { pid: string; onClose: () => void }) {
 }
 
 export function AudioView() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const songs = useAsync(() => api.assets(pid, { kind: "audio", limit: 60 }), [pid, app.dataVersion]);
@@ -123,6 +124,9 @@ export function AudioView() {
   const [songId, setSongId] = useState<string | null>(null);
   const [song, setSong] = useState<Asset | null>(null);
   const [analysing, setAnalysing] = useState(false);
+  // the analysis as the server gives it now: a new song is analysed on open, and a song with
+  // timed lyrics gets its real sections ([Verse], [Chorus]...) instead of the energy guesses
+  const [view, setView] = useState<Analysis | null>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const audio = useRef<HTMLAudioElement>(null);
@@ -158,11 +162,21 @@ export function AudioView() {
   }, [lyricsId]);
   useEffect(() => { if (!lyricsId && lyricsList.data?.items[0]) setLyricsId(lyricsList.data.items[0].id); }, [lyricsList.data, lyricsId]);
 
+  useEffect(() => {
+    setView(null);
+    if (!song || song.kind !== "audio") return;
+    let live = true;
+    setAnalysing(true);
+    api.analyze(song.id, false).then((a) => { if (live) setView(a); }).catch(() => undefined)
+      .finally(() => { if (live) setAnalysing(false); });
+    return () => { live = false; };
+  }, [song?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const analyse = async (force: boolean) => {
     if (!song) return;
     setAnalysing(true);
     try {
-      await api.analyze(song.id, force);
+      setView(await api.analyze(song.id, force));
       setSong(await api.asset(song.id));
     } catch (e) {
       app.toast((e as Error).message, "bad");
@@ -269,7 +283,7 @@ export function AudioView() {
         <input type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadSong(f); e.target.value = ""; }} /></label>
     </>
   );
-  const analysis = song?.analysis;
+  const analysis = view || song?.analysis;
   const duration = analysis?.duration_s || song?.duration_s || 0;
   const currentLine = lines.reduce((acc, l, i) => (l.time_s !== null && l.time_s <= time ? i : acc), -1);
 
@@ -312,7 +326,7 @@ export function AudioView() {
                 {analysing ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {analysis ? t("reanalyse") : t("analyse")}
               </button>
             </div>
-            {song && <Waveform peaks={song.waveform || []} analysis={analysis} duration={duration} time={time}
+            {song && <Waveform lang={lang} peaks={song.waveform || []} analysis={analysis} duration={duration} time={time}
               onSeek={(s) => { if (audio.current) audio.current.currentTime = s; }} />}
             {song && <audio ref={audio} src={fileUrl(song.id)} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
               onTimeUpdate={(e) => setTime((e.target as HTMLAudioElement).currentTime)} />}
@@ -320,10 +334,10 @@ export function AudioView() {
               <div className="section-legend">
                 {analysis.sections.map((s, i) => (
                   <span key={i} className={`pill ${s.energy === "high" ? "accent" : s.energy === "low" ? "info" : "gold"}`}>
-                    {s.label} · {fmtTime(s.start_s)}-{fmtTime(s.end_s)} · {t("energy")} {s.energy}
+                    {sectionLabel(s.label, lang)} · {fmtTime(s.start_s)}-{fmtTime(s.end_s)} · {t("energy")} {energyWord(s.energy, lang)}
                   </span>
                 ))}
-                {analysis.notes && <span className="muted small">{analysis.notes}</span>}
+                {analysis.notes && <span className="muted small">{translateText(analysis.notes, lang)}</span>}
               </div>
             )}
           </div>

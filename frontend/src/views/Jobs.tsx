@@ -1,13 +1,9 @@
 import { useState } from "react";
-import { ListChecks, X } from "lucide-react";
+import { AudioLines, ListChecks, X } from "lucide-react";
 import { api, type Project } from "../api";
 import { useT } from "../i18n";
+import { AUDIO_JOB_TYPES, jobLabel, jobMessage } from "../messages";
 import { ConfirmButton, Empty, JobState, Progress, timeAgo, useApp } from "../components/ui";
-
-export const JOB_LABEL: Record<string, Record<string, string>> = {
-  en: { generate_image: "Generate", edit_image: "Edit", animate: "Animate", render_timeline: "Render", download_voice: "Voice download", production: "Production", production_qa: "QA pass" },
-  es: { generate_image: "Generar", edit_image: "Editar", animate: "Animar", render_timeline: "Renderizar", download_voice: "Descarga de voz", production: "Producción", production_qa: "Revisión QA" },
-};
 
 export function JobsView({ projects }: { projects: Project[] }) {
   const { t, lang } = useT();
@@ -44,11 +40,13 @@ export function JobsView({ projects }: { projects: Project[] }) {
             <tbody>
               {jobs.map((j) => {
                 const ids = j.outputs?.asset_ids || (j.outputs?.asset_id ? [j.outputs.asset_id] : []);
+                // the outputs are bare ids: the job type says whether they are songs, voices or stems
+                const audioOut = AUDIO_JOB_TYPES.includes(j.type);
                 const prompt = (j.params?.positive_prompt || j.params?.prompt || j.params?.voice_id) as string | undefined;
                 return (
                   <tr key={j.id}>
                     <td>
-                      <strong>{JOB_LABEL[lang]?.[j.type] || j.type}</strong> <span className="pill">{j.lane}</span>
+                      <strong>{jobLabel(j.type, lang)}</strong> <span className="pill">{j.lane}</span>
                       <div className="mono muted small">{j.id}</div>
                       {prompt && <div className="small muted ellipsis" style={{ maxWidth: 320 }}>{prompt}</div>}
                     </td>
@@ -57,12 +55,14 @@ export function JobsView({ projects }: { projects: Project[] }) {
                       {["running", "waiting_gpu", "queued"].includes(j.state) && <div style={{ marginTop: 8 }}><Progress value={j.progress} waiting={j.state === "waiting_gpu"} /></div>}
                     </td>
                     <td className="small">
-                      <span className={j.state === "failed" ? "err-text" : ""}>{j.message}</span>
+                      <span className={j.state === "failed" ? "err-text" : ""}>{jobMessage(j.message, lang)}</span>
                       {ids.length > 0 && (
                         <div className="job-thumbs">
                           {ids.slice(0, 8).map((id) => (
                             <button key={id} onClick={() => app.openAsset(id, ids)} title={id}>
-                              <img src={`/api/assets/${id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
+                              {audioOut
+                                ? <AudioLines size={16} style={{ color: "var(--muted)" }} />
+                                : <img src={`/api/assets/${id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />}
                             </button>
                           ))}
                         </div>

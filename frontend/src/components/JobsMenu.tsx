@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Clapperboard, ListChecks, X } from "lucide-react";
 import { api, type Job } from "../api";
 import { useT } from "../i18n";
-import { JOB_LABEL } from "../views/Jobs";
+import { jobLabel, jobMessage } from "../messages";
 import { useApp } from "./ui";
 
 const LIVE = ["queued", "waiting_gpu", "running"];
@@ -28,7 +28,7 @@ export function JobsMenu() {
   if (!live.length) return null;
   const label = (j: Job) => {
     const p = j.params as { slug?: string; name?: string; prompt?: string };
-    const kind = JOB_LABEL[lang]?.[j.type] || j.type;
+    const kind = jobLabel(j.type, lang);
     if (j.type === "production") return `${kind} · ${p.name || p.slug || ""}`;
     return `${kind}${p.prompt ? ` · ${String(p.prompt).slice(0, 48)}` : ""}`;
   };
@@ -54,7 +54,7 @@ export function JobsMenu() {
                   <strong className="small ellipsis grow">{label(j)}</strong>
                   <span className="mono small muted">{j.state === "running" ? elapsed(j) : t(j.state === "waiting_gpu" ? "stateWaiting" : "stateQueued")}</span>
                 </div>
-                {j.message && <div className="small muted ellipsis">{j.message}</div>}
+                {j.message && <div className="small muted ellipsis">{jobMessage(j.message, lang)}</div>}
                 {j.state === "running" && <div className="ns-bar"><i style={{ width: `${Math.round((j.progress || 0) * 100)}%` }} /></div>}
               </button>
               <button className="btn sm icon ghost" title={t("cancelJob")} onClick={async () => {

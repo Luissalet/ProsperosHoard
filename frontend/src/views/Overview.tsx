@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { CheckCircle2, Circle, Clapperboard, Pencil } from "lucide-react";
+import { CheckCircle2, Circle, Clapperboard, Image as ImageIcon, Pencil } from "lucide-react";
 import { api, fileUrl, thumbUrl } from "../api";
 import { useT, type MessageKey } from "../i18n";
-import { AssetTile, useApp, useAsync } from "../components/ui";
+import { AssetPicker, AssetTile, useApp, useAsync } from "../components/ui";
 import { ProductionCard } from "./Productions";
 import { VideoModal } from "./VideoModal";
 
@@ -17,6 +17,7 @@ export function OverviewView() {
   const productions = useAsync(() => api.productions(), [app.dataVersion]);
   const [newVideo, setNewVideo] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [pickCover, setPickCover] = useState(false);
   const [brief, setBrief] = useState("");
 
   const p = project.data;
@@ -56,10 +57,14 @@ export function OverviewView() {
       )}
       <div className="overview-grid">
         <div className="stack">
-          <div className="card" style={{ padding: 12 }}>
-            {p.cover_asset_id ? (
-              <img className="cover-img" src={fileUrl(p.cover_asset_id)} alt={t("overviewCover")} onClick={() => app.openAsset(p.cover_asset_id!)} style={{ cursor: "zoom-in" }} />
+          <div className="card cover-card" style={{ padding: 12 }}>
+            {(p.cover_asset_id || p.auto_cover_asset_id) ? (
+              <img className="cover-img" src={fileUrl((p.cover_asset_id || p.auto_cover_asset_id)!)} alt={t("overviewCover")}
+                onClick={() => app.openAsset((p.cover_asset_id || p.auto_cover_asset_id)!)} style={{ cursor: "zoom-in" }} />
             ) : <div className="cover-img" style={{ background: "linear-gradient(135deg, var(--accent-soft), var(--gold-soft))" }} />}
+            <button className="btn sm cover-pick" onClick={() => setPickCover(true)}><ImageIcon size={13} /> {t("overviewPickCover")}</button>
+            {pickCover && <AssetPicker projectId={pid} kind="image" title={t("overviewPickCover")} onClose={() => setPickCover(false)}
+              onPick={async (a) => { setPickCover(false); await api.updateProject(pid, { cover_asset_id: a.id }); project.reload(); app.bump(); }} />}
           </div>
           <div className="card">
             <h2>{t("overviewNext")}</h2>

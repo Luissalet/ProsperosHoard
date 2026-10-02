@@ -5,18 +5,19 @@ import {
 } from "lucide-react";
 import { api, type DubSegment, type EngineStatus, type Job, type StudioVoice, type VoiceSpec } from "../api";
 import { useT } from "../i18n";
+import { jobMessage, voiceEngineLabel, voiceEngineText, voiceWarning } from "../messages";
 import { AssetPicker, ConfirmButton, Empty, JobState, Progress, useApp, useAsync } from "../components/ui";
 
 type Tab = "engines" | "library" | "speak" | "transcribe" | "audiobook" | "dub";
 
 function EngineRow({ e, onInstalled }: { e: EngineStatus; onInstalled: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [jobId, setJobId] = useState<string | null>(null);
   const job = app.jobs.find((j) => j.id === jobId) || null;
   useEffect(() => {
-    if (job && job.state === "done") { app.toast(`${e.label}: ${t("installed")}`, "ok"); onInstalled(); setJobId(null); }
-    if (job && job.state === "failed") { app.toast(job.message || t("installFailed"), "bad"); setJobId(null); }
+    if (job && job.state === "done") { app.toast(`${voiceEngineLabel(e.label, lang)}: ${t("installed")}`, "ok"); onInstalled(); setJobId(null); }
+    if (job && job.state === "failed") { app.toast(jobMessage(job.message, lang) || t("installFailed"), "bad"); setJobId(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.state]);
 
@@ -34,10 +35,10 @@ function EngineRow({ e, onInstalled }: { e: EngineStatus; onInstalled: () => voi
     <div className="row" style={{ background: "var(--surface-2)", borderRadius: 8, padding: "8px 12px" }}>
       <span className={`dot ${e.installed ? "ok" : "bad"}`} />
       <span className="grow">
-        <strong className="small">{e.label}</strong>{" "}
+        <strong className="small">{voiceEngineLabel(e.label, lang)}</strong>{" "}
         {e.capabilities.cloning && <span className="pill">{t("cloningCapable")}</span>}
         {e.capabilities.needs_gpu && <span className="pill">{t("needsGpu")}</span>}
-        <div className="muted small">{e.installed ? e.reason : e.install_hint || e.reason}</div>
+        <div className="muted small">{voiceEngineText(e.installed ? e.reason : e.install_hint || e.reason, lang)}</div>
       </span>
       {e.installed ? (
         <span className="pill ok"><CheckCircle2 size={13} /> {t("installed")}</span>
@@ -71,7 +72,7 @@ function EnginesTab() {
 function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
   spec: VoiceSpec; setSpec: (s: VoiceSpec) => void; engines: EngineStatus[]; voices: StudioVoice[];
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   return (
     <div className="row wrap">
       <select value={spec.voice_id || ""} onChange={(e) => setSpec({ ...spec, voice_id: e.target.value || null, engine_id: e.target.value ? undefined : spec.engine_id })}>
@@ -81,7 +82,7 @@ function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
       {!spec.voice_id && (
         <select value={spec.engine_id || ""} onChange={(e) => setSpec({ ...spec, engine_id: e.target.value || null })}>
           <option value="">{t("chooseVoice")}</option>
-          {engines.filter((e) => e.installed).map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+          {engines.filter((e) => e.installed).map((e) => <option key={e.id} value={e.id}>{voiceEngineLabel(e.label, lang)}</option>)}
         </select>
       )}
       <label className="field" style={{ width: 110 }}>{t("speedLabel")}
@@ -93,7 +94,7 @@ function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
 }
 
 function LibraryTab() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const voices = useAsync(() => api.studioVoices(), []);
   const engines = useAsync(() => api.voiceEngines(), []);
@@ -142,7 +143,7 @@ function LibraryTab() {
           <input placeholder={t("voiceName")} value={name} onChange={(e) => setName(e.target.value)} style={{ minWidth: 200 }} />
           <select value={engineId} onChange={(e) => setEngineId(e.target.value)}>
             <option value="">{t("voiceEngine")}</option>
-            {cloningEngines.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+            {cloningEngines.map((e) => <option key={e.id} value={e.id}>{voiceEngineLabel(e.label, lang)}</option>)}
           </select>
           <label className="btn sm">
             <UploadCloud size={13} /> {file ? file.name : t("chooseFile")}
@@ -170,7 +171,7 @@ function LibraryTab() {
                 <span>{t("clipping")}: {v.quality.clipping_pct}%</span>
                 {v.has_sample && <audio src={api.voiceSampleUrl(v.id)} controls preload="none" style={{ height: 28, width: 200 }} />}
               </div>
-              {v.quality.warnings.length > 0 && <div className="muted small">{v.quality.warnings.join(" · ")}</div>}
+              {v.quality.warnings.length > 0 && <div className="muted small">{v.quality.warnings.map((w) => voiceWarning(w, lang)).join(" · ")}</div>}
               <div className="row wrap small">
                 {v.presets.map((p) => <span key={p} className="pill">{p}</span>)}
                 <input placeholder={t("presetName")} value={presetName[v.id] || ""} style={{ width: 130 }}
@@ -331,7 +332,7 @@ function useJob(jobId: string | null): Job | null {
 }
 
 function AudiobookTab() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const engines = useAsync(() => api.voiceEngines(), []);
   const voices = useAsync(() => api.studioVoices(), []);
@@ -386,7 +387,7 @@ function AudiobookTab() {
       </div>
       {job && (
         <div className="stack">
-          <div className="row"><JobState state={job.state} /><span className="small muted">{job.message}</span></div>
+          <div className="row"><JobState state={job.state} /><span className="small muted">{jobMessage(job.message, lang)}</span></div>
           {["queued", "waiting_gpu", "running"].includes(job.state) && <Progress value={job.progress} />}
           {job.state === "done" && (
             <div className="stack">
@@ -406,7 +407,7 @@ function AudiobookTab() {
 }
 
 function DubTab() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const engines = useAsync(() => api.voiceEngines(), []);
   const voices = useAsync(() => api.studioVoices(), []);
@@ -476,9 +477,9 @@ function DubTab() {
       </div>
       {job && (
         <div className="stack">
-          <div className="row"><JobState state={job.state} /><span className="small muted">{job.message}</span></div>
+          <div className="row"><JobState state={job.state} /><span className="small muted">{jobMessage(job.message, lang)}</span></div>
           {["queued", "waiting_gpu", "running"].includes(job.state) && <Progress value={job.progress} />}
-          {job.state === "failed" && <div className="row"><XCircle size={14} className="err-text" /><span className="small err-text">{job.message}</span></div>}
+          {job.state === "failed" && <div className="row"><XCircle size={14} className="err-text" /><span className="small err-text">{jobMessage(job.message, lang)}</span></div>}
           {(outputs.segments?.length || 0) > 0 && (
             <div className="card" style={{ padding: 6 }}>
               <table className="list">

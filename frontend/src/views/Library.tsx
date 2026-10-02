@@ -5,9 +5,10 @@ import { useT } from "../i18n";
 import { AssetTile, ConfirmButton, Empty, Modal, useApp, useDebounced } from "../components/ui";
 import { useDeleteAssets } from "../components/useDeleteAssets";
 import { LinkDownload } from "../components/LinkDownload";
+import { kindName, sourceName } from "../messages";
 
 export function LibraryView() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const [query, setQuery] = useState("");
@@ -117,11 +118,11 @@ export function LibraryView() {
         </div>
         <select value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">{t("kindAll")}</option>
-          {["image", "video", "audio", "lyrics", "font"].map((k) => <option key={k} value={k}>{k}</option>)}
+          {["image", "video", "audio", "lyrics", "font"].map((k) => <option key={k} value={k}>{kindName(k, lang)}</option>)}
         </select>
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">{t("sourceAll")}</option>
-          {["generated", "rendered", "import", "derived"].map((k) => <option key={k} value={k}>{k}</option>)}
+          {["generated", "rendered", "import", "derived"].map((k) => <option key={k} value={k}>{sourceName(k, lang)}</option>)}
         </select>
         <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} aria-label={t("minRating")}>
           <option value={0}>{t("minRating")}</option>

@@ -6,7 +6,8 @@ import {
 import {
   api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
-import { useT, type MessageKey } from "../i18n";
+import { useT, type Lang, type MessageKey } from "../i18n";
+import { errorText, jobMessage, lineageEvent, stageName, translateText } from "../messages";
 import { LookPanel } from "../components/LookPanel";
 import { Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
@@ -22,8 +23,18 @@ const STATUS_KEY: Record<string, MessageKey> = {
   failed: "stateFailed", cancelled: "stateCancelled", partial: "statusPartial",
 };
 
-export function StatusPill({ status }: { status: string }) {
+const LIVE_JOB = ["queued", "waiting_gpu", "running"];
+
+/** "queued" with no live job is not queued: an edit left it waiting for the person to press Continue. */
+export function awaitsContinue(status: string, slug: string, jobId: string | null | undefined, jobs: Job[]): boolean {
+  if (status !== "queued") return false;
+  return !jobs.some((j) => LIVE_JOB.includes(j.state)
+    && (j.id === jobId || (j.type === "production" && (j.params as { slug?: string }).slug === slug)));
+}
+
+export function StatusPill({ status, pending }: { status: string; pending?: boolean }) {
   const { t } = useT();
+  if (status === "queued" && pending) return <span className="pill gold">{t("statusChangesPending")}</span>;
   return <span className={`pill ${STATUS_TONE[status] || ""}`}>{t(STATUS_KEY[status] || "stateQueued")}</span>;
 }
 
@@ -31,7 +42,7 @@ export function StatusPill({ status }: { status: string }) {
 export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onStarted }: {
   recipe?: RecipeSummary; fromProduction?: ProductionSummary; defaultTitle?: string; onClose: () => void; onStarted: (slug: string) => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [chars, setChars] = useState<(Character & { projectName: string })[]>([]);
@@ -71,7 +82,7 @@ export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onS
         },
       });
       app.toast(t("productionQueued"), "ok");
-      out.notes.forEach((n) => app.toast(n, "info"));
+      out.notes.forEach((n) => app.toast(translateText(n, lang), "info"));
       app.refreshJobs();
       onStarted(out.production.slug);
     } catch (e) {
@@ -134,14 +145,14 @@ const STAGE_TAB: Record<string, Tab> = {
 };
 
 /** A failure message in words the person can act on; the raw text stays one click away. */
-export function humanError(message: string | null | undefined, t: ReturnType<typeof useT>["t"]): string {
+export function humanError(message: string | null | undefined, t: ReturnType<typeof useT>["t"], lang: Lang = "en"): string {
   const m = message || "";
   if (/WinError (5|32)|Access is denied|PermissionError|being used by another process/i.test(m)) return t("errFileLocked");
   if (/ComfyUI is not answering|comfy\w* (is )?(down|unreachable|not reachable)|Connection refused/i.test(m)) return t("errComfyDown");
   if (/out of memory|CUDA error|OOM|not enough VRAM/i.test(m)) return t("errVram");
   if (/language model|llm unavailable|no llama\.cpp/i.test(m)) return t("errLlm");
   if (/the run stopped without finishing/i.test(m)) return t("errStopped");
-  const first = m.replace(/^[a-z_]+:\s*/i, "").split(/(?<=[.;])\s/)[0];
+  const first = errorText(undefined, m.replace(/^[a-z_]+:\s*/i, "").split(/(?<=[.;])\s/)[0], lang);
   return first.length > 220 ? `${first.slice(0, 219)}…` : first;
 }
 
@@ -181,7 +192,7 @@ function PipelineStepper({ state, active, onPick }: { state: ProductionState; ac
 
 /** What would stop the next run, checked before it starts (ComfyUI, music model, ffmpeg, GPU memory). */
 function Preflight({ slug }: { slug: string }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [items, setItems] = useState<Awaited<ReturnType<typeof api.productionPreflight>>["items"] | null>(null);
   const [starting, setStarting] = useState(false);
@@ -199,7 +210,7 @@ function Preflight({ slug }: { slug: string }) {
       {items.map((i) => (
         <div key={i.code} className={`pf-item ${i.level}`}>
           {i.level === "error" ? <AlertTriangle size={14} /> : i.level === "warn" ? <AlertTriangle size={14} /> : <Info size={14} />}
-          <span className="grow">{(() => { const k = `pf_${i.code}` as MessageKey; const txt = t(k); return txt === k ? i.message : txt; })()}</span>
+          <span className="grow">{(() => { const k = `pf_${i.code}` as MessageKey; const txt = t(k); return txt === k ? errorText(undefined, i.message, lang) : txt; })()}</span>
           {i.code === "comfy_down" && i.startable && <button className="btn sm" disabled={starting} onClick={start}>{starting ? <Loader2 size={12} className="spin" /> : <Play size={12} />} {t("pfStartComfy")}</button>}
         </div>
       ))}
@@ -211,7 +222,7 @@ function Preflight({ slug }: { slug: string }) {
 function NextStep({ state, active, onChanged, setTab }: {
   state: ProductionState; active: boolean; onChanged: () => void; setTab: (tab: Tab) => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState(false);
@@ -237,7 +248,7 @@ function NextStep({ state, active, onChanged, setTab }: {
         <Loader2 size={18} className="spin" />
         <div className="grow">
           <strong>{waiting ? (job?.state === "waiting_gpu" ? t("nsWaitingGpu") : t("nsQueued")) : t("nsRunning", { stage: stageName || "…" })}</strong>
-          {job?.message && job.message !== jobStage && <div className="small muted ellipsis">{job.message}</div>}
+          {job?.message && job.message !== jobStage && <div className="small muted ellipsis">{jobMessage(job.message, lang)}</div>}
           {!waiting && <div className="ns-bar"><i style={{ width: `${pct}%` }} /></div>}
         </div>
         {state.job_id && <button className="btn sm" disabled={busy} onClick={() => act(() => api.cancelJob(state.job_id!), t("sbPaused"))}><PauseIcon size={13} /> {t("sbPause")}</button>}
@@ -275,7 +286,7 @@ function NextStep({ state, active, onChanged, setTab }: {
         <div className="grow">
           <strong>{animatic ? (noClips ? t("nsAnimaticNoClips") : t("nsAnimatic")) : t("nsReview", { stage: stageName })}</strong>
           <div className="small muted">{animatic && plan ? (noClips ? t("nsAnimaticNoClipsLead")
-            : t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes })) : state.message}</div>
+            : t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes })) : jobMessage(state.message, lang)}</div>
           <Preflight slug={state.slug} />
         </div>
         {animatic && <button className="btn sm" onClick={() => setTab("preview")}><Film size={13} /> {t("nsWatch")}</button>}
@@ -290,11 +301,11 @@ function NextStep({ state, active, onChanged, setTab }: {
         {failed ? <AlertTriangle size={18} /> : <PauseIcon size={18} />}
         <div className="grow">
           <strong>{failed ? t("nsFailed", { stage: stageName || "—" }) : t("nsCancelled")}</strong>
-          {failed && <div className="small">{humanError(state.message, t)}</div>}
+          {failed && <div className="small">{humanError(state.message, t, lang)}</div>}
           {failed && state.message && (
             <button className="link-btn small" onClick={() => setDetails(!details)}>{details ? t("errHide") : t("errDetails")}</button>
           )}
-          {details && <pre className="ns-details">{state.message}</pre>}
+          {details && <pre className="ns-details">{jobMessage(state.message, lang)}{lang === "es" && state.message && jobMessage(state.message, lang) !== state.message ? `\n\n${state.message}` : ""}</pre>}
           <Preflight slug={state.slug} />
         </div>
         <button className="btn sm primary" disabled={busy} onClick={go}><RotateCcw size={13} /> {t("resumeProduction")}</button>
@@ -305,7 +316,7 @@ function NextStep({ state, active, onChanged, setTab }: {
     return (
       <div className="next-step info">
         <Shuffle size={18} />
-        <div className="grow"><strong>{t("nsEdited")}</strong><div className="small muted">{state.message || t("nsEditedLead")}</div>
+        <div className="grow"><strong>{t("nsEdited")}</strong><div className="small muted">{jobMessage(state.message, lang) || t("nsEditedLead")}</div>
           <Preflight slug={state.slug} /></div>
         <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {t("continueProduction")}</button>
       </div>
@@ -326,7 +337,7 @@ function NextStep({ state, active, onChanged, setTab }: {
 function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   slug: string; reloadList: () => void; onStarted: (slug: string) => void; onBack: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
@@ -354,7 +365,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
       if (r.ok) {
         app.toast(t("exportLumiereDone", { clips: String(r.imported_clips ?? 0) }), "ok");
         if (r.url) window.open(r.url, "_blank", "noopener");
-      } else app.toast(t("exportLumiereFail", { error: r.error || "" }), "bad");
+      } else app.toast(t("exportLumiereFail", { error: errorText(undefined, r.error || "", lang) }), "bad");
     } catch (e) { app.toast((e as Error).message, "bad"); }
     finally { setLumiereBusy(false); }
   };
@@ -396,7 +407,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
       <div className="card prod-head">
         <div className="row wrap" style={{ gap: 8 }}>
           <button className="btn sm ghost" onClick={onBack}><ArrowLeft size={14} /> {t("prodBack")}</button>
-          <h2 className="grow" style={{ margin: 0 }}><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
+          <h2 className="grow" style={{ margin: 0 }}><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} pending={awaitsContinue(view.status, slug, data.job_id, app.jobs)} /></h2>
           {!isShort && !legacy && (
             <label className="switch" title={t("autopilotHint")}>
               <input type="checkbox" checked={autopilot} onChange={async (e) => {
@@ -516,12 +527,12 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
           {current === "history" && (
             <div className="card">
               <h2>{t("lineageTitle")}</h2>
-              {data.message && <p className="small muted">{data.message}</p>}
+              {data.message && <p className="small muted">{jobMessage(data.message, lang)}</p>}
               {legacy || !data.lineage?.length ? <p className="small muted">—</p> : (
                 <ul className="small" style={{ margin: 0, paddingLeft: 18, maxHeight: 480, overflow: "auto" }}>
                   {data.lineage.slice(-120).reverse().map((e, i) => (
-                    <li key={i}><span className="muted mono">{e.at.slice(0, 10)} {e.at.slice(11, 19)}</span> <strong>{e.stage}</strong> {e.event}
-                      {e.key ? ` · ${String(e.key)}` : ""}{e.reason ? ` · ${String(e.reason)}` : ""}</li>
+                    <li key={i}><span className="muted mono">{e.at.slice(0, 10)} {e.at.slice(11, 19)}</span> <strong>{stageName(e.stage, lang)}</strong> {lineageEvent(e.event, lang)}
+                      {e.key ? ` · ${String(e.key)}` : ""}{e.reason ? ` · ${translateText(String(e.reason), lang)}` : ""}</li>
                   ))}
                 </ul>
               )}
@@ -650,7 +661,7 @@ function ShotsModal({ state, onClose, onSaved }: { state: ProductionState; onClo
 }
 
 function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [busy, setBusy] = useState(false);
   const card = state.qa?.last;
@@ -684,7 +695,7 @@ function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void })
         <>
           <p className="small">
             <span className={`pill ${card.failed ? "bad" : "ok"}`}>{t("qaSummary", { passed: card.passed, failed: card.failed, skipped: card.skipped })}</span>
-            {" "}<span className="muted">{card.stage} · {t("qaVision", { name: card.vision })}{retries > 0 ? ` · ${t("qaRetries", { n: retries })}` : ""}</span>
+            {" "}<span className="muted">{card.stage === "all" ? t("all") : stageName(card.stage, lang)} · {t("qaVision", { name: card.vision })}{retries > 0 ? ` · ${t("qaRetries", { n: retries })}` : ""}</span>
           </p>
           {failing.length > 0 && (
             <div className="stack" style={{ gap: 8 }}>
@@ -696,8 +707,8 @@ function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void })
                     </button>
                   )}
                   <div className="small">
-                    <strong>{i.stage} {i.key}</strong>{i.score != null && <span className="muted"> · {i.score}/10</span>}
-                    <div className="err-text">{i.reasons.join("; ")}</div>
+                    <strong>{stageName(i.stage, lang)} {i.key}</strong>{i.score != null && <span className="muted"> · {i.score}/10</span>}
+                    <div className="err-text">{i.reasons.map((r) => translateText(r, lang)).join("; ")}</div>
                   </div>
                 </div>
               ))}
@@ -742,13 +753,14 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
   p: ProductionSummary; projectName?: string; onOpen: () => void; compact?: boolean;
 }) {
   const { t, lang } = useT();
+  const app = useApp();
   const pct = p.progress && p.progress.total ? Math.round((p.progress.done / p.progress.total) * 100) : 0;
   const where = p.stage ? t(`stage_${p.stage}` as MessageKey) : "";
   const cardHint = () => {
     if (p.status === "done") return t("nsDone");
     if (p.status === "awaiting_review" && p.stage === "song" && p.kind !== "short") return t("nsPickTake");
     if (p.status === "awaiting_review" && p.stage === "animatic") return t("nsAnimatic");
-    if (p.status === "failed") return `${t("nsFailed", { stage: where || "—" })} · ${humanError(p.message, t)}`;
+    if (p.status === "failed") return `${t("nsFailed", { stage: where || "—" })} · ${humanError(p.message, t, lang)}`;
     return where ? `${where}${p.progress ? ` · ${p.progress.done}/${p.progress.total}` : ""}` : "";
   };
   return (
@@ -760,7 +772,7 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
       <div className="prod-info">
         <div className="row" style={{ gap: 6 }}>
           <strong className="ellipsis grow">{p.name}</strong>
-          {!compact && <StatusPill status={p.status} />}
+          {!compact && <StatusPill status={p.status} pending={awaitsContinue(p.status, p.slug, null, app.jobs)} />}
         </div>
         <span className="small muted ellipsis">
           {[p.kind === "short" ? t("shortBadge") : p.shot_count ? t("prodShotsN", { n: p.shot_count }) : "",

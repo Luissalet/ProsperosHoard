@@ -3,6 +3,7 @@ import { ClipboardCheck, Loader2, Plus, Sparkles, Trash2, Undo2, Wand2 } from "l
 import { api, thumbUrl, type Asset, type Character, type Project, type VideoDraft, type VideoShot } from "../api";
 import { useT } from "../i18n";
 import { Modal, useApp } from "../components/ui";
+import { sectionLabel } from "../messages";
 
 const LANGS: [string, string][] = [["en", "English"], ["es", "Español"], ["fr", "Français"], ["it", "Italiano"],
   ["pt", "Português"], ["de", "Deutsch"], ["ja", "日本語"], ["ko", "한국어"]];
@@ -13,7 +14,7 @@ const blankShot = (): VideoShot => ({ prompt: "", lead: true, motion: "move", mo
 // model drafts (or you write) -> edit it -> the production runs (stills,
 // animatic for review, Wan clips, the cut on the beat).
 export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose: () => void; onStarted: (slug: string) => void; projectId?: string }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [chars, setChars] = useState<(Character & { projectName: string })[]>([]);
   const [charId, setCharId] = useState("");
@@ -23,7 +24,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
   const [concept, setConcept] = useState("");
   const [songMode, setSongMode] = useState<"compose" | "asset">("compose");
   const [genre, setGenre] = useState("");
-  const [language, setLanguage] = useState("en");
+  const [language, setLanguage] = useState<string>(lang === "es" ? "es" : "en");
   const [duration, setDuration] = useState(120);
   const [songs, setSongs] = useState<Asset[]>([]);
   const [songId, setSongId] = useState("");
@@ -66,6 +67,29 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
   }, [projectId]);
 
   const leadBody = () => (charId ? { character_id: charId } : { lead_name: newName, lead_look: newLook });
+  // the director's pass runs after the plan is on screen: the list is editable at once and the
+  // proposed rewrites arrive as a suggestion to apply (or not)
+  const [reviewing, setReviewing] = useState(false);
+  const [proposal, setProposal] = useState<VideoShot[] | null>(null);
+  const reviewAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => reviewAbort.current?.abort(), []);
+  const review = async (d: VideoDraft) => {
+    const ctl = new AbortController();
+    reviewAbort.current = ctl;
+    setReviewing(true);
+    setProposal(null);
+    try {
+      const r = await api.critiquePlan({ concept, ...leadBody(), draft: d, notes_language: lang }, ctl.signal);
+      setDraft((cur) => (cur ? { ...cur, critique: { issues: r.issues, revised: false } } : cur));
+      if (r.revised && r.shots?.length) setProposal(r.shots);
+    } catch { /* no review: the plan stands as it is */ }
+    finally { if (reviewAbort.current === ctl) { reviewAbort.current = null; setReviewing(false); } }
+  };
+  const applyProposal = () => {
+    if (!draft || !proposal) return;
+    setDraft({ ...draft, first_shots: draft.shots, shots: proposal, critique: { issues: draft.critique?.issues || [], revised: true } });
+    setProposal(null);
+  };
   const plan = async () => {
     setBusy("plan");
     const ctl = new AbortController();
@@ -74,10 +98,11 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
       const r = await api.planVideo({
         concept, ...leadBody(), shots, language, genre: genre || null, duration_s: duration,
         song_asset_id: songMode === "asset" ? songId || null : null, lyrics: songMode === "asset" ? lyrics || null : null,
-        project: projectId || null,
+        project: projectId || null, notes_language: lang, critic: false,
       }, ctl.signal);
       setDraft(r.draft);
       if (!name && r.draft.title) setName(r.draft.title);
+      review(r.draft);
     } catch (e) {
       if (!ctl.signal.aborted) app.toast((e as Error).message, "bad");
     } finally {
@@ -121,7 +146,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
     <Modal title={t("newVideo")} onClose={onClose} wide footer={
       !draft ? (
         <>
-          {busy === "plan" && elapsed >= 45 && <span className="hint grow" style={{ maxWidth: 360 }}>{t("videoPlanSlow")}</span>}
+          {busy === "plan" && elapsed >= 150 && <span className="hint grow" style={{ maxWidth: 360 }}>{t("videoPlanSlow")}</span>}
           {busy === "plan"
             ? <button className="btn ghost" onClick={() => planAbort.current?.abort()}>{t("videoPlanStop")}</button>
             : <button className="btn ghost" onClick={onClose}>{t("cancel")}</button>}
@@ -212,6 +237,16 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
       ) : (
         <div className="stack">
           {(draft.warnings || []).map((w) => <p key={w} className="err-text small">{w}</p>)}
+          {reviewing && (
+            <div className="card critic-card row" style={{ gap: 8 }}><Loader2 size={14} className="spin" /> <span className="small">{t("criticWorking")}</span></div>
+          )}
+          {proposal && (
+            <div className="card critic-card row" style={{ gap: 8 }}>
+              <ClipboardCheck size={14} /> <span className="small grow">{t("criticProposal", { n: proposal.filter((s, i) => s.prompt !== draft.shots[i]?.prompt).length })}</span>
+              <button className="btn sm primary" onClick={applyProposal}>{t("criticApply")}</button>
+              <button className="btn sm ghost" onClick={() => setProposal(null)}>{t("criticDismiss")}</button>
+            </div>
+          )}
           {draft.critique && (draft.critique.issues.length > 0 || draft.critique.revised) && (
             <div className="card critic-card">
               <div className="row" style={{ gap: 8 }}>
@@ -249,7 +284,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
                   <select value={s.motion} onChange={(e) => setShot(i, { motion: e.target.value as "move" | "still" })}>
                     <option value="move">{t("videoMove")}</option><option value="still">{t("videoStill")}</option></select>
                   <select value={s.section} onChange={(e) => setShot(i, { section: e.target.value })}>
-                    {SECTIONS.map((x) => <option key={x} value={x}>{x || t("videoAnySection")}</option>)}</select>
+                    {SECTIONS.map((x) => <option key={x} value={x}>{x ? sectionLabel(x, lang) : t("videoAnySection")}</option>)}</select>
                   <div className="grow" />
                   <button className="btn sm icon ghost" onClick={() => setDraft({ ...draft, shots: draft.shots.filter((_, j) => j !== i) })} title={t("deleteAsset")}><Trash2 size={13} /></button>
                 </div>

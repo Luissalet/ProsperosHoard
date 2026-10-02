@@ -77,7 +77,7 @@ export function ProjectsView({ projects, reload }: { projects: Project[]; reload
               onClick={() => setDeleting(p)}><Trash2 size={14} /></button>
             <button className="project-card" onClick={() => app.setProject(p.id)}>
               <div className="cover">
-                {p.cover_asset_id && <img src={thumbUrl({ id: p.cover_asset_id, thumb_path: "x", kind: "image" })} alt="" />}
+                {(p.cover_asset_id || p.auto_cover_asset_id) && <img src={thumbUrl({ id: (p.cover_asset_id || p.auto_cover_asset_id)!, thumb_path: "x", kind: "image" })} alt="" />}
               </div>
               <div className="info">
                 <strong style={{ fontSize: 16 }}>{p.name}</strong>

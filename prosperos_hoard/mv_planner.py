@@ -436,8 +436,12 @@ CRITIC_RUBRIC = (
 )
 
 
+NOTE_LANGUAGES = {"es": "Spanish (Spain)", "en": "English", "fr": "French", "it": "Italian", "pt": "Portuguese",
+                  "de": "German"}
+
+
 def critique(chat: Callable[[list[dict[str, Any]], int, float], str], draft: dict[str, Any], *, concept: str,
-             lead_name: str, lead_look: str) -> dict[str, Any]:
+             lead_name: str, lead_look: str, notes_language: Optional[str] = None) -> dict[str, Any]:
     """A second pass over a planned shot list: the rubric issues found
     without a model plus a director's review that rewrites the weak shots.
     Returns {"issues": [...], "revised": bool, "shots": [...] (when revised)};
@@ -453,7 +457,9 @@ def critique(chat: Callable[[list[dict[str, Any]], int, float], str], draft: dic
             f"Concept: {concept}\nLead: {lead_name}, {lead_look}\n"
             + (f"Already noticed: {'; '.join(issues)}\n" if issues else "")
             + f"Shot list ({len(shots)} shots):\n{listing}\n\n"
-            "List the problems you find (short, one per item) and give the whole shot list back improved: the same number "
+            + (f"Write the problems in {NOTE_LANGUAGES[notes_language]}; keep the shots' prompts in English.\n"
+               if notes_language in NOTE_LANGUAGES and notes_language != "en" else "")
+            + "List the problems you find (short, one per item) and give the whole shot list back improved: the same number "
             "of shots, same order and sections unless the story needs a change, rewriting only the weak ones. Answer "
             'exactly as {"issues": ["..."], "shots": [{"prompt", "lead", "motion", "motion_prompt", "section"}]}')},
     ]
