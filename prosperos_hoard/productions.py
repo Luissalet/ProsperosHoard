@@ -783,6 +783,10 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
         timeline = done.get("timeline") or {}
         if timeline.get("timelines"):
             view["renders"] = {aspect: info.get("renders") for aspect, info in timeline["timelines"].items()}
+            stale = {aspect: info["previous_renders"] for aspect, info in timeline["timelines"].items()
+                     if info.get("previous_renders") and not info.get("renders")}
+            if stale:
+                view["previous_renders"] = stale
         animatic = done.get("animatic") or {}
         if animatic.get("renders"):
             view["animatic"] = {"renders": animatic["renders"], "clips_planned": (animatic.get("plan") or {}).get("clips_planned"),
@@ -1767,6 +1771,51 @@ def update_settings(data_dir: Path, slug: str, patch: dict[str, Any]) -> dict[st
         log(state, "review", "changed_settings", **{k: v for k, v in patch.items() if k != "qa"})
         save_state(data_dir, state)
         return state["settings"]
+
+
+def set_finishing(store: Store, slug: str, finishing: Any) -> dict[str, Any]:
+    """The production's look: colour grade, grain, vignette, bands, lyric
+    style and beat effects (see video.validate_finishing). Saved in the
+    spec (the animatic and the cut read it) and on its cut timelines;
+    a cut already rendered is marked to render again, which the next run
+    (studio_production_continue) does without touching anything else.
+    Returns {"finishing", "rerender": [aspects]}."""
+    from . import video as video_mod  # pure: validation only
+
+    try:
+        clean = video_mod.validate_finishing(finishing or {})
+    except video_mod.RenderError as exc:
+        raise ProductionError("bad_finishing", str(exc)) from None
+    with lock_for(slug):
+        state = load_state(store.data_dir, slug)
+        if is_legacy(state):
+            raise ProductionError("legacy_production", "a scripted production has no look to change; export it as a recipe")
+        if is_running(state, store.data_dir):
+            raise ProductionError("busy", "the production is running; pause it first or wait until it stops")
+        spec = state["spec"]
+        spec.setdefault("timeline", {})["finishing"] = clean
+        rerender: list[str] = []
+        entry = (state.get("done") or {}).get("timeline")
+        if entry:
+            for aspect, info in (entry.get("timelines") or {}).items():
+                try:
+                    engine.update_timeline(store, info["timeline_id"], {"finishing": clean})
+                except (NotFound, engine.EngineError):
+                    continue
+                if info.get("renders"):
+                    # the old cut stays watchable until the new one lands
+                    info["previous_renders"] = info["renders"]
+                    info["renders"] = {}
+                    rerender.append(aspect)
+            if rerender:
+                entry["complete"] = False
+                state["done"].pop("report", None)
+                if state.get("status") == "done":
+                    state["status"] = "queued"
+                    state["stage"] = "timeline"
+        log(state, "timeline", "changed_finishing", finishing=clean, rerender=rerender or None)
+        save_state(store.data_dir, state)
+        return {"finishing": clean, "rerender": rerender}
 
 
 SONG_COMPOSE_FIELDS = ("tags", "lyrics", "bpm", "duration", "key", "language", "time_signature", "seed", "count")

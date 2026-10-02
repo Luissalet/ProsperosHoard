@@ -62,6 +62,14 @@ Qué hacer cuando el usuario pide, con sus palabras:
 - **«Hazlo todo sin pararte» / «piloto automático»**:
   `studio_production_settings(production, autopilot=true)` y
   `studio_production_continue`.
+- **«Que pegue con la música» / «zoom en el bombo» / «dale un look de
+  terror»**: `studio_production_finishing(production, finishing={...})`
+  con `beat_fx` (`source` kick/beats/downbeats; `zoom`, `flash`, `shake`
+  de 0 a 1) y el resto del look; si ya estaba renderizado, se renderiza de
+  nuevo solo el montaje. Enséñale el resultado con `studio_show`.
+- **«Hazme el Canvas de Spotify» / «un bucle para Spotify»**:
+  `studio_canvas(production)` (estribillo, 8 s, sin letra) y dale el
+  enlace de descarga.
 - **«Pásalo a Premiere / DaVinci»**: `studio_export_timeline(production,
   aspect)` y dale el enlace de descarga.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:

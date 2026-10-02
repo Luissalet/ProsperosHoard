@@ -302,6 +302,52 @@ def analyze_samples(samples: np.ndarray, sr: int = SAMPLE_RATE) -> dict[str, Any
     }
 
 
+HIT_SOURCES = ("kick", "beats", "downbeats")
+
+
+def beat_hits(samples: np.ndarray, source: str = "kick", sr: int = SAMPLE_RATE,
+              max_per_s: float = 6.0) -> list[tuple[float, float]]:
+    """The moments a beat effect fires on, as (time_s, strength 0-1).
+
+    "kick": peaks of the low band (< 150 Hz) onset envelope - the bass drum
+    and big bass notes, which is what the eye expects a punch on; "beats":
+    the beat grid (downbeats full strength, the rest softer); "downbeats":
+    one per bar. Silent or beatless audio gives no hits."""
+    if source not in HIT_SOURCES:
+        raise ValueError(f"source must be one of {', '.join(HIT_SOURCES)}")
+    samples = np.asarray(samples, dtype=np.float32)
+    if len(samples) < FRAME_SIZE * 2 or float(np.abs(samples).max(initial=0.0)) < 1e-4:
+        return []
+    if source != "kick":
+        analysis = analyze_samples(samples, sr)
+        downs = [round(float(t), 3) for t in analysis["downbeats"]]
+        if source == "downbeats":
+            return [(t, 1.0) for t in downs]
+        down_set = set(downs)
+        return [(round(float(t), 3), 1.0 if round(float(t), 3) in down_set else 0.55) for t in analysis["beat_times"]]
+    mags = _stft_mags(samples)
+    low = _flux(mags, 0, _band_bins(sr, FRAME_SIZE, 150.0))
+    if low.max() <= 0:
+        return []
+    ref = float(np.percentile(low[low > 0], 97)) if np.any(low > 0) else float(low.max())
+    env = np.clip(low / max(ref, 1e-9), 0.0, 1.5)
+    fps = sr / HOP
+    half = max(1, int(round(0.07 * fps)))
+    min_gap = max(1.0 / max_per_s, 0.16)
+    hits: list[tuple[float, float]] = []
+    for i in range(1, len(env) - 1):
+        v = env[i]
+        if v < 0.35 or v < env[max(0, i - half):i + half + 1].max():
+            continue
+        t = i / fps
+        if hits and t - hits[-1][0] < min_gap:
+            if v > hits[-1][1]:
+                hits[-1] = (round(t, 3), round(float(min(1.0, v)), 3))
+            continue
+        hits.append((round(t, 3), round(float(min(1.0, v)), 3)))
+    return hits
+
+
 def analyze_file(path: Path) -> dict[str, Any]:
     samples = decode_to_mono(path)
     return analyze_samples(samples)

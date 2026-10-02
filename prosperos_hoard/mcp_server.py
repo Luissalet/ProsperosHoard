@@ -626,7 +626,8 @@ def studio_timeline(
     "lyrics_asset_id", "karaoke", "finishing"}. Transitions: cut, crossfade, dip_black, flash_white.
     finishing (applied once at render, all optional): {"color_grade": "teal_orange"|"sodium_night"|
     "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
-    "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)}.
+    "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)|"bold",
+    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1}}.
     Returns a compact view: duration, clips_total, finishing and one page of clips with their index.
 
     Keywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, colour grade, color grade, vignette, film grain, letterbox, glitch flash, horror captions, linea de tiempo, montaje al ritmo, video musical, editar clips, gradacion de color
@@ -1109,6 +1110,41 @@ def studio_production_settings(production: str, autopilot: Optional[bool] = None
     body: dict[str, Any] = {k: v for k, v in (("autopilot", autopilot), ("animatic", animatic), ("song_review", song_review),
                                               ("qa", qa)) if v is not None}
     return _call("POST", "/api/agent/studio_production_settings", params={"production": production}, json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_finishing(production: str, finishing: dict[str, Any], render: bool = True) -> dict[str, Any]:
+    """Set a music video's look: colour grade, grain, vignette, letterbox, lyric style and beat effects / look.
+
+    finishing (all optional; {} = plain): {"color_grade": "teal_orange"|"sodium_night"|"bleach_bypass",
+    "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
+    "lyric_style": "default"|"horror"|"bold", "beat_fx": {"source": "kick"|"beats"|"downbeats",
+    "zoom": 0-1, "flash": 0-1, "shake": 0-1}} - beat_fx punches in, flashes and shakes the picture on
+    the bass drum (kick), every beat or every bar. The animatic and the cut use it; a cut already
+    rendered is re-rendered (render=true queues it; nothing else is redone). Returns the clean look and
+    the aspects that will render again.
+
+    Keywords: look, colour grade, film grain, beat effects, zoom on the kick, flash on the beat, camera shake,
+    music video style, efectos al ritmo, zoom al bombo, destellos, temblor, gradacion de color, estilo del videoclip
+    """
+    return _call("POST", "/api/agent/studio_production_finishing", params={"production": production},
+                 json={"finishing": finishing, "render": render})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_canvas(production: str, seconds: float = 8.0, start_s: Optional[float] = None, lyrics: bool = False) -> dict[str, Any]:
+    """Make a Spotify Canvas: a seamless silent 9:16 loop (3-8 s, 720x1280) of the music video's chorus / bucle.
+
+    Cut from the production's own rendered cut (9:16 preferred; a 16:9 one is centre-cropped), starting at
+    the first chorus unless start_s is given; the tail crossfades into the start so it loops without a jump.
+    That stretch is re-rendered without the burned-in lyrics (a Canvas plays behind the track title);
+    lyrics=true keeps them.
+    Returns the new asset id, where it starts and why ("chorus", "loudest section"), and a download link.
+
+    Keywords: spotify canvas, loop, looping video, vertical loop, apple music motion, canvas de spotify, bucle, video en bucle
+    """
+    return _call("POST", "/api/agent/studio_canvas", params={"production": production},
+                 json={"seconds": seconds, "start_s": start_s, "lyrics": lyrics})
 
 
 @tool(_ro(readOnlyHint=True))

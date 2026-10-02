@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, Film, Loader2, Megaphone, Music,
-  Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Shuffle, Users,
+  Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Repeat, Shuffle, Sparkles, Users,
 } from "lucide-react";
 import {
   api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
+import { LookPanel } from "../components/LookPanel";
 import { Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
@@ -330,6 +331,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
   const [tab, setTab] = useState<Tab | null>(null);
+  const [canvasBusy, setCanvasBusy] = useState(false);
   const active = data ? liveRun(data, app.jobs) : false;
   useEffect(() => {
     if (!active) return;
@@ -348,9 +350,23 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
     try { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); changed(); }
     catch (e) { app.toast((e as Error).message, "bad"); }
   };
-  const renders = view.renders || {};
+  // while a new look re-renders the cut, the previous cut stays on screen
+  const stale = (view as { previous_renders?: Record<string, Record<string, string>> }).previous_renders || {};
+  const renders: Record<string, Record<string, string>> = { ...Object.fromEntries(
+    Object.entries(view.renders || {}).filter(([, q]) => q && Object.keys(q).length)), ...Object.fromEntries(
+    Object.entries(stale).filter(([a]) => !(view.renders || {})[a] || !Object.keys((view.renders || {})[a] || {}).length)) };
   const settings = (data.settings || {}) as Record<string, unknown>;
   const autopilot = Boolean(settings.animatic_autocontinue) && !settings.song_review;
+  const canvasId = ((data.done?.extras as { canvas?: string } | undefined) || {}).canvas;
+  const makeCanvas = async () => {
+    setCanvasBusy(true);
+    try {
+      const r = await api.makeCanvas(slug);
+      app.toast(t("canvasMade", { start: r.start_s.toFixed(1), from: r.start_from }), "ok");
+      changed();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setCanvasBusy(false); }
+  };
   const timelineIds = (((data.done?.timeline as { timelines?: Record<string, { timeline_id?: string }> } | undefined)?.timelines) || {});
   const animatic = (data.done?.animatic as { renders?: Record<string, string> } | undefined)?.renders;
   const outputs = Object.keys(renders).length + (animatic ? Object.keys(animatic).length : 0);
@@ -408,7 +424,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                       const id = byQuality.final || byQuality.preview;
                       return id ? (
                         <div key={aspect} className="stack" style={{ gap: 4 }}>
-                          <span className="small muted">{aspect}{byQuality.final ? "" : ` · ${t("previewQuality")}`}</span>
+                          <span className="small muted">{aspect}{byQuality.final ? "" : ` · ${t("previewQuality")}`}{stale[aspect] ? ` · ${t("lookPrevious")}` : ""}</span>
                           <div className="video-frame" style={{ width: aspect === "16:9" ? 480 : 260 }}>
                             <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
                           </div>
@@ -422,7 +438,37 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                         </div>
                       ) : null;
                     })}
+                    {canvasId && (
+                      <div className="stack" style={{ gap: 4 }}>
+                        <span className="small muted">{t("canvasTitle")}</span>
+                        <div className="video-frame" style={{ width: 150, aspectRatio: "9 / 16" }}>
+                          <video src={fileUrl(canvasId)} poster={`/api/assets/${canvasId}/thumb`} autoPlay loop muted playsInline preload="metadata"
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        </div>
+                        <a className="btn sm ghost" href={`${fileUrl(canvasId)}?download=true`} download><Download size={13} /> {t("download")}</a>
+                      </div>
+                    )}
                   </div>
+                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                    <button className="btn sm" disabled={canvasBusy} onClick={makeCanvas} title={t("canvasHint")}>
+                      {canvasBusy ? <Loader2 size={13} className="spin" /> : <Repeat size={13} />} {canvasId ? t("canvasRemake") : t("canvasMake")}
+                    </button>
+                    <span className="hint">{t("canvasHint")}</span>
+                  </div>
+                </div>
+              )}
+              {!legacy && (
+                <div className="card">
+                  <h2><Sparkles size={16} /> {t("lookTitle")}</h2>
+                  <LookPanel value={(data.spec.timeline || {}).finishing} note={t("lookNoteProduction")}
+                    onApply={async (f) => {
+                      try {
+                        const r = await api.setProductionFinishing(slug, f, true);
+                        app.toast(r.rerender.length ? t("lookRerendering", { aspects: r.rerender.join(", ") }) : t("lookApplied"), "ok");
+                        app.refreshJobs();
+                        changed();
+                      } catch (e) { app.toast((e as Error).message, "bad"); }
+                    }} />
                 </div>
               )}
               <AnimaticCard state={data} onChanged={changed} />

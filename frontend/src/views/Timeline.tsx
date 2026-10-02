@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clapperboard, FileDown, Film, Loader2, Minus, Plus, Scissors, Wand2 } from "lucide-react";
+import { Clapperboard, FileDown, Film, Loader2, Minus, Plus, Scissors, Sparkles, Wand2 } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Analysis, type Asset, type Clip, type LyricClip, type Timeline } from "../api";
 import { useT } from "../i18n";
 import { Empty, JobState, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
+import { LookPanel } from "../components/LookPanel";
 
 const TRANSITIONS = ["cut", "crossfade", "dip_black", "flash_white"];
 const PANS = ["none", "left", "right", "up", "down"];
@@ -59,12 +60,14 @@ export function TimelineView() {
   const latest = (renders.data?.items || []).find((r) => r.recipe?.timeline_id === tl?.id);
   const job = app.jobs.find((j) => j.id === renderJob);
 
-  const patch = async (body: Record<string, unknown>) => {
-    if (!tl) return;
+  const patch = async (body: Record<string, unknown>): Promise<boolean> => {
+    if (!tl) return false;
     try {
       setTl(await api.patchTimeline(tl.id, body));
+      return true;
     } catch (e) {
       app.toast((e as Error).message, "bad");
+      return false;
     }
   };
 
@@ -210,6 +213,8 @@ export function TimelineView() {
                   <label className="check"><input type="checkbox" checked={lyrics.some((l) => l.karaoke)} disabled={!lyrics.length}
                     onChange={(e) => patch({ karaoke: e.target.checked })} /> {t("karaoke")}</label>
                   <p className="muted small">{t("selectClip")}</p>
+                  <h2 style={{ marginTop: 6 }}><Sparkles size={16} /> {t("lookTitle")}</h2>
+                  <LookPanel compact value={tl.finishing} onApply={async (f) => { if (await patch({ finishing: f })) app.toast(t("lookApplied"), "ok"); }} />
                 </>
               )}
             </div>

@@ -414,7 +414,18 @@ export interface LyricClip {
   karaoke: boolean;
 }
 
+export interface Finishing {
+  color_grade?: "teal_orange" | "sodium_night" | "bleach_bypass";
+  grain?: number;
+  vignette?: boolean;
+  letterbox?: boolean;
+  glitch_on_downbeats?: boolean;
+  lyric_style?: "default" | "horror" | "bold";
+  beat_fx?: { source?: "kick" | "beats" | "downbeats"; zoom?: number; flash?: number; shake?: number };
+}
+
 export interface Timeline {
+  finishing?: Finishing;
   id: string;
   project_id: string;
   name: string;
@@ -836,7 +847,7 @@ export interface ProductionState {
   job_id: string | null;
   recipe: { name: string; reuse: string[]; cast: { lead: string } } | null;
   spec: { title?: string; lead?: { name: string; look: string; palette?: string[] }; shots?: ProductionShot[];
-          timeline?: { aspects?: string[] }; cast?: CastMember[]; cast_per_shot?: number } & Record<string, unknown>;
+          timeline?: { aspects?: string[]; finishing?: Finishing }; cast?: CastMember[]; cast_per_shot?: number } & Record<string, unknown>;
   settings: { animatic: boolean; animatic_autocontinue: boolean; qa: { enabled: boolean; max_retries: number } };
   done: Record<string, any>;
   lineage: { at: string; stage: string; event: string; [k: string]: unknown }[];
@@ -1111,6 +1122,10 @@ export const api = {
   productionPreflight: (slug: string) =>
     request<{ ok: boolean; items: { level: "error" | "warn" | "info"; code: string; message: string; startable?: boolean }[] }>(
       "GET", `/api/productions/${slug}/preflight`),
+  makeCanvas: (slug: string, seconds = 8, start_s?: number) =>
+    request<{ asset_id: string; start_s: number; start_from: string; seconds: number }>("POST", `/api/productions/${slug}/canvas`, { seconds, start_s }),
+  setProductionFinishing: (slug: string, finishing: Finishing, render = true) =>
+    request<{ finishing: Finishing; rerender: string[]; job?: Job }>("PATCH", `/api/productions/${slug}/finishing`, { finishing, render }),
   setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown> }) =>
     request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/api/productions/${slug}/settings`, body),
   timelineExportUrl: (timelineId: string, format: "zip" | "xml" | "edl" = "zip", name?: string) =>
