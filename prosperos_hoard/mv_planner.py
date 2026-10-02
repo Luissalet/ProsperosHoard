@@ -375,6 +375,107 @@ def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: st
     return draft
 
 
+# ------------------------------------------------------------ the critic
+
+_SIZE_WORDS = {
+    "wide": ("wide", "establishing", "long shot", "full shot", "aerial", "panorama", "vista"),
+    "medium": ("medium", "waist", "cowboy", "mid shot", "half body", "american shot"),
+    "close": ("close-up", "close up", "closeup", "extreme close", "macro", "detail", "portrait"),
+}
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 3}
+
+
+def rubric_issues(draft: dict[str, Any]) -> list[str]:
+    """What a script supervisor would flag in a shot list, without a model:
+    near-duplicate shots, no variety of shot sizes, the lead never or
+    always on screen, the same motion everywhere, songs sections left
+    without a shot."""
+    shots = draft.get("shots") or []
+    issues: list[str] = []
+    seen: list[tuple[int, set[str]]] = []
+    for i, s in enumerate(shots):
+        w = _words(s.get("prompt") or "")
+        for j, other in seen:
+            if w and other and len(w & other) / max(1, len(w | other)) > 0.6:
+                issues.append(f"shots {j + 1} and {i + 1} are almost the same picture")
+                break
+        seen.append((i, w))
+    sizes = {k for s in shots for k, words in _SIZE_WORDS.items() if any(x in (s.get("prompt") or "").lower() for x in words)}
+    if len(shots) >= 4 and len(sizes) < 2:
+        issues.append("every shot has the same size: mix wide, medium and close-up shots")
+    leads = sum(1 for s in shots if s.get("lead"))
+    if shots and leads == 0:
+        issues.append("the lead never appears")
+    elif len(shots) >= 6 and leads == len(shots):
+        issues.append("the lead is in every shot: add a few places or details to breathe")
+    motions = [str(s.get("motion_prompt") or "").strip().lower() for s in shots if s.get("motion") != "still"]
+    if len(motions) >= 4 and len(set(motions)) <= max(1, len(motions) // 4):
+        issues.append("the clips all move the same way: give each its own camera or subject motion")
+    if (draft.get("song") or {}).get("lyrics"):
+        tagged = {t.lower().replace("-", "").replace(" ", "") for t in re.findall(r"\[([^\]]+)\]", draft["song"]["lyrics"])}
+        tagged = {t for t in tagged if t in SECTIONS}
+        covered = {s.get("section") for s in shots if s.get("section")}
+        missing = sorted(tagged - covered)
+        if missing and covered:
+            issues.append(f"no shot for the {', '.join(missing)}")
+    return issues
+
+
+CRITIC_RUBRIC = (
+    "You are a music-video director and script supervisor reviewing a shot list before anything is filmed. Check:\n"
+    "1. Variety: a mix of shot sizes (wide, medium, close-up), angles and places; no two shots alike.\n"
+    "2. Each prompt is one concrete, filmable picture: who, doing what, where, light and lens. No text, logos or "
+    "signs in frame, no abstract ideas a camera cannot see.\n"
+    "3. Story: the shots follow the concept and the song's sections in order, with a clear start, build and ending.\n"
+    "4. The lead looks the same: never describe their face, hair or clothes differently from their look.\n"
+    "5. Motion: each clip's motion_prompt is a simple physical motion of the camera or subject that fits 5 seconds.\n"
+    "Keep every @Name mention (the lead, places, objects) exactly as written: they load reference pictures.\n"
+)
+
+
+def critique(chat: Callable[[list[dict[str, Any]], int, float], str], draft: dict[str, Any], *, concept: str,
+             lead_name: str, lead_look: str) -> dict[str, Any]:
+    """A second pass over a planned shot list: the rubric issues found
+    without a model plus a director's review that rewrites the weak shots.
+    Returns {"issues": [...], "revised": bool, "shots": [...] (when revised)};
+    the draft is not changed here. A model that fails or answers badly
+    leaves only the rubric issues."""
+    issues = rubric_issues(draft)
+    shots = draft.get("shots") or []
+    listing = json.dumps([{k: s.get(k) for k in ("prompt", "lead", "motion", "motion_prompt", "section")} for s in shots],
+                         ensure_ascii=False)
+    messages = [
+        {"role": "system", "content": CRITIC_RUBRIC + "Answer with one JSON object and nothing else."},
+        {"role": "user", "content": (
+            f"Concept: {concept}\nLead: {lead_name}, {lead_look}\n"
+            + (f"Already noticed: {'; '.join(issues)}\n" if issues else "")
+            + f"Shot list ({len(shots)} shots):\n{listing}\n\n"
+            "List the problems you find (short, one per item) and give the whole shot list back improved: the same number "
+            "of shots, same order and sections unless the story needs a change, rewriting only the weak ones. Answer "
+            'exactly as {"issues": ["..."], "shots": [{"prompt", "lead", "motion", "motion_prompt", "section"}]}')},
+    ]
+    try:
+        reply = chat(messages, min(12000, 900 + 220 * len(shots)), 0.5)
+        data = _json_object(reply)
+    except Exception:  # noqa: BLE001 - no review: keep the plan as it is
+        return {"issues": issues, "revised": False}
+    found = [str(x).strip()[:200] for x in (data.get("issues") or []) if str(x).strip()][:12]
+    try:
+        revised = normalise_draft({"shots": data.get("shots") or []}, False, "en", 0)["shots"]
+    except ProductionError:
+        revised = []
+    out: dict[str, Any] = {"issues": list(dict.fromkeys(issues + found)), "revised": False}
+    if len(revised) >= max(2, len(shots) - 1) and len(revised) <= len(shots) + 2:
+        for new, old in zip(revised, shots):
+            if not new.get("section") and old.get("section"):
+                new["section"] = old["section"]
+        out.update({"revised": True, "shots": revised})
+    return out
+
+
 def spec_from_draft(draft: dict[str, Any], *, lead: dict[str, Any], song_asset_id: Optional[str] = None,
                     clips: str = "all", aspects: Optional[list[str]] = None, song_takes: int = 2,
                     engine: str = "auto", brief: Optional[str] = None, lyrics: Optional[str] = None) -> dict[str, Any]:

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ClipboardCheck, Loader2, Plus, Sparkles, Trash2, Undo2, Wand2 } from "lucide-react";
 import { api, thumbUrl, type Asset, type Character, type Project, type VideoDraft, type VideoShot } from "../api";
 import { useT } from "../i18n";
 import { Modal, useApp } from "../components/ui";
@@ -212,6 +212,18 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
       ) : (
         <div className="stack">
           {(draft.warnings || []).map((w) => <p key={w} className="err-text small">{w}</p>)}
+          {draft.critique && (draft.critique.issues.length > 0 || draft.critique.revised) && (
+            <div className="card critic-card">
+              <div className="row" style={{ gap: 8 }}>
+                <strong className="grow"><ClipboardCheck size={14} /> {draft.critique.revised ? t("criticRevised") : t("criticNotes")}</strong>
+                {draft.first_shots && (
+                  <button className="btn sm ghost" onClick={() => setDraft({ ...draft, shots: draft.first_shots!, first_shots: undefined,
+                    critique: { ...draft.critique!, revised: false } })}><Undo2 size={13} /> {t("criticUndo")}</button>
+                )}
+              </div>
+              {draft.critique.issues.length > 0 && <ul className="small">{draft.critique.issues.map((x) => <li key={x}>{x}</li>)}</ul>}
+            </div>
+          )}
           <div className="grid-2">
             <label className="field">{t("videoName")}<input value={name} onChange={(e) => setName(e.target.value)} /></label>
             <label className="field">{t("videoWorldLook")}<input value={draft.world_look} onChange={(e) => setDraft({ ...draft, world_look: e.target.value })} /></label>

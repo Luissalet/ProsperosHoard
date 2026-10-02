@@ -541,6 +541,7 @@ class VideoPlanBody(BaseModel):
     genre: Optional[str] = None
     duration_s: float = 120
     project: Optional[str] = None  # its places and objects are offered to the planner as @Name
+    critic: bool = True            # a second pass that reviews the shot list and rewrites the weak shots
 
 
 class VideoFromPlanBody(BaseModel):
@@ -629,6 +630,30 @@ class VideoFramesBody(BaseModel):
 
 class ProductionShotsBody(BaseModel):
     changes: list[dict[str, Any]]
+    run: bool = True
+
+
+class ReframeBody(BaseModel):
+    asset_id: str
+    aspect: str = "9:16"                        # 9:16, 16:9, 1:1, 4:5, 2:3, 3:2, 21:9
+    framing: str = "fill"                       # fill (crop around the subject) | blur | fit
+    focus_x: Optional[float] = None             # 0-1, where the subject is (found on its own when missing)
+    focus_y: Optional[float] = None
+    quality: str = "final"                      # final | preview (720p, faster)
+    project: Optional[str] = None
+    wait_s: float = 0
+
+
+class StemsBody(BaseModel):
+    asset_id: str
+    force: bool = False                         # split again even if the stems exist
+    device: Optional[str] = None                # "cpu" or "cuda:N" (default: the card with most free memory, else cpu)
+    wait_s: float = 0
+
+
+class ProductionReframeBody(BaseModel):
+    aspects: list[str]
+    framing: Optional[str] = None               # fill | blur | fit (for clips of another shape)
     run: bool = True
 
 
@@ -825,6 +850,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("dub", lambda job, p: dubbing_mod.dub_job(store, backend, job, p))
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
     queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
+    queue.register("reframe", lambda job, p: engine.reframe_job(store, job, p))
+
+    def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        from . import stems as stems_mod
+        p = job["params"]
+        try:
+            out = stems_mod.separate(store, p["asset_id"], backend.launcher.comfy_install()[1], progress,
+                                     device=p.get("device"), force=bool(p.get("force")))
+        except stems_mod.StemsError as exc:
+            raise engine.EngineError(exc.code, exc.message) from None
+        return {**out, "asset_ids": list(out["stems"].values())}
+
+    queue.register("stems", _stems_job)
     # production/QA handlers are registered below, next to the operations
     # they queue sub-jobs through; the workers start at the end of create_app
 
@@ -3214,6 +3252,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                 n_shots=body.shots, language=body.language, compose_song=not body.song_asset_id,
                                 duration_s=body.duration_s, lyrics=body.lyrics, genre=body.genre,
                                 on_bad_reply=_keep_bad_plan_reply, elements=elements)
+        if body.critic:
+            review = mv_planner.critique(chat, draft, concept=body.concept, lead_name=lead["name"],
+                                         lead_look=lead.get("look") or "")
+            if review.get("revised"):
+                draft["first_shots"] = draft["shots"]
+                draft["shots"] = review.pop("shots")
+            draft["critique"] = review
         return {"draft": draft, "lead": lead, **({"elements": [e["name"] for e in elements]} if elements else {})}
 
     def op_video_from_plan(body: VideoFromPlanBody) -> dict[str, Any]:
@@ -3464,6 +3509,76 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_settings")
     def agent_production_settings(production: str, body: ProductionSettingsBody):
         return agent("studio_production_settings", production, lambda: op_production_settings(production, body))
+
+    def op_reframe(body: ReframeBody) -> dict[str, Any]:
+        asset = store.get_asset(body.asset_id)
+        if asset["kind"] not in ("image", "video"):
+            raise engine.EngineError("not_visual", "only pictures and clips can be reframed")
+        if body.aspect not in engine.REFRAME_ASPECTS:
+            raise engine.EngineError("bad_aspect", f"aspect must be one of {', '.join(engine.REFRAME_ASPECTS)}")
+        if body.framing not in engine.video_mod.FRAMINGS:
+            raise engine.EngineError("bad_framing", f"framing must be one of {', '.join(engine.video_mod.FRAMINGS)}")
+        for v in (body.focus_x, body.focus_y):
+            if v is not None and not 0.0 <= v <= 1.0:
+                raise engine.EngineError("bad_focus", "focus_x and focus_y go from 0 (left/top) to 1 (right/bottom)")
+        pid = body.project or asset["project_id"]
+        job = queue.enqueue("reframe", "cpu", {**body.model_dump(exclude={"wait_s", "project"}), "project_id": pid},
+                            project_id=pid)
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/assets/{asset_id}/reframe")
+    def asset_reframe(asset_id: str, body: ReframeBody):
+        return op_reframe(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/studio_reframe")
+    def agent_reframe(body: ReframeBody):
+        return agent("studio_reframe", body.asset_id, lambda: op_reframe(body))
+
+    def op_stems(body: StemsBody) -> dict[str, Any]:
+        from . import stems as stems_mod
+        asset = store.get_asset(body.asset_id)
+        if asset["kind"] not in ("audio", "video"):
+            raise engine.EngineError("not_audio", "stems come out of a song (or a video's sound)")
+        have = stems_mod.existing(store, asset["id"])
+        if not body.force and all(k in have for k in stems_mod.STEMS):
+            return {"stems": have, "reused": True}
+        if body.device and not re.fullmatch(r"cpu|cuda:\d", body.device):
+            raise engine.EngineError("bad_device", "device is cpu or cuda:N")
+        job = queue.enqueue("stems", "cpu", {"asset_id": asset["id"], "force": body.force, "device": body.device},
+                            project_id=asset["project_id"])
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job), "stems": have}
+
+    @app.get("/api/assets/{asset_id}/stems")
+    def asset_stems(asset_id: str):
+        from . import stems as stems_mod
+        store.get_asset(asset_id)
+        return {"stems": stems_mod.existing(store, asset_id)}
+
+    @app.post("/api/assets/{asset_id}/stems")
+    def asset_stems_make(asset_id: str, body: StemsBody):
+        return op_stems(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/studio_stems")
+    def agent_stems(body: StemsBody):
+        return agent("studio_stems", body.asset_id, lambda: op_stems(body))
+
+    def op_production_reframe(slug: str, body: ProductionReframeBody) -> dict[str, Any]:
+        out = productions_mod.reframe(store, slug, body.aspects, body.framing)
+        if body.run and out["rerender"]:
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.post("/api/productions/{slug}/reframe")
+    def production_reframe(slug: str, body: ProductionReframeBody):
+        return op_production_reframe(slug, body)
+
+    @app.post("/api/agent/studio_production_reframe")
+    def agent_production_reframe(production: str, body: ProductionReframeBody):
+        return agent("studio_production_reframe", production, lambda: op_production_reframe(production, body))
 
     def op_production_regenerate(slug: str, body: ProductionRegenerateBody) -> dict[str, Any]:
         out = productions_mod.regenerate_unlocked(store.data_dir, slug, body.stage, body.keys)

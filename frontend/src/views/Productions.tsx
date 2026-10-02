@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, Film, Loader2, Megaphone, Music,
-  Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Repeat, Shuffle, Sparkles, Users,
+  Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Repeat, Shuffle, Sparkles, Users, Ratio, Plus,
 } from "lucide-react";
 import {
   api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
@@ -471,6 +471,26 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                       {canvasBusy ? <Loader2 size={13} className="spin" /> : <Repeat size={13} />} {canvasId ? t("canvasRemake") : t("canvasMake")}
                     </button>
                     <span className="hint">{t("canvasHint")}</span>
+                  </div>
+                </div>
+              )}
+              {!legacy && (
+                <div className="card">
+                  <h2><Ratio size={16} /> {t("reframeTitle")}</h2>
+                  <p className="small muted">{t("reframeHint")}</p>
+                  <div className="row wrap" style={{ gap: 8 }}>
+                    <span className="small">{t("reframeHave", { aspects: ((data.spec.timeline || {}).aspects || ["9:16"]).join(" · ") })}</span>
+                    <span className="grow" />
+                    {["9:16", "16:9", "1:1"].filter((a) => !((data.spec.timeline || {}).aspects || ["9:16"]).includes(a)).map((a) => (
+                      <button key={a} className="btn sm" disabled={active} onClick={async () => {
+                        try {
+                          const r = await api.reframeProduction(slug, [a], (data.spec.timeline?.finishing as { framing?: string } | undefined)?.framing || "blur");
+                          app.toast(t("reframeQueued", { aspects: r.new.join(", ") }), "ok");
+                          app.refreshJobs();
+                          changed();
+                        } catch (e) { app.toast((e as Error).message, "bad"); }
+                      }}><Plus size={13} /> {t("reframeAdd", { aspect: a })}</button>
+                    ))}
                   </div>
                 </div>
               )}

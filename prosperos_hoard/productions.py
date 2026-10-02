@@ -2111,6 +2111,45 @@ def set_finishing(store: Store, slug: str, finishing: Any) -> dict[str, Any]:
         return {"finishing": clean, "rerender": rerender}
 
 
+def reframe(store: Store, slug: str, aspects: list[str], framing: Optional[str] = None) -> dict[str, Any]:
+    """The cut in other shapes without generating anything again: adds the
+    `aspects` (9:16, 16:9, 1:1) to the ones it renders and, with `framing`,
+    changes how clips of another shape fill the frame ("fill" crops them,
+    "blur" fits them over a blurred copy, "fit" adds bars). Only the cut
+    renders again. Returns {"aspects", "new", "rerender"}."""
+    if not isinstance(aspects, list) or not aspects:
+        raise ProductionError("bad_aspects", "aspects is a list like [\"16:9\", \"1:1\"]")
+    bad = [a for a in aspects if a not in engine.timeline_mod.ASPECTS]
+    if bad:
+        raise ProductionError("bad_aspects", f"{', '.join(bad)}: aspects are {', '.join(engine.timeline_mod.ASPECTS)}")
+    rerender: list[str] = []
+    if framing is not None:
+        current = dict(((load_state(store.data_dir, slug)["spec"].get("timeline") or {}).get("finishing")) or {})
+        current["framing"] = framing
+        rerender = set_finishing(store, slug, current)["rerender"]
+    with lock_for(slug):
+        state = load_state(store.data_dir, slug)
+        if is_legacy(state):
+            raise ProductionError("legacy_production", "a scripted production cannot be reframed; export it as a recipe")
+        if is_running(state, store.data_dir):
+            raise ProductionError("busy", "the production is running; pause it first or wait until it stops")
+        tl = state["spec"].setdefault("timeline", {})
+        have = list(tl.get("aspects") or ["9:16"])
+        new = [a for a in dict.fromkeys(aspects) if a not in have]
+        tl["aspects"] = have + new
+        if new:
+            entry = state["done"].get("timeline")
+            if entry:
+                entry["complete"] = False
+                state["done"].pop("report", None)
+            if state.get("status") == "done":
+                state["status"] = "queued"
+                state["stage"] = "timeline"
+        log(state, "timeline", "reframed", aspects=new, framing=framing)
+        save_state(store.data_dir, state)
+    return {"aspects": tl["aspects"], "new": new, "rerender": list(dict.fromkeys(new + rerender))}
+
+
 SONG_COMPOSE_FIELDS = ("tags", "lyrics", "bpm", "duration", "key", "language", "time_signature", "seed", "count")
 
 
