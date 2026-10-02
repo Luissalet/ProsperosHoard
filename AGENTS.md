@@ -2,7 +2,12 @@
 
 Reglas para agentes de código que trabajen en este repositorio.
 
-1. **Nada de FastAPI fuera de `api.py`.** `engine.py`, `store.py`, `db.py`,
+1. **Nada de FastAPI fuera de `api.py` y `family_api.py`** (este último
+   solo monta las rutas de la familia: catálogo y llamada comunes, las cuatro
+   herramientas `production_export_lumiere`, `cast_import_character`,
+   `production_from_storyboard` y `voice_tts`, y los ajustes; su lógica está en
+   `family_tools.py`, `family_settings.py`, `jobevents.py` y `gpu_lease.py`,
+   sin FastAPI; `PROSPERO_GPU_LEASE=0` apaga la reserva de GPU). `engine.py`, `store.py`, `db.py`,
    `comfy_driver.py`, `design.py`, `audio.py`, `video.py`, `timeline.py`,
    `voices.py`, `backend.py`, `shorts.py`, `stock.py` y `soundtrack.py` son
    lógica pura y se prueban sin servidor (lo externo de un short pasa por el

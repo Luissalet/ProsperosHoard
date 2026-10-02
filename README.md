@@ -77,7 +77,7 @@ with ids and pictures.
 | Stock footage | Pexels and Pixabay search (videos or photos, filtered by orientation and length) with a free API key per provider, the smallest file that reaches the render's resolution, imported with provider, author, page and licence in its recipe, and credit lines built from them | Needs a key (Settings > Stock footage); results depend on English keywords |
 | Spaces (node canvas) | A canvas per project (Spaces in the sidebar) where text, media, cast, picture, clip, song, assistant, edit, join-clips, list and note nodes are wired with typed, coloured connections (text blue, image purple, clip green, audio orange): a picture takes prompts and up to 10 references, a clip takes start pictures (one clip each), a prompt, a motion clip to copy or a song to sing (lip sync, with "Pick a line": the song is transcribed and a sung line sets where and how long the clip sings), a song takes prompts; the **assistant** writes a text or a list with the local model, and texts from a list or a list-mode assistant **fan out** (one render per item); a clip also hands on each clip's **last frame**, so the next shot starts where the last one ended, and **Join clips** plays them in order with a song under them; **Edit** upscales x2/x4 or removes backgrounds; pictures and clips take **camera** options (shot, angle, move, lens, light, composition from the film guide); a run walks the graph in waves, so independent generators render together on every GPU, the picture made upstream feeds the clip downstream in the same run, "Run" skips nodes whose inputs and settings did not change, and **Stop** cancels a run and its renders; untick a take and it stops flowing downstream; earlier runs stay selectable; drop a wire on empty canvas to add a node that fits it, right-click to add, drop files to import them; "Improve" rewrites a prompt with the local model keeping `@names`, `<imageN>` tags and the cast's design; versioned saves (an assistant editing the same space never gets overwritten), templates (reference film, singing shot, short film from an idea, blank), deleted spaces restorable; assistants build, edit, run and stop spaces with `studio_spaces` | Generators are the studio's own (Qwen-Image, Wan 2.2, S2V, Animate, ACE-Step): no depth/pose control nodes yet; one run at a time per space; the assistant and "Improve" need a local model behind Hoard Link |
 | Film guide | A guide to the camera's language (Film guide in the sidebar): 57 entries - shot sizes, camera angles, camera moves, lenses and focus, light and composition - each with its own drawing (the moves, rack focus and others animated), what it is, when to use it and the English words a model understands; "Copy" and "Use in Generate"; in any prompt box (Generate, the shot editor, a space's nodes) typing `/` opens it: `/plano`, `/shot`, `/angulo`, `/movimiento`, `/lente`, `/luz`, `/composicion` or a name (`/contrapicado`, `/close`) lists the matches with their drawing and Enter writes the words into the prompt; `studio_cinema` gives assistants the same vocabulary and `camera={...}` on a render adds it | The words steer the model; they do not guarantee the framing |
-| Agent control | 75 MCP tools mirroring `/api/agent/*` (66 studio tools, 7 of them for the character kit and 3 for shorts and stock footage, plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
+| Agent control | 79 MCP tools mirroring `/api/agent/*` (66 studio tools, 7 of them for the character kit and 3 for shorts and stock footage, plus 9 for the voice studio and 4 for the other apps of the Hoard family), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled by the MCP tools (`studio_job`/`voice_job` can wait server-side); the family hub also hears the job events |
 | Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Spaces (the node canvas), Film guide, Videos (each project's music videos and shorts) and Productions (all of them, with Recipes and New short), Voice, Jobs, Backends, Assistant activity, Settings (with the stock footage keys); dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
@@ -274,6 +274,11 @@ loading anything of its own.
 | `voice_audiobook` / `voice_dub` | Narrate text as chapters / dub a video into another language | no |
 | `voice_resynthesize_segment` / `voice_job` | Fix and re-run one dub segment / poll a voice-studio job | no / yes |
 
+| `production_export_lumiere` | Write a production's cut as FCP7 XML + EDL and open it as a project in Lumiere's Hoard | no |
+| `cast_import_character` | A cast member from a name, a description, a look and reference images (the same name and `source_ref` twice is the same member) | no |
+| `production_from_storyboard` | A production draft from shots `{text, duration_s?, image?}`; not queued, it still needs a song | no |
+| `voice_tts` | Speak a text with a saved voice or the best installed engine; returns the path of a WAV | no |
+
 It works with any MCP client over stdio too:
 
 ```json
@@ -285,6 +290,29 @@ It works with any MCP client over stdio too:
 
 Arguments, result shapes and limits of every tool: [docs/MCP.md](docs/MCP.md).
 The end-to-end recipe the agent follows: [skills/idol-production/SKILL.md](skills/idol-production/SKILL.md).
+
+## The Hoard family
+
+Prospero joins the other Hoard apps through the shared family contract (the vendored `hoard_link`):
+
+- **Shared agent contract.** `GET /api/agent/tools` lists every per-tool route (query and body arguments, `readOnlyHint`, the same
+  descriptions as the MCP adapter) and `POST /api/agent/call {name, arguments}` runs one with the family bearer token
+  (`data/mcp-token`); it runs the very function the per-tool route runs. Both are placed before the catch-all routes. `/api/health`
+  has a `hoard_link` block. `faustus-plugin.json` declares it.
+- **Job events.** Renders, songs, clips and whole productions send `prospero.job.queued|started|progress|done|failed|cancelled` with
+  `job_id`, `title`, `kind` (`render`, `song`, `clip`, `production`), `progress`, `gpu`, `url`; progress is throttled to one event every
+  5 s. A production that stops for you finishes its job as `done` with `status: "awaiting_review"` and `awaiting` (`take`, `animatic`,
+  `script` or `review`).
+- **Notifications.** Only productions, the thing that waits for a person: it needs a take, the animatic or a review, it finished, or it
+  failed (failed = high priority). They go through the family hub and link to the production's page. **Settings > Production notices**
+  (or `GET|PUT /api/family/settings`): `notify.via` = `auto` (the hub when it answers), `hub` (always try) or `off`;
+  `notify.language` = `es` or `en`. Stored in `data/family.json`.
+- **GPU lease.** A job in the GPU lane holds the hub's lease for its class of model (`hoard_link.lease`) on top of the existing VRAM
+  check, so the editor's transcription and the language models do not load at the same moment. With no hub it changes nothing; when the
+  hub keeps the lease queued past two minutes the job goes to `waiting_gpu` and retries. `PROSPERO_GPU_LEASE=0` turns it off.
+- **For Lumiere.** On a production's page, **Export to Lumiere** (also the tool `production_export_lumiere`) writes the cut's XML and EDL
+  to `data/exports/lumiere/` and asks Lumiere's Hoard to open it as a project; if it is not running or may not read that folder, the
+  answer says so and the files stay there. Lumiere may only read some folders (`LUMIERE_FILE_ROOTS`): allow Prospero's data folder.
 
 ## Shared models (HoardLink)
 
@@ -806,8 +834,8 @@ Configure (or `training` in `data/backend.json`):
   aligned elsewhere (the example used faster-whisper), for a final cut.
 - Section labels are "section A/B" with an energy level, not verse/chorus;
   very fast songs (around 170 BPM) are reported at half time.
-- Jobs are polled (`studio_job` can wait server-side); there are no push
-  events.
+- The MCP tools poll jobs (`studio_job` can wait server-side); the family
+  hub hears `prospero.job.*` events, other clients do not.
 - Timeline editing is clip-level, Ken Burns is a zoom range plus a pan
   direction, and colour grades are filter approximations, not 3D LUTs.
 - The QR layer of the designer draws a placeholder box.

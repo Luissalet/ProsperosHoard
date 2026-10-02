@@ -1522,6 +1522,69 @@ def studio_character_library(action: str = "list", character_id: Optional[str] =
                        "query": query, "rename": rename})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def production_export_lumiere(production: str, aspect: Optional[str] = None, timeline_id: Optional[str] = None) -> dict[str, Any]:
+    """Send a production's cut to Lumiere's Hoard (video editor) as a project / enviar el montaje a Lumiere.
+
+    Writes the cut as FCP7 XML + EDL (lyrics as markers) in the data folder and asks Lumiere, through the family
+    hub, to open it as a project: ok, project_id, url. aspect picks the cut when a production has several
+    (16:9, 9:16...); timeline_id exports a timeline instead. When Lumiere is not running or may not read this
+    folder, ok is false with the reason and the two files are still there (files.xml, files.edl).
+
+    Keywords: lumiere, video editor, export cut, send to editor, family, hub, enviar a lumiere, editar en lumiere, montaje
+    """
+    return _call("POST", "/api/agent/production_export_lumiere",
+                 json={"production": production, "aspect": aspect, "timeline_id": timeline_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def cast_import_character(name: str, description: str = "", look: str = "", images: Optional[list[str]] = None,
+                          source_ref: str = "", project: Optional[str] = None) -> dict[str, Any]:
+    """Add a cast member that another app describes / importar personaje al reparto desde otra app.
+
+    name, description (bio), look (the prompt that keeps its appearance), images (reference image paths in the
+    folders Prospero may import from; the first becomes the canonical image) and source_ref (hoard://... of the
+    original). Goes into `project`, or the "Casting" project. The same name and source_ref again returns the same
+    member (existing=true). Returns ok, character_id.
+
+    Keywords: import character, cast, family, from another app, writer, importar personaje, reparto, personaje de otra app
+    """
+    return _call("POST", "/api/agent/cast_import_character",
+                 json={"name": name, "description": description, "look": look, "images": images or [],
+                       "source_ref": source_ref, "project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def production_from_storyboard(title: str, shots: list[dict[str, Any]], source_ref: str = "", project: Optional[str] = None,
+                               character_id: Optional[str] = None, lead_name: Optional[str] = None,
+                               lead_look: Optional[str] = None, song_asset_id: Optional[str] = None) -> dict[str, Any]:
+    """Make a production draft from a storyboard / borrador de producción desde un guion gráfico.
+
+    shots = [{text, duration_s?, image?}]: text becomes the shot's prompt, duration_s places it on the song's
+    timeline (shots follow one another), image (an asset id or an importable path) is reused instead of generated.
+    The draft is NOT queued: a production needs a song (song_asset_id here, or studio_production_song later) and
+    your go-ahead (studio_production_continue). Returns ok, production (slug), project_id, next.
+
+    Keywords: storyboard, shot list, production draft, family, writer, guion gráfico, lista de planos, borrador de producción
+    """
+    return _call("POST", "/api/agent/production_from_storyboard",
+                 json={"title": title, "shots": shots, "source_ref": source_ref, "project": project, "character_id": character_id,
+                       "lead_name": lead_name, "lead_look": lead_look, "song_asset_id": song_asset_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None) -> dict[str, Any]:
+    """Speak a text and get the audio file's path / leer un texto en voz alta y obtener la ruta del audio.
+
+    voice: a library voice (id or name) or an engine's own voice id; empty = the best installed engine. lang is
+    the language code (es, en...). The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to
+    save the audio as a project asset instead.
+
+    Keywords: tts, text to speech, narrate, speak, family, narration, texto a voz, narrar, locución, audio de un texto
+    """
+    return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang})
+
+
 def main() -> None:
     mcp.run()
 

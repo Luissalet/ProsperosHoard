@@ -34,6 +34,12 @@ prosperos_hoard/
   backend.py       wrapper around the vendored Hoard Link: ComfyUI client on Hoard
                    Link's loop, free VRAM, "free ComfyUI memory", import folders,
                    overrides in data/backend.json, MusicBackend adapters
+  family_api.py    the one module besides api.py that knows FastAPI for the family: the shared catalogue and call routes
+                   (built from the per-tool routes, placed before the catch-alls), the four family tool routes, settings
+  family_tools.py  export to Lumiere, cast import, storyboard to production draft, TTS (pure logic)
+  family_settings.py  notify.via / notify.language in data/family.json
+  jobevents.py     prospero.job.* events (throttled progress) and the production notifier (through the hub only)
+  gpu_lease.py     the hub's GPU lease around GPU-lane jobs, PROSPERO_GPU_LEASE=0 to opt out
   hoard_link/      vendored shared model-backend resolver (see VENDORED.txt, never edited)
   design.py        Pillow layout renderer (rect/gradient, image with blur, text with
                    columns, holo, grain, vignette, frame, badge, qr placeholder),

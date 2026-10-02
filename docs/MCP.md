@@ -129,6 +129,18 @@ Faustus reads the same information from `faustus-plugin.json`
 \* `studio_cast` with `action="list"` does not change anything; the tool as a
 whole is annotated as writing because create/update do.
 
+### Family tools
+
+Four tools for the other apps of the Hoard family (also reachable through the hub's `POST /api/agent/call`). Their logic is in
+`family_tools.py`.
+
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `production_export_lumiere` | `production` (slug), `aspect?`, `timeline_id?` | `{ok, project_id, url, imported_clips, skipped, files{xml, edl}}`; when the editor is not running or may not read the folder, `ok: false` with `error` and `hint`, and the files are still written to `data/exports/lumiere/` |
+| `cast_import_character` | `name`, `description?`, `look?`, `images[]` (paths in the allowed import folders), `source_ref?`, `project?` | `{ok, character_id, project_id, existing, images}`; the same name with the same `source_ref` returns the member that exists; the same name with another ref is `name_taken` |
+| `production_from_storyboard` | `title`, `shots[{text, duration_s?, image?}]` (at most 80), `source_ref?`, `project?`, `character_id?` or `lead_name?`/`lead_look?`, `song_asset_id?` | `{ok, production, project_id, shots, queued: false, next, view}`; durations become cut spans (4 s when only some are given); an `image` (asset id or path) is reused instead of generated |
+| `voice_tts` | `text` (at most 20000 characters), `voice?` (saved voice id or name, or an engine's own voice id), `lang?` | `{ok, path, engine_id, bytes}`: a WAV in `data/exports/tts/` |
+
 ### Voice studio tools
 
 Everything below runs on local engines only, installed on request (see

@@ -30,7 +30,7 @@ from . import charkit
 from . import charpack
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
-from . import exporters
+from . import exporters, family_api, gpu_lease, jobevents
 from . import productions as productions_mod
 from . import cinema
 from . import spaces as spaces_mod
@@ -47,7 +47,9 @@ from . import voice_pipelines as vp
 from . import voices as voices_mod
 from .backend import Backend
 from .design import DesignError
+from .hoard_link import family
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
+from .family_settings import FamilySettings
 from .ids import new_id
 from .jobs import JobQueue
 from .store import AssetInUse, NotFound, ProjectBusy, Store
@@ -778,8 +780,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     store = Store(data_dir)
     backend = Backend(data_dir, demo=demo)
     # one GPU worker for the main ComfyUI plus one per render-pool server
+    # the family: events for the hub, notices when a production needs the person, the hub's GPU lease (family_api.install below)
+    family_settings = FamilySettings(data_dir)
+    job_events = jobevents.JobEvents(store, family.emit, base_url=lambda: f"http://127.0.0.1:{port}",
+                                     notifier=jobevents.Notifier(store, family_settings))
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
-                     target_ready=backend.pool_server_ready, accepts=backend.accepts_job)
+                     target_ready=backend.pool_server_ready, accepts=backend.accepts_job, events=job_events,
+                     gpu_guard=None if demo else (lambda job: gpu_lease.hold(
+                         job, backend.vram_estimates_mb, on_gpu=job_events.set_gpu,
+                         resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto"))))
     queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
     queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))
@@ -1181,7 +1190,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return {
             "service": "prosperos-hoard", "name": "Prospero's Hoard", "version": __version__, "status": "ok",
             "demo": demo, "projects": len(store.list_projects(limit=50)["items"]),
-            "active_jobs": len(active),
+            "active_jobs": len(active), "hoard_link": family.health_block(),
         }
 
     @app.get("/api/backend")
@@ -3709,6 +3718,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "recent_jobs": [engine.job_view(j) for j in store.list_jobs(limit=5)["items"]],
             }
         return agent("studio_status", "", run)
+
+    # ------------------------------------------------------------ family
+    # the shared agent contract (/api/agent/tools and /api/agent/call), the four tools other apps call and the family settings;
+    # the two shared routes go to the front of the router, so the catch-all routes below never swallow them
+    family_api.install(app, family_api.Context(
+        store=store, backend=backend, settings=family_settings, agent=agent, error_payload=error_payload, export_lookup=_export_lookup,
+        resolve_timeline=lambda **kw: _export_timeline_id(ExportTimelineBody(**kw)), casting_project=_casting_project,
+        tts_engines=_tts_engines, production_view=production_view, mcp_source=Path(__file__).with_name("mcp_server.py")))
 
     # -------------------------------------------------------- static / SPA
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

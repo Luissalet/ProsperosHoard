@@ -79,7 +79,7 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Vídeo de archivo | Búsqueda en Pexels y Pixabay (vídeos o fotos, filtrados por orientación y duración) con una clave gratuita por proveedor, el fichero más pequeño que alcanza la resolución del render, importado con proveedor, autor, página y licencia en su receta, y las líneas de crédito a partir de ahí | Necesita clave (Ajustes > Vídeo de archivo); los resultados dependen de palabras clave en inglés |
 | Espacios (lienzo de nodos) | Un lienzo por proyecto (Espacios en la barra lateral) donde se conectan nodos de texto, medios, reparto, imagen, clip, canción, asistente, retoque, unir clips, lista y nota con conexiones tipadas y de colores (texto azul, imagen morado, clip verde, audio naranja): una imagen recibe prompts y hasta 10 referencias, un clip recibe imágenes de inicio (un clip por cada una), un prompt, un clip de movimiento que copiar o una canción que cantar (lip sync, con «Elegir frase»: se transcribe la canción y una frase cantada fija dónde empieza y cuánto dura); el **asistente** escribe un texto o una lista con el modelo local, y los textos que llegan de una lista o de un asistente en modo lista **se reparten** (un render por elemento); un clip entrega también el **último fotograma** de cada clip, para que el plano siguiente empiece donde acabó el anterior, y **Unir clips** los pone en orden con una canción debajo; **Retoque** reescala ×2/×4 o quita fondos; las imágenes y los clips tienen opciones de **cámara** (plano, ángulo, movimiento, lente, luz, composición de la guía de cine); una ejecución recorre el grafo por oleadas, así que los generadores independientes se renderizan a la vez en todas las GPU, la imagen de arriba alimenta al clip de abajo en la misma ejecución, «Ejecutar» se salta los nodos que no han cambiado y **Parar** cancela una ejecución y sus renders; desmarca una toma y deja de pasar a los nodos siguientes; las ejecuciones anteriores se pueden recuperar; suelta una conexión en un hueco vacío para añadir un nodo que encaje, clic derecho para añadir, suelta archivos para importarlos; «Mejorar» reescribe un prompt con el modelo local respetando los `@nombres`, las etiquetas `<imageN>` y el diseño del reparto; guardado con versiones (un asistente que edita el mismo espacio nunca se pisa), plantillas (película con referencias, plano cantando, corto a partir de una idea, en blanco), espacios borrados recuperables; los asistentes montan, editan, ejecutan y paran espacios con `studio_spaces` | Los generadores son los del estudio (Qwen-Image, Wan 2.2, S2V, Animate, ACE-Step): aún no hay nodos de control de profundidad/pose; una ejecución a la vez por espacio; el asistente y «Mejorar» necesitan un modelo local detrás de Hoard Link |
 | Guía de cine | Una guía del lenguaje de la cámara (Guía de cine en la barra lateral): 57 entradas - tipos de plano, ángulos, movimientos de cámara, lentes y foco, luz y composición - cada una con su dibujo (los movimientos, el cambio de foco y otros, animados), qué es, cuándo usarlo y las palabras en inglés que entiende el modelo; «Copiar» y «Usar en Generar»; en cualquier cuadro de prompt (Generar, el editor de planos, los nodos de un espacio) escribir `/` la abre ahí: `/plano`, `/shot`, `/angulo`, `/movimiento`, `/lente`, `/luz`, `/composicion` o un nombre (`/contrapicado`, `/primer`) muestra lo que coincide con su dibujo e Intro escribe las palabras en el prompt; `studio_cinema` da a los asistentes el mismo vocabulario y `camera={...}` en un render lo añade | Las palabras guían al modelo; no garantizan el encuadre |
-| Control por agentes | 75 herramientas MCP equivalentes a `/api/agent/*` (66 del estudio, 7 de ellas para el kit de personaje y 3 para shorts y vídeo de archivo, más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
+| Control por agentes | 79 herramientas MCP equivalentes a `/api/agent/*` (66 del estudio, 7 de ellas para el kit de personaje y 3 para shorts y vídeo de archivo, más 9 del estudio de voz y 4 para las demás apps de la familia Hoard), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Las herramientas MCP consultan los trabajos (`studio_job`/`voice_job` puede esperar en el servidor); el hub de la familia oye además los eventos de trabajo |
 | Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Espacios (el lienzo de nodos), Guía de cine, Vídeos (los videoclips y shorts de cada proyecto) y Producciones (todos, con Recetas y Nuevo short), Voz, Trabajos, Backends, Actividad del asistente y Ajustes (con las claves de vídeo de archivo); tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
@@ -279,6 +279,11 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `voice_audiobook` / `voice_dub` | Narrar un texto por capítulos / doblar un vídeo a otro idioma | no |
 | `voice_resynthesize_segment` / `voice_job` | Corregir y rehacer un segmento de doblaje / consultar un trabajo del estudio de voz | no / sí |
 
+| `production_export_lumiere` | Escribe el montaje de una producción como FCP7 XML + EDL y lo abre como proyecto en Lumiere's Hoard | no |
+| `cast_import_character` | Un miembro del reparto a partir de un nombre, una descripción, un aspecto e imágenes de referencia (el mismo nombre y `source_ref` dos veces es el mismo miembro) | no |
+| `production_from_storyboard` | Un borrador de producción a partir de planos `{text, duration_s?, image?}`; no se encola, aún necesita una canción | no |
+| `voice_tts` | Lee un texto con una voz guardada o el mejor motor instalado; devuelve la ruta de un WAV | no |
+
 También funciona con cualquier cliente MCP por stdio:
 
 ```json
@@ -291,6 +296,31 @@ También funciona con cualquier cliente MCP por stdio:
 Argumentos, formato de las respuestas y límites de cada herramienta:
 [docs/MCP.md](docs/MCP.md). La receta completa que sigue el agente:
 [skills/idol-production/SKILL.md](skills/idol-production/SKILL.md).
+
+## La familia Hoard
+
+Prospero se une a las demás apps Hoard con el contrato común de la familia (el `hoard_link` incluido):
+
+- **Contrato de agente común.** `GET /api/agent/tools` lista todas las rutas por herramienta (argumentos de query y de cuerpo,
+  `readOnlyHint`, las mismas descripciones que el adaptador MCP) y `POST /api/agent/call {name, arguments}` ejecuta una con el token de
+  la familia (`data/mcp-token`); ejecuta la misma función que la ruta de esa herramienta. Ambas van antes de las rutas comodín.
+  `/api/health` trae un bloque `hoard_link`. `faustus-plugin.json` lo declara.
+- **Eventos de trabajo.** Renders, canciones, clips y producciones enteras envían `prospero.job.queued|started|progress|done|failed|
+  cancelled` con `job_id`, `title`, `kind` (`render`, `song`, `clip`, `production`), `progress`, `gpu`, `url`; el progreso se limita a un
+  evento cada 5 s. Una producción que se detiene para ti termina su trabajo como `done` con `status: "awaiting_review"` y `awaiting`
+  (`take`, `animatic`, `script` o `review`).
+- **Avisos.** Solo de producciones, lo único que espera a una persona: necesita una toma, el animático o una revisión, ha terminado o ha
+  fallado (fallo = prioridad alta). Van por el hub de la familia y enlazan a la página de la producción. **Ajustes > Avisos de
+  producciones** (o `GET|PUT /api/family/settings`): `notify.via` = `auto` (el hub cuando responde), `hub` (siempre lo intenta) u `off`;
+  `notify.language` = `es` o `en`. Se guarda en `data/family.json`.
+- **Reserva de GPU.** Un trabajo del carril de GPU toma la reserva del hub para su clase de modelo (`hoard_link.lease`) además de la
+  comprobación de VRAM que ya existía, para que la transcripción del editor y los modelos de lenguaje no carguen a la vez. Sin hub no
+  cambia nada; si el hub la mantiene en cola más de dos minutos el trabajo pasa a `waiting_gpu` y reintenta. `PROSPERO_GPU_LEASE=0` la
+  desactiva.
+- **Para Lumiere.** En la página de una producción, **Exportar a Lumiere** (también la herramienta `production_export_lumiere`) escribe el
+  XML y el EDL del montaje en `data/exports/lumiere/` y pide a Lumiere's Hoard que lo abra como proyecto; si no está en marcha o no puede
+  leer esa carpeta, la respuesta lo dice y los archivos se quedan ahí. Lumiere solo puede leer algunas carpetas (`LUMIERE_FILE_ROOTS`):
+  permite la carpeta de datos de Prospero.
 
 ## Modelos compartidos (HoardLink)
 
@@ -839,8 +869,9 @@ Con `--demo` se configura un entrenador falso para probar el flujo entero sin GP
 - Las secciones se llaman «section A/B» con un nivel de energía, no
   estrofa/estribillo; las canciones muy rápidas (unos 170 BPM) se detectan a
   la mitad.
-- Los trabajos se consultan (`studio_job` puede esperar en el servidor); no
-  hay eventos push.
+- Las herramientas MCP consultan los trabajos (`studio_job` puede esperar en
+  el servidor); el hub de la familia oye los eventos `prospero.job.*`, otros
+  clientes no.
 - El montaje se edita por planos, el Ken Burns es un rango de zoom más una
   dirección de desplazamiento y las gradaciones de color son aproximaciones
   con filtros, no LUT 3D.

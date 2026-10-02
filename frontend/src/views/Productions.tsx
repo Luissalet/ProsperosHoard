@@ -332,6 +332,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const [recast, setRecast] = useState(false);
   const [tab, setTab] = useState<Tab | null>(null);
   const [canvasBusy, setCanvasBusy] = useState(false);
+  const [lumiereBusy, setLumiereBusy] = useState(false);
   const active = data ? liveRun(data, app.jobs) : false;
   useEffect(() => {
     if (!active) return;
@@ -346,6 +347,17 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const legacy = Boolean(view.legacy);
   const isShort = data.kind === "short";
   const changed = () => { reload(); reloadList(); app.refreshJobs(); };
+  const exportLumiere = async (timelineId: string, aspect: string) => {
+    setLumiereBusy(true);
+    try {
+      const r = await api.exportToLumiere(slug, timelineId, aspect);
+      if (r.ok) {
+        app.toast(t("exportLumiereDone", { clips: String(r.imported_clips ?? 0) }), "ok");
+        if (r.url) window.open(r.url, "_blank", "noopener");
+      } else app.toast(t("exportLumiereFail", { error: r.error || "" }), "bad");
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setLumiereBusy(false); }
+  };
   const saveRecipe = async () => {
     try { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); changed(); }
     catch (e) { app.toast((e as Error).message, "bad"); }
@@ -433,6 +445,11 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                             {timelineIds[aspect]?.timeline_id && (
                               <a className="btn sm ghost" href={api.timelineExportUrl(timelineIds[aspect].timeline_id!, "zip", `${data.name || slug} ${aspect.replace(":", "x")}`)} download title={t("exportEditorsHint")}>
                                 <FileDown size={13} /> {t("exportEditors")}</a>
+                            )}
+                            {timelineIds[aspect]?.timeline_id && (
+                              <button className="btn sm ghost" disabled={lumiereBusy} title={t("exportLumiereHint")} data-testid="export-lumiere"
+                                onClick={() => exportLumiere(timelineIds[aspect].timeline_id!, aspect)}>
+                                <FileDown size={13} /> {t("exportLumiere")}</button>
                             )}
                           </div>
                         </div>

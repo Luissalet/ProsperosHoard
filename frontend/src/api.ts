@@ -1214,6 +1214,12 @@ export const api = {
     request<{ finishing: Finishing; rerender: string[]; job?: Job }>("PATCH", `/api/productions/${slug}/finishing`, { finishing, render }),
   setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown> }) =>
     request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/api/productions/${slug}/settings`, body),
+  exportToLumiere: (production: string, timelineId?: string, aspect?: string) =>
+    request<{ ok: boolean; project_id?: string; url?: string; imported_clips?: number; error?: string; hint?: string; files: { xml: string; edl: string } }>(
+      "POST", "/api/agent/production_export_lumiere", { production, timeline_id: timelineId, aspect }),
+  familySettings: () => request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("GET", "/api/family/settings"),
+  setFamilySettings: (body: Record<string, string>) =>
+    request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("PUT", "/api/family/settings", body),
   timelineExportUrl: (timelineId: string, format: "zip" | "xml" | "edl" = "zip", name?: string) =>
     `/api/timelines/${timelineId}/export${q({ format, name })}`,
   composeSong: (pid: string, body: { tags: string; lyrics: string; bpm?: number; duration?: number; key?: string; language?: string; count?: number }) =>
