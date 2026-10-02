@@ -114,6 +114,7 @@ const EXACT_ES: Record<string, string> = {
   "lyrics changed": "letra cambiada",
   "song changed": "canción cambiada",
   "the job no longer exists": "el trabajo ya no existe",
+  "no vision model": "sin modelo de visión",
   "the run stopped without finishing (the app closed or the job ended); resume it":
     "la ejecución se paró sin terminar (se cerró la app o el trabajo acabó); reanúdala",
   "QA regenerated outputs; the production runs again to rebuild what depends on them":
@@ -165,6 +166,9 @@ const JOB_RULES: Rule[] = [
   [/^GPU (\d+) has (\d+) MB free; training needs about (\d+) MB$/, "la GPU $1 tiene $2 MB libres; el entrenamiento necesita unos $3 MB"],
   [/^the freest GPU \((\d+)\) has (\d+) MB free; training needs about (\d+) MB - stop other models or use Backends > Free ComfyUI memory$/,
     "la GPU más libre (la $1) tiene $2 MB libres; el entrenamiento necesita unos $3 MB: para otros modelos o usa Backends > Liberar memoria de ComfyUI"],
+  [/^no GPU has the ~(\d+) GB this needs free(?:; (.+) holds memory \(stop it in the header's GPU panel\))?$/,
+    (m) => `ninguna GPU tiene libres los ~${m[1]} GB que hacen falta${m[2] ? `; ${m[2]} ocupa memoria (páralo en el panel de GPU de la cabecera)` : ""}`],
+  [/^shot (.+) sings but is not placed on its lines in the song track$/, "el plano $1 canta pero no está colocado sobre sus versos en la pista de la canción"],
   [/^animatic (.+?): (.*)$/, (m) => `animático ${m[1]}: ${translateText(m[2], "es")}`],
   // QA reasons
   [/^flat picture \(spread (.+) < (.+)\)$/, "imagen plana (dispersión $1 < $2)"],
@@ -203,6 +207,11 @@ export function translateText(msg: string, lang: Lang, depth = 0): string {
     if (!rule.re) continue;
     const m = rule.re.exec(msg);
     if (m) return render(rule.es, m, msg);
+  }
+  if (msg.includes("; ")) {  // a list of reasons, one per item ("4: cancelled; 3: out of memory")
+    const parts = msg.split("; ");
+    const done = parts.map((x) => translateText(x, lang, depth + 1));
+    if (done.some((x, i) => x !== parts[i])) return done.join("; ");
   }
   const p = PREFIX.exec(msg);
   if (p) {
@@ -858,3 +867,44 @@ export function kindName(kind: string, lang: Lang): string {
 export function sourceName(source: string, lang: Lang): string {
   return SOURCE_LABEL[lang]?.[source] || source;
 }
+
+// ------------------------------------------------------------------ names the studio gives its outputs
+
+const NAME_PREFIX_ES: Record<string, string> = {
+  upscaled: "ampliada", pose: "pose", depth: "profundidad", "background removed": "sin fondo", vary: "variación",
+  reuse: "reutilizada", animated: "animada", img2img: "retocada", inpaint: "repintada", outpaint: "ampliada por los bordes",
+  hires: "en alta", edit: "editada", relight: "reiluminada", restyle: "con otro estilo", upscale: "ampliada",
+  remove_background: "sin fondo", pose_map: "pose", depth_map: "profundidad",
+};
+const NAME_RULES: [RegExp, (m: RegExpExecArray) => string][] = [
+  [/^Auto-cut - (.+)$/, (m) => `Montaje automático - ${assetName(m[1], "es")}`],
+  [/^(.+) - timed lyrics$/, (m) => `${assetName(m[1], "es")} - letra sincronizada`],
+  [/^(.+) \((final|preview)\)$/, (m) => `${assetName(m[1], "es")} (${m[2] === "final" ? "final" : "vista previa"})`],
+  [/^(.+) retake ([\d.]+-[\d.]+s)$/, (m) => `${assetName(m[1], "es")} · retoma ${m[2]}`],
+  [/^(.+) edited(?: ([\d.]+-[\d.]+s))?$/, (m) => `${assetName(m[1], "es")} · editado${m[2] ? ` ${m[2]}` : ""}`],
+  [/^(.+) frame ([\d.]+s)(\.\w+)?$/, (m) => `${assetName(m[1], "es")} · fotograma ${m[2]}${m[3] || ""}`],
+  [/^(.+) frame (\d+)(\.\w+)?$/, (m) => `${assetName(m[1], "es")} · fotograma ${m[2]}${m[3] || ""}`],
+  [/^(.+) last frame(\.\w+)?$/, (m) => `${assetName(m[1], "es")} · último fotograma${m[2] || ""}`],
+  [/^joined (\d+) clips(\.\w+)?$/, (m) => `${m[1]} clips unidos${m[2] || ""}`],
+  [/^composite of (\d+)(\.\w+)?$/, (m) => `composición de ${m[1]}${m[2] || ""}`],
+  [/^upscaled x(\d+): (.+)$/, (m) => `ampliada x${m[1]}: ${assetName(m[2], "es")}`],
+];
+
+/** The name of an asset as the reader's language would put it: the names the studio made up itself
+ * ("Auto-cut - ...", "... - timed lyrics", "upscaled: ...") are translated; a name someone wrote stays as it is. */
+export function assetName(name: string | null | undefined, lang: Lang, depth = 0): string {
+  if (!name || lang !== "es" || depth > 4) return name || "";
+  for (const [re, to] of NAME_RULES) {
+    const m = re.exec(name);
+    if (m) return to(m);
+  }
+  const p = /^([a-z][a-z0-9 _]{1,24}): (.+)$/.exec(name);
+  if (p && NAME_PREFIX_ES[p[1]]) return `${NAME_PREFIX_ES[p[1]]}: ${assetName(p[2], lang, depth + 1)}`;
+  return name;
+}
+
+/** A production's status as a message key (queued, running, awaiting_review...). */
+export const PRODUCTION_STATUS_KEY: Record<string, MessageKey> = {
+  queued: "stateQueued", running: "stateRunning", awaiting_review: "statusAwaiting", done: "stateDone",
+  failed: "stateFailed", cancelled: "stateCancelled", partial: "statusPartial",
+};

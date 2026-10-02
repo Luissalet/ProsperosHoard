@@ -3,7 +3,7 @@ import { ClipboardCheck, Loader2, Plus, Sparkles, Trash2, Undo2, Wand2 } from "l
 import { api, thumbUrl, type Asset, type Character, type Project, type VideoDraft, type VideoShot } from "../api";
 import { useT } from "../i18n";
 import { Modal, useApp } from "../components/ui";
-import { sectionLabel } from "../messages";
+import { assetName, sectionLabel } from "../messages";
 
 const LANGS: [string, string][] = [["en", "English"], ["es", "Español"], ["fr", "Français"], ["it", "Italiano"],
   ["pt", "Português"], ["de", "Deutsch"], ["ja", "日本語"], ["ko", "한국어"]];
@@ -204,7 +204,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
               <label className="field">{t("videoPickSong")}
                 <select value={songId} onChange={(e) => setSongId(e.target.value)}>
                   <option value="">—</option>
-                  {songs.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}{a.duration_s ? ` · ${Math.round(a.duration_s)} s` : ""}</option>)}
+                  {songs.map((a) => <option key={a.id} value={a.id}>{assetName(a.name, lang) || a.id}{a.duration_s ? ` · ${Math.round(a.duration_s)} s` : ""}</option>)}
                 </select>
                 {songs.length === 0 && <span className="hint">{t("videoNoSongs")}</span>}
               </label>

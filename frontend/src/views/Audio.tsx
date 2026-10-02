@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioLines, Download, Loader2, Mic, Music, Pause, Play, RefreshCw, Save, Sparkles, Square, Timer, Upload, Wand2 } from "lucide-react";
 import { api, fileUrl, type Analysis, type Asset } from "../api";
 import { useT, type Lang } from "../i18n";
-import { energyWord, sectionLabel, translateText } from "../messages";
+import { assetName, energyWord, sectionLabel, translateText } from "../messages";
 import { Empty, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
 
 const ENERGY_COLOURS: Record<string, string> = { low: "rgba(122,167,255,0.10)", mid: "rgba(245,194,107,0.10)", high: "rgba(255,77,141,0.16)" };
@@ -228,7 +228,7 @@ export function AudioView() {
     setAutoTiming(true);
     try {
       const text = rawText.split("\n").map((x) => x.replace(/^(\[[\d:.]+\])+/, "").trim()).filter(Boolean).join("\n");
-      const r = await api.timeLyrics(pid, song.id, text, `${song.name || "Song"} - timed lyrics`);
+      const r = await api.timeLyrics(pid, song.id, text, `${song.name || t("song")} - ${t("timedLyricsName")}`);
       setLyricsId(r.id);
       app.toast(t("autoTimed", { n: r.lines, s: r.sections.length }), "ok");
       app.bump();
@@ -244,7 +244,7 @@ export function AudioView() {
       const text = lrc || rawText;
       if (lyricsId) await api.saveLyrics(lyricsId, text);
       else {
-        const a = await api.createLyrics(pid, text, `${song?.name || "Song"} lyrics`);
+        const a = await api.createLyrics(pid, text, `${song?.name || t("song")} - ${t("lyricsName")}`);
         setLyricsId(a.id);
       }
       app.toast(t("saved"), "ok");
@@ -316,7 +316,7 @@ export function AudioView() {
           <div className="card stack">
             <div className="row wrap">
               <select value={songId || ""} onChange={(e) => setSongId(e.target.value)} style={{ minWidth: 280 }}>
-                {songList.map((s) => <option key={s.id} value={s.id}>{s.name || s.id}</option>)}
+                {songList.map((s) => <option key={s.id} value={s.id}>{assetName(s.name, lang) || s.id}</option>)}
               </select>
               <button className="btn primary icon" onClick={toggle} title={playing ? t("pause") : t("play")}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
               <span className="mono muted">{fmtTime(time)} / {fmtTime(duration)}</span>
@@ -349,7 +349,7 @@ export function AudioView() {
               <div className="row">
                 <select value={lyricsId} onChange={(e) => setLyricsId(e.target.value)} className="grow">
                   <option value="">{t("newLyrics")}</option>
-                  {(lyricsList.data?.items || []).map((l) => <option key={l.id} value={l.id}>{l.name || l.id}</option>)}
+                  {(lyricsList.data?.items || []).map((l) => <option key={l.id} value={l.id}>{assetName(l.name, lang) || l.id}</option>)}
                 </select>
               </div>
               {timing === null ? (

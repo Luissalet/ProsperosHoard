@@ -5,7 +5,7 @@ import { useT } from "../i18n";
 import { AssetTile, ConfirmButton, Empty, Modal, useApp, useDebounced } from "../components/ui";
 import { useDeleteAssets } from "../components/useDeleteAssets";
 import { LinkDownload } from "../components/LinkDownload";
-import { kindName, sourceName } from "../messages";
+import { assetName, kindName, sourceName } from "../messages";
 
 export function LibraryView() {
   const { t, lang } = useT();
@@ -150,7 +150,7 @@ export function LibraryView() {
                   {x.thumb ? <img src={`/api/trash/${x.id}/thumb`} alt="" loading="lazy" style={{ opacity: 0.7 }} />
                     : <div className="media-icon"><Trash2 size={22} /></div>}
                   <div className="tile-meta" style={{ opacity: 1 }}>
-                    <span className="ellipsis grow">{x.name || x.id}</span>
+                    <span className="ellipsis grow">{assetName(x.name, lang) || x.id}</span>
                     <button className="btn sm" onClick={async () => {
                       try { await api.restoreAsset(x.id); app.toast(t("restored"), "ok"); app.bump(); loadTrash(); }
                       catch (e) { app.toast((e as Error).message, "bad"); }

@@ -695,7 +695,7 @@ function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void })
         <>
           <p className="small">
             <span className={`pill ${card.failed ? "bad" : "ok"}`}>{t("qaSummary", { passed: card.passed, failed: card.failed, skipped: card.skipped })}</span>
-            {" "}<span className="muted">{card.stage === "all" ? t("all") : stageName(card.stage, lang)} · {t("qaVision", { name: card.vision })}{retries > 0 ? ` · ${t("qaRetries", { n: retries })}` : ""}</span>
+            {" "}<span className="muted">{card.stage === "all" ? t("all") : stageName(card.stage, lang)} · {t("qaVision", { name: translateText(card.vision, lang) })}{retries > 0 ? ` · ${t("qaRetries", { n: retries })}` : ""}</span>
           </p>
           {failing.length > 0 && (
             <div className="stack" style={{ gap: 8 }}>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clapperboard, FileDown, Film, Loader2, Minus, Plus, Scissors, Sparkles, Wand2 } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Analysis, type Asset, type Clip, type LyricClip, type Timeline } from "../api";
-import { useT } from "../i18n";
+import { useT, type MessageKey } from "../i18n";
+import { assetName } from "../messages";
 import { Empty, JobState, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
 import { LookPanel } from "../components/LookPanel";
 
@@ -9,7 +10,7 @@ const TRANSITIONS = ["cut", "crossfade", "dip_black", "flash_white"];
 const PANS = ["none", "left", "right", "up", "down"];
 
 export function TimelineView() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const timelines = useAsync(() => api.timelines(pid), [pid, app.dataVersion]);
@@ -90,11 +91,11 @@ export function TimelineView() {
   return (
     <>
       <div className="page-head">
-        <div><h1>{t("timelineTitle")}</h1>{tl && <p>{tl.name} · {tl.aspect} · {tl.fps} fps · {fmtTime(duration)}</p>}</div>
+        <div><h1>{t("timelineTitle")}</h1>{tl && <p>{assetName(tl.name, lang)} · {tl.aspect} · {tl.fps} fps · {fmtTime(duration)}</p>}</div>
         <div className="actions">
           {(timelines.data?.items || []).length > 1 && (
             <select value={tlId || ""} onChange={(e) => { setTlId(e.target.value); setSel(null); }}>
-              {timelines.data!.items.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              {timelines.data!.items.map((x) => <option key={x.id} value={x.id}>{assetName(x.name, lang)}</option>)}
             </select>
           )}
           <button className="btn" onClick={() => setAutoOpen(true)}><Wand2 size={16} /> {t("autoCut")}</button>
@@ -137,7 +138,7 @@ export function TimelineView() {
                       className={`clip-block${sel === i ? " selected" : ""}${dropAt === i ? " drop-target" : ""}`}
                       style={{ left: c.start_s * pxPerS + 1, width: Math.max(4, c.duration_s * pxPerS - 2),
                         backgroundImage: a && thumbUrl(a) ? `url(${thumbUrl(a)})` : undefined }}
-                      title={`${t("clip", { n: i + 1 })} · ${c.duration_s.toFixed(2)} s · ${tr}`}
+                      title={`${t("clip", { n: i + 1 })} · ${c.duration_s.toFixed(2)} s · ${t(`trans_${tr}` as MessageKey)}`}
                       onClick={() => setSel(i)}
                       onDragStart={() => setDragFrom(i)}
                       onDragOver={(e) => { e.preventDefault(); setDropAt(i); }}
@@ -163,7 +164,7 @@ export function TimelineView() {
                   <div key={i} className="lyric-block" style={{ left: l.start_s * pxPerS, width: Math.max(8, (l.end_s - l.start_s) * pxPerS - 2) }} title={l.text}>{l.text}</div>
                 ))}
               </div>
-              <div className="track-label">{t("song")} · {song?.name}</div>
+              <div className="track-label">{t("song")} · {assetName(song?.name, lang)}</div>
               <div className="track audio">
                 {song?.waveform && (
                   <svg width={width} height={46} style={{ display: "block" }} preserveAspectRatio="none" viewBox={`0 0 ${song.waveform.length} 46`}>
@@ -184,7 +185,7 @@ export function TimelineView() {
                 </div>
               )}
               <div className="card">
-                <h2>{t("renderReady")} {latest && <span className="muted small" style={{ fontWeight: 400 }}>{latest.name}</span>}</h2>
+                <h2>{t("renderReady")} {latest && <span className="muted small" style={{ fontWeight: 400 }}>{assetName(latest.name, lang)}</span>}</h2>
                 {latest ? (
                   <div className="render-row">
                     <div className="video-frame" style={{ width: tl.aspect === "9:16" ? 250 : tl.aspect === "1:1" ? 380 : 520, maxWidth: "100%" }}>
@@ -209,7 +210,7 @@ export function TimelineView() {
                   onDelete={() => { patch({ clip_updates: [{ index: sel, delete: true }] }); setSel(null); }} />
               ) : (
                 <>
-                  <h2><Scissors size={16} /> {tl.name}</h2>
+                  <h2><Scissors size={16} /> {assetName(tl.name, lang)}</h2>
                   <label className="check"><input type="checkbox" checked={lyrics.some((l) => l.karaoke)} disabled={!lyrics.length}
                     onChange={(e) => patch({ karaoke: e.target.checked })} /> {t("karaoke")}</label>
                   <p className="muted small">{t("selectClip")}</p>
@@ -246,7 +247,7 @@ function ClipEditor({ index, clip, asset, onApply, onDelete }: {
         <input type="range" min={0.5} max={8} step={0.05} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></label>
       <div className="grid-2">
         <label className="field">{t("transition")}
-          <select value={transition} onChange={(e) => setTransition(e.target.value)}>{TRANSITIONS.map((x) => <option key={x}>{x}</option>)}</select></label>
+          <select value={transition} onChange={(e) => setTransition(e.target.value)}>{TRANSITIONS.map((x) => <option key={x} value={x}>{t(`trans_${x}` as MessageKey)}</option>)}</select></label>
         <label className="field">{t("duration")}
           <input type="number" min={0.05} max={2} step={0.05} value={tDur} disabled={transition === "cut"} onChange={(e) => setTDur(Number(e.target.value))} /></label>
       </div>
@@ -254,7 +255,7 @@ function ClipEditor({ index, clip, asset, onApply, onDelete }: {
         <div className="grid-3">
           <label className="field">{t("zoomStart")}<input type="number" min={1} max={2} step={0.02} value={zs} onChange={(e) => setZs(Number(e.target.value))} /></label>
           <label className="field">{t("zoomEnd")}<input type="number" min={1} max={2} step={0.02} value={ze} onChange={(e) => setZe(Number(e.target.value))} /></label>
-          <label className="field">{t("pan")}<select value={pan} onChange={(e) => setPan(e.target.value)}>{PANS.map((x) => <option key={x}>{x}</option>)}</select></label>
+          <label className="field">{t("pan")}<select value={pan} onChange={(e) => setPan(e.target.value)}>{PANS.map((x) => <option key={x} value={x}>{t(`pan_${x}` as MessageKey)}</option>)}</select></label>
         </div>
       )}
       <div className="row">
@@ -270,7 +271,7 @@ function ClipEditor({ index, clip, asset, onApply, onDelete }: {
 }
 
 function AutoCutDialog({ onClose, onBuilt }: { onClose: () => void; onBuilt: (tl: Timeline) => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const songs = useAsync(() => api.assets(pid, { kind: "audio", limit: 60 }), [pid]);
@@ -310,7 +311,7 @@ function AutoCutDialog({ onClose, onBuilt }: { onClose: () => void; onBuilt: (tl
         <button className="btn primary" onClick={build} disabled={!song || busy}>{busy ? <Loader2 size={15} className="spin" /> : <Wand2 size={15} />} {t("build")}</button></>}>
       <div className="stack">
         <label className="field">{t("song")}
-          <select value={song} onChange={(e) => setSong(e.target.value)}>{songList.map((s) => <option key={s.id} value={s.id}>{s.name || s.id}</option>)}</select></label>
+          <select value={song} onChange={(e) => setSong(e.target.value)}>{songList.map((s) => <option key={s.id} value={s.id}>{assetName(s.name, lang) || s.id}</option>)}</select></label>
         <div className="grid-2">
           <label className="field">{t("pool")}
             <select value={board} onChange={(e) => setBoard(e.target.value)}>
@@ -320,7 +321,7 @@ function AutoCutDialog({ onClose, onBuilt }: { onClose: () => void; onBuilt: (tl
           <label className="field">{t("lyrics")}
             <select value={lyr} onChange={(e) => setLyr(e.target.value)}>
               <option value="">{t("noLyrics")}</option>
-              {(lyrics.data?.items || []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {(lyrics.data?.items || []).map((l) => <option key={l.id} value={l.id}>{assetName(l.name, lang)}</option>)}
             </select></label>
         </div>
         <div className="field">{t("aspect")}
