@@ -177,7 +177,15 @@ def test_vtt_time_carries_seconds_into_minutes():
 
 def test_srt_time_carries_seconds_into_minutes_at_hour_boundary():
     # 3599.9996s must round to 01:00:00,000, not "00:59:60,000" or "00:59:59,1000".
-    assert ve._srt_time(3599.9996) == "01:00:00,000"
+    srt = ve.segments_to_srt([{"start_s": 3599.9996, "end_s": 3601.0, "text": "x"}])
+    assert srt.splitlines()[1] == "01:00:00,000 --> 01:00:01,000"
+
+
+def test_subtitle_files_skip_empty_cues_and_escape_vtt_text():
+    segments = [{"start_s": 0, "end_s": 1, "text": "  "}, {"start_s": 1, "end_s": 2, "text": "a < b & c"}]
+    assert ve.segments_to_srt(segments).splitlines()[0] == "1"                       # the empty cue takes no number
+    assert "a &lt; b &amp; c" in ve.segments_to_vtt(segments)
+    assert ve.segments_to_txt(segments) == "a < b & c"
 
 
 def test_transcript_segment_to_dict():

@@ -399,3 +399,12 @@ def test_render_with_transitions_keeps_the_full_length(tmp_path):
     from prosperos_hoard import audio as audio_mod
 
     assert abs(audio_mod.probe_duration_s(out) - sum(durations)) < 0.1
+
+
+def test_lyric_text_cannot_inject_ass_override_tags():
+    from prosperos_hoard import video
+
+    out = video.ass_escape("{\\pos(0,0)}hi\nthere\\N")
+    assert "{" not in out and "}" not in out and "\\pos" not in out and out.count("\\N") == 1
+    assert len(video.ass_escape("x" * 900)) == 500
+    assert video._ass_time(3661.456) == "1:01:01.46"

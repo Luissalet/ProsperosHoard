@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 from . import procutil
 from .hoard_link import proc as hlproc
 from .backend import ffmpeg_path
+from .hoard_link.media import subs
 
 FONTS_DIR = Path(__file__).parent / "fonts"
 
@@ -468,25 +469,13 @@ def _word_weight(word: str) -> int:
 KARAOKE_MAX_FILL_S = 3.6
 
 
-def _ass_time(seconds: float) -> str:
-    seconds = max(0.0, seconds)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h}:{m:02d}:{s:05.2f}"
+_ass_time = subs.ass_time
 
 
 def ass_escape(text: str) -> str:
-    """Make arbitrary lyric text inert inside an ASS Dialogue line: no
-    override blocks (`{\\pos..}`), no `\\N`/`\\h` escapes, no line breaks that
-    could start a new `Dialogue:` event. A backslash is kept visible by
-    following it with an invisible word joiner; braces use libass's `\\{`
-    `\\}` escapes; real newlines become ASS line breaks."""
-    text = str(text).replace("\r\n", "\n").replace("\r", "\n")
-    text = text.replace("\\", "\\\u2060")
-    text = text.replace("{", "\\{").replace("}", "\\}")
-    text = "\\N".join(part.strip() for part in text.split("\n"))
-    return text[:500]
+    """Make arbitrary lyric text inert inside an ASS Dialogue line (the shared escape: no override tags, no line breaks that could
+    start a new event), at most 500 characters."""
+    return subs.ass_escape(text)[:500]
 
 
 def build_ass(width: int, height: int, lyric_clips: list[dict[str, Any]], style: str = "default") -> str:

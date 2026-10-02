@@ -20,6 +20,7 @@ from . import procutil
 from . import voice_engines as ve
 from . import voice_lab
 from .backend import Backend, ffmpeg_path
+from .hoard_link.media import ffmpeg as ffmpeg_shared
 from .ids import new_id
 from .store import Store
 from .util import now_iso
@@ -47,21 +48,7 @@ def _ffmpeg() -> str:
 
 # ------------------------------------------------------------ time-fit math
 
-def atempo_chain(factor: float) -> list[str]:
-    """`factor` (source_duration / target_duration - >1 means "speed up")
-    as a chain of ffmpeg `atempo` filters, each within its supported
-    0.5-2.0 range. Pure and unit-tested without running ffmpeg."""
-    factor = max(1.0 / MAX_OVERALL_FACTOR, min(MAX_OVERALL_FACTOR, factor))
-    if abs(factor - 1.0) < 1e-6:
-        return []
-    stages: list[float] = []
-    remaining = factor
-    bound = MAX_ATEMPO if remaining > 1.0 else MIN_ATEMPO
-    while (remaining > MAX_ATEMPO) or (remaining < MIN_ATEMPO):
-        stages.append(bound)
-        remaining /= bound
-    stages.append(remaining)
-    return [f"atempo={s:.6f}" for s in stages]
+atempo_chain = ffmpeg_shared.atempo_chain   # source / target duration -> a chain of atempo= filters (ffmpeg takes 0.5-2.0 each)
 
 
 def compute_time_fit_factor(source_duration_s: float, target_duration_s: float) -> float:
