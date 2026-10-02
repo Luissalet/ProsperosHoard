@@ -116,11 +116,14 @@ def real_object_info() -> dict[str, Any]:
 MOTION_FILES = {
     ("UNETLoader", "unet_name"): ["wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
                                   "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
-                                  "wan_animate_2_distill_int8_convrot.safetensors"],
+                                  "wan_animate_2_distill_int8_convrot.safetensors",
+                                  "wan2.2_s2v_14B_fp8_scaled.safetensors"],
+    ("AudioEncoderLoader", "audio_encoder_name"): ["wav2vec2_large_english_fp16.safetensors"],
     ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
     ("CLIPVisionLoader", "clip_name"): ["clip_vision_h.safetensors"],
     ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
-                                           "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors"],
+                                           "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+                                           "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"],
 }
 
 
@@ -128,12 +131,7 @@ def with_motion_models(info: dict[str, Any]) -> dict[str, Any]:
     """A copy of an object_info with the motion model files listed too."""
     out = json.loads(json.dumps(info))
     for (cls, inp), files in MOTION_FILES.items():
-        try:
-            entry = out[cls]["input"]["required"][inp]
-        except KeyError:
-            continue
-        current = entry[0] if isinstance(entry[0], list) else []
-        entry[0] = list(dict.fromkeys([*current, *files]))
+        _set_choices(out, cls, inp, files)
     return out
 
 
@@ -385,6 +383,7 @@ class FakeComfyServer:
         self.upscale_models: list[str] = list(UPSCALE_MODEL_FILES)
         self.bg_removal_models: list[str] = list(BG_REMOVAL_FILES)
         self.devices_override: Optional[list[dict]] = None  # tests: a custom /system_stats device list
+        self.motion_models = False  # tests: list the Wan 14B / Animate / S2V files as installed
         self.history_delay_s = 0.0  # tests: how long a prompt "renders" before /history shows it
         self._ready_at: dict[str, float] = {}
         self._server = None
@@ -394,7 +393,7 @@ class FakeComfyServer:
 
     # ------------------------------------------------------------------
     def _object_info(self, node: Optional[str] = None) -> dict[str, Any]:
-        full = real_object_info()
+        full = with_motion_models(real_object_info()) if self.motion_models else real_object_info()
         loras = sorted(p.relative_to(self.lora_dir).as_posix() for p in self.lora_dir.rglob("*.safetensors")) \
             if self.lora_dir.is_dir() else []
         if loras and "LoraLoaderModelOnly" in full:

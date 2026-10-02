@@ -194,7 +194,8 @@ def _clean_spans(raw: Any, duration_s: float) -> list[dict[str, Any]]:
         assets = [a for a in span.get("assets") or [] if a]
         if end - start < MIN_CLIP_S or not assets:
             continue
-        out.append({"start_s": round(start, 3), "end_s": round(end, 3), "assets": assets})
+        out.append({"start_s": round(start, 3), "end_s": round(end, 3), "assets": assets,
+                    "synced": bool(span.get("synced"))})
     out.sort(key=lambda s: s["start_s"])
     kept: list[dict[str, Any]] = []
     for span in out:
@@ -302,7 +303,12 @@ def build_auto_cut(
             "asset_id": asset["id"], "kind": asset.get("kind", "image"), "start_s": round(starts[i], 3),
             "duration_s": duration_s, "trim_start_s": 0.0, "transition_in": transition,
         }
-        if clip["kind"] == "video":
+        span = _span_at(starts[i], spans) if spans else None
+        if clip["kind"] == "video" and span is not None and span.get("synced"):
+            # a lip-synced clip was rendered from this span's own audio: it
+            # plays from the second the span is at, or the lips drift
+            clip["trim_start_s"] = round(max(0.0, starts[i] - span["start_s"]), 3)
+        elif clip["kind"] == "video":
             clip["trim_start_s"] = _video_trim(asset, duration_s, video_uses, lead_in, rotate)
         if clip["kind"] == "image":
             if ken_burns_variety:

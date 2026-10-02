@@ -767,6 +767,7 @@ export interface ProductionShot {
   refs?: ShotRef[];
   motion_ref?: MotionRef;
   crowd?: boolean;   // part of the background cast stands behind it
+  sing?: boolean;    // lip sync: its clip sings the stretch it is placed on
   cast?: string[];   // exactly these cast members (by name)
   start_s?: number;  // placed on exactly this stretch of the song
   end_s?: number;

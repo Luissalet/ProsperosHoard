@@ -260,6 +260,11 @@ class GenerateImageBody(BaseModel):
     # mentioned locations/props with a reference image go in as numbered
     # references (an edit) on engines that read several (Qwen-Image 2.1)
     use_element_references: bool = True
+    # lip sync (template wan22_s2v): the stretch of a song the character
+    # sings - audio_seconds from audio_start_s
+    audio_asset_id: Optional[str] = None
+    audio_start_s: Optional[float] = None
+    audio_seconds: Optional[float] = None
     consistent: bool = False
     # character adapters (LoRAs): injected for every @mentioned character
     # (and every id in `characters`) that has one for the render's
@@ -908,6 +913,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             **({"matched_elements": composed["matched_elements"]} if composed.get("matched_elements") else {}),
             **({"loras": adapters["loras"]} if adapters["loras"] else {}),
         }
+        if body.audio_asset_id:
+            if store.get_asset(body.audio_asset_id)["kind"] not in ("audio", "video"):
+                raise engine.EngineError("audio_not_audio", "audio_asset_id must be a song or a sound")
+            if body.audio_seconds is not None and not 0.5 <= float(body.audio_seconds) <= 20:
+                raise engine.EngineError("bad_parameter", "audio_seconds must be between 0.5 and 20")
+            params["audio_asset_id"] = body.audio_asset_id
+            params["audio_start_s"] = max(0.0, float(body.audio_start_s or 0))
+            if body.audio_seconds:
+                params["audio_seconds"] = float(body.audio_seconds)
         if body.driving_asset_id:
             if store.get_asset(body.driving_asset_id)["kind"] != "video":
                 raise engine.EngineError("driving_not_video", "driving_asset_id must be a video (the motion to copy)")
@@ -3023,6 +3037,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if not any(m.get("available") for m in status.get("music") or []):
                 items.append({"level": "error", "code": "no_music_model",
                               "message": "no music model is installed in ComfyUI to compose the song: pick a song of yours (Change song)"})
+        singing = [sh["key"] for sh in (state.get("spec") or {}).get("shots") or [] if sh.get("sing")]
+        if singing and "clips" in pending and status["comfy"].get("reachable"):
+            if not engine.s2v_installed(engine._object_info(backend) or {}):
+                items.append({"level": "error", "code": "no_s2v",
+                              "message": f"shot {', '.join(singing)} sings, but the lip-sync model (Wan 2.2 S2V, its audio encoder "
+                                         "and 4-step LoRA) is not installed in ComfyUI"})
+            unplaced = [sh["key"] for sh in state["spec"]["shots"] if sh.get("sing") and not productions_mod.shot_span(sh)]
+            if unplaced:
+                items.append({"level": "error", "code": "sing_needs_span",
+                              "message": f"shot {', '.join(unplaced)} sings but is not placed on its lines in the song track"})
         if not status["ffmpeg"]["found"]:
             items.append({"level": "error", "code": "no_ffmpeg", "message": "ffmpeg was not found: the animatic and the cut need it"})
         try:
