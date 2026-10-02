@@ -48,6 +48,11 @@ def _esc(text: Any) -> str:
     return html.escape(str(text or ""), quote=True)
 
 
+def _short(info: dict[str, Any]) -> str:
+    """A clip's name in the editor: its file name (prompts make unreadable names)."""
+    return Path(info["path"]).name
+
+
 def _clips(timeline: dict[str, Any], kind: str) -> list[dict[str, Any]]:
     track = next((t for t in timeline.get("tracks") or [] if t.get("type") == kind), None)
     return list((track or {}).get("clips") or [])
@@ -79,7 +84,7 @@ def to_xmeml(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = Non
                      + "</samplecharacteristics></video></media>")
         else:
             chars = "<media><audio><channelcount>2</channelcount></audio></media>"
-        return (f'<file id="file-{_esc(aid)}"><name>{_esc(info.get("name"))}</name>'
+        return (f'<file id="file-{_esc(aid)}"><name>{_esc(Path(info["path"]).name)}</name>'
                 f'<pathurl>{_esc(file_url(info["path"]))}</pathurl>{_rate(fps)}'
                 + (f"<duration>{dur}</duration>" if dur else "") + chars + "</file>")
 
@@ -92,7 +97,7 @@ def to_xmeml(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = Non
             continue
         src_in = _frames(clip.get("trim_start_s") or 0, fps) if info.get("kind") == "video" else 0
         src_dur = _frames(info.get("duration_s") or 0, fps) if info.get("kind") == "video" else length
-        out.append(f'<clipitem id="clipitem-{i}"><name>{_esc(info.get("name"))}</name>'
+        out.append(f'<clipitem id="clipitem-{i}"><name>{_esc(_short(info))}</name>'
                    f"<duration>{max(src_dur, src_in + length)}</duration>{_rate(fps)}"
                    f"<start>{start}</start><end>{start + length}</end><in>{src_in}</in><out>{src_in + length}</out>"
                    + file_block(clip["asset_id"], info, "video") + "</clipitem>")
@@ -101,7 +106,7 @@ def to_xmeml(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = Non
     song_id = timeline.get("audio_asset_id")
     song = lookup(song_id) if song_id else None
     if song:
-        out.append(f'<clipitem id="clipitem-audio"><name>{_esc(song.get("name"))}</name>'
+        out.append(f'<clipitem id="clipitem-audio"><name>{_esc(_short(song))}</name>'
                    f"<duration>{max(total, _frames(song.get('duration_s') or 0, fps))}</duration>{_rate(fps)}"
                    f"<start>0</start><end>{total}</end><in>0</in><out>{total}</out>"
                    + file_block(song_id, song, "audio")
