@@ -117,13 +117,19 @@ MOTION_FILES = {
     ("UNETLoader", "unet_name"): ["wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
                                   "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
                                   "wan_animate_2_distill_int8_convrot.safetensors",
-                                  "wan2.2_s2v_14B_fp8_scaled.safetensors"],
-    ("AudioEncoderLoader", "audio_encoder_name"): ["wav2vec2_large_english_fp16.safetensors"],
+                                  "wan2.2_s2v_14B_fp8_scaled.safetensors",
+                                  "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors"],
+    ("AudioEncoderLoader", "audio_encoder_name"): ["wav2vec2_large_english_fp16.safetensors",
+                                                   "wav2vec2-chinese-base_fp16.safetensors"],
     ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
     ("CLIPVisionLoader", "clip_name"): ["clip_vision_h.safetensors"],
+    ("ModelPatchLoader", "name"): ["wan2.1_infiniteTalk_single_fp16.safetensors"],
+    ("CheckpointLoaderSimple", "ckpt_name"): ["sdpose_wholebody_fp16.safetensors"],
+    ("LoadDA3Model", "model_name"): ["depth_anything_3_mono_large.safetensors"],
     ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
                                            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
-                                           "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"],
+                                           "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+                                           "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"],
 }
 
 

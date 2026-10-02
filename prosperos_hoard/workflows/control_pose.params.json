@@ -1,0 +1,16 @@
+{
+  "template": "control_pose",
+  "kind": "image",
+  "vram_class": "control",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "pose_model": "2.ckpt_name"
+  },
+  "output_node": "5",
+  "model_params": [
+    "pose_model"
+  ],
+  "notes": "A pose map (body, hands and face keypoints drawn on black, OpenPose colours) of the people in an image, with the core SDPose nodes and sdpose_wholebody_fp16 (models/checkpoints) - the official utility_sdpose_ood_image_to_pose.json graph without its resize step. A space feeds it to a picture as a pose reference.",
+  "defaults": {}
+}

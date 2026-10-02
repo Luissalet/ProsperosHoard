@@ -6,6 +6,7 @@ and the richer UI endpoints. See `docs/API.md` for every route.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import mimetypes
 import re
@@ -190,17 +191,27 @@ class SpaceRunBody(BaseModel):
     force: bool = False           # "all": run even the nodes whose inputs did not change
 
 
+class SpaceAppRunBody(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)  # {input node id: text | asset id(s) | character id}
+
+
+class SpaceBuildBody(BaseModel):
+    request: str
+
+
 class SpaceNodeStateBody(BaseModel):
     excluded: Optional[list[str]] = None   # outputs unticked so they do not flow downstream
     outputs: Optional[list[str]] = None    # pick an earlier run's outputs back
 
 
 class SpaceAgentBody(BaseModel):
-    action: str = "list"          # list | get | create | edit | run | stop | delete | restore
+    action: str = "list"          # list | get | create | edit | run | stop | delete | restore | estimate | build | app | app_run
     space: Optional[str] = None
     name: Optional[str] = None
     template: str = "blank"
     ops: list[dict[str, Any]] = Field(default_factory=list)  # edit: add_node / set / connect / disconnect / remove / move
+    request: Optional[str] = None  # build: what to make, in words (the local model draws the graph)
+    values: dict[str, Any] = Field(default_factory=dict)  # app_run: {input node id: text | asset id(s) | character id}
     mode: str = "node"
     node_ids: list[str] = Field(default_factory=list)
     force: bool = False
@@ -312,6 +323,8 @@ class GenerateImageBody(BaseModel):
     audio_asset_id: Optional[str] = None
     audio_start_s: Optional[float] = None
     audio_seconds: Optional[float] = None
+    # first and last frame (template wan22_flf2v): the image the clip ends on
+    end_asset_id: Optional[str] = None
     # film language (cinema.py): {shot, angle, move, lens, light, composition} ids whose terms join the prompt
     camera: Optional[dict[str, str]] = None
     consistent: bool = False
@@ -873,6 +886,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if body.template != "wan_animate2":
                 body = body.model_copy(update={"driving_asset_id": None, "driving_start_s": None,
                                                "template_params": None})
+        if body.template == "auto_sing":
+            # lip sync: InfiniteTalk for long lines when installed, else S2V
+            body = body.model_copy(update={"template": engine.sing_template(object_info or {}, float(body.audio_seconds or 0),
+                                                                            (body.template_params or {}).get("sing_engine")),
+                                           "template_params": None})
+        if body.end_asset_id and body.template in ("auto_clip", "wan22_i2v_14b", "wan22_ti2v"):
+            if not engine.flf_installed(object_info or {}):
+                raise engine.EngineError("no_flf", "a clip that ends on a given frame needs Wan 2.2 14B image-to-video "
+                                                   "(both experts and the 4-step LoRAs) in ComfyUI")
+            body = body.model_copy(update={"template": "wan22_flf2v", "driving_asset_id": None, "driving_start_s": None})
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         available_loras = comfy_driver.lora_choices(object_info) if object_info else None
         adapter_route = False
@@ -979,12 +1002,17 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.audio_asset_id:
             if store.get_asset(body.audio_asset_id)["kind"] not in ("audio", "video"):
                 raise engine.EngineError("audio_not_audio", "audio_asset_id must be a song or a sound")
-            if body.audio_seconds is not None and not 0.5 <= float(body.audio_seconds) <= 20:
-                raise engine.EngineError("bad_parameter", "audio_seconds must be between 0.5 and 20")
+            longest = 90 if template == "wan21_infinitetalk" else 20
+            if body.audio_seconds is not None and not 0.5 <= float(body.audio_seconds) <= longest:
+                raise engine.EngineError("bad_parameter", f"audio_seconds must be between 0.5 and {longest} for {template}")
             params["audio_asset_id"] = body.audio_asset_id
             params["audio_start_s"] = max(0.0, float(body.audio_start_s or 0))
             if body.audio_seconds:
                 params["audio_seconds"] = float(body.audio_seconds)
+        if body.end_asset_id:
+            if store.get_asset(body.end_asset_id)["kind"] != "image":
+                raise engine.EngineError("end_not_image", "end_asset_id must be an image (the frame the clip ends on)")
+            params["end_asset_id"] = body.end_asset_id
         if body.driving_asset_id:
             if store.get_asset(body.driving_asset_id)["kind"] != "video":
                 raise engine.EngineError("driving_not_video", "driving_asset_id must be a video (the motion to copy)")
@@ -1014,7 +1042,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         asset = store.get_asset(body.asset_id)
         if asset["kind"] != "image":
             raise engine.EngineError("not_an_image", f"asset {body.asset_id} is {asset['kind']}; edits need an image")
-        ops = ("img2img", "inpaint", "hires", "vary", "reuse", "upscale", "remove_background")
+        ops = ("img2img", "inpaint", "hires", "vary", "reuse", "upscale", "remove_background", "pose_map", "depth_map")
         if body.operation not in ops:
             raise engine.EngineError("bad_operation", f"operation must be one of {', '.join(ops)}")
         if body.operation == "inpaint" and not body.mask_asset_id:
@@ -2780,6 +2808,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def list_spaces(project_id: str, deleted: bool = False):
         return {"items": [{"id": sp["id"], "name": sp["name"], "updated_at": sp["updated_at"], "version": sp["version"],
                            "nodes": len(sp["graph"].get("nodes") or []), "cover": _space_cover(sp),
+                           "app": any((n.get("data") or {}).get("app_input") for n in sp["graph"].get("nodes") or []),
                            **({"deleted_at": sp["deleted_at"]} if sp.get("deleted_at") else {})}
                           for sp in store.list_spaces(project_id, deleted=deleted)]}
 
@@ -2842,6 +2871,84 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/spaces/{space_id}/stop")
     def stop_space(space_id: str):
         return op_space_stop(space_id)
+
+    def op_space_estimate(space_id: str, mode: str = "all", node_ids: Optional[list[str]] = None,
+                          force: bool = False) -> dict[str, Any]:
+        return spaces_mod.estimate(store, space_id, mode, node_ids or [], force, backend.vram_estimates_mb())
+
+    @app.get("/api/spaces/{space_id}/estimate")
+    def space_estimate(space_id: str, mode: str = "all", node_ids: str = "", force: bool = False):
+        return op_space_estimate(space_id, mode, [x for x in node_ids.split(",") if x], force)
+
+    def op_space_app(space_id: str) -> dict[str, Any]:
+        return spaces_mod.app_view(store, store.get_space(space_id))
+
+    def op_space_app_run(space_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        space = store.get_space(space_id)
+        view = spaces_mod.app_view(store, space)
+        if not view["inputs"] and values:
+            raise spaces_mod.SpaceError("no_inputs", "this space has no app inputs: mark text, media or cast nodes as inputs")
+        graph = spaces_mod.validate_graph(spaces_mod.apply_app_values(store, space["graph"], values))
+        saved = store.save_space_graph(space_id, graph, None, None)
+        run = op_space_run(space_id, SpaceRunBody(mode="all"))
+        return {**run, "version": saved["version"], "app": spaces_mod.app_view(store, store.get_space(space_id))}
+
+    @app.get("/api/spaces/{space_id}/app")
+    def space_app(space_id: str):
+        return op_space_app(space_id)
+
+    @app.post("/api/spaces/{space_id}/app/run")
+    def space_app_run(space_id: str, body: SpaceAppRunBody):
+        return op_space_app_run(space_id, body.values)
+
+    def op_space_build(space_id: str, request: str) -> dict[str, Any]:
+        """The local model draws (or extends) a space from a request in
+        words: a compact plan turned into edit ops, laid out next to what
+        is already there, validated, saved."""
+        space = store.get_space(space_id)
+        text = (request or "").strip()
+        if not text:
+            raise spaces_mod.SpaceError("empty_request", "say what to make")
+        cast = [f"{c['name']} ({c.get('element') or 'character'})" for c in store.list_characters(space["project_id"])][:40]
+        existing = [f"{n['id']} ({n['type']})" for n in space["graph"]["nodes"]][:60]
+        ask = (f"Project cast: {', '.join(cast) or 'none'}.\nNodes already on the canvas (you may wire to them by id): "
+               f"{', '.join(existing) or 'none'}.\n\nRequest: {text}")
+        messages = [{"role": "system", "content": spaces_mod.BUILD_GUIDE}, {"role": "user", "content": ask}]
+        last_error = ""
+        for attempt in range(2):
+            if last_error:
+                messages = messages + [{"role": "user", "content": f"That was not valid ({last_error}). Answer with the JSON only."}]
+            reply = studio.chat(messages, 1800, 0.2, effort="off")
+            m = re.search(r"\{.*\}", reply or "", re.S)
+            try:
+                plan = json.loads(m.group(0)) if m else None
+            except ValueError as exc:
+                plan, last_error = None, f"bad JSON: {exc}"
+            if not isinstance(plan, dict) or not plan.get("nodes"):
+                last_error = last_error or "no nodes"
+                continue
+            existing_ids = {n["id"] for n in space["graph"]["nodes"]}
+            ops = spaces_mod.plan_to_ops(store, space["project_id"], plan, existing_ids)
+            if not any(o["op"] == "add_node" for o in ops):
+                last_error = "no usable nodes"
+                continue
+            try:
+                graph = _apply_space_ops(space["graph"], ops)
+            except spaces_mod.SpaceError as exc:
+                last_error = exc.message
+                continue
+            new_ids = {o["id"] for o in ops if o["op"] == "add_node"}
+            right = max([n["x"] for n in space["graph"]["nodes"]] or [-460]) + 460
+            spaces_mod.layout_new_nodes(graph, new_ids, right if space["graph"]["nodes"] else 0, 0)
+            saved = store.save_space_graph(space_id, spaces_mod.validate_graph(graph), None, None)
+            return {"note": str(plan.get("note") or "")[:300], "added": sorted(new_ids),
+                    "wires": sum(1 for o in ops if o["op"] == "connect"), "space": space_view(saved, compact=True)}
+        raise spaces_mod.SpaceError("build_failed", f"the local model did not give a usable graph ({last_error}); "
+                                                    "try again with simpler words, or build it with edit ops")
+
+    @app.post("/api/spaces/{space_id}/build")
+    def space_build(space_id: str, body: SpaceBuildBody):
+        return op_space_build(space_id, body.request)
 
     @app.patch("/api/spaces/{space_id}/nodes/{node_id}")
     def space_node_state(space_id: str, node_id: str, body: SpaceNodeStateBody):
@@ -2955,11 +3062,21 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 return op_space_run(space["id"], SpaceRunBody(mode=body.mode, node_ids=body.node_ids, force=body.force))
             if body.action == "stop":
                 return op_space_stop(space["id"])
+            if body.action == "estimate":
+                return op_space_estimate(space["id"], body.mode if body.mode != "node" or body.node_ids else "all",
+                                         body.node_ids, body.force)
+            if body.action == "build":
+                return op_space_build(space["id"], body.request or "")
+            if body.action == "app":
+                return op_space_app(space["id"])
+            if body.action == "app_run":
+                return op_space_app_run(space["id"], body.values)
             if body.action == "delete":
                 return space_view(store.delete_space(space["id"]), compact=True)
             if body.action == "restore":
                 return space_view(store.restore_space(space["id"]), compact=True)
-            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, stop, delete, restore")
+            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, stop, estimate, build, app, "
+                                                      "app_run, delete, restore")
         return agent("studio_spaces", f"{body.action}:{body.space or body.name or ''}", run)
 
     @app.post("/api/agent/studio_prompt_enhance")

@@ -938,7 +938,8 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 
 // ------------------------------------------------------------- spaces
 
-export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine";
+export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine"
+  | "variations" | "group";
 
 export interface SpaceNode {
   id: string;
@@ -998,7 +999,24 @@ export interface SpaceSummary {
   version: number;
   nodes: number;
   cover: string | null;
+  app?: boolean;
   deleted_at?: string;
+}
+
+export interface SpaceEstimate {
+  nodes: { node: string; renders?: number; seconds?: number; templates?: string[]; measured?: boolean; skipped?: boolean; error?: string }[];
+  renders: number;
+  seconds: number;
+  minutes: number;
+  vram_mb: number | null;
+}
+
+export interface SpaceApp {
+  id: string;
+  name: string;
+  description: string;
+  inputs: { node: string; type: "text" | "asset" | "cast"; label: string; kind?: string; value: any }[];
+  outputs: { node: string; label: string; kind: string; status?: string; outputs: string[]; texts?: string[]; error?: string | null }[];
 }
 
 
@@ -1337,6 +1355,13 @@ export const api = {
   restoreSpace: (id: string) => request<Space>("POST", `/api/spaces/${id}/restore`),
   runSpace: (id: string, mode: "node" | "downstream" | "all", nodeIds: string[] = [], force = false) =>
     request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
+  spaceEstimate: (id: string, mode = "all", nodeIds: string[] = []) =>
+    request<SpaceEstimate>("GET", `/api/spaces/${id}/estimate${q({ mode, node_ids: nodeIds.join(",") || undefined })}`),
+  spaceApp: (id: string) => request<SpaceApp>("GET", `/api/spaces/${id}/app`),
+  runSpaceApp: (id: string, values: Record<string, unknown>) =>
+    request<{ job: Job; nodes: string[]; app: SpaceApp }>("POST", `/api/spaces/${id}/app/run`, { values }),
+  buildSpace: (id: string, requestText: string) =>
+    request<{ note: string; added: string[]; wires: number }>("POST", `/api/spaces/${id}/build`, { request: requestText }),
   stopSpace: (id: string) => request<{ stopped: string[] }>("POST", `/api/spaces/${id}/stop`),
   spaceNode: (id: string, nodeId: string, patch: { excluded?: string[]; outputs?: string[] }) =>
     request<Space>("PATCH", `/api/spaces/${id}/nodes/${nodeId}`, patch),

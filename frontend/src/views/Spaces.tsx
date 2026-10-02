@@ -7,15 +7,17 @@ import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRe
 import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useReactFlow,
   type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type OnConnectEnd,
-  applyEdgeChanges, applyNodeChanges, useUpdateNodeInternals,
+  applyEdgeChanges, applyNodeChanges, useUpdateNodeInternals, NodeResizer,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Aperture, ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
   Music, Play, Plus, RotateCcw, Sparkles, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
+  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2,
 } from "lucide-react";
 import {
-  ApiError, api, type Character, type Space, type SpaceEdge, type SpaceGraph, type SpaceNodeState, type SpaceNodeType, type SpaceSummary,
+  ApiError, api, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
+  type SpaceNodeType, type SpaceSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "../components/ui";
@@ -26,43 +28,49 @@ import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 type Port = "text" | "image" | "video" | "audio" | "any";
 const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
   // [handle, accepts, many wires]
-  image: [["prompt", "text", true], ["refs", "image", true]],
-  video: [["start", "image", true], ["prompt", "text", true], ["motion", "video", false], ["audio", "audio", false]],
+  image: [["prompt", "text", true], ["refs", "image", true], ["pose", "image", false], ["layout", "image", false]],
+  video: [["start", "image", true], ["end", "image", false], ["prompt", "text", true], ["motion", "video", false], ["audio", "audio", false]],
   music: [["prompt", "text", true]],
   list: [["items", "any", true]],
   assistant: [["prompt", "text", true]],
   edit: [["image", "image", true]],
   combine: [["clips", "video", true], ["audio", "audio", false]],
+  variations: [["image", "image", true], ["prompt", "text", true]],
 };
-const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine"];
+const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations"];
+const APP_INPUTS: SpaceNodeType[] = ["text", "asset", "cast"];
 const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#f0a04b", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
-  assistant: Bot, edit: ScanLine, combine: Layers,
+  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame,
 };
 const TYPE_LABEL: Record<SpaceNodeType, MessageKey> = {
   text: "spNodeText", asset: "spNodeAsset", cast: "spNodeCast", image: "spNodeImage", video: "spNodeVideo",
   music: "spNodeMusic", list: "spNodeList", note: "spNodeNote", assistant: "spNodeAssistant", edit: "spNodeEdit", combine: "spNodeCombine",
+  variations: "spNodeVariations", group: "spNodeGroup",
 };
-const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "edit", "combine", "list", "note"];
+const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "variations", "edit", "combine", "list",
+  "note", "group"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
   video: { prompt: "", quality: "draft" }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
   list: { unticked: [] }, note: { text: "" },
   assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
+  variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
   text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220, assistant: 290, edit: 250, combine: 280,
+  variations: 270, group: 620,
 };
 
 type NodeData = { kind: SpaceNodeType; data: Record<string, any> };
-type SpNode = Node<NodeData, "sp">;
+type SpNode = Node<NodeData, "sp" | "grp">;
 
 function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: string | null): Port | null {
   if (kind === "text") return "text";
   if (kind === "cast") return handle === "text" ? "text" : "image";
   if (kind === "video") return handle === "last" ? "image" : "video";
-  if (kind === "image" || kind === "edit") return "image";
+  if (kind === "image" || kind === "edit" || kind === "variations") return "image";
   if (kind === "assistant") return "text";
   if (kind === "combine") return "video";
   if (kind === "music") return "audio";
@@ -72,10 +80,13 @@ function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: str
 }
 
 function toRf(graph: SpaceGraph): { nodes: SpNode[]; edges: Edge[] } {
-  const nodes: SpNode[] = graph.nodes.map((n) => ({
+  const nodes: SpNode[] = graph.nodes.map((n) => (n.type === "group" ? {
+    id: n.id, type: "grp", position: { x: n.x, y: n.y }, data: { kind: n.type, data: n.data || {} },
+    style: { width: n.w || WIDTH.group, height: n.h || 380 }, zIndex: -1,
+  } : {
     id: n.id, type: "sp", position: { x: n.x, y: n.y }, data: { kind: n.type, data: n.data || {} },
     style: { width: n.w || WIDTH[n.type] },
-  }));
+  })) as SpNode[];
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const edges: Edge[] = graph.edges.map((e) => edgeOf(e, byId.get(e.source)?.type, byId.get(e.source)?.data));
   return { nodes, edges };
@@ -93,7 +104,8 @@ function toGraph(nodes: SpNode[], edges: Edge[], viewport?: { x: number; y: numb
   return {
     nodes: nodes.map((n) => ({
       id: n.id, type: n.data.kind, x: Math.round(n.position.x), y: Math.round(n.position.y), data: n.data.data,
-      ...(typeof n.style?.width === "number" && n.style.width !== WIDTH[n.data.kind] ? { w: n.style.width } : {}),
+      ...(n.data.kind === "group" ? { w: Math.round(Number(n.width ?? n.style?.width ?? WIDTH.group)), h: Math.round(Number(n.height ?? n.style?.height ?? 380)) }
+        : typeof n.style?.width === "number" && n.style.width !== WIDTH[n.data.kind] ? { w: n.style.width } : {}),
     })),
     edges: edges.map((e) => ({
       id: e.id, source: e.source, source_handle: e.sourceHandle && e.sourceHandle !== "out" ? e.sourceHandle : null,
@@ -139,6 +151,7 @@ interface Ctx {
   pickRun: (id: string, outputs: string[]) => void;
   pickAssets: (id: string, kind: string) => void;
   open: (assetId: string, list: string[]) => void;
+  touched: () => void;
 }
 const SpaceCtx = createContext<Ctx>(null as unknown as Ctx);
 
@@ -398,7 +411,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="image" placeholder={t("spImagePh")} />
         <div className="sp-opts nodrag">
           <select value={data.aspect || "1:1"} onChange={(e) => set({ aspect: e.target.value })} title={t("spAspect")}>
-            {["1:1", "16:9", "9:16", "4:3", "3:4", "21:9"].map((a) => <option key={a}>{a}</option>)}
+            {["1:1", "16:9", "9:16", "2:3", "3:2", "4:5"].map((a) => <option key={a}>{a}</option>)}
           </select>
           <select value={data.count || 1} onChange={(e) => set({ count: Number(e.target.value) })} title={t("spCount")}>
             {[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>×{n}</option>)}
@@ -426,15 +439,22 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             <LinePicker nodeId={id} onPick={(start, secs) => set({ audio_start_s: start, seconds: secs })} />
             <label className="sp-num" title={t("spAudioStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.audio_start_s ?? 0}
               onChange={(e) => set({ audio_start_s: Number(e.target.value) })} />s</label>
-            <label className="sp-num" title={t("spSecondsHint")}>{t("spLength")}<input type="number" min={1} max={19} step={0.1} value={data.seconds ?? 4.8}
+            <label className="sp-num" title={t("spSecondsHint")}>{t("spLength")}<input type="number" min={1}
+              max={data.sing_engine === "s2v" ? 19 : 90} step={0.1} value={data.seconds ?? 4.8}
               onChange={(e) => set({ seconds: Number(e.target.value) })} />s</label>
+            <select value={data.sing_engine || "auto"} onChange={(e) => set({ sing_engine: e.target.value })} title={t("spSingEngineHint")}>
+              <option value="auto">{t("spSingAuto")}</option>
+              <option value="s2v">{t("spSingS2v")}</option>
+              <option value="infinitetalk">{t("spSingTalk")}</option>
+            </select>
           </>}
           {wired.has("motion") && !wired.has("audio") && (
             <label className="sp-num" title={t("spMotionStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.motion_start_s ?? 0}
               onChange={(e) => set({ motion_start_s: Number(e.target.value) })} />s</label>
           )}
         </div>
-        <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion") : t("spModeAnimate")}</div>
+        <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion")
+          : wired.has("end") ? t("spModeEnd") : t("spModeAnimate")}</div>
         <CameraPicker value={data.camera} onChange={(c) => set({ camera: c })} clips />
       </>
     );
@@ -469,14 +489,40 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
       </>
     );
   } else if (kind === "edit") {
-    const v = data.operation === "remove_background" ? "bg" : String(data.scale || 2) === "4" ? "x4" : "x2";
+    const v = data.operation === "remove_background" ? "bg" : data.operation === "pose_map" ? "pose"
+      : data.operation === "depth_map" ? "depth" : String(data.scale || 2) === "4" ? "x4" : "x2";
     body = (
-      <select className="nodrag" value={v} onChange={(e) => set(e.target.value === "bg" ? { operation: "remove_background" }
-        : { operation: "upscale", scale: e.target.value === "x4" ? 4 : 2 })}>
-        <option value="x2">{t("spUpscale2")}</option>
-        <option value="x4">{t("spUpscale4")}</option>
-        <option value="bg">{t("spRemoveBg")}</option>
-      </select>
+      <>
+        <select className="nodrag" value={v} onChange={(e) => {
+          const x = e.target.value;
+          set(x === "bg" ? { operation: "remove_background" } : x === "pose" ? { operation: "pose_map" }
+            : x === "depth" ? { operation: "depth_map" } : { operation: "upscale", scale: x === "x4" ? 4 : 2 });
+        }}>
+          <option value="x2">{t("spUpscale2")}</option>
+          <option value="x4">{t("spUpscale4")}</option>
+          <option value="bg">{t("spRemoveBg")}</option>
+          <option value="pose">{t("spPoseMap")}</option>
+          <option value="depth">{t("spDepthMap")}</option>
+        </select>
+        {(v === "pose" || v === "depth") && <div className="small muted sp-mode">{t(v === "pose" ? "spPoseHint" : "spDepthHint")}</div>}
+      </>
+    );
+  } else if (kind === "variations") {
+    const modes = ["angles", "expressions", "ages", "lighting", "storyboard", "custom"];
+    body = (
+      <>
+        <div className="sp-opts nodrag">
+          <select value={data.mode || "angles"} onChange={(e) => set({ mode: e.target.value })}>
+            {modes.map((m) => <option key={m} value={m}>{t(`spVar_${m}` as MessageKey)}</option>)}
+          </select>
+          <select value={data.count || 4} onChange={(e) => set({ count: Number(e.target.value) })} title={t("spCount")}>
+            {[2, 3, 4, 6, 9].map((n) => <option key={n} value={n}>×{n}</option>)}
+          </select>
+        </div>
+        {data.mode === "custom" && <textarea className="nodrag nowheel" rows={4} value={data.custom || ""} placeholder={t("spVarCustomPh")}
+          onChange={(e) => set({ custom: e.target.value })} />}
+        <div className="small muted sp-mode">{t("spVarHint")}</div>
+      </>
     );
   } else if (kind === "combine") {
     body = (
@@ -554,6 +600,10 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
     );
   }
 
+  const appLabel = (data.app_input && APP_INPUTS.includes(kind)) || (data.app_output && runnable) ? (
+    <input className="nodrag sp-app-label" value={data.app_label || ""} placeholder={t("spAppLabelPh")}
+      onChange={(e) => set({ app_label: e.target.value })} />
+  ) : null;
   const inputs = INPUTS[kind] || [];
   const outs: [string, Port][] = kind === "cast" ? [["image", "image"], ["text", "text"]]
     : kind === "video" ? [["out", "video"], ["last", "image"]] : out ? [["out", out]] : [];
@@ -569,6 +619,10 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           <button className="btn xs icon ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} /></button>
           <button className="btn xs icon ghost nodrag" title={t("spRunDown")} disabled={busy} onClick={() => ctx.run(id, "downstream")}><FastForward size={13} /></button>
         </>}
+        {APP_INPUTS.includes(kind) && <button className={`btn xs icon ghost nodrag${data.app_input ? " sp-on" : ""}`}
+          title={t("spAppInputHint")} onClick={() => set({ app_input: !data.app_input })}><LogIn size={12} /></button>}
+        {runnable && <button className={`btn xs icon ghost nodrag${data.app_output ? " sp-on" : ""}`}
+          title={t("spAppOutputHint")} onClick={() => set({ app_output: !data.app_output })}><Star size={12} /></button>}
         <button className="btn xs icon ghost nodrag" title={t("spDuplicate")} onClick={() => ctx.duplicate(id)}><Copy size={12} /></button>
         <button className="btn xs icon ghost nodrag" title={t("delete")} onClick={() => ctx.remove(id)}><Trash2 size={12} /></button>
       </div>
@@ -593,12 +647,132 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           </div>
         </div>
       )}
-      <div className="sp-body">{body}{outputs}</div>
+      <div className="sp-body">{appLabel}{body}{outputs}</div>
     </div>
   );
 });
 
-const NODE_TYPES = { sp: SpaceNodeView };
+/** A frame that holds nodes together: dragging it carries the nodes inside. */
+const GroupNodeView = memo(function GroupNodeView({ id, data: nd, selected }: NodeProps<SpNode>) {
+  const { t } = useT();
+  const ctx = useContext(SpaceCtx);
+  const color = nd.data.color || "#b48cf0";
+  return (
+    <div className="sp-group" style={{ borderColor: color, background: `${color}14` }}>
+      <NodeResizer isVisible={selected} minWidth={200} minHeight={140} lineStyle={{ borderColor: color }}
+        handleStyle={{ background: color }} onResizeEnd={() => ctx.touched()} />
+      <div className="sp-group-head">
+        <input className="nodrag" value={nd.data.title || ""} placeholder={t("spGroupPh")} style={{ color }}
+          onChange={(e) => ctx.update(id, { title: e.target.value })} />
+        <span className="grow" />
+        {["#b48cf0", "#7fa6d9", "#5bbf86", "#f0a04b", "#e07a6e", "#9a95a6"].map((c) => (
+          <button key={c} className="sp-group-dot nodrag" style={{ background: c }} onClick={() => ctx.update(id, { color: c })} />
+        ))}
+        <button className="btn xs icon ghost nodrag" title={t("delete")} onClick={() => ctx.remove(id)}><Trash2 size={12} /></button>
+      </div>
+    </div>
+  );
+});
+
+const NODE_TYPES = { sp: SpaceNodeView, grp: GroupNodeView };
+
+// ------------------------------------------------------------ the app view
+
+/** Spaces opened from the list with "use as app" start in the form view. */
+const OPEN_AS_APP = new Set<string>();
+
+/** A space as a form: the marked inputs as fields, the marked generators as
+ * results. Running it writes the values into the graph and runs it all. */
+function AppView({ spaceId, onRan, state }: { spaceId: string; onRan: () => void; state: Record<string, SpaceNodeState> }) {
+  const { t } = useT();
+  const app = useApp();
+  const ctx = useContext(SpaceCtx);
+  const [view, setView] = useState<SpaceApp | null>(null);
+  const [values, setValues] = useState<Record<string, any>>({});
+  const [picking, setPicking] = useState<{ node: string; kind: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const stateKey = Object.entries(state).map(([k, v]) => `${k}:${v.status}:${(v.outputs || []).join(",")}:${(v.excluded || []).length}`).join("|");
+  useEffect(() => {
+    api.spaceApp(spaceId).then((v) => {
+      setView(v);
+      setValues((old) => Object.keys(old).length ? old : Object.fromEntries(v.inputs.map((f) => [f.node, f.value])));
+    }).catch((e) => app.toast((e as Error).message, "bad"));
+  }, [spaceId, stateKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // an unnamed field or result shows its node's kind ("Variations 1"), not its id
+  const labelOf = (node: string, label: string) => {
+    const n = ctx.nodes.find((x) => x.id === node);
+    if (label !== node || !n) return label;
+    const num = node.match(/(\d+)$/)?.[1];
+    return `${t(TYPE_LABEL[n.data.kind])}${num ? ` ${num}` : ""}`;
+  };
+  if (!view) return <div className="sp-app"><Loader2 size={18} className="spin" /></div>;
+  const running = view.outputs.some((o) => o.status === "queued" || o.status === "running") || busy;
+  const go = async () => {
+    setBusy(true);
+    try {
+      const res = await api.runSpaceApp(spaceId, values);
+      setView(res.app);
+      onRan();
+      app.refreshJobs();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="sp-app">
+      <div className="sp-app-form card">
+        <h2><AppWindow size={18} /> {view.name}</h2>
+        {view.description && <p className="muted">{view.description}</p>}
+        {view.inputs.length === 0 && <p className="small muted">{t("spAppNoInputs")}</p>}
+        {view.inputs.map((f) => (
+          <label key={f.node} className="field">
+            <span>{labelOf(f.node, f.label)}</span>
+            {f.type === "text" ? (
+              <textarea rows={3} value={values[f.node] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.node]: e.target.value }))} />
+            ) : f.type === "cast" ? (
+              <select value={values[f.node] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.node]: e.target.value }))}>
+                <option value="">—</option>
+                {ctx.characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            ) : (
+              <div className="sp-app-assets">
+                {((values[f.node] || []) as string[]).map((a) => (
+                  <div key={a} className="sp-app-asset">
+                    <Thumb id={a} port={(f.kind || "image") as Port} onClick={() => app.openAsset(a, values[f.node])} />
+                    <button className="btn xs icon ghost" onClick={() => setValues((v) => ({ ...v, [f.node]: (v[f.node] || []).filter((x: string) => x !== a) }))}><X size={11} /></button>
+                  </div>
+                ))}
+                <button className="btn sm" onClick={() => setPicking({ node: f.node, kind: f.kind || "image" })}><Plus size={13} /> {t("spAddFromLibrary")}</button>
+              </div>
+            )}
+          </label>
+        ))}
+        <button className="btn primary" disabled={running} onClick={go}>
+          {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />} {t("spAppRun")}</button>
+      </div>
+      <div className="sp-app-results">
+        {view.outputs.length === 0 && <p className="small muted">{t("spAppNoOutputs")}</p>}
+        {view.outputs.map((o) => (
+          <div key={o.node} className="card sp-app-out">
+            <div className="row" style={{ gap: 8 }}><strong>{labelOf(o.node, o.label)}</strong><StatusChip st={state[o.node] || (o.status ? { status: o.status } as SpaceNodeState : undefined)} /></div>
+            {o.error && <p className="small bad">{o.error}</p>}
+            {o.texts?.length ? <ul className="small">{o.texts.map((x, i) => <li key={i}>{x}</li>)}</ul> : null}
+            <div className="sp-app-grid">
+              {o.outputs.map((a) => <Thumb key={a} id={a} port={(o.kind || "image") as Port} onClick={() => app.openAsset(a, o.outputs)} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {picking && (
+        <AssetPicker projectId={app.projectId!} kind={picking.kind} allProjects title={t("spAddFromLibrary")}
+          onClose={() => setPicking(null)}
+          onPick={(a) => {
+            setValues((v) => ({ ...v, [picking.node]: [...((v[picking.node] || []) as string[]).filter((x) => x !== a.id), a.id] }));
+            setPicking(null);
+          }} />
+      )}
+    </div>
+  );
+}
 
 // ------------------------------------------------------------ the editor
 
@@ -832,11 +1006,66 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     },
     pickAssets: (id, kind) => setPicking({ id, kind }),
     open: (aid, list) => app.openAsset(aid, list),
+    touched: markDirty,
   };
+
+  // a group carries the nodes that sit inside it when dragged
+  const carried = useRef<{ group: { x: number; y: number }; nodes: Map<string, { x: number; y: number }> } | null>(null);
+  const onNodeDragStart = useCallback((_: unknown, node: SpNode) => {
+    if (node.type !== "grp") { carried.current = null; return; }
+    const w = Number(node.width ?? node.style?.width ?? WIDTH.group);
+    const h = Number(node.height ?? node.style?.height ?? 380);
+    const inside = new Map<string, { x: number; y: number }>();
+    for (const n of latest.current.nodes) {
+      if (n.id === node.id || n.type === "grp" || n.selected) continue;
+      const { x, y } = n.position;
+      if (x >= node.position.x && y >= node.position.y && x <= node.position.x + w - 40 && y <= node.position.y + h - 40) inside.set(n.id, { x, y });
+    }
+    carried.current = { group: { ...node.position }, nodes: inside };
+  }, []);
+  const onNodeDrag = useCallback((_: unknown, node: SpNode) => {
+    const c = carried.current;
+    if (!c || node.type !== "grp" || !c.nodes.size) return;
+    const dx = node.position.x - c.group.x;
+    const dy = node.position.y - c.group.y;
+    setNodes((ns) => ns.map((n) => {
+      const p0 = c.nodes.get(n.id);
+      return p0 ? { ...n, position: { x: p0.x + dx, y: p0.y + dy } } : n;
+    }));
+  }, []);
+
+  // what a full run would cost: renders, minutes and the biggest engine
+  const [est, setEst] = useState<SpaceEstimate | null>(null);
+  const runningKey = Object.entries(state).map(([k, v]) => `${k}:${v.status}:${(v.outputs || []).length}`).join("|");
+  useEffect(() => {
+    if (save !== "saved") return;
+    const id = setTimeout(() => { api.spaceEstimate(spaceId).then(setEst).catch(() => setEst(null)); }, 500);
+    return () => clearTimeout(id);
+  }, [save, spaceId, runningKey]);
+
+  // the assistant that builds part of the graph from one sentence
+  const [building, setBuilding] = useState<{ open: boolean; text: string; busy: boolean }>({ open: false, text: "", busy: false });
+  const build = async () => {
+    if (!building.text.trim()) return;
+    setBuilding((b) => ({ ...b, busy: true }));
+    try {
+      await flush();
+      const res = await api.buildSpace(spaceId, building.text.trim());
+      await load(false);
+      setTimeout(() => flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 }), 120);
+      app.toast(res.note || t("spBuilt", { n: res.added.length }), "ok");
+      setBuilding({ open: false, text: "", busy: false });
+    } catch (e) {
+      app.toast(e instanceof ApiError && e.code === "llm_unavailable" ? t("spNoLlm") : (e as Error).message, "bad");
+      setBuilding((b) => ({ ...b, busy: false }));
+    }
+  };
+  const [appMode, setAppMode] = useState(() => { const v = OPEN_AS_APP.has(spaceId); OPEN_AS_APP.delete(spaceId); return v; });
 
   const onNodesChange = useCallback((changes: NodeChange<SpNode>[]) => {
     setNodes((ns) => applyNodeChanges(changes, ns));
-    if (changes.some((c) => c.type === "remove" || (c.type === "position" && c.dragging === false))) markDirty();
+    if (changes.some((c) => c.type === "remove" || (c.type === "position" && c.dragging === false)
+      || (c.type === "dimensions" && c.resizing === false))) markDirty();
   }, [markDirty]);
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     setEdges((es) => applyEdgeChanges(changes, es));
@@ -892,13 +1121,36 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
           <input className="sp-name" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { if (space && name.trim() && name !== space.name) markDirty(); }}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} aria-label={t("name")} />
           <span className={`sp-save small ${save}`}>{t(save === "saved" ? "spSaved" : save === "saving" ? "spSaving" : save === "error" ? "spSaveError" : "spUnsaved")}</span>
-          <div className="sp-add-bar">
+          <div className="sp-add-bar" style={appMode ? { display: "none" } : undefined}>
             {ADDABLE.map((k) => {
               const I = TYPE_ICON[k];
               return <button key={k} className="btn sm ghost" title={t(TYPE_LABEL[k])} onClick={() => addNode(k)}><I size={14} /><span className="sp-add-label">{t(TYPE_LABEL[k])}</span></button>;
             })}
           </div>
           <span className="grow" />
+          <div className="sp-build">
+            <button className={`btn sm ghost${building.open ? " sp-on" : ""}`} title={t("spBuildHint")} onClick={() => setBuilding((b) => ({ ...b, open: !b.open }))}>
+              <Wand2 size={14} /> {t("spBuild")}</button>
+            {building.open && (
+              <div className="sp-build-pop">
+                <textarea autoFocus rows={3} value={building.text} placeholder={t("spBuildPh")} disabled={building.busy}
+                  onChange={(e) => setBuilding((b) => ({ ...b, text: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); build(); } if (e.key === "Escape") setBuilding((b) => ({ ...b, open: false })); }} />
+                <div className="row" style={{ gap: 6, justifyContent: "space-between" }}>
+                  <span className="small muted">{t("spBuildNote")}</span>
+                  <button className="btn sm primary" disabled={building.busy || !building.text.trim()} onClick={build}>
+                    {building.busy ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />} {t("spBuildGo")}</button>
+                </div>
+              </div>
+            )}
+          </div>
+          <button className={`btn sm ghost${appMode ? " sp-on" : ""}`} title={t("spAppHint")} onClick={async () => { await flush(); setAppMode((v) => !v); }}>
+            {appMode ? <Workflow size={14} /> : <AppWindow size={14} />} {appMode ? t("spCanvas") : t("spApp")}</button>
+          {est && est.renders > 0 && (
+            <span className="pill sp-est" title={t("spEstHint", { vram: est.vram_mb ? `${Math.round(est.vram_mb / 1024)} GB` : "?" })}>
+              <Clock size={11} /> {t("spEst", { min: est.minutes < 1 ? "<1" : String(Math.round(est.minutes)), n: est.renders })}
+            </span>
+          )}
           {busyCount > 0 && <span className="pill accent"><Loader2 size={11} className="spin" /> {busyCount}</span>}
           {busyCount > 0 && <button className="btn sm danger" title={t("spStopHint")} onClick={async () => {
             try { await api.stopSpace(spaceId); app.toast(t("spStopped"), "info"); setState((await api.space(spaceId)).state); }
@@ -908,11 +1160,12 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
           <button className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
           <button className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}><Play size={14} /> {t("spRunAll")}</button>
         </div>
-        <div className="sp-canvas" ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+        {appMode && <AppView spaceId={spaceId} onRan={() => { setPolling(true); }} state={state} />}
+        <div className="sp-canvas" ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} style={appMode ? { display: "none" } : undefined}>
           <ReactFlow<SpNode, Edge>
             nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} onConnectEnd={onConnectEnd}
-            isValidConnection={connectOk}
+            isValidConnection={connectOk} onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag}
             onMoveEnd={(_, vp) => { viewport.current = vp; }}
             onPaneClick={() => setMenu(null)}
             onPaneContextMenu={(e) => {
@@ -1023,7 +1276,7 @@ export function SpacesView() {
                 {s.cover ? <Thumb id={s.cover} port="image" /> : <Workflow size={30} />}
               </button>
               <div className="sp-card-meta">
-                <strong className="ellipsis">{s.name}</strong>
+                <strong className="ellipsis">{s.name}{s.app && <span className="pill accent sp-app-badge"><AppWindow size={10} /> {t("spApp")}</span>}</strong>
                 <span className="small muted">{t("spNodesN", { n: s.nodes })} · {timeAgo(s.updated_at, lang)}</span>
               </div>
               <div className="row" style={{ gap: 6 }}>
@@ -1032,6 +1285,7 @@ export function SpacesView() {
                 ) : (
                   <>
                     <button className="btn sm" onClick={() => app.go("spaces", s.id)}>{t("spOpen")}</button>
+                    {s.app && <button className="btn sm" title={t("spAppHint")} onClick={() => { OPEN_AS_APP.add(s.id); app.go("spaces", s.id); }}><AppWindow size={13} /> {t("spApp")}</button>}
                     <ConfirmButton armedLabel={t("confirmDelete")} onConfirm={async () => { await api.deleteSpace(s.id); list.reload(); }}><Trash2 size={13} /></ConfirmButton>
                   </>
                 )}

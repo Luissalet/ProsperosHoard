@@ -1,0 +1,19 @@
+{
+  "template": "control_depth",
+  "kind": "image",
+  "vram_class": "control",
+  "requires_reference": true,
+  "reference_node": "1.image",
+  "map": {
+    "depth_model": "2.model_name",
+    "resolution": "3.resolution"
+  },
+  "output_node": "5",
+  "model_params": [
+    "depth_model"
+  ],
+  "notes": "A depth map (near = bright) of an image with Depth Anything 3 (core DA3 nodes, depth_anything_3_mono_large in models/geometry_estimation) - the official utility_depth_anything3_image_depth_estimation.json graph. A space feeds it to a picture as a layout reference.",
+  "defaults": {
+    "resolution": 504
+  }
+}

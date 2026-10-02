@@ -1,0 +1,56 @@
+{
+  "template": "wan21_infinitetalk",
+  "kind": "video",
+  "vram_class": "wan14b",
+  "min_card_mb": 15000,
+  "free_after": true,
+  "requires_reference": true,
+  "reference_node": "32.image",
+  "audio_node": "24.audio",
+  "map": {
+    "positive_prompt": "14.text",
+    "width": "129.width",
+    "height": "129.height",
+    "length": "129.length",
+    "seed": "193.noise_seed",
+    "steps": "192.steps",
+    "fps": "140.fps",
+    "unet_name": "13.unet_name",
+    "clip_name": "16.clip_name",
+    "vae_name": "29.vae_name",
+    "audio_encoder_name": "26.audio_encoder_name",
+    "lora_name": "179.lora_name",
+    "patch_name": "112.name",
+    "motion_frames": "129.motion_frame_count",
+    "audio_scale": "129.audio_scale"
+  },
+  "output_node": "141",
+  "model_params": [
+    "unet_name",
+    "clip_name",
+    "vae_name",
+    "audio_encoder_name",
+    "patch_name"
+  ],
+  "talk_chunks": {
+    "talk": "129",
+    "guider": "191",
+    "scheduler": "192",
+    "noise": "193",
+    "sampler": "194",
+    "decode": "119",
+    "video": "140",
+    "max": 24
+  },
+  "notes": "InfiniteTalk on Wan 2.1 I2V 14B (fp8) + the lightx2v step-distill LoRA, ComfyUI core nodes (WanInfiniteTalkToVideo + ModelPatchLoader): the character of the reference image sings or speaks the audio clip at 25 fps for as long as the line lasts. The first generation is `length` frames (81 = 3.24 s); comfy_driver.expand_talk_chunks chains extensions that continue from the frames made so far (the last `motion_frames` as motion context, the audio window following on) and joins them without the repeated context frames, the way the official video_wan2_1_infinitetalk.json template does. For long lines and whole verses; S2V (wan22_s2v) stays the faster choice for a few seconds.",
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "length": 81,
+    "steps": 6,
+    "fps": 25,
+    "motion_frames": 9,
+    "audio_scale": 1,
+    "negative_prompt": ""
+  }
+}
