@@ -2965,7 +2965,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise spaces_mod.SpaceError("empty_request", "say what to make")
         cast = [f"{c['name']} ({c.get('element') or 'character'})" for c in store.list_characters(space["project_id"])][:40]
         existing = [f"{n['id']} ({n['type']})" for n in space["graph"]["nodes"]][:60]
-        ask = (f"Project cast: {', '.join(cast) or 'none'}.\nNodes already on the canvas (you may wire to them by id): "
+        songs = [f"{a['id']} \"{(a.get('name') or '')[:50]}\" ({round(float(a.get('duration_s') or 0))} s)"
+                 for a in store.list_assets(space["project_id"], kind="audio", limit=8)["items"]
+                 if (a.get("recipe") or {}).get("operation") not in ("stems",)][:5]
+        ask = (f"Project cast: {', '.join(cast) or 'none'}.\nProject songs, newest first: {'; '.join(songs) or 'none'}.\n"
+               f"Nodes already on the canvas (you may wire to them by id): "
                f"{', '.join(existing) or 'none'}.\n\nRequest: {text}")
         messages = [{"role": "system", "content": spaces_mod.BUILD_GUIDE}, {"role": "user", "content": ask}]
         last_error = ""

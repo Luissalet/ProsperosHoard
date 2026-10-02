@@ -157,3 +157,46 @@ def test_the_assistant_draws_a_graph(client):
     assert xs["vera"] < xs["shot1"] < xs["clip1"] < xs["clip2"] < xs["film"]
     app.state.short_hooks = {**app.state.short_hooks, "chat": lambda m, t, temp: "nothing"}
     assert c.post(f"/api/spaces/{sp['id']}/build", json={"request": "x"}).status_code == 400
+
+
+def test_the_build_uses_the_cast_and_the_projects_song(client):
+    from PIL import Image
+    from test_lipsync import _song
+    from test_qa import _save
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Build cast"}).json()["id"]
+    face = _save(store, pid, Image.new("RGB", (64, 64), (200, 180, 160)))
+    made = c.post(f"/api/agent/studio_cast?project={pid}", json={"action": "create", "name": "Vera",
+                                                                 "fields": {"prompt": "a singer"}}).json()
+    vid = made.get("id") or made.get("character", {}).get("id")
+    c.post(f"/api/agent/studio_cast?project={pid}", json={"action": "update", "id": vid, "fields": {"canonical_asset_id": face}})
+    song = _song(store, {"id": pid}, 4.0)
+    sp = c.post(f"/api/projects/{pid}/spaces", json={"name": "b"}).json()
+    seen = {}
+    plan = {"note": "ok", "nodes": [
+        {"id": "sheet", "type": "image", "prompt": "Character reference sheet for VERA, front and back", "sheet": True},
+        {"id": "a1", "type": "image", "prompt": "Wide shot of VERA on stage", "refs": ["sheet"]},
+        {"id": "a2", "type": "image", "prompt": "Close-up of vera singing"},
+        {"id": "v1", "type": "video", "prompt": "VERA sways", "start": ["a1"]},
+        {"id": "tune", "type": "asset", "asset_id": song},
+        {"id": "film", "type": "combine", "clips": ["v1"], "audio": "tune"}]}
+
+    def chat(messages, t, temp):
+        seen["ask"] = messages[-1]["content"]
+        return json.dumps(plan)
+
+    app.state.short_hooks = {**(getattr(app.state, "short_hooks", None) or {}), "chat": chat}
+    r = c.post(f"/api/spaces/{sp['id']}/build", json={"request": "VERA on stage, with my song"})
+    assert r.status_code == 200, r.text
+    assert song in seen["ask"]  # the project's songs are offered
+    g = c.get(f"/api/spaces/{sp['id']}").json()["graph"]
+    nodes = {n["id"]: n for n in g["nodes"]}
+    assert "sheet" not in nodes  # no new sheet for someone already in the cast
+    cast = next(n for n in g["nodes"] if n["type"] == "cast")
+    assert cast["data"]["character_id"] == vid
+    edges = {(e["source"], e["source_handle"], e["target"], e["target_handle"]) for e in g["edges"]}
+    assert (cast["id"], "image", "a1", "refs") in edges and (cast["id"], "image", "a2", "refs") in edges
+    assert nodes["a1"]["data"]["prompt"] == "Wide shot of @Vera on stage" and "@Vera" in nodes["a2"]["data"]["prompt"]
+    assert nodes["v1"]["data"]["prompt"] == "VERA sways"
+    assert nodes["tune"]["data"] == {"kind": "audio", "asset_ids": [song]} and ("tune", None, "film", "audio") in edges

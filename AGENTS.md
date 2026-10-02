@@ -197,3 +197,36 @@ Qué hacer cuando el usuario pide, con sus palabras:
   decisiones nuevas. El guion indica los slugs consultados en `memory_sources`.
 - **«Busca b-roll de X»**: `studio_stock_search(query en inglés, aspect, project,
   take=N)`; cuenta de quién es cada clip (`author`).
+- **«Sepárame la voz» / «dame solo la batería» / «una pista instrumental»**:
+  `studio_stems(asset_id)` (voz, batería, bajo y resto como recursos de
+  audio; la primera vez instala Demucs y tarda). Después el lip sync usa la
+  voz limpia solo y los efectos `kick` leen la batería. Si no hay GPU con
+  3 GB libres, va a la CPU: díselo.
+- **«Hazlo vertical» / «ahora cuadrado» / «versión horizontal»**: una
+  imagen o un clip, `studio_reframe(asset_id, aspect, framing)`; un
+  videoclip entero, `studio_production_reframe(production, aspects,
+  framing)` (solo se vuelve a renderizar el montaje). `framing`: `fill`
+  recorta, `blur` encaja sobre un fondo desenfocado, `fit` pone barras.
+- **«Aprueba este plano» / «rehaz el resto»**: `studio_production_shots`
+  con `{"key": "4", "locked": true}` y después
+  `studio_production_regenerate(production, stage="clips"|"frames")`: solo
+  se rehacen los no aprobados, con semillas nuevas.
+- **«Que el plano 4 siga al 3 sin corte»**: `studio_production_shots` con
+  `{"key": "4", "continue_from": "3"}` (su clip empieza en el último
+  fotograma del 3 y acaba en su propio fotograma; hace falta el modelo de
+  primer a último fotograma, si no el final se descarta).
+- **«Haz borradores rápidos»**: `studio_production_settings(production,
+  clip_quality="draft")` y, cuando le guste el montaje,
+  `studio_production_promote(production)` para pasarlos a final con las
+  mismas semillas.
+- **«Letra palabra a palabra» / «letra a máquina» / «estilo cine»**:
+  `studio_production_finishing` con `lyric_style` `pop`, `typewriter`,
+  `cinema`, `pulse` o `handwritten`.
+- **«Úsalo como app» / «déjamelo como formulario»**: marca las entradas
+  (`data.app_input`, con `data.app_label`) y las salidas (`data.app_output`)
+  del espacio con `studio_spaces(action="edit")`; mira el formulario con
+  `action="app"` y ejecútalo con `action="app_run", values={nodo: valor}`.
+  Antes de una ejecución larga, `action="estimate"` da minutos y renders.
+- **«Móntamelo tú» en un espacio**: `studio_spaces(action="build",
+  request="...")` (necesita un modelo local); revisa el resultado con
+  `action="get"` antes de ejecutar y corrige con `ops`.
