@@ -68,6 +68,8 @@ def test_a_lip_sync_render_uploads_the_line_and_chains_for_a_long_one(store, bac
     assert (server.input_dir / load["audio"]).is_file()
     # 7 s at 16 fps = 112 frames > 77: two generations
     assert sum(1 for v in wf.values() if v["class_type"] == "WanSoundImageToVideoExtend") == 1
+    # the 115 frames are shared by the two generations (61 each, Wan's 4n+1), not 77 + a mostly empty 77
+    assert wf["104"]["inputs"]["value"] == 61
     assert _node(wf, "WanSoundImageToVideo")["width"] == 832
     asset = store.get_asset(done["outputs"]["asset_ids"][0])
     assert asset["kind"] == "video" and song in asset["recipe"]["input_asset_ids"]

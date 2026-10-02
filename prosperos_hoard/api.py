@@ -32,6 +32,7 @@ from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import exporters
 from . import productions as productions_mod
+from . import cinema
 from . import spaces as spaces_mod
 from . import qa as qa_mod
 from . import recipes as recipes_mod
@@ -172,7 +173,7 @@ class TrashBody(BaseModel):
 
 class SpaceCreateBody(BaseModel):
     name: str = "Space"
-    template: str = "blank"   # blank | reference_film | singing_shot
+    template: str = "blank"   # blank | reference_film | singing_shot | short_film
 
 
 class SpaceSaveBody(BaseModel):
@@ -193,7 +194,7 @@ class SpaceNodeStateBody(BaseModel):
 
 
 class SpaceAgentBody(BaseModel):
-    action: str = "list"          # list | get | create | edit | run | delete | restore
+    action: str = "list"          # list | get | create | edit | run | stop | delete | restore
     space: Optional[str] = None
     name: Optional[str] = None
     template: str = "blank"
@@ -309,6 +310,8 @@ class GenerateImageBody(BaseModel):
     audio_asset_id: Optional[str] = None
     audio_start_s: Optional[float] = None
     audio_seconds: Optional[float] = None
+    # film language (cinema.py): {shot, angle, move, lens, light, composition} ids whose terms join the prompt
+    camera: Optional[dict[str, str]] = None
     consistent: bool = False
     # character adapters (LoRAs): injected for every @mentioned character
     # (and every id in `characters`) that has one for the render's
@@ -847,6 +850,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
         proj = store.get_project(project)
+        if body.camera:
+            is_clip = any(k in (body.template or "") for k in ("wan", "svd", "clip", "animate", "s2v"))
+            terms = cinema.camera_prompt(body.camera, video=is_clip)
+            if terms:
+                body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})
         object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
         engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
         if body.template == "auto_clip":
@@ -1785,6 +1793,22 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             fields["name"] = body.name
         return store.update_group(group_id, **fields)
 
+    @app.get("/api/cinema")
+    def cinema_guide(q: str = "", category: Optional[str] = None):
+        return {"categories": [{"id": k, "name": {"en": v["en"], "es": v["es"]}, "aliases": v["aliases"]}
+                               for k, v in cinema.CATEGORIES.items()],
+                "items": cinema.search(q, category)}
+
+    @app.get("/api/agent/studio_cinema")
+    def agent_cinema(q: str = "", category: Optional[str] = None):
+        def run():
+            items = cinema.search(q, category)
+            return {"items": [{"id": e["id"], "category": e["category"], "name": e["name"]["en"], "es": e["name"]["es"],
+                               "use": e["when"]["en"], "prompt": e["prompt"], **({"clips_only": True} if e["video_only"] else {})}
+                              for e in items],
+                    "camera_keys": list(cinema.CAMERA_KEYS)}
+        return agent("studio_cinema", f"{category or ''}:{q}"[:80], run)
+
     @app.get("/api/style-presets")
     def style_presets(project: Optional[str] = None):
         return {"items": store.list_style_presets(project)}
@@ -2630,6 +2654,17 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def job(self, job_id: str) -> dict[str, Any]:
             return store.get_job(job_id)
 
+        # -- spaces (spaces.py): edits queue jobs, the rest is local work
+        def edit(self, body: dict[str, Any]) -> dict[str, Any]:
+            return op_edit(EditImageBody(**{k: v for k, v in body.items() if v is not None}))["job"]
+
+        def last_frame(self, asset_id: str, project_id: str) -> dict[str, Any]:
+            return engine.last_frame(store, asset_id, project_id)
+
+        def combine(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            return engine.combine_clips(store, project_id, body["clips"], body.get("audio_asset_id"),
+                                        float(body.get("audio_start_s") or 0))
+
         def cancel(self, job_id: str) -> None:
             queue.cancel(job_id)
 
@@ -2780,12 +2815,32 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def run_space(space_id: str, body: SpaceRunBody):
         return op_space_run(space_id, body)
 
+    def op_space_stop(space_id: str) -> dict[str, Any]:
+        """Stop a space's run: its orchestrator job is cancelled (which cancels
+        the renders it queued) and nodes still waiting go back to idle."""
+        space = store.get_space(space_id)
+        stopped = []
+        for j in store.list_jobs(state="active", limit=50)["items"]:
+            if j.get("type") == "space_run" and (j.get("params") or {}).get("space_id") == space_id:
+                queue.cancel(j["id"])
+                stopped.append(j["id"])
+        for nid, st in space["state"].items():
+            if st.get("status") == "queued":
+                store.patch_space_state(space_id, nid, {"status": "done" if st.get("outputs") or st.get("texts") else None,
+                                                        "error": None})
+        return {"stopped": stopped, "space": space_view(store.get_space(space_id), compact=True)}
+
+    @app.post("/api/spaces/{space_id}/stop")
+    def stop_space(space_id: str):
+        return op_space_stop(space_id)
+
     @app.patch("/api/spaces/{space_id}/nodes/{node_id}")
     def space_node_state(space_id: str, node_id: str, body: SpaceNodeStateBody):
         st = (store.get_space(space_id)["state"].get(node_id)) or {}
         patch: dict[str, Any] = {}
         if body.excluded is not None:
-            patch["excluded"] = [a for a in body.excluded if a in (st.get("outputs") or [])]
+            mine = set(st.get("outputs") or []) | set(st.get("texts") or [])
+            patch["excluded"] = [a for a in body.excluded if a in mine]
         if body.outputs is not None:
             known = {a for r in st.get("runs") or [] for a in r.get("outputs") or []} | set(st.get("outputs") or [])
             unknown = [a for a in body.outputs if a not in known]
@@ -2889,11 +2944,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 return space_view(store.save_space_graph(space["id"], graph, None, body.name), compact=True)
             if body.action == "run":
                 return op_space_run(space["id"], SpaceRunBody(mode=body.mode, node_ids=body.node_ids, force=body.force))
+            if body.action == "stop":
+                return op_space_stop(space["id"])
             if body.action == "delete":
                 return space_view(store.delete_space(space["id"]), compact=True)
             if body.action == "restore":
                 return space_view(store.restore_space(space["id"]), compact=True)
-            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, delete, restore")
+            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, stop, delete, restore")
         return agent("studio_spaces", f"{body.action}:{body.space or body.name or ''}", run)
 
     @app.post("/api/agent/studio_prompt_enhance")

@@ -78,6 +78,17 @@ Qué hacer cuando el usuario pide, con sus palabras:
   sigue el job; lee `state` con `action="get"` y enséñale las salidas con
   `studio_show`. Un `cast` da `image` (su referencia) y `text` (`@Nombre`).
   Para mejorar un prompt: `studio_prompt_enhance`.
+- **«Hazlo en contrapicado» / «un primer plano» / «con luz de neón» / «que
+  la cámara se acerque»**: `studio_cinema(query)` da el id y las palabras;
+  pásalo como `camera={"shot": ..., "angle": ..., "light": ...}` a
+  `studio_generate_image` o en `data.camera` de un nodo (los movimientos,
+  `move`, solo en clips).
+- **«Encadena los planos» / «que siga donde acabó» / «júntalo todo»**: en
+  un espacio, conecta la salida `last` de un clip al `start` del
+  siguiente y todos los clips a un nodo `combine` (con la canción en su
+  `audio`). Para varias ideas a la vez: un `assistant` con
+  `as_list=true` o una `list` en el `prompt` de una imagen hace un render
+  por elemento. «Para» → `studio_spaces(action="stop")`.
 - **«Pásalo a Premiere / DaVinci»**: `studio_export_timeline(production,
   aspect)` y dale el enlace de descarga.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:

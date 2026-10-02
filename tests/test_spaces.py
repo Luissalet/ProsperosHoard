@@ -195,3 +195,156 @@ def test_prompt_enhancer_tells_the_model_the_cast_design(client):
     empty = {"chat": lambda m, t, temp: "  "}
     app.state.short_hooks = {**app.state.short_hooks, **empty}
     assert c.post("/api/prompt/enhance", json={"text": "@Ball dancing"}).status_code >= 400
+
+
+class FakeStudio:
+    """Jobs finish at once with one asset each; local work is recorded."""
+
+    def __init__(self, reply="1. a red door\n2. a blue door\n- a green door"):
+        self.jobs, self.calls, self.reply = {}, [], reply
+
+    def _job(self, kind, body):
+        jid = f"j{len(self.jobs) + 1}"
+        self.jobs[jid] = {"id": jid, "state": "done", "outputs": {"asset_ids": [f"a_{kind}{len(self.jobs) + 1}"]}}
+        self.calls.append((kind, body))
+        return {"id": jid}
+
+    def generate(self, pid, body):
+        return self._job("gen", body)
+
+    def compose(self, pid, body):
+        return self._job("song", body)
+
+    def edit(self, body):
+        return self._job("edit", body)
+
+    def job(self, jid):
+        return self.jobs[jid]
+
+    def chat(self, messages, max_tokens, temperature, effort=None):
+        self.calls.append(("chat", messages[-1]["content"]))
+        return self.reply
+
+    def combine(self, pid, body):
+        self.calls.append(("combine", body))
+        return {"id": "a_joined"}
+
+    def last_frame(self, clip, pid):
+        return {"id": f"last_{clip}"}
+
+    def cancel(self, jid):
+        self.calls.append(("cancel", jid))
+
+
+def _space_with(client, graph):
+    c, app, _ = client
+    pid = c.post("/api/projects", json={"name": "Waves"}).json()["id"]
+    store = _store(client)
+    sp = store.create_space(pid, "w", spaces.validate_graph(graph))
+    return store, sp["id"]
+
+
+def test_independent_generators_share_a_wave():
+    g = spaces.validate_graph({"nodes": [
+        {"id": "t", "type": "text", "data": {"text": "x"}}, {"id": "a", "type": "image"},
+        {"id": "s", "type": "music", "data": {"tags": "pop"}}, {"id": "l", "type": "list"},
+        {"id": "v", "type": "video"}], "edges": [
+        {"source": "t", "target": "a", "target_handle": "prompt"},
+        {"source": "a", "target": "l", "target_handle": "items"},
+        {"source": "l", "target": "v", "target_handle": "start"}]})
+    waves = spaces._levels(g, spaces.run_order(g, "all"))
+    assert sorted(waves[0]) == ["a", "s"] and waves[1:] == [["v"]]
+
+
+def test_assistant_list_fans_out_and_shots_chain_into_a_film(client):
+    graph = {"nodes": [
+        {"id": "idea", "type": "assistant", "data": {"prompt": "three doors for a horror short", "as_list": True, "items": 3}},
+        {"id": "style", "type": "text", "data": {"text": "STYLE: 35mm, fog"}},
+        {"id": "pic", "type": "image", "data": {"count": 1, "camera": {"shot": "wide"}}},
+        {"id": "shot1", "type": "video", "data": {"prompt": "the door creaks open"}},
+        {"id": "shot2", "type": "video", "data": {"prompt": "something steps out"}},
+        {"id": "big", "type": "edit", "data": {"operation": "upscale"}},
+        {"id": "film", "type": "combine"}],
+        "edges": [
+            {"source": "idea", "target": "pic", "target_handle": "prompt"},
+            {"source": "style", "target": "pic", "target_handle": "prompt"},
+            {"source": "pic", "target": "big", "target_handle": "image"},
+            {"source": "pic", "target": "shot1", "target_handle": "start"},
+            {"source": "shot1", "source_handle": "last", "target": "shot2", "target_handle": "start"},
+            {"source": "shot1", "target": "film", "target_handle": "clips"},
+            {"source": "shot2", "target": "film", "target_handle": "clips"}]}
+    store, sid = _space_with(client, graph)
+    studio = FakeStudio()
+    res = spaces.run_space(store, studio, sid, "all", poll_s=0)
+    assert set(res["ran"]) == {"idea", "pic", "big", "shot1", "shot2", "film"} and not res["failed"]
+    state = store.get_space(sid)["state"]
+    assert state["idea"]["texts"] == ["a red door", "a blue door", "a green door"]
+    gens = [b for k, b in studio.calls if k == "gen" and "reference_asset_id" not in b]
+    assert [b["prompt"].split(". ")[1].split(",")[0] for b in gens] == ["a red door", "a blue door", "a green door"]
+    assert all(b["prompt"].startswith("STYLE: 35mm, fog. ") and "wide shot" in b["prompt"] for b in gens)
+    assert len(state["pic"]["outputs"]) == 3 and len(state["big"]["outputs"]) == 3 and len(state["shot1"]["outputs"]) == 3
+    # shot 2 starts from shot 1's last frames
+    starts2 = [b["reference_asset_id"] for k, b in studio.calls if k == "gen" and b.get("prompt", "").startswith("something")]
+    assert starts2 == [f"last_{c}" for c in state["shot1"]["outputs"]]
+    combine = next(b for k, b in studio.calls if k == "combine")
+    assert combine["clips"] == state["shot1"]["outputs"] + state["shot2"]["outputs"]
+    assert state["film"]["outputs"] == ["a_joined"]
+    # unticking an idea drops its picture from the next run
+    store.patch_space_state(sid, "idea", {"excluded": ["a blue door"]})
+    plan = spaces.plan_node(store, store.get_space(sid)["graph"], store.get_space(sid)["state"], "pic")
+    assert len(plan) == 2
+
+
+def test_stopping_a_run_cancels_its_jobs(client):
+    from prosperos_hoard.jobs import JobCancelled
+    graph = {"nodes": [{"id": "p", "type": "image", "data": {"prompt": "x"}}], "edges": []}
+    store, sid = _space_with(client, graph)
+    studio = FakeStudio()
+    studio.jobs_state = "running"
+    original = studio._job
+
+    def slow(kind, body):
+        r = original(kind, body)
+        studio.jobs[r["id"]]["state"] = "running"
+        return r
+
+    studio._job = slow
+
+    def progress(frac, msg):
+        if "waiting" in msg:
+            raise JobCancelled("cancelled")
+
+    with pytest.raises(JobCancelled):
+        spaces.run_space(store, studio, sid, "all", progress=progress, poll_s=0)
+    assert ("cancel", "j1") in studio.calls
+    assert store.get_space(sid)["state"]["p"]["error"] == "stopped"
+
+
+def test_last_frame_and_joining_clips_with_ffmpeg(client, tmp_path):
+    import subprocess
+
+    from prosperos_hoard import engine
+    from prosperos_hoard.backend import ffmpeg_path
+    exe = ffmpeg_path()
+    if not exe:
+        pytest.skip("no ffmpeg")
+    c, _, _ = client
+    pid = c.post("/api/projects", json={"name": "Join"}).json()["id"]
+    store = _store(client)
+    clips = []
+    for i, (color, size) in enumerate((("red", "320x180"), ("blue", "160x160"))):
+        p = tmp_path / f"c{i}.mp4"
+        subprocess.run([exe, "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c={color}:s={size}:d=1:r=24",
+                        "-pix_fmt", "yuv420p", str(p)], check=True)
+        clips.append(engine.import_asset(store, pid, p, "video")["id"])
+    song = tmp_path / "s.wav"
+    subprocess.run([exe, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=440:d=4", str(song)], check=True)
+    song_id = engine.import_asset(store, pid, song, "audio")["id"]
+    last = engine.last_frame(store, clips[1])
+    assert last["kind"] == "image" and last["recipe"]["operation"] == "last_frame"
+    from PIL import Image
+    px = Image.open(store.data_dir / last["file_path"]).convert("RGB").getpixel((5, 5))
+    assert px[2] > 150 and px[0] < 80  # the blue clip's frame
+    joined = engine.combine_clips(store, pid, clips, song_id, 1.0)
+    assert joined["kind"] == "video" and 1.8 < (joined["duration_s"] or 0) < 2.4
+    assert (joined["width"], joined["height"]) == (320, 180)

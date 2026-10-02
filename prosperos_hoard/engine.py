@@ -1122,6 +1122,93 @@ def extract_frames(store: Store, asset_id: str, count: int = 6, project_id: Opti
     return out
 
 
+def last_frame(store: Store, asset_id: str, project_id: Optional[str] = None) -> dict[str, Any]:
+    """The last frame of a clip as an image asset: the start of the next
+    shot when shots are chained (a space's clip "last frame" output)."""
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "video":
+        raise EngineError("not_video", f"asset {asset_id} is {asset['kind']}; a last frame comes out of a video")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to take a frame out of a video")
+    src = store.data_dir / asset["file_path"]
+    tmp_dir = store.data_dir / "tmp" / "frames"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"{new_id('fr')}.png"
+    for seek in (["-sseof", "-0.25"], ["-sseof", "-1"], []):
+        procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", *seek, "-i", str(src), "-update", "1", "-q:v", "1",
+                      str(tmp)], timeout=90)
+        if tmp.is_file() and tmp.stat().st_size:
+            break
+    if not tmp.is_file():
+        raise EngineError("no_frames", "no frame could be read from that video")
+    try:
+        return import_asset(store, project_id or asset["project_id"], tmp, "image",
+                            original_name=f"{Path(asset.get('name') or 'clip').stem} last frame.png",
+                            recipe={"operation": "last_frame", "backend": "local", "input_asset_ids": [asset_id],
+                                    "derived_from": asset_id}, source="derived")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _has_audio(exe: str, path: Path) -> bool:
+    out = procutil.run([exe, "-nostdin", "-hide_banner", "-i", str(path)], text=True, timeout=30)
+    return "Audio:" in (out.stderr or "")
+
+
+def combine_clips(store: Store, project_id: str, clip_ids: list[str], audio_asset_id: Optional[str] = None,
+                  audio_start_s: float = 0.0, fps: int = 24) -> dict[str, Any]:
+    """Join clips one after the other into one video (the first clip sets the
+    size; the others are fitted into it), with a song laid under them from
+    `audio_start_s`, or the clips' own sound when every clip has some."""
+    if not clip_ids:
+        raise EngineError("no_clips", "wire at least one clip in")
+    exe = ffmpeg_path()
+    if not exe:
+        raise EngineError("no_ffmpeg", "ffmpeg is needed to join clips")
+    clips = [store.get_asset(c) for c in clip_ids[:60]]
+    for c in clips:
+        if c["kind"] != "video":
+            raise EngineError("not_video", f"asset {c['id']} is {c['kind']}; only clips can be joined")
+    paths = [store.data_dir / c["file_path"] for c in clips]
+    w = int(clips[0].get("width") or 1280) // 2 * 2
+    h = int(clips[0].get("height") or 720) // 2 * 2
+    own_audio = not audio_asset_id and all(_has_audio(exe, p) for p in paths)
+    cmd = [exe, "-nostdin", "-y", "-loglevel", "error"]
+    for p in paths:
+        cmd += ["-i", str(p)]
+    parts, labels = [], []
+    for i in range(len(paths)):
+        parts.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+                     f"setsar=1,fps={fps},format=yuv420p[v{i}]")
+        labels.append(f"[v{i}]" + (f"[{i}:a]" if own_audio else ""))
+    graph = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(paths)}:v=1:a={1 if own_audio else 0}[v]" + ("[a]" if own_audio else "")
+    cmd += ["-filter_complex", graph, "-map", "[v]"]
+    if own_audio:
+        cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+    elif audio_asset_id:
+        song = store.get_asset(audio_asset_id)
+        if song["kind"] != "audio":
+            raise EngineError("not_audio", f"asset {audio_asset_id} is {song['kind']}")
+        cmd[cmd.index("-filter_complex"):cmd.index("-filter_complex")] = [
+            "-ss", f"{max(0.0, float(audio_start_s)):.3f}", "-i", str(store.data_dir / song["file_path"])]
+        cmd += ["-map", f"{len(paths)}:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+    tmp_dir = store.data_dir / "tmp" / "combine"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    out = tmp_dir / f"{new_id('cmb')}.mp4"
+    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-movflags", "+faststart", str(out)]
+    res = procutil.run(cmd, text=True, timeout=1800)
+    if res.returncode != 0 or not out.is_file():
+        raise EngineError("combine_failed", (res.stderr or "ffmpeg failed")[-400:])
+    try:
+        return import_asset(store, project_id, out, "video", original_name=f"joined {len(paths)} clips.mp4",
+                            recipe={"operation": "combine", "backend": "local", "input_asset_ids": clip_ids
+                                    + ([audio_asset_id] if audio_asset_id else []), "audio_start_s": audio_start_s},
+                            source="derived")
+    finally:
+        out.unlink(missing_ok=True)
+
+
 _SAMPLING_KEYS = ("steps", "cfg", "sampler", "scheduler")
 
 
@@ -1315,6 +1402,11 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         fps, length = float(values.get("fps") or 16), int(values.get("length") or 77)
         wanted = float(params.get("audio_seconds") or 0) * fps
         values["chunks"] = max(1, min(int(spec["chunks"].get("max") or 4), math.ceil((wanted + 3) / length) if wanted else 1))
+        if wanted and not params.get("length"):
+            # share the line evenly between the chunks instead of rendering
+            # a whole last chunk for a few frames (Wan lengths are 4n+1)
+            per = math.ceil((wanted + 3) / values["chunks"])
+            values["length"] = min(length, max(33, (per - 1 + 3) // 4 * 4 + 1))
     size_mode = spec.get("size_from_reference")
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])

@@ -938,7 +938,7 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 
 // ------------------------------------------------------------- spaces
 
-export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note";
+export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine";
 
 export interface SpaceNode {
   id: string;
@@ -967,6 +967,8 @@ export interface SpaceGraph {
 export interface SpaceNodeState {
   status?: "queued" | "running" | "done" | "failed" | "partial";
   outputs?: string[];
+  texts?: string[];
+  last_frames?: Record<string, string>;
   excluded?: string[];
   error?: string | null;
   jobs?: string[];
@@ -997,6 +999,25 @@ export interface SpaceSummary {
   nodes: number;
   cover: string | null;
   deleted_at?: string;
+}
+
+
+// ------------------------------------------------------- film language
+
+export type CinemaCategory = "shot" | "angle" | "move" | "lens" | "light" | "composition";
+export interface CinemaEntry {
+  id: string;
+  category: CinemaCategory;
+  name: { en: string; es: string };
+  what: { en: string; es: string };
+  when: { en: string; es: string };
+  prompt: string;
+  aliases: string[];
+  video_only: boolean;
+}
+export interface CinemaGuide {
+  categories: { id: CinemaCategory; name: { en: string; es: string }; aliases: string[] }[];
+  items: CinemaEntry[];
 }
 
 export const fileUrl = (id: string) => `/api/assets/${id}/file`;
@@ -1310,9 +1331,11 @@ export const api = {
   restoreSpace: (id: string) => request<Space>("POST", `/api/spaces/${id}/restore`),
   runSpace: (id: string, mode: "node" | "downstream" | "all", nodeIds: string[] = [], force = false) =>
     request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
+  stopSpace: (id: string) => request<{ stopped: string[] }>("POST", `/api/spaces/${id}/stop`),
   spaceNode: (id: string, nodeId: string, patch: { excluded?: string[]; outputs?: string[] }) =>
     request<Space>("PATCH", `/api/spaces/${id}/nodes/${nodeId}`, patch),
   enhancePrompt: (text: string, kind: "image" | "video" | "music", project?: string) =>
     request<{ text: string }>("POST", "/api/prompt/enhance", { text, kind, project }),
+  cinema: () => request<CinemaGuide>("GET", "/api/cinema"),
   libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
 };

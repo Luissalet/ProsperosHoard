@@ -11,14 +11,15 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
-  Music, Play, Plus, RotateCcw, Sparkles, StickyNote, Trash2, Type, User, Workflow, X, FastForward,
+  Aperture, ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
+  Music, Play, Plus, RotateCcw, Sparkles, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
 } from "lucide-react";
 import {
   ApiError, api, type Character, type Space, type SpaceEdge, type SpaceGraph, type SpaceNodeState, type SpaceNodeType, type SpaceSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "../components/ui";
+import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 
 // ------------------------------------------------------------ the node model
 
@@ -29,23 +30,30 @@ const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
   video: [["start", "image", true], ["prompt", "text", true], ["motion", "video", false], ["audio", "audio", false]],
   music: [["prompt", "text", true]],
   list: [["items", "any", true]],
+  assistant: [["prompt", "text", true]],
+  edit: [["image", "image", true]],
+  combine: [["clips", "video", true], ["audio", "audio", false]],
 };
-const GENERATORS: SpaceNodeType[] = ["image", "video", "music"];
+const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine"];
 const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#f0a04b", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
+  assistant: Bot, edit: ScanLine, combine: Layers,
 };
 const TYPE_LABEL: Record<SpaceNodeType, MessageKey> = {
   text: "spNodeText", asset: "spNodeAsset", cast: "spNodeCast", image: "spNodeImage", video: "spNodeVideo",
-  music: "spNodeMusic", list: "spNodeList", note: "spNodeNote",
+  music: "spNodeMusic", list: "spNodeList", note: "spNodeNote", assistant: "spNodeAssistant", edit: "spNodeEdit", combine: "spNodeCombine",
 };
-const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "list", "note"];
+const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "edit", "combine", "list", "note"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
   video: { prompt: "", quality: "draft" }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
   list: { unticked: [] }, note: { text: "" },
+  assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
 };
-const WIDTH: Record<SpaceNodeType, number> = { text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220 };
+const WIDTH: Record<SpaceNodeType, number> = {
+  text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220, assistant: 290, edit: 250, combine: 280,
+};
 
 type NodeData = { kind: SpaceNodeType; data: Record<string, any> };
 type SpNode = Node<NodeData, "sp">;
@@ -53,7 +61,10 @@ type SpNode = Node<NodeData, "sp">;
 function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: string | null): Port | null {
   if (kind === "text") return "text";
   if (kind === "cast") return handle === "text" ? "text" : "image";
-  if (kind === "image" || kind === "video") return kind;
+  if (kind === "video") return handle === "last" ? "image" : "video";
+  if (kind === "image" || kind === "edit") return "image";
+  if (kind === "assistant") return "text";
+  if (kind === "combine") return "video";
   if (kind === "music") return "audio";
   if (kind === "asset") return (data.kind as Port) || "image";
   if (kind === "list") return "any";
@@ -144,11 +155,21 @@ function resolveOutputs(ctx: Pick<Ctx, "nodes" | "edges" | "state" | "characters
     return c.canonical_asset_id ? [["image", c.canonical_asset_id]] : [];
   }
   if (kind === "asset") return (data.asset_ids || []).map((a: string) => [data.kind || "image", a] as [Port, string]);
+  if (kind === "assistant") {
+    const st = ctx.state[id] || {};
+    const ex = new Set(st.excluded || []);
+    return (st.texts || []).filter((x) => !ex.has(x)).map((x) => ["text", x]);
+  }
   if (GENERATORS.includes(kind)) {
     const st = ctx.state[id] || {};
     const ex = new Set(st.excluded || []);
-    const port: Port = kind === "music" ? "audio" : (kind as Port);
-    return (st.outputs || []).filter((a) => !ex.has(a)).map((a) => [port, a]);
+    const kept = (st.outputs || []).filter((a) => !ex.has(a));
+    if (kind === "video" && handle === "last") {
+      const lf = st.last_frames || {};
+      return kept.filter((a) => lf[a]).map((a) => ["image", lf[a]] as [Port, string]);
+    }
+    const port = outputPort(kind, data) || "image";
+    return kept.map((a) => [port, a]);
   }
   if (kind === "list") {
     const out: [Port, string][] = [];
@@ -216,10 +237,93 @@ function Enhance({ text, kind, onDone }: { text: string; kind: "image" | "video"
 function PromptBox({ value, onChange, kind, placeholder, rows = 3 }: {
   value: string; onChange: (s: string) => void; kind: "image" | "video" | "music"; placeholder: string; rows?: number;
 }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const slash = useSlashMenu(value, onChange, ref, { clips: kind === "video" });
   return (
-    <div className="sp-prompt">
-      <textarea className="nodrag nowheel" rows={rows} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+    <div className="sp-prompt slash-wrap">
+      <textarea ref={ref} className="nodrag nowheel" rows={rows} value={value} placeholder={placeholder}
+        onChange={(e) => { onChange(e.target.value); if (kind !== "music") slash.update(e.target.value, e.target.selectionStart); }}
+        onKeyDown={(e) => { slash.onKeyDown(e); }} onBlur={() => setTimeout(slash.close, 150)} />
+      {slash.menu}
       <div className="sp-prompt-foot"><Enhance text={value} kind={kind} onDone={onChange} /></div>
+    </div>
+  );
+}
+
+/** The sung lines of the song wired into a clip's audio (speech to text),
+ * to start the lip sync on one line and last as long as it. */
+function LinePicker({ nodeId, onPick }: { nodeId: string; onPick: (start: number, seconds: number) => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const ctx = useContext(SpaceCtx);
+  const [lines, setLines] = useState<{ start_s: number; end_s: number; text: string }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const edge = ctx.edges.find((e) => e.target === nodeId && e.targetHandle === "audio");
+  const audio = edge ? resolveOutputs(ctx, edge.source, edge.sourceHandle === "out" ? null : edge.sourceHandle).find(([p]) => p === "audio")?.[1] : undefined;
+  const load = async () => {
+    if (!audio) { app.toast(t("spLinesNoAudio"), "info"); return; }
+    setBusy(true);
+    try { setLines((await api.transcribe({ asset_id: audio })).segments.filter((x) => x.text.trim())); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <span className="sp-lines">
+      <button className="btn xs ghost nodrag" onClick={() => (lines ? setLines(null) : load())} disabled={busy} title={t("spLinesHint")}>
+        {busy ? <Loader2 size={12} className="spin" /> : <Captions size={12} />} {t("spLines")}
+      </button>
+      {lines && (
+        <div className="sp-lines-menu nowheel nodrag">
+          {lines.length === 0 && <div className="small muted" style={{ padding: 6 }}>{t("spLinesNone")}</div>}
+          {lines.map((l, i) => (
+            <button key={i} onClick={() => { onPick(Math.max(0, +(l.start_s - 0.2).toFixed(2)), Math.min(19, Math.max(1, +(l.end_s - l.start_s + 0.5).toFixed(1)))); setLines(null); }}>
+              <span className="mono small muted">{l.start_s.toFixed(1)}s</span> <span>{l.text}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+const CAMERA_KEYS = ["shot", "angle", "move", "lens", "light", "composition"] as const;
+
+/** Film language for a picture or a clip: the chosen terms join its prompt
+ * on the server (cinema.camera_prompt). */
+function CameraPicker({ value, onChange, clips }: { value?: Record<string, string>; onChange: (v: Record<string, string> | null) => void; clips: boolean }) {
+  const { t, lang } = useT();
+  const guide = useCinemaGuide();
+  const [open, setOpen] = useState(false);
+  const L = lang === "es" ? "es" : "en";
+  const cam = value || {};
+  if (!guide) return null;
+  const chosen = CAMERA_KEYS.map((k) => guide.items.find((e) => e.id === cam[k] && e.category === k)).filter(Boolean);
+  return (
+    <div className="sp-camera nodrag">
+      <button className="sp-camera-head" onClick={() => setOpen((o) => !o)}>
+        <Aperture size={12} /> <span className="grow ellipsis">{chosen.length ? chosen.map((e) => e!.name[L]).join(" · ") : t("spCameraNone")}</span>
+        <span className="muted">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="sp-camera-grid">
+          {CAMERA_KEYS.filter((k) => clips || k !== "move").map((k) => {
+            const cat = guide.categories.find((c) => c.id === k)!;
+            return (
+              <label key={k} className="sp-camera-row">
+                <span>{cat.name[L]}</span>
+                <select value={cam[k] || ""} onChange={(e) => {
+                  const next: Record<string, string> = { ...cam, [k]: e.target.value };
+                  if (!e.target.value) delete next[k];
+                  onChange(Object.keys(next).length ? next : null);
+                }}>
+                  <option value="">—</option>
+                  {guide.items.filter((e) => e.category === k && (clips || !e.video_only)).map((e) => <option key={e.id} value={e.id}>{e.name[L]}</option>)}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -304,6 +408,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             <option value="sheet">{t("spPresetSheet")}</option>
           </select>
         </div>
+        {data.preset !== "sheet" && <CameraPicker value={data.camera} onChange={(c) => set({ camera: c })} clips={false} />}
       </>
     );
   } else if (kind === "video") {
@@ -318,6 +423,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             </div>
           )}
           {wired.has("audio") && <>
+            <LinePicker nodeId={id} onPick={(start, secs) => set({ audio_start_s: start, seconds: secs })} />
             <label className="sp-num" title={t("spAudioStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.audio_start_s ?? 0}
               onChange={(e) => set({ audio_start_s: Number(e.target.value) })} />s</label>
             <label className="sp-num" title={t("spSecondsHint")}>{t("spLength")}<input type="number" min={1} max={19} step={0.1} value={data.seconds ?? 4.8}
@@ -329,6 +435,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           )}
         </div>
         <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion") : t("spModeAnimate")}</div>
+        <CameraPicker value={data.camera} onChange={(c) => set({ camera: c })} clips />
       </>
     );
   } else if (kind === "music") {
@@ -346,6 +453,39 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>×{n}</option>)}
           </select>
         </div>
+      </>
+    );
+  } else if (kind === "assistant") {
+    body = (
+      <>
+        <textarea className="nodrag nowheel" rows={4} value={data.prompt || ""} placeholder={t("spAssistantPh")}
+          onChange={(e) => set({ prompt: e.target.value })} />
+        <div className="sp-opts nodrag">
+          <label className="check small"><input type="checkbox" checked={!!data.as_list} onChange={(e) => set({ as_list: e.target.checked })} /> {t("spAsList")}</label>
+          {data.as_list && <label className="sp-num">{t("spItems")}<input type="number" min={1} max={24} value={data.items ?? 5}
+            onChange={(e) => set({ items: Number(e.target.value) })} /></label>}
+        </div>
+        <div className="small muted sp-mode">{data.as_list ? t("spAsListHint") : t("spAssistantHint")}</div>
+      </>
+    );
+  } else if (kind === "edit") {
+    const v = data.operation === "remove_background" ? "bg" : String(data.scale || 2) === "4" ? "x4" : "x2";
+    body = (
+      <select className="nodrag" value={v} onChange={(e) => set(e.target.value === "bg" ? { operation: "remove_background" }
+        : { operation: "upscale", scale: e.target.value === "x4" ? 4 : 2 })}>
+        <option value="x2">{t("spUpscale2")}</option>
+        <option value="x4">{t("spUpscale4")}</option>
+        <option value="bg">{t("spRemoveBg")}</option>
+      </select>
+    );
+  } else if (kind === "combine") {
+    body = (
+      <>
+        <div className="small muted">{t("spCombineHint")}</div>
+        {wired.has("audio") && <div className="sp-opts nodrag">
+          <label className="sp-num" title={t("spAudioStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.audio_start_s ?? 0}
+            onChange={(e) => set({ audio_start_s: Number(e.target.value) })} />s</label>
+        </div>}
       </>
     );
   } else if (kind === "list") {
@@ -375,10 +515,21 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
 
   // outputs of a generator: tick to pass on, click to view, earlier runs
   let outputs: ReactNode = null;
-  if (runnable && (st?.outputs?.length || st?.error)) {
+  if (kind === "assistant" && (st?.texts?.length || st?.error)) {
+    const ex = new Set(st.excluded || []);
+    outputs = (
+      <div className="sp-outputs">
+        {st.error && <div className="sp-error small">{st.error}</div>}
+        {(st.texts || []).map((x) => (
+          <button key={x} className={`sp-chip nodrag${ex.has(x) ? " dim" : ""}`} title={t("spTick")}
+            onClick={() => ctx.setExcluded(id, ex.has(x) ? [...ex].filter((y) => y !== x) : [...ex, x])}>{x}</button>
+        ))}
+      </div>
+    );
+  } else if (runnable && (st?.outputs?.length || st?.error)) {
     const list = st.outputs || [];
     const ex = new Set(st.excluded || []);
-    const port: Port = kind === "music" ? "audio" : (kind as Port);
+    const port: Port = outputPort(kind, data) || "image";
     const runs = st.runs || [];
     const current = runs.findIndex((r) => r.outputs.join() === list.join());
     outputs = (
@@ -404,7 +555,8 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
   }
 
   const inputs = INPUTS[kind] || [];
-  const outs: [string, Port][] = kind === "cast" ? [["image", "image"], ["text", "text"]] : out ? [["out", out]] : [];
+  const outs: [string, Port][] = kind === "cast" ? [["image", "image"], ["text", "text"]]
+    : kind === "video" ? [["out", "video"], ["last", "image"]] : out ? [["out", out]] : [];
   return (
     <div className={`sp-node sp-${kind}${selected ? " selected" : ""}${busy ? " busy" : ""}`}>
       <div className="sp-head">
@@ -434,7 +586,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           <div className="sp-outs">
             {outs.map(([h, port]) => (
               <div key={h} className="sp-port out">
-                <span style={{ color: PORT_COLOR[port] }}>{t(`spOut_${port}` as MessageKey)}</span>
+                <span style={{ color: PORT_COLOR[port] }}>{t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}</span>
                 <Handle type="source" position={Position.Right} id={h} style={{ background: PORT_COLOR[port] }} />
               </div>
             ))}
@@ -748,6 +900,10 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
           </div>
           <span className="grow" />
           {busyCount > 0 && <span className="pill accent"><Loader2 size={11} className="spin" /> {busyCount}</span>}
+          {busyCount > 0 && <button className="btn sm danger" title={t("spStopHint")} onClick={async () => {
+            try { await api.stopSpace(spaceId); app.toast(t("spStopped"), "info"); setState((await api.space(spaceId)).state); }
+            catch (e) { app.toast((e as Error).message, "bad"); }
+          }}><Square size={12} /> {t("spStop")}</button>}
           <button className="btn sm ghost icon" title={t("spFit")} onClick={() => flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 })}><Maximize size={15} /></button>
           <button className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
           <button className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}><Play size={14} /> {t("spRunAll")}</button>
@@ -810,6 +966,7 @@ const TEMPLATES: { id: string; icon: typeof Workflow; title: MessageKey; hint: M
   { id: "blank", icon: Plus, title: "spTplBlank", hint: "spTplBlankHint" },
   { id: "reference_film", icon: Film, title: "spTplFilm", hint: "spTplFilmHint" },
   { id: "singing_shot", icon: AudioLines, title: "spTplSing", hint: "spTplSingHint" },
+  { id: "short_film", icon: Bot, title: "spTplShort", hint: "spTplShortHint" },
 ];
 
 export function SpacesView() {

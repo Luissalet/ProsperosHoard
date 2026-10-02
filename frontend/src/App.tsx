@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
-  Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow,
+  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/jetbrains-mono";
@@ -25,6 +25,7 @@ import { ActivityView } from "./views/Activity";
 import { SettingsView } from "./views/Settings";
 import { VoiceView } from "./views/Voice";
 import { ProductionsView } from "./views/Productions";
+import { CinemaView } from "./views/Cinema";
 import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
 
@@ -47,6 +48,7 @@ const GLOBAL_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "projects", key: "navProjects", icon: FolderKanban },
   { id: "productions", key: "navProductions", icon: Film },
   { id: "voice", key: "navVoice", icon: Mic2 },
+  { id: "cinema", key: "navCinema", icon: Aperture },
   { id: "jobs", key: "navJobs", icon: ListChecks },
   { id: "backends", key: "navBackends", icon: Server },
   { id: "activity", key: "navActivity", icon: Activity },
@@ -177,6 +179,7 @@ export default function App() {
   else if (section === "timeline") view = <TimelineView key={projectId} />;
   else if (section === "boards") view = <BoardsView key={projectId} />;
   else if (section === "voice") view = <VoiceView />;
+  else if (section === "cinema") view = <CinemaView />;
   else if (section === "productions") view = <ProductionsView key={route.arg || ""} />;
   else if (section === "jobs") view = <JobsView projects={projects} />;
   else if (section === "backends") view = <BackendsView />;

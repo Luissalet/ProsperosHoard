@@ -361,7 +361,7 @@ def studio_generate_image(
     wait_s: float = 0, use_character_reference: bool = False, use_element_references: bool = True,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
     characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
-    model: Optional[str] = None,
+    model: Optional[str] = None, camera: Optional[dict[str, str]] = None,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
@@ -401,6 +401,9 @@ def studio_generate_image(
     lists `adapters`; use_adapters=false renders without. prefer_adapter=true with consistent=true renders
     txt2img + adapter (free poses) instead of an edit of the canonical image when every mentioned
     character has one.
+    camera: film language picked by id from studio_cinema - {"shot": "close_up", "angle": "low_angle",
+    "lens": "telephoto", "light": "rim_light", "composition": "rule_of_thirds"} (+ "move" for clip
+    templates); their English terms are added to the prompt.
 
     Keywords: generate image, txt2img, make a photo, draw, render a portrait, character consistency, same character, qwen, flux, image engine, generar imagen, crear foto, dibujar, hacer una foto, personaje consistente
     """
@@ -413,10 +416,24 @@ def studio_generate_image(
         "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
         "use_element_references": use_element_references,
         "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
-        "use_adapters": use_adapters, "prefer_adapter": prefer_adapter,
+        "use_adapters": use_adapters, "prefer_adapter": prefer_adapter, "camera": camera,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)
+
+
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def studio_cinema(query: str = "", category: Optional[str] = None) -> dict[str, Any]:
+    """Film language guide: shot sizes, camera angles, camera moves, lenses and focus, light, composition / guía de cine.
+
+    query: words or a category ("plano", "shot", "angle", "luz", "close up", "contrapicado"); category:
+    shot | angle | move | lens | light | composition. Returns items {id, category, name, es, use, prompt,
+    clips_only?}: `prompt` is the English wording a model understands; pass ids as
+    studio_generate_image(camera={"shot": id, ...}) or in a space node's data.camera.
+
+    Keywords: shot types, camera angle, camera movement, lens, lighting, composition, cinematography, tipos de plano, plano medio, primer plano, contrapicado, travelling, iluminación
+    """
+    return _call("GET", "/api/agent/studio_cinema", params={"q": query, "category": category})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
@@ -1155,22 +1172,34 @@ def studio_spaces(
 ) -> dict[str, Any]:
     """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
 
-    action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot") | "get" (space) |
-    "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"all", node_ids, force) | "delete" | "restore".
+    action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot"|"short_film") | "get"
+    (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"all", node_ids, force) | "stop"
+    (cancel a run and its renders) | "delete" | "restore".
     Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
     "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
-    count, engine, seed} with inputs prompt (text) and refs (image); video {prompt, quality "draft"|"final",
-    seconds, audio_start_s, motion_start_s, seed} with inputs start (image: one clip per image), prompt,
-    motion (video: copy its moves) and audio (audio: the character sings it, lip sync); music {tags, lyrics,
-    duration, bpm, count} with input prompt; list (items: anything; data.unticked drops items); note {text}.
+    count, engine, seed, camera} with inputs prompt (text) and refs (image); video {prompt, quality
+    "draft"|"final", seconds, audio_start_s, motion_start_s, seed, camera} with inputs start (image: one clip
+    per image), prompt, motion (video: copy its moves) and audio (audio: the character sings it, lip sync),
+    and two outputs: the clips, and source_handle "last" = each clip's last frame (wire it into another
+    clip's start to continue the shot); music {tags, lyrics, duration, bpm, count} with input prompt;
+    assistant {prompt, as_list, items} - the local model writes a text, or a list of `items` lines;
+    edit {operation "upscale" (scale 2|4) | "remove_background"} with input image (many); combine
+    {audio_start_s} joins the clips wired into "clips" in wire order, with input audio (a song under them);
+    list (items: anything; data.unticked drops items); note {text}.
+    camera: film language ids from studio_cinema, {"shot", "angle", "move" (clips), "lens", "light",
+    "composition"} - their terms join the prompt.
+    Fan-out: texts that reach a picture's or a clip's prompt from a list or a list-mode assistant make one
+    render each (other wired texts are shared by all), up to 24.
     ops (edit): {"op": "add_node", "id", "type", "x", "y", "data"} | {"op": "set", "id", "data"} |
     {"op": "move", "id", "x", "y"} | {"op": "connect", "source", "source_handle"?, "target", "target_handle"} |
     {"op": "disconnect", "source", "target", "target_handle"?} | {"op": "remove", "id"}.
     A run is a job: poll studio_job, then action="get" shows each node's status and outputs (asset ids;
-    look at them with studio_show). "all" skips nodes whose inputs did not change unless force=true.
+    texts for an assistant; look at them with studio_show). Generators that do not depend on each other run
+    together (a render pool spreads them over the GPUs). "all" skips nodes whose inputs did not change
+    unless force=true.
 
-    Keywords: space, canvas, node graph, workflow, references, character sheet, wire, run all, espacio, lienzo,
-    nodos, flujo, hoja de personaje, conectar, ejecutar todo
+    Keywords: space, canvas, node graph, workflow, references, character sheet, wire, run all, chain shots, last
+    frame, join clips, upscale, espacio, lienzo, nodos, flujo, hoja de personaje, conectar, ejecutar todo, unir clips
     """
     return _call("POST", "/api/agent/studio_spaces", params={"project": project}, json={
         "action": action, "space": space, "name": name, "template": template, "ops": ops or [], "mode": mode,
