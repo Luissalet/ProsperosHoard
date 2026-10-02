@@ -121,7 +121,10 @@ MOTION_FILES = {
                                   "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
                                   "wan2.1_vace_1.3B_fp16.safetensors",
                                   "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
-                                  "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors"],
+                                  "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+                                  "wan2.1_bernini_1.3B_fp16.safetensors",
+                                  "wan2.2_bernini_r_high_noise_fp8_scaled.safetensors",
+                                  "wan2.2_bernini_r_low_noise_fp8_scaled.safetensors"],
     ("AudioEncoderLoader", "audio_encoder_name"): ["wav2vec2_large_english_fp16.safetensors",
                                                    "wav2vec2-chinese-base_fp16.safetensors"],
     ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
@@ -133,7 +136,8 @@ MOTION_FILES = {
                                            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
                                            "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
                                            "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
-                                           "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"],
+                                           "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+                                           "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors"],
 }
 
 
@@ -611,7 +615,7 @@ class FakeComfyServer:
         seed = int(k_inputs.get("seed", 0))
         prompt_text = self._positive_prompt_text(workflow, k_inputs)
         reference = self._find_reference(workflow)
-        vace = _first(workflow, "WanVaceToVideo")
+        vace = _first(workflow, "WanVaceToVideo") or _first(workflow, "BerniniConditioning")
         if vace is not None:
             return self._render_vace(prompt_id, workflow, vace, save_node, outputs)
         latent = _first(workflow, "Wan22ImageToVideoLatent") or {}
@@ -632,8 +636,9 @@ class FakeComfyServer:
         return node_id
 
     def _render_vace(self, prompt_id: str, workflow: dict[str, Any], vace: dict, save_node: dict, outputs: dict) -> str:
-        """Wan VACE (a retake): a real mp4 of exactly `length` frames at the
-        requested size, so the splice back into the clip can be checked."""
+        """Wan VACE (a retake) or Bernini-R (a clip edit): a real mp4 of
+        exactly `length` frames at the requested size, so the splice back
+        into the clip can be checked."""
         import subprocess
         from ..backend import ffmpeg_path
         inp = vace.get("inputs", {})

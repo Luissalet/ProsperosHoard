@@ -1432,15 +1432,51 @@ def studio_download_media(project: str, url: str, audio_only: bool = False, star
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def studio_video_frames(asset_id: str, count: int = 6) -> dict[str, Any]:
+def studio_video_frames(asset_id: str, count: int = 6, at_s: Optional[float] = None) -> dict[str, Any]:
     """Take stills out of a video or an animated GIF as image assets / sacar fotogramas de un video o GIF.
 
     count: 1-24, evenly spaced. Use them as references (a dance pose for a shot, a look to copy):
-    studio_production_shots refs or studio_generate_image reference_asset_ids.
+    studio_production_shots refs or studio_generate_image reference_asset_ids. at_s: just the frame at
+    that time instead (0 = the first frame: edit it with studio_generate_image(prompt=the change,
+    reference_asset_ids=[frame]), then studio_clip_edit with mode="propagate" and first_frame_asset_id
+    carries the edit through the clip).
 
-    Keywords: frames from video, gif frames, extract frames, pose reference, fotogramas, sacar frames, gif
+    Keywords: frames from video, gif frames, extract frames, pose reference, first frame, fotogramas,
+    sacar frames, gif, primer fotograma
     """
-    return _call("POST", "/api/agent/studio_video_frames", json={"asset_id": asset_id, "count": count})
+    return _call("POST", "/api/agent/studio_video_frames", json={"asset_id": asset_id, "count": count, "at_s": at_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_clip_edit(asset_id: str, prompt: str = "", mode: str = "auto", quality: str = "draft",
+                     reference_asset_ids: Optional[list[str]] = None, first_frame_asset_id: Optional[str] = None,
+                     start_s: float = 0.0, enhance: bool = True, exact: bool = False, preview: bool = False,
+                     seed: Optional[int] = None, negative: Optional[str] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Edit a whole clip from an instruction and keep its motion / editar un clip con una instruccion.
+
+    "make it night with rain on the street", "put @Vera in a red leather coat", "replace the guitar with a
+    violin", "turn it into a watercolour", "she crouches instead of standing". Bernini-R (a Wan renderer
+    trained for video editing) redraws up to 5 s of the clip (from start_s; longer clips are spliced back)
+    at 480p, keeping what the instruction does not change; the result is a new clip at the source's size,
+    fps and sound, and a take of its shot when the clip belongs to a production.
+    mode: auto (default) | edit (replace, add, remove, recolour) | restyle (look, light, colours, or a
+    change of pose/action) | reference (with pictures: reference_asset_ids, or @Name of cast members with a
+    picture, become image0, image1...) | propagate (first_frame_asset_id: the window's first frame edited
+    as a picture - see studio_video_frames at_s - is carried through the clip).
+    The instruction is rewritten into the detailed "what changes / what stays" shape the model was trained
+    on (with the vision model looking at frames when there is one); preview=true returns that text and the
+    references without rendering, exact=true sends prompt as it is. quality: draft (1.3B, quick) or final
+    (Wan 2.2 A14B, 6 steps). Fails with no_bernini when the models are missing.
+
+    Keywords: edit video with text, video edit, change the clip, restyle clip, relight, swap object,
+    instruction video editing, editar video con texto, cambiar el clip, que sea de noche, cambiar ropa,
+    reestilizar clip, propagar edicion
+    """
+    return _call("POST", "/api/agent/studio_clip_edit", params={"preview": str(preview).lower()},
+                 json={"asset_id": asset_id, "prompt": prompt, "mode": mode, "quality": quality,
+                       "reference_asset_ids": reference_asset_ids or [], "first_frame_asset_id": first_frame_asset_id,
+                       "start_s": start_s, "enhance": enhance, "exact": exact, "seed": seed, "negative": negative,
+                       "wait_s": wait_s})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

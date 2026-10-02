@@ -823,3 +823,10 @@ table.list tr.selected td { background: var(--accent-soft); }
 .sp-layer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 0; border-top: 1px dashed var(--border); }
 .sp-layer select { flex: 1 1 110px; min-width: 0; }
 .sp-layer .sp-num input { width: 46px; }
+
+/* clip edit (Lightbox) */
+.clipedit-ref { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 2px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.clipedit-ref img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; }
+.clipedit-ref-label { font-size: 11px; opacity: .8; }
+.clipedit-plan textarea { font-size: 12px; }

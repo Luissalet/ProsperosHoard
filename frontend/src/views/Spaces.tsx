@@ -37,20 +37,21 @@ const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
   combine: [["clips", "video", true], ["audio", "audio", false]],
   variations: [["image", "image", true], ["prompt", "text", true]],
   composite: [["background", "any", true], ["layers", "any", true]],
+  clip_edit: [["clip", "video", true], ["prompt", "text", true], ["refs", "image", true], ["first", "image", false]],
 };
-const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite"];
+const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit"];
 const APP_INPUTS: SpaceNodeType[] = ["text", "asset", "cast"];
 const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#f0a04b", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
-  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2,
+  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2, clip_edit: Wand2,
 };
 const TYPE_LABEL: Record<SpaceNodeType, MessageKey> = {
   text: "spNodeText", asset: "spNodeAsset", cast: "spNodeCast", image: "spNodeImage", video: "spNodeVideo",
   music: "spNodeMusic", list: "spNodeList", note: "spNodeNote", assistant: "spNodeAssistant", edit: "spNodeEdit", combine: "spNodeCombine",
-  variations: "spNodeVariations", group: "spNodeGroup", composite: "spNodeComposite",
+  variations: "spNodeVariations", group: "spNodeGroup", composite: "spNodeComposite", clip_edit: "spNodeClipEdit",
 };
-const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "music", "assistant", "variations", "edit", "composite",
+const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "clip_edit", "music", "assistant", "variations", "edit", "composite",
   "combine", "list", "note", "group"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
@@ -58,10 +59,11 @@ const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   list: { unticked: [] }, note: { text: "" },
   assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
   variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" }, composite: { layers: [] },
+  clip_edit: { prompt: "", mode: "auto", quality: "draft" },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
   text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220, assistant: 290, edit: 250, combine: 280,
-  variations: 270, group: 620, composite: 300,
+  variations: 270, group: 620, composite: 300, clip_edit: 290,
 };
 
 type NodeData = { kind: SpaceNodeType; data: Record<string, any> };
@@ -73,7 +75,7 @@ function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: str
   if (kind === "video") return handle === "last" ? "image" : "video";
   if (kind === "image" || kind === "edit" || kind === "variations") return "image";
   if (kind === "assistant") return "text";
-  if (kind === "combine") return "video";
+  if (kind === "combine" || kind === "clip_edit") return "video";
   if (kind === "composite") return "any";
   if (kind === "music") return "audio";
   if (kind === "asset") return (data.kind as Port) || "image";
@@ -562,6 +564,27 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             </div>
           );
         })}
+      </>
+    );
+  } else if (kind === "clip_edit") {
+    body = (
+      <>
+        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={t("clipEditPh")} />
+        <div className="sp-opts nodrag">
+          <select value={data.mode || "auto"} onChange={(e) => set({ mode: e.target.value })}>
+            <option value="auto">{t("clipEditModeAuto")}</option>
+            <option value="edit">{t("clipEditModeEdit")}</option>
+            <option value="restyle">{t("clipEditModeRestyle")}</option>
+            <option value="reference">{t("clipEditModeReference")}</option>
+            <option value="propagate">{t("clipEditModePropagate")}</option>
+          </select>
+          <select value={data.quality || "draft"} onChange={(e) => set({ quality: e.target.value })}>
+            <option value="draft">{t("sbDraft")}</option><option value="final">{t("sbFinal")}</option>
+          </select>
+          <label className="sp-num" title={t("spClipEditFromHint")}>{t("spFrom")}<input type="number" min={0} step={0.5} value={data.start_s ?? 0}
+            onChange={(e) => set({ start_s: Number(e.target.value) })} />s</label>
+        </div>
+        <div className="small muted sp-mode">{wired.has("first") ? t("spClipEditFirst") : t("spClipEditHint")}</div>
       </>
     );
   } else if (kind === "combine") {

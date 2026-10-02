@@ -221,7 +221,7 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
             <button type="button" className="tile" style={{ width: 112 }} onClick={() => toggle(x.asset_id)}
               onDoubleClick={() => app.openAsset(x.asset_id, all.map((y) => y.asset_id))} title={x.kind === "video" ? t("sbClip") : t("sbStill")}>
               <img src={`/api/assets/${x.asset_id}/thumb`} alt="" />
-              <span className="pill badge-dark sb-take-kind">{x.kind === "video" ? <Film size={10} /> : <Images size={10} />}{"quality" in x && x.quality === "draft" ? ` ${t("sbDraft")}` : ""}{"retake" in x && x.retake ? ` ${t("sbRetake")}` : ""}</span>
+              <span className="pill badge-dark sb-take-kind">{x.kind === "video" ? <Film size={10} /> : <Images size={10} />}{"quality" in x && x.quality === "draft" ? ` ${t("sbDraft")}` : ""}{"retake" in x && x.retake ? ` ${t("sbRetake")}` : ""}{"edit" in x && x.edit ? ` ${t("sbEdited")}` : ""}</span>
             </button>
             {x.current ? <span className="small muted">{t("sbTakeCurrent")}</span>
               : <button type="button" className="btn xs" disabled={disabled || busy} onClick={() => use(x.asset_id)}>{t("sbTakeUse")}</button>}

@@ -1,0 +1,244 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "wan2.2_bernini_r_high_noise_fp8_scaled.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "wan2.2_bernini_r_low_noise_fp8_scaled.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "3": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+   "strength_model": 3.0
+  }
+ },
+ "4": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "2",
+    0
+   ],
+   "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+   "strength_model": 1.5
+  }
+ },
+ "5": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "type": "wan",
+   "device": "default"
+  }
+ },
+ "6": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "wan_2.1_vae.safetensors"
+  }
+ },
+ "7": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "You are a helpful assistant specialized in video editing.Make it night.",
+   "clip": [
+    "5",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+   "clip": [
+    "5",
+    0
+   ]
+  }
+ },
+ "9": {
+  "class_type": "LoadVideo",
+  "inputs": {
+   "file": "source.mp4"
+  }
+ },
+ "10": {
+  "class_type": "GetVideoComponents",
+  "inputs": {
+   "video": [
+    "9",
+    0
+   ]
+  }
+ },
+ "11": {
+  "class_type": "BerniniConditioning",
+  "inputs": {
+   "positive": [
+    "7",
+    0
+   ],
+   "negative": [
+    "8",
+    0
+   ],
+   "vae": [
+    "6",
+    0
+   ],
+   "width": 848,
+   "height": 480,
+   "length": 81,
+   "batch_size": 1,
+   "source_video": [
+    "10",
+    0
+   ],
+   "ref_max_size": 848
+  }
+ },
+ "12": {
+  "class_type": "BasicScheduler",
+  "inputs": {
+   "model": [
+    "4",
+    0
+   ],
+   "scheduler": "simple",
+   "steps": 6,
+   "denoise": 1.0
+  }
+ },
+ "13": {
+  "class_type": "SplitSigmas",
+  "inputs": {
+   "sigmas": [
+    "12",
+    0
+   ],
+   "step": 3
+  }
+ },
+ "14": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "res_multistep"
+  }
+ },
+ "15": {
+  "class_type": "SamplerCustom",
+  "inputs": {
+   "model": [
+    "3",
+    0
+   ],
+   "add_noise": true,
+   "noise_seed": 1,
+   "cfg": 1.0,
+   "positive": [
+    "11",
+    0
+   ],
+   "negative": [
+    "11",
+    1
+   ],
+   "sampler": [
+    "14",
+    0
+   ],
+   "sigmas": [
+    "13",
+    0
+   ],
+   "latent_image": [
+    "11",
+    2
+   ]
+  }
+ },
+ "16": {
+  "class_type": "SamplerCustom",
+  "inputs": {
+   "model": [
+    "4",
+    0
+   ],
+   "add_noise": false,
+   "noise_seed": 0,
+   "cfg": 1.0,
+   "positive": [
+    "11",
+    0
+   ],
+   "negative": [
+    "11",
+    1
+   ],
+   "sampler": [
+    "14",
+    0
+   ],
+   "sigmas": [
+    "13",
+    1
+   ],
+   "latent_image": [
+    "15",
+    0
+   ]
+  }
+ },
+ "17": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "16",
+    0
+   ],
+   "vae": [
+    "6",
+    0
+   ]
+  }
+ },
+ "18": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": [
+    "17",
+    0
+   ],
+   "fps": 16,
+   "bit_depth": 8,
+   "color_space": "sRGB",
+   "codec": "none"
+  }
+ },
+ "19": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "filename_prefix": "video/prospero_clip_edit",
+   "format": "auto",
+   "format.codec": "auto",
+   "codec": "auto",
+   "video": [
+    "18",
+    0
+   ]
+  }
+ }
+}

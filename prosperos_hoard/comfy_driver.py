@@ -474,6 +474,7 @@ def wire_reference_group(workflow: dict[str, Any], spec: dict[str, Any], filenam
     if not group:
         return workflow
     encode_node, prefix, nodes = group["encode_node"], group["prefix"], list(group.get("nodes") or [])
+    start = int(group.get("start", 1))  # the first slot's number: image_1.. (Qwen) or reference_image_0.. (Bernini)
     max_count = int(group.get("max", len(nodes)))
     while len(nodes) < max_count:
         nodes.append(f"{encode_node}_ref{len(nodes) + 1}")
@@ -484,10 +485,10 @@ def wire_reference_group(workflow: dict[str, Any], spec: dict[str, Any], filenam
             workflow[node_id]["inputs"]["image"] = filename
         else:
             workflow[node_id] = {"class_type": "LoadImage", "inputs": {"image": filename}}
-        encode_inputs[f"{prefix}{i + 1}"] = [node_id, 0]
+        encode_inputs[f"{prefix}{i + start}"] = [node_id, 0]
     for i in range(len(filenames), max_count):
         workflow.pop(nodes[i], None)
-        encode_inputs.pop(f"{prefix}{i + 1}", None)
+        encode_inputs.pop(f"{prefix}{i + start}", None)
     return workflow
 
 

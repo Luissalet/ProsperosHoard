@@ -41,7 +41,7 @@ def enabled() -> bool:
 
 def vram_class(job: dict[str, Any], resolve_image_engine: Optional[Callable[[], str]] = None) -> str:
     params = job.get("params") or {}
-    if job["type"] == "retake":
+    if job["type"] in ("retake", "clip_edit"):
         return "wan14b" if params.get("quality") == "final" else "wan"
     if job["type"] == "edit_image" and params.get("operation") in EDIT_CLASS:
         return EDIT_CLASS[params["operation"]]

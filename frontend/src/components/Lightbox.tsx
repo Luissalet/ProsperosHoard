@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn, Ratio, AudioLines, Scissors, RefreshCw } from "lucide-react";
-import { api, fileUrl, type Asset, type Board } from "../api";
-import { useT } from "../i18n";
-import { ConfirmButton, Stars, useApp, useAsync } from "./ui";
+import { api, fileUrl, type Asset, type Board, type ClipEditMode, type ClipEditPlan, type ClipEditRequest } from "../api";
+import { useT, type MessageKey } from "../i18n";
+import { AssetPicker, ConfirmButton, Stars, useApp, useAsync } from "./ui";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
@@ -271,6 +271,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               <RefreshCw size={13} /> {t("retakeGo")}</button>
           </div>
         )}
+        {asset.kind === "video" && <ClipEditPanel asset={asset} busy={busy} run={run} />}
         {(asset.kind === "image" || asset.kind === "video") && (
           <div className="row wrap" style={{ gap: 6 }} title={t("assetReframeHint")}>
             <span className="small muted"><Ratio size={13} /> {t("assetReframe")}</span>
@@ -337,6 +338,140 @@ function CastReference({ asset }: { asset: Asset }) {
             } catch (e) { app.toast((e as Error).message, "bad"); }
           }}>{t("refUse")}</button>
         </>
+      )}
+    </div>
+  );
+}
+
+/** Edit a whole clip from an instruction (Bernini-R): the instruction, how
+ * (mode), pictures the text calls image0.., the first frame to edit as a
+ * picture and carry through the clip, a preview of the text the model
+ * gets (editable: then it is sent as it is). */
+function ClipEditPanel({ asset, busy, run }: {
+  asset: Asset; busy: boolean; run: (label: string, fn: () => Promise<{ job: { id: string } }>) => Promise<void>;
+}) {
+  const { t } = useT();
+  const app = useApp();
+  const [text, setText] = useState("");
+  const [mode, setMode] = useState<ClipEditMode>("auto");
+  const [quality, setQuality] = useState<"draft" | "final">("draft");
+  const [start, setStart] = useState(0);
+  const [refs, setRefs] = useState<string[]>([]);
+  const [first, setFirst] = useState<string | null>(null);
+  const [firstEdit, setFirstEdit] = useState("");
+  const [picking, setPicking] = useState<"ref" | "first" | null>(null);
+  const [plan, setPlan] = useState<ClipEditPlan | null>(null);
+  const [planText, setPlanText] = useState("");
+  const [working, setWorking] = useState(false);
+  useEffect(() => { setText(""); setRefs([]); setFirst(null); setPlan(null); setStart(0); setMode("auto"); }, [asset.id]);
+  useEffect(() => { setPlan(null); }, [text, mode, refs, first, start]);
+  const long = (asset.duration_s || 0) > 5.1;
+  const propagate = mode === "propagate";
+  const body = (): ClipEditRequest => ({
+    prompt: text, mode, quality, start_s: start, reference_asset_ids: refs,
+    first_frame_asset_id: propagate || mode === "auto" ? first : null,
+  });
+  const preview = async () => {
+    setWorking(true);
+    try {
+      const p = await api.clipEditPreview(asset.id, body());
+      setPlan(p);
+      setPlanText(p.prompt);
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setWorking(false); }
+  };
+  const go = () => run(t("clipEditTitle"), () => api.clipEdit(asset.id, plan
+    ? { ...body(), prompt: planText, exact: true, mode: plan.task === "vi2v" ? "propagate" : mode,
+        reference_asset_ids: plan.reference_asset_ids }
+    : body()));
+  const takeFirst = async () => {
+    setWorking(true);
+    try {
+      const r = await api.videoFrames(asset.id, 1, start);
+      setFirst(r.items[0]?.id || null);
+      app.toast(t("clipEditFirstTaken"), "ok");
+      app.bump();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setWorking(false); }
+  };
+  const thumb = (id: string, onRemove: () => void, label: string) => (
+    <span key={id} className="clipedit-ref" title={label}>
+      <img src={fileUrl(id)} alt="" />
+      <span className="clipedit-ref-label mono">{label}</span>
+      <button className="btn icon xs" onClick={onRemove} aria-label="remove"><X size={11} /></button>
+    </span>
+  );
+  const offset = first && (propagate || mode === "auto") ? 1 : 0;
+  return (
+    <div className="stack clipedit" style={{ gap: 6 }}>
+      <span className="small muted" title={t("clipEditHint")}><Wand2 size={13} /> {t("clipEditTitle")}</span>
+      <textarea rows={2} value={text} placeholder={t("clipEditPh")} onChange={(e) => setText(e.target.value)} disabled={propagate} />
+      <div className="row wrap" style={{ gap: 6 }}>
+        <select value={mode} onChange={(e) => setMode(e.target.value as ClipEditMode)} style={{ width: "auto" }}>
+          <option value="auto">{t("clipEditModeAuto")}</option>
+          <option value="edit">{t("clipEditModeEdit")}</option>
+          <option value="restyle">{t("clipEditModeRestyle")}</option>
+          <option value="reference">{t("clipEditModeReference")}</option>
+          <option value="propagate">{t("clipEditModePropagate")}</option>
+        </select>
+        <select value={quality} onChange={(e) => setQuality(e.target.value as "draft" | "final")} style={{ width: "auto" }}>
+          <option value="draft">{t("sbDraft")}</option><option value="final">{t("sbFinal")}</option>
+        </select>
+        {long && (
+          <label className="row small" style={{ gap: 4 }}>{t("clipEditFrom")}<input type="number" min={0} step={0.5} value={start}
+            max={Math.max(0, (asset.duration_s || 0) - 1)} style={{ width: 64 }} onChange={(e) => setStart(Number(e.target.value))} />s</label>
+        )}
+      </div>
+      {propagate ? (
+        <div className="stack" style={{ gap: 6 }}>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <span className="small muted">{t("clipEditFirst")}</span>
+            {first && thumb(first, () => setFirst(null), "image0")}
+            <button className="btn sm" disabled={working} onClick={takeFirst}><Film size={13} /> {t("clipEditTakeFirst")}</button>
+            <button className="btn sm" onClick={() => setPicking("first")}>{t("clipEditPickFirst")}</button>
+          </div>
+          {first && (
+            <div className="row" style={{ gap: 6 }}>
+              <input className="grow" value={firstEdit} placeholder={t("clipEditFirstPh")} onChange={(e) => setFirstEdit(e.target.value)} />
+              <button className="btn sm" disabled={busy || !firstEdit.trim()} onClick={() => run(t("clipEditFirstGo"), async () => {
+                const r = await api.generate(asset.project_id, { prompt: firstEdit, engine: "auto", reference_asset_id: first,
+                  reference_asset_ids: [first], count: 1 });
+                app.toast(t("clipEditFirstQueued"), "ok");
+                return r;
+              })}><Sparkles size={13} /> {t("clipEditFirstGo")}</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="row wrap" style={{ gap: 6 }}>
+          <span className="small muted">{t("clipEditRefs")}</span>
+          {refs.map((r, i) => thumb(r, () => setRefs(refs.filter((x) => x !== r)), `image${i + offset}`))}
+          {refs.length < 4 && <button className="btn sm" onClick={() => setPicking("ref")}>{t("clipEditAddRef")}</button>}
+        </div>
+      )}
+      {plan && (
+        <div className="stack clipedit-plan" style={{ gap: 4 }}>
+          <span className="small muted">{t("clipEditPlanTask")}: <span className="mono">{plan.task}</span> · {t(`clipEditHow_${plan.how}` as MessageKey)}
+            {plan.cast.length > 0 && <> · @{plan.cast.join(", @")}</>}</span>
+          {plan.how === "no_model" && <span className="hint" title={plan.how_detail || ""}>{t("clipEditNoModel")}</span>}
+          {plan.unknown_mentions.length > 0 && <span className="hint">{t("clipEditUnknown", { names: plan.unknown_mentions.map((n) => "@" + n).join(", ") })}</span>}
+          <textarea rows={4} value={planText} onChange={(e) => setPlanText(e.target.value)} disabled={plan.task === "vi2v"} />
+          <span className="hint">{t("clipEditPlanHint")}</span>
+        </div>
+      )}
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn sm" disabled={working || busy || (!propagate && !text.trim()) || (propagate && !first)} onClick={preview}>
+          <Sparkles size={13} /> {t("clipEditPreview")}</button>
+        <button className="btn sm primary" disabled={busy || working || (!propagate && !text.trim() && !plan) || (propagate && !first)} onClick={go}>
+          <Wand2 size={13} /> {t("clipEditGo")}</button>
+      </div>
+      {picking && (
+        <AssetPicker projectId={asset.project_id} kind="image" title={picking === "first" ? t("clipEditPickFirst") : t("clipEditAddRef")}
+          onClose={() => setPicking(null)} onPick={(a) => {
+            if (picking === "first") setFirst(a.id);
+            else if (!refs.includes(a.id)) setRefs([...refs, a.id].slice(0, 4));
+            setPicking(null);
+          }} />
       )}
     </div>
   );
