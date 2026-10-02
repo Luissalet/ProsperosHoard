@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximi
 import { api, fileUrl, type Asset, type Board, type ClipEditMode, type ClipEditPlan, type ClipEditRequest } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Stars, useApp, useAsync } from "./ui";
-import { kindName, sourceName } from "../messages";
+import { assetName, kindName, sourceName } from "../messages";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
@@ -123,7 +123,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   ];
 
   return (
-    <div className="overlay" role="dialog" aria-label={asset.name || asset.id}>
+    <div className="overlay" role="dialog" aria-label={assetName(asset.name, lang) || asset.id}>
       <div className="lightbox-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="lightbox-tools">
           <button className="btn sm" onClick={onClose}><X size={15} /> {t("close")}</button>
@@ -150,7 +150,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
             <span className="pill">{sourceName(asset.source, lang)}</span>
             {list.length > 1 && <span className="muted small">{idx + 1} / {list.length}</span>}
           </div>
-          <h2>{asset.name || asset.id}</h2>
+          <h2>{assetName(asset.name, lang) || asset.id}</h2>
           <div className="mono muted small">{asset.id}</div>
         </div>
         <div className="row">

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AudioLines, FileText, Film, Heart, Star, Type, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type Job } from "../api";
 import { useT, type MessageKey } from "../i18n";
-import { kindName } from "../messages";
+import { assetName, kindName } from "../messages";
 
 // ------------------------------------------------------------ app context
 
@@ -174,7 +174,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
       onClick={onClick}
       draggable={draggable}
       onDragStart={(e) => { e.dataTransfer.setData("text/prospero-asset", asset.id); e.dataTransfer.effectAllowed = "copy"; }}
-      title={asset.name || asset.id}
+      title={assetName(asset.name, lang) || asset.id}
     >
       {src ? (
         <img src={src} alt="" loading="lazy" style={square ? { aspectRatio: "1 / 1", objectFit: "cover" } : undefined}
@@ -194,7 +194,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
       {selecting && <span className="tile-select">{selected ? "✓" : ""}</span>}
       {asset.favourite && <Heart className="fav" size={16} fill="currentColor" />}
       <div className="tile-meta">
-        <span className="ellipsis grow">{asset.name || asset.id}</span>
+        <span className="ellipsis grow">{assetName(asset.name, lang) || asset.id}</span>
         {asset.rating > 0 && <span className="nowrap">{"★".repeat(asset.rating)}</span>}
       </div>
     </button>
@@ -207,7 +207,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
 export function AssetPicker({ projectId, kind = "image", onPick, onClose, title, allProjects = false }: {
   projectId: string; kind?: string; onPick: (a: Asset) => void; onClose: () => void; title?: string; allProjects?: boolean;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<"project" | "all">("project");
   const [items, setItems] = useState<(Asset & { project_name?: string })[]>([]);
@@ -261,10 +261,10 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
           </div>
           <div className="picker-grid picker2-grid">
             {items.map((a) => (
-              <button key={a.id} className={focus?.id === a.id ? "on" : ""} title={a.name || a.id}
+              <button key={a.id} className={focus?.id === a.id ? "on" : ""} title={assetName(a.name, lang) || a.id}
                 onClick={() => setFocus(a)} onDoubleClick={() => onPick(a)}>
                 {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" loading="lazy" /> : <div className="media-icon"><KindIcon kind={a.kind} /></div>}
-                <span className="picker2-name ellipsis">{a.name || a.id}</span>
+                <span className="picker2-name ellipsis">{assetName(a.name, lang) || a.id}</span>
                 {scope === "all" && a.project_name && <span className="picker2-proj ellipsis">{a.project_name}</span>}
               </button>
             ))}
@@ -282,7 +282,7 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
                     <audio key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay style={{ width: "100%" }} />
                   </div>
                 ) : <img src={focus.kind === "image" ? `/api/assets/${focus.id}/file` : thumbUrl(focus)} alt="" />}
-              <strong className="ellipsis" style={{ maxWidth: "100%" }}>{focus.name || focus.id}</strong>
+              <strong className="ellipsis" style={{ maxWidth: "100%" }}>{assetName(focus.name, lang) || focus.id}</strong>
               <span className="small muted">
                 {[focus.project_name, focus.width && focus.height ? `${focus.width}×${focus.height}` : "",
                   focus.duration_s ? `${Math.floor(focus.duration_s / 60)}:${String(Math.round(focus.duration_s % 60)).padStart(2, "0")}` : "",

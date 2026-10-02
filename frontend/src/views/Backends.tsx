@@ -100,7 +100,7 @@ export function BackendsView() {
                 <div className="panel-title"><Cpu size={14} /> {t("gpu")}</div>
                 {(s.comfy.devices || []).map((d) => (
                   <div key={d.name} className="stack" style={{ gap: 4, marginBottom: 8 }}>
-                    <div className="row small"><span className="grow">{d.name}</span><span className="mono">{d.vram_free_mb} / {d.vram_total_mb} MB free</span></div>
+                    <div className="row small"><span className="grow">{d.name}</span><span className="mono">{d.vram_free_mb} / {d.vram_total_mb} MB {t("svcFree")}</span></div>
                     <div className="bar"><span style={{ width: `${100 - (d.vram_free_mb / Math.max(1, d.vram_total_mb)) * 100}%` }} /></div>
                   </div>
                 ))}

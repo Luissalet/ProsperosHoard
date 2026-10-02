@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FolderPlus, Loader2, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { api, thumbUrl, type Project, type TrashedProject } from "../api";
 import { useT } from "../i18n";
+import { PRODUCTION_STATUS_KEY } from "../messages";
 import { ConfirmButton, Empty, Modal, timeAgo, useApp } from "../components/ui";
 
 export function ProjectsView({ projects, reload }: { projects: Project[]; reload: () => void }) {
@@ -154,7 +155,7 @@ function DeleteProjectModal({ project, onClose, onDeleted }: { project: Project;
           {info.productions.length > 0 && (
             <div className="small">{t("projDeleteProductions")}
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-                {info.productions.map((x) => <li key={x.slug}><strong>{x.name || x.slug}</strong> <span className="muted">· {x.status}</span></li>)}
+                {info.productions.map((x) => <li key={x.slug}><strong>{x.name || x.slug}</strong> <span className="muted">· {PRODUCTION_STATUS_KEY[x.status] ? t(PRODUCTION_STATUS_KEY[x.status]) : x.status}</span></li>)}
               </ul>
             </div>
           )}

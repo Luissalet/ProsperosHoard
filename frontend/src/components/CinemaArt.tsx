@@ -107,7 +107,7 @@ const CROP: Record<string, [number, number, number]> = {
 
 function Frame({ children, viewBox = "0 0 160 90", label }: { children: ReactNode; viewBox?: string; label?: string }) {
   return (
-    <svg className="cine-art" viewBox={viewBox} preserveAspectRatio="xMidYMid slice" role="img" aria-label={label}>
+    <svg className="cine-art" viewBox={viewBox} preserveAspectRatio="xMidYMid slice" aria-hidden="true" data-kind={label}>
       {children}
     </svg>
   );
