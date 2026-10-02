@@ -670,3 +670,12 @@ def test_voice_tts_uses_a_saved_voice_by_id_or_name(client, monkeypatch):
     for key in (voice["id"], "narrator"):
         r = c.post("/api/agent/voice_tts", json={"text": "hi", "voice": key})
         assert r.status_code == 200 and FakeTTS.spoken[-1][1] == "narr-1", r.text
+
+
+def test_a_notice_the_hub_holds_for_quiet_hours_counts_as_delivered(store, notifier):
+    n, hub = notifier
+    slug = a_production(store)
+    hub.notify = lambda *a, **k: {"ok": True, "held": "quiet"}
+    n.production(production_job(slug, "done", {"status": "done"}), "Night Walk", URL)
+    assert n.sent[-1]["ok"] is True and n.sent[-1]["error"] == ""
+    assert n.router.via_status()["setting"] == "auto"
