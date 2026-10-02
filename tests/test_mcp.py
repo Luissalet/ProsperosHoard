@@ -309,3 +309,20 @@ def test_mcp_server_refuses_non_loopback_url(monkeypatch):
     sys.modules.pop("prosperos_hoard.mcp_server", None)
     monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
     importlib.import_module("prosperos_hoard.mcp_server")
+
+
+def test_mcp_bridge_ignores_proxy_variables_and_waits_no_longer_than_the_family_rule(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:3128")
+    sys.modules.pop("prosperos_hoard.mcp_server", None)
+    try:
+        mod = importlib.import_module("prosperos_hoard.mcp_server")
+        assert mod._client.trust_env is False
+    finally:
+        sys.modules.pop("prosperos_hoard.mcp_server", None)
+    from prosperos_hoard import api
+    from prosperos_hoard.hoard_link import waiting
+
+    assert api.MAX_WAIT_S == waiting.MAX_WAIT_S == 150.0
