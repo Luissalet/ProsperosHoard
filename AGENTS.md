@@ -230,6 +230,28 @@ Qué hacer cuando el usuario pide, con sus palabras:
   como toma suya. Si da `no_vace`, faltan los modelos en ComfyUI. Todavía
   no se ha ejecutado en una GPU real (los modelos están instalados, pero
   las tarjetas estaban ocupadas): avísale de que es la primera vez.
+- **«Que sea de noche» / «ponle un abrigo rojo» / «cambia la guitarra por
+  un violín» / «conviértelo en acuarela»**: `studio_clip_edit(asset_id,
+  prompt, quality="draft"|"final")` rehace el clip entero (hasta 5 s; uno
+  más largo, por ventanas desde `start_s`) con Bernini-R siguiendo la
+  instrucción y manteniendo el movimiento; sale un clip nuevo con el
+  tamaño, los fps y el sonido del original, y el original se queda. Con
+  `preview=true` enséñale antes el texto que recibirá el modelo (la
+  instrucción se reescribe salvo con `exact=true`). `mode`: `edit`
+  (sustituir, añadir, quitar, recolorear), `restyle` (otro aspecto, luz o
+  pose), `reference` (hasta 4 imágenes en `reference_asset_ids`; el
+  `@Nombre` de un personaje con imagen vale). Para un cambio muy concreto,
+  «desde un primer fotograma editado»: `studio_video_frames(asset_id,
+  at_s=0)` -> edítalo con `studio_generate_image(prompt=el cambio,
+  reference_asset_ids=[fotograma])` (edición por instrucción) ->
+  `studio_clip_edit(asset_id, mode="propagate",
+  first_frame_asset_id=...)`. Si es el clip de un plano, aparece como
+  toma suya. En un espacio hace lo mismo el nodo `clip_edit` (Editar clip;
+  entradas `clip`, `prompt`, `refs` y `first`; `data.mode`, `data.quality`,
+  `data.start_s`): una edición por cada clip conectado. Si da
+  `no_bernini`, faltan los modelos en ComfyUI. Todavía no
+  se ha ejecutado en una GPU real (las tarjetas están ocupadas con un
+  modelo de lenguaje): avísale de que es la primera vez.
 - **«Pon este recorte encima» / «un logo sobre el vídeo»**: en un espacio,
   un nodo `composite` (Capas) con el fondo en `background` y lo que va
   encima en `layers` (hasta 8); por capa `data.layers[i]` con `blend`,
