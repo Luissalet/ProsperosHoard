@@ -121,6 +121,14 @@ Qué hacer cuando el usuario pide, con sus palabras:
   recupera con `action="restore"` (`action="deleted"` los lista). Si
   responde `in_use`, di qué producción lo usa y borra con `force=true` solo
   si el usuario lo confirma.
+- **«Que cante este verso» / «que mueva los labios»**: el plano tiene que
+  estar fijado en sus versos (`studio_production_timing` para los tiempos,
+  `studio_production_shots` con `span`); después `{"key": "3", "sing":
+  true}`. Su clip se hace con Wan 2.2 S2V desde su tramo de la canción
+  (unos 5 min por cada 4,8 s en una tarjeta de 16 GB) y el montaje lo pone
+  en su segundo exacto. Fuera de una producción: `studio_generate_image`
+  con `template="wan22_s2v"`, `reference_asset_id`, `audio_asset_id`,
+  `audio_start_s` y `audio_seconds`.
 - **«Que el escenario / la guitarra salga siempre igual»**: un lugar o un
   objeto es una entrada del reparto: `studio_cast(action="create",
   kind="location"|"prop", name, fields={"prompt": aspecto})`; genera su
