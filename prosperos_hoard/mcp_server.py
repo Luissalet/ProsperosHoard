@@ -1633,16 +1633,18 @@ def production_from_storyboard(title: str, shots: list[dict[str, Any]], source_r
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None) -> dict[str, Any]:
+def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None, engine: Optional[str] = None,
+              speed: Optional[float] = None) -> dict[str, Any]:
     """Speak a text and get the audio file's path / leer un texto en voz alta y obtener la ruta del audio.
 
     voice: a library voice (id or name) or an engine's own voice id; empty = the best installed engine. lang is
-    the language code (es, en...). The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to
+    the language code (es, en...). engine: an engine id such as piper (a library voice's own engine wins; unknown_engine
+    when it is not installed); speed: 0.5 to 2.0, 1.0 normal. The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to
     save the audio as a project asset instead.
 
     Keywords: tts, text to speech, narrate, speak, family, narration, texto a voz, narrar, locución, audio de un texto
     """
-    return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang})
+    return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang, "engine": engine, "speed": speed})
 
 
 def main() -> None:

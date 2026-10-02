@@ -605,12 +605,14 @@ class FakeTTS(ve.TTSEngine):
     label = "Fake"
     capabilities = ve.EngineCapabilities(languages=["en"], cloning=False)
     spoken: list = []
+    speeds: list = []
 
     def is_installed(self):
         return True
 
     def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
         FakeTTS.spoken.append((text, voice_ref, language))
+        FakeTTS.speeds.append(speed)
         return ve.wav_bytes_mono16((np.sin(np.linspace(0, 10, max(1, len(text)) * 100)) * 0.2).astype("float32"), 16000)
 
 
@@ -631,6 +633,32 @@ def test_voice_tts_returns_the_path_of_a_wav(client, monkeypatch):
     assert c.post("/api/agent/voice_tts", json={"text": " "}).json()["error"] == "empty_text"
     monkeypatch.setattr("prosperos_hoard.api.ve.default_tts_engines", lambda **kw: [])
     assert c.post("/api/agent/voice_tts", json={"text": "x"}).json()["error"] == "tts_not_installed"
+
+
+class OtherTTS(FakeTTS):
+    id = "other-tts"
+
+    def is_installed(self):
+        return False
+
+
+def test_voice_tts_takes_an_engine_and_a_speed(client, monkeypatch):
+    c, app, _ = client
+    monkeypatch.setattr("prosperos_hoard.api.ve.default_tts_engines", lambda **kw: [FakeTTS(), OtherTTS()])
+    FakeTTS.speeds.clear()
+    ok = c.post("/api/agent/voice_tts", json={"text": "hola", "engine": "fake-tts", "speed": 1.5})
+    assert ok.status_code == 200 and ok.json()["engine_id"] == "fake-tts" and FakeTTS.speeds[-1] == 1.5
+    assert c.post("/api/agent/voice_tts", json={"text": "hola"}).status_code == 200 and FakeTTS.speeds[-1] is None
+    for engine_name in ("nope-tts", "other-tts"):                           # unknown, or known but not installed
+        bad = c.post("/api/agent/voice_tts", json={"text": "hola", "engine": engine_name})
+        assert bad.status_code == 400 and bad.json()["error"] == "unknown_engine", bad.text
+    for speed in (0.1, 3, "fast"):
+        bad = c.post("/api/agent/voice_tts", json={"text": "hola", "speed": speed})
+        assert bad.status_code in (400, 422), bad.text
+    assert c.post("/api/agent/voice_tts", json={"text": "hola", "speed": 2.5}).json()["error"] == "bad_speed"
+    voice = app.state.store.create_studio_voice("Own", "fake-tts", voice_ref="own-1")      # a library voice's own engine wins
+    mixed = c.post("/api/agent/voice_tts", json={"text": "hola", "voice": voice["id"], "engine": "other-tts"})
+    assert mixed.status_code == 200 and mixed.json()["engine_id"] == "fake-tts"
 
 
 def test_voice_tts_uses_a_saved_voice_by_id_or_name(client, monkeypatch):
