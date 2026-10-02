@@ -184,7 +184,7 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/api/productions` | every production folder under `data/productions/` (app-made and scripted, `legacy: true`) |
+| GET | `/api/productions` | every production folder under `data/productions/` (app-made and scripted, `legacy: true`); each with `cover {asset_id, kind}` (final cut, animatic or first still), `progress {done, total}` stages and `shot_count` |
 | POST | `/api/productions` | `{name, spec, settings?, project?}`: create and queue |
 | GET | `/api/productions/{slug}` | the full `state.json` plus `view` (the compact agent view) |
 | POST | `/api/productions/{slug}/continue` | approve / resume |

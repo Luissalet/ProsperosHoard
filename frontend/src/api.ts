@@ -731,6 +731,9 @@ export interface ProductionSummary {
   legacy?: boolean;
   animatic?: boolean;
   kind?: "music_video" | "short";
+  cover?: { asset_id: string; kind: "image" | "video" } | null;
+  progress?: { done: number; total: number };
+  shot_count?: number;
 }
 
 export interface ProductionShot {

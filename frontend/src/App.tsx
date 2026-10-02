@@ -26,9 +26,11 @@ import { SettingsView } from "./views/Settings";
 import { VoiceView } from "./views/Voice";
 import { ProductionsView } from "./views/Productions";
 import { Vitals } from "./components/Vitals";
+import { JobsMenu } from "./components/JobsMenu";
 
 const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "overview", key: "navOverview", icon: LayoutDashboard },
+  { id: "video", key: "navVideo", icon: Film },
   { id: "cast", key: "navCast", icon: Users },
   { id: "generate", key: "navGenerate", icon: Wand2 },
   { id: "library", key: "navLibrary", icon: Images },
@@ -161,6 +163,7 @@ export default function App() {
   const needsProject = PROJECT_IDS.has(section);
   if (needsProject && !projectId) view = <ProjectsView projects={projects} reload={loadProjects} />;
   else if (section === "overview") view = <OverviewView key={projectId} />;
+  else if (section === "video") view = <ProductionsView key={`${projectId}/${route.arg || ""}`} projectId={projectId!} />;
   else if (section === "cast") view = <CastView key={projectId} />;
   else if (section === "generate") view = <GenerateView key={projectId} />;
   else if (section === "library") view = <LibraryView key={projectId} />;
@@ -236,11 +239,7 @@ export default function App() {
               <div className="spacer" />
               <Vitals />
               {demo && <span className="pill gold" title={t("demoHint")}>{t("demoBadge")}</span>}
-              {active.length > 0 && (
-                <button className="btn sm" onClick={() => go("jobs")}>
-                  <span className="dot warn" /> {t("activeJobs", { n: active.length })}
-                </button>
-              )}
+              <JobsMenu />
             </header>
             <div className="content">{view}</div>
           </main>

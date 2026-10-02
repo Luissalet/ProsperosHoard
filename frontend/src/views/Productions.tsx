@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookCopy, Clapperboard, Film, Megaphone, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users } from "lucide-react";
 import {
-  api, fileUrl, type Character, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
+  AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, Film, Loader2, Megaphone, Music,
+  Pause as PauseIcon, Play, RotateCcw, Save, ShieldCheck, Shuffle, Users,
+} from "lucide-react";
+import {
+  api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
-import { Empty, Modal, timeAgo, useApp, useAsync } from "../components/ui";
+import { Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
 import { StoryboardCard, liveRun } from "./Storyboard";
@@ -17,7 +20,6 @@ const STATUS_KEY: Record<string, MessageKey> = {
   queued: "stateQueued", running: "stateRunning", awaiting_review: "statusAwaiting", done: "stateDone",
   failed: "stateFailed", cancelled: "stateCancelled", partial: "statusPartial",
 };
-const STAGE_TONE: Record<string, string> = { done: "ok", partial: "warn", pending: "" };
 
 export function StatusPill({ status }: { status: string }) {
   const { t } = useT();
@@ -124,18 +126,181 @@ export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onS
   );
 }
 
-function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloadList: () => void; onStarted: (slug: string) => void }) {
+type Tab = "storyboard" | "preview" | "qa" | "history";
+const STAGE_TAB: Record<string, Tab> = {
+  character: "storyboard", song: "storyboard", frames: "storyboard", lyrics: "storyboard", animatic: "preview", clips: "preview",
+  photocards: "preview", album: "preview", timeline: "preview", report: "history",
+};
+
+/** A failure message in words the person can act on; the raw text stays one click away. */
+export function humanError(message: string | null | undefined, t: ReturnType<typeof useT>["t"]): string {
+  const m = message || "";
+  if (/WinError (5|32)|Access is denied|PermissionError|being used by another process/i.test(m)) return t("errFileLocked");
+  if (/ComfyUI is not answering|comfy\w* (is )?(down|unreachable|not reachable)|Connection refused/i.test(m)) return t("errComfyDown");
+  if (/out of memory|CUDA error|OOM|not enough VRAM/i.test(m)) return t("errVram");
+  if (/language model|llm unavailable|no llama\.cpp/i.test(m)) return t("errLlm");
+  if (/the run stopped without finishing/i.test(m)) return t("errStopped");
+  const first = m.replace(/^[a-z_]+:\s*/i, "").split(/(?<=[.;])\s/)[0];
+  return first.length > 220 ? `${first.slice(0, 219)}…` : first;
+}
+
+/** The stage a running production is really on: its job says so before the state file does. */
+function liveStage(state: ProductionState, jobs: Job[]): string | null {
+  const job = jobs.find((j) => j.id === state.job_id);
+  const word = job?.message?.split(/[\s:·]/)[0] || "";
+  return Object.keys(state.view.stages || {}).includes(word) ? word : null;
+}
+
+function PipelineStepper({ state, active, onPick }: { state: ProductionState; active: boolean; onPick: (stage: string) => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const stages = Object.entries(state.view.stages || {});
+  const current = (active && liveStage(state, app.jobs)) || state.stage;
+  return (
+    <ol className="pipe">
+      {stages.map(([stage, st]) => {
+        const here = current === stage;
+        let cls: string = st;
+        if (here && active) cls = "running";
+        else if (here && state.status === "awaiting_review") cls = "paused";
+        else if (here && state.status === "failed") cls = "failed";
+        const Icon = cls === "done" ? Check : cls === "running" ? Loader2 : cls === "paused" ? PauseIcon
+          : cls === "failed" ? AlertTriangle : cls === "partial" ? CircleDot : Circle;
+        return (
+          <li key={stage} className={`pipe-step ${cls}`}>
+            <button onClick={() => onPick(stage)} title={t(`stage_${stage}` as MessageKey)}>
+              <Icon size={14} className={cls === "running" ? "spin" : ""} /> <span>{t(`stage_${stage}` as MessageKey)}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** One banner that says where the production is and the one thing to do now. */
+function NextStep({ state, active, onChanged, setTab }: {
+  state: ProductionState; active: boolean; onChanged: () => void; setTab: (tab: Tab) => void;
+}) {
+  const { t } = useT();
+  const app = useApp();
+  const [busy, setBusy] = useState(false);
+  const [details, setDetails] = useState(false);
+  const job = app.jobs.find((j) => j.id === state.job_id);
+  const act = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try { await fn(); if (ok) app.toast(ok, "ok"); onChanged(); } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  const go = () => act(() => api.continueProduction(state.slug), t("productionQueued"));
+  const jobStage = liveStage(state, app.jobs);
+  const stage = (active && jobStage) || state.stage;
+  const stageName = stage ? t(`stage_${stage}` as MessageKey) : "";
+  const isShort = state.kind === "short";
+  const legacy = Boolean(state.view.legacy);
+  if (legacy) return null;
+
+  if (active) {
+    const waiting = job?.state === "queued" || job?.state === "waiting_gpu";
+    const pct = Math.round((job?.progress || 0) * 100);
+    return (
+      <div className="next-step accent">
+        <Loader2 size={18} className="spin" />
+        <div className="grow">
+          <strong>{waiting ? (job?.state === "waiting_gpu" ? t("nsWaitingGpu") : t("nsQueued")) : t("nsRunning", { stage: stageName || "…" })}</strong>
+          {job?.message && job.message !== jobStage && <div className="small muted ellipsis">{job.message}</div>}
+          {!waiting && <div className="ns-bar"><i style={{ width: `${pct}%` }} /></div>}
+        </div>
+        {state.job_id && <button className="btn sm" disabled={busy} onClick={() => act(() => api.cancelJob(state.job_id!), t("sbPaused"))}><PauseIcon size={13} /> {t("sbPause")}</button>}
+      </div>
+    );
+  }
+  if (state.status === "awaiting_review" && state.stage === "song" && !isShort) {
+    const partial = (state.partial?.song || {}) as { song_asset_ids?: string[] };
+    const takes = (state.done?.song?.song_asset_ids as string[] | undefined) || partial.song_asset_ids || [];
+    return (
+      <div className="next-step gold">
+        <Music size={18} />
+        <div className="grow stack" style={{ gap: 8 }}>
+          <div><strong>{t("nsPickTake")}</strong><div className="small muted">{t("nsPickTakeLead")}</div></div>
+          {takes.map((id, i) => (
+            <div key={id} className="row" style={{ gap: 10 }}>
+              <strong className="mono small">{t("takeN", { n: i + 1 })}</strong>
+              <audio src={fileUrl(id)} controls preload="none" style={{ flex: 1, height: 32 }} />
+              <button className="btn sm primary" disabled={busy} onClick={() => act(() => api.continueProduction(state.slug, i + 1), t("takeChosen", { n: i + 1 }))}>{t("useThisTake")}</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (state.status === "awaiting_review") {
+    const plan = (state.done?.animatic as { plan?: { clips_planned: number; gpu_minutes: number } } | undefined)?.plan;
+    const animatic = state.stage === "animatic" && !isShort;
+    return (
+      <div className="next-step gold">
+        <PauseIcon size={18} />
+        <div className="grow">
+          <strong>{animatic ? t("nsAnimatic") : t("nsReview", { stage: stageName })}</strong>
+          <div className="small muted">{animatic && plan ? t("nsAnimaticLead", { clips: plan.clips_planned, gpu: plan.gpu_minutes }) : state.message}</div>
+        </div>
+        {animatic && <button className="btn sm" onClick={() => setTab("preview")}><Film size={13} /> {t("nsWatch")}</button>}
+        <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {animatic ? t("nsAnimaticGo") : t("continueProduction")}</button>
+      </div>
+    );
+  }
+  if (state.status === "failed" || state.status === "cancelled") {
+    const failed = state.status === "failed";
+    return (
+      <div className={`next-step ${failed ? "bad" : ""}`}>
+        {failed ? <AlertTriangle size={18} /> : <PauseIcon size={18} />}
+        <div className="grow">
+          <strong>{failed ? t("nsFailed", { stage: stageName || "—" }) : t("nsCancelled")}</strong>
+          {failed && <div className="small">{humanError(state.message, t)}</div>}
+          {failed && state.message && (
+            <button className="link-btn small" onClick={() => setDetails(!details)}>{details ? t("errHide") : t("errDetails")}</button>
+          )}
+          {details && <pre className="ns-details">{state.message}</pre>}
+        </div>
+        <button className="btn sm primary" disabled={busy} onClick={go}><RotateCcw size={13} /> {t("resumeProduction")}</button>
+      </div>
+    );
+  }
+  if (state.status === "queued") {
+    return (
+      <div className="next-step info">
+        <Shuffle size={18} />
+        <div className="grow"><strong>{t("nsEdited")}</strong><div className="small muted">{state.message || t("nsEditedLead")}</div></div>
+        <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {t("continueProduction")}</button>
+      </div>
+    );
+  }
+  if (state.status === "done") {
+    return (
+      <div className="next-step ok">
+        <Check size={18} />
+        <div className="grow"><strong>{t("nsDone")}</strong><div className="small muted">{isShort ? t("nsDoneLeadShort") : t("nsDoneLead")}</div></div>
+        {!isShort && <button className="btn sm primary" onClick={() => setTab("preview")}><Film size={13} /> {t("nsDoneWatch")}</button>}
+      </div>
+    );
+  }
+  return null;
+}
+
+function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
+  slug: string; reloadList: () => void; onStarted: (slug: string) => void; onBack: () => void;
+}) {
   const { t } = useT();
   const app = useApp();
   const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
+  const [tab, setTab] = useState<Tab | null>(null);
   const active = data ? liveRun(data, app.jobs) : false;
   useEffect(() => {
     if (!active) return;
     const id = setInterval(reload, 2500);
     return () => clearInterval(id);
   }, [active, reload]);
-  // the list beside follows this production's status (it was left "running")
   const status = data?.status;
   useEffect(() => { if (status) reloadList(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -143,76 +308,91 @@ function ProductionDetail({ slug, reloadList, onStarted }: { slug: string; reloa
   const view = data.view;
   const legacy = Boolean(view.legacy);
   const isShort = data.kind === "short";
-  const act = async (fn: () => Promise<unknown>) => {
-    try { await fn(); reload(); reloadList(); app.refreshJobs(); } catch (e) { app.toast((e as Error).message, "bad"); }
+  const changed = () => { reload(); reloadList(); app.refreshJobs(); };
+  const saveRecipe = async () => {
+    try { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); changed(); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
   };
-  const saveRecipe = () => act(async () => { const r = await api.exportRecipe(slug); app.toast(t("recipeSaved", { name: r.name }), "ok"); });
   const renders = view.renders || {};
+  const animatic = (data.done?.animatic as { renders?: Record<string, string> } | undefined)?.renders;
+  const outputs = Object.keys(renders).length + (animatic ? Object.keys(animatic).length : 0);
+  // the tab follows the production until the person picks one
+  const autoTab: Tab = data.status === "awaiting_review" && data.stage === "animatic" ? "preview"
+    : data.status === "done" && outputs ? "preview" : "storyboard";
+  const current = tab || autoTab;
+  const tabs: [Tab, string][] = [
+    ["storyboard", t("tabStoryboard")], ["preview", `${t("tabPreview")}${outputs ? ` · ${outputs}` : ""}`],
+    ["qa", t("tabQa")], ["history", t("tabHistory")],
+  ];
 
   return (
     <div className="stack">
-      <div className="card">
-        <h2><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
-        <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
-          {!legacy && (["failed", "cancelled"].includes(view.status) || (view.status === "queued" && !active)) && (
-            <button className="btn sm primary" onClick={() => act(() => api.continueProduction(slug))}>
-              <RotateCcw size={13} /> {t("resumeProduction")}
-            </button>
-          )}
-          {!isShort && <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>}
+      <div className="card prod-head">
+        <div className="row wrap" style={{ gap: 8 }}>
+          <button className="btn sm ghost" onClick={onBack}><ArrowLeft size={14} /> {t("prodBack")}</button>
+          <h2 className="grow" style={{ margin: 0 }}><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} /></h2>
+          {!isShort && !legacy && <button className="btn sm" onClick={saveRecipe}><Save size={13} /> {t("saveAsRecipe")}</button>}
           {!isShort && <button className="btn sm" onClick={() => setRecast(true)}><Users size={13} /> {t("recreateWith")}</button>}
-          {view.project_id && <button className="btn sm ghost" onClick={() => app.setProject(view.project_id!)}>{t("openProject")}</button>}
         </div>
         {legacy && <p className="small muted">{t("legacyNote")}</p>}
-        {data.recipe && <p className="small muted">{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
-        {data.message && <p className={`small ${view.status === "failed" ? "err-text" : "muted"}`}>{data.message}</p>}
-        {view.stages && (
-          <div className="row wrap" style={{ gap: 6 }}>
-            {Object.entries(view.stages).map(([stage, st]) => (
-              <span key={stage} className={`pill ${STAGE_TONE[st] || ""}${data.stage === stage && active ? " accent" : ""}`}>
-                {t((`stage_${stage}`) as MessageKey)}
-              </span>
+        {data.recipe && <p className="small muted" style={{ margin: "6px 0 0" }}>{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
+        {view.stages && <PipelineStepper state={data} active={active} onPick={(s) => setTab(STAGE_TAB[s] || "storyboard")} />}
+        <NextStep state={data} active={active} onChanged={changed} setTab={setTab} />
+      </div>
+      {isShort ? <ShortDetail state={data} onChanged={changed} /> : (
+        <>
+          <div className="tabs-bar">
+            {tabs.map(([k, label]) => (
+              <button key={k} className={current === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
-        )}
-      </div>
-      {isShort && <ShortDetail state={data} onChanged={() => { reload(); reloadList(); }} />}
-      {!isShort && <SongTakesCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {!isShort && view.status !== "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {!isShort && Object.keys(renders).length > 0 && (
-        <div className="card">
-          <h2>{t("finalCut")}</h2>
-          <div className="row wrap" style={{ alignItems: "flex-start" }}>
-            {Object.entries(renders).map(([aspect, byQuality]) => {
-              const id = byQuality.final || byQuality.preview;
-              return id ? (
-                <div key={aspect} className="stack" style={{ gap: 4 }}>
-                  <span className="small muted">{aspect}</span>
-                  <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
-                    <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+          {current === "storyboard" && (
+            <>
+              {!legacy && (data.spec.shots || []).length > 0 && <StoryboardCard state={data} onChanged={changed} />}
+              {!legacy && <SongTrackCard state={data} onChanged={changed} />}
+            </>
+          )}
+          {current === "preview" && (
+            <>
+              {Object.keys(renders).length > 0 && (
+                <div className="card">
+                  <h2>{t("finalCut")}</h2>
+                  <div className="row wrap" style={{ alignItems: "flex-start" }}>
+                    {Object.entries(renders).map(([aspect, byQuality]) => {
+                      const id = byQuality.final || byQuality.preview;
+                      return id ? (
+                        <div key={aspect} className="stack" style={{ gap: 4 }}>
+                          <span className="small muted">{aspect}{byQuality.final ? "" : ` · ${t("previewQuality")}`}</span>
+                          <div className="video-frame" style={{ width: aspect === "16:9" ? 480 : 260 }}>
+                            <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+                          </div>
+                          <a className="btn sm ghost" href={fileUrl(id)} download><Download size={13} /> {t("download")}</a>
+                        </div>
+                      ) : null;
+                    })}
                   </div>
                 </div>
-              ) : null;
-            })}
-          </div>
-        </div>
-      )}
-      {!isShort && view.status === "done" && <AnimaticCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {!legacy && !isShort && <SongTrackCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />}
-      {!legacy && !isShort && (data.spec.shots || []).length > 0 && (
-        <StoryboardCard state={data} onChanged={() => { reload(); reloadList(); app.refreshJobs(); }} />
-      )}
-      {!isShort && <QaCard state={data} onRan={reload} />}
-      {!legacy && data.lineage?.length > 0 && (
-        <div className="card">
-          <h2>{t("lineageTitle")}</h2>
-          <ul className="small" style={{ margin: 0, paddingLeft: 18, maxHeight: 220, overflow: "auto" }}>
-            {data.lineage.slice(-40).reverse().map((e, i) => (
-              <li key={i}><span className="muted mono">{e.at.slice(11, 19)}</span> <strong>{e.stage}</strong> {e.event}
-                {e.key ? ` · ${String(e.key)}` : ""}{e.reason ? ` · ${String(e.reason)}` : ""}</li>
-            ))}
-          </ul>
-        </div>
+              )}
+              <AnimaticCard state={data} onChanged={changed} />
+              {outputs === 0 && !(view.stages?.frames === "done") && <p className="muted small">{t("previewEmpty")}</p>}
+            </>
+          )}
+          {current === "qa" && <QaCard state={data} onRan={reload} />}
+          {current === "history" && (
+            <div className="card">
+              <h2>{t("lineageTitle")}</h2>
+              {data.message && <p className="small muted">{data.message}</p>}
+              {legacy || !data.lineage?.length ? <p className="small muted">—</p> : (
+                <ul className="small" style={{ margin: 0, paddingLeft: 18, maxHeight: 480, overflow: "auto" }}>
+                  {data.lineage.slice(-120).reverse().map((e, i) => (
+                    <li key={i}><span className="muted mono">{e.at.slice(0, 10)} {e.at.slice(11, 19)}</span> <strong>{e.stage}</strong> {e.event}
+                      {e.key ? ` · ${String(e.key)}` : ""}{e.reason ? ` · ${String(e.reason)}` : ""}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </>
       )}
       {recast && <RecastModal fromProduction={view} defaultTitle={legacy ? undefined : data.spec.title} onClose={() => setRecast(false)} onStarted={(s) => { setRecast(false); onStarted(s); }} />}
     </div>
@@ -238,11 +418,6 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
       <h2>
         <Film size={16} /> {t("animaticTitle")}
         <div className="card-actions">
-          {state.status === "awaiting_review" && (
-            <button className="btn sm primary" onClick={async () => {
-              try { await api.continueProduction(state.slug); onChanged(); } catch (e) { app.toast((e as Error).message, "bad"); }
-            }}><Play size={13} /> {t("continueProduction")}</button>
-          )}
           {!legacy && state.spec.shots?.length ? (
             <button className="btn sm" onClick={() => setEditing(true)}><Shuffle size={13} /> {t("changeShots")}</button>
           ) : null}
@@ -269,36 +444,6 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
         </div>
       )}
       {editing && <ShotsModal state={state} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
-    </div>
-  );
-}
-
-// Paused after the song: listen to the takes and pick one before any still
-// is cut to it. Once chosen, the takes stay listed with the one in use.
-function SongTakesCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
-  const { t } = useT();
-  const app = useApp();
-  const partial = ((state as unknown as { partial?: Record<string, any> }).partial || {}).song || {};
-  const done = state.done?.song as { song_asset_ids?: string[]; song_asset_id?: string } | undefined;
-  const takes: string[] = done?.song_asset_ids || partial.song_asset_ids || [];
-  const choosing = state.status === "awaiting_review" && state.stage === "song";
-  if (takes.length < 2 && !choosing) return null;
-  return (
-    <div className="card stack">
-      <h2>{t("songTakesTitle")}</h2>
-      {choosing && <p className="small">{t("songTakesLead")}</p>}
-      {takes.map((id, i) => (
-        <div key={id} className="row" style={{ gap: 10 }}>
-          <strong className="mono small">{t("takeN", { n: i + 1 })}</strong>
-          <audio src={fileUrl(id)} controls preload="none" style={{ flex: 1 }} />
-          {choosing ? (
-            <button className="btn sm primary" onClick={async () => {
-              try { await api.continueProduction(state.slug, i + 1); app.toast(t("takeChosen", { n: i + 1 }), "ok"); onChanged(); }
-              catch (e) { app.toast((e as Error).message, "bad"); }
-            }}>{t("useThisTake")}</button>
-          ) : done?.song_asset_id === id ? <span className="pill ok">{t("takeInUse")}</span> : null}
-        </div>
-      ))}
     </div>
   );
 }
@@ -458,54 +603,111 @@ function RecipesCard({ onStarted }: { onStarted: (slug: string) => void }) {
   );
 }
 
-export function ProductionsView() {
+export function ProductionCard({ p, projectName, onOpen, compact }: {
+  p: ProductionSummary; projectName?: string; onOpen: () => void; compact?: boolean;
+}) {
   const { t, lang } = useT();
+  const pct = p.progress && p.progress.total ? Math.round((p.progress.done / p.progress.total) * 100) : 0;
+  const where = p.stage ? t(`stage_${p.stage}` as MessageKey) : "";
+  const cardHint = () => {
+    if (p.status === "done") return t("nsDone");
+    if (p.status === "awaiting_review" && p.stage === "song" && p.kind !== "short") return t("nsPickTake");
+    if (p.status === "awaiting_review" && p.stage === "animatic") return t("nsAnimatic");
+    if (p.status === "failed") return `${t("nsFailed", { stage: where || "—" })} · ${humanError(p.message, t)}`;
+    return where ? `${where}${p.progress ? ` · ${p.progress.done}/${p.progress.total}` : ""}` : "";
+  };
+  return (
+    <button className={`prod-card${compact ? " compact" : ""}`} onClick={onOpen}>
+      <div className="prod-cover">
+        {p.cover ? <img src={`/api/assets/${p.cover.asset_id}/thumb`} alt="" loading="lazy" /> : <Clapperboard size={compact ? 18 : 28} />}
+        {p.cover?.kind === "video" && <span className="prod-play"><Play size={compact ? 10 : 14} /></span>}
+      </div>
+      <div className="prod-info">
+        <div className="row" style={{ gap: 6 }}>
+          <strong className="ellipsis grow">{p.name}</strong>
+          {!compact && <StatusPill status={p.status} />}
+        </div>
+        <span className="small muted ellipsis">
+          {p.kind === "short" ? t("shortBadge") : t("prodShotsN", { n: p.shot_count || 0 })}
+          {projectName ? ` · ${projectName}` : ""} · {timeAgo(p.updated_at, lang)}
+        </span>
+        {!p.legacy && (
+          <>
+            <div className="prod-progress"><i style={{ width: `${pct}%` }} /></div>
+            <span className={`small ellipsis ${p.status === "awaiting_review" ? "gold-text" : p.status === "failed" ? "err-text" : "muted"}`}>{cardHint()}</span>
+          </>
+        )}
+      </div>
+    </button>
+  );
+}
+
+/** Music videos and shorts: a gallery to pick from (a project's own, or all
+ * of them), and one production at a time with its pipeline, its next step
+ * and its storyboard. */
+export function ProductionsView({ projectId }: { projectId?: string }) {
+  const { t } = useT();
   const app = useApp();
   const { data, reload } = useAsync(() => api.productions(), [app.dataVersion]);
-  const items = useMemo(() => data?.items || [], [data]);
-  const selected = app.route.arg || items[0]?.slug;
-  const open = (slug: string) => { app.go("productions", slug); reload(); };
+  const { data: projects } = useAsync(() => api.projects(), [app.dataVersion]);
+  const names = useMemo(() => Object.fromEntries((projects?.items || []).map((p: Project) => [p.id, p.name])), [projects]);
+  const all = useMemo(() => data?.items || [], [data]);
+  const items = projectId ? all.filter((p) => p.project_id === projectId) : all;
+  const selected = app.route.arg;
+  const open = (p: { slug: string; project_id?: string | null }) => {
+    if (projectId) app.go("video", p.slug);
+    else if (p.project_id && names[p.project_id]) window.location.hash = `#/p/${p.project_id}/video/${p.slug}`;
+    else app.go("productions", p.slug);
+    reload();
+  };
+  const openSlug = (slug: string) => {
+    api.production(slug).then((s) => open({ slug, project_id: s.project_id })).catch(() => app.go("productions", slug));
+  };
+  const back = () => (projectId ? app.go("video") : app.go("productions"));
   const [newShort, setNewShort] = useState(false);
   const [newVideo, setNewVideo] = useState(false);
+  const modals = (
+    <>
+      {newVideo && <VideoModal projectId={projectId} onClose={() => setNewVideo(false)} onStarted={(s) => { setNewVideo(false); openSlug(s); }} />}
+      {newShort && <ShortModal onClose={() => setNewShort(false)} onStarted={(s) => { setNewShort(false); openSlug(s); }} />}
+    </>
+  );
 
+  if (selected) {
+    return (
+      <>
+        <ProductionDetail key={selected} slug={selected} reloadList={reload} onStarted={openSlug} onBack={back} />
+        {modals}
+      </>
+    );
+  }
+  const title = projectId ? t("videoTitle") : t("productionsTitle");
   return (
     <>
       <div className="page-head">
-        <div><h1>{t("productionsTitle")}</h1><p>{t("productionsLead")}</p></div>
+        <div><h1>{title}</h1><p>{projectId ? t("videoLeadText") : t("productionsLead")}</p></div>
         <div className="actions">
           <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
           <button className="btn" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
         </div>
       </div>
-      {newVideo && <VideoModal onClose={() => setNewVideo(false)} onStarted={(s) => { setNewVideo(false); open(s); }} />}
-      {newShort && <ShortModal onClose={() => setNewShort(false)} onStarted={(s) => { setNewShort(false); open(s); }} />}
-      <div className="productions-grid">
-        <div className="stack">
-          <div className="card" style={{ padding: 6 }}>
-            {items.length === 0 ? <Empty icon={<Clapperboard size={30} />} text={t("noProductions")} /> : (
-              <table className="list">
-                <tbody>
-                  {items.map((p) => (
-                    <tr key={p.slug} onClick={() => open(p.slug)} style={{ cursor: "pointer" }} className={p.slug === selected ? "selected" : ""}>
-                      <td>
-                        <strong>{p.name}</strong>{p.kind === "short" && <span className="pill info" style={{ marginLeft: 6 }}>{t("shortBadge")}</span>}
-                        <div className="mono muted small">{p.slug}</div>
-                      </td>
-                      <td><StatusPill status={p.status} /></td>
-                      <td className="small muted nowrap">{timeAgo(p.updated_at, lang)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+      {modals}
+      {items.length === 0 ? (
+        <div className="prod-empty card">
+          <Clapperboard size={34} />
+          <h2>{projectId ? t("prodNoneHere") : t("noProductionsTitle")}</h2>
+          <p className="muted">{t("prodStartHere")}</p>
+          <div className="row" style={{ gap: 8, justifyContent: "center" }}>
+            <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
+            <button className="btn" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
           </div>
-          <RecipesCard onStarted={open} />
         </div>
-        <div>
-          {selected ? <ProductionDetail key={selected} slug={selected} reloadList={reload} onStarted={open} />
-            : <p className="muted">{t("pickProduction")}</p>}
+      ) : (
+        <div className="prod-grid">
+          {items.map((p) => <ProductionCard key={p.slug} p={p} projectName={projectId ? undefined : names[p.project_id || ""]} onOpen={() => open(p)} />)}
         </div>
-      </div>
+      )}
+      <div style={{ marginTop: 18, maxWidth: 720 }}><RecipesCard onStarted={openSlug} /></div>
     </>
   );
 }

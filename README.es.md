@@ -78,7 +78,7 @@ el estudio hace el trabajo y responde con identificadores e imágenes.
 | Shorts narrados | Un tema (el guion - gancho, 5-9 bloques con un prompt de imagen y palabras de búsqueda en inglés cada uno, título, descripción, hashtags - lo escribe el modelo local a través de Hoard Link) o tu propio guion se convierte en un vídeo vertical como una producción reanudable: cada frase locutada (una voz del estudio de voz, Piper o el TTS de Faustus) con sus tiempos exactos, los tiempos de cada palabra desde el reconocimiento de voz alineados sobre las palabras del propio guion (o una estimación por sílabas), un plan de planos sobre el reloj de la locución relleno con vídeo de archivo o imágenes generadas (`auto`/`stock`/`generate`/`mix`, generando cuando no encuentra nada), clips de Wan opcionales tras revisar un animático, una música (ninguna, un recurso, una instrumental de ACE-Step o una pista de `data/music/`) que se aparta bajo la voz con un compresor sidechain, -14 LUFS, subtítulos «bold» con la palabra dicha resaltada, cada formato renderizado y un `publish.txt` con título, descripción, hashtags y los créditos del metraje; pausa opcional para leer el guion, edición del guion que rehace solo lo que depende de él (la música se conserva) y de 2 a 8 variantes en una llamada | Los datos del guion son del modelo: léelo (`settings.script_review`) antes de publicar; sin reconocimiento de voz el tiempo de cada palabra es una estimación; no sube nada a las plataformas |
 | Vídeo de archivo | Búsqueda en Pexels y Pixabay (vídeos o fotos, filtrados por orientación y duración) con una clave gratuita por proveedor, el fichero más pequeño que alcanza la resolución del render, importado con proveedor, autor, página y licencia en su receta, y las líneas de crédito a partir de ahí | Necesita clave (Ajustes > Vídeo de archivo); los resultados dependen de palabras clave en inglés |
 | Control por agentes | 53 herramientas MCP equivalentes a `/api/agent/*` (44 del estudio, 7 de ellas para el kit de personaje y 3 para shorts y vídeo de archivo, más 9 del estudio de voz), resultados compactos con identificadores, imágenes solo cuando se piden explícitamente (`include_image=true`), errores con código y siguiente paso, y un registro auditable «Lo que hizo el asistente» | Los trabajos se consultan (`studio_job`/`voice_job` puede esperar en el servidor); no hay eventos push |
-| Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Producciones (con Recetas y Nuevo short), Voz, Trabajos, Backends, Actividad del asistente y Ajustes (con las claves de vídeo de archivo); tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
+| Interfaz | Estudio en React: Resumen, Reparto (con el Kit de cada personaje: resumen, hoja de modelo, dataset, entrenamiento, tomas; importación de paquetes y biblioteca), Generar, Biblioteca con visor, Diseño, Audio, Montaje, Tableros, Vídeos (los videoclips y shorts de cada proyecto) y Producciones (todos, con Recetas y Nuevo short), Voz, Trabajos, Backends, Actividad del asistente y Ajustes (con las claves de vídeo de archivo); tema oscuro y claro, español e inglés, atajos de teclado | El montaje se edita por planos (duración, transición, cámara, orden, sustitución), no fotograma a fotograma |
 
 ![Visor de la Biblioteca con el set de photocards: diez tarjetas y el panel de receta con repetir, variar, ampliar y animar](docs/media/03-photocards.png)
 *Aplicación real, datos de demostración sintéticos: el set de photocards de los cinco miembros inventados, abierto en el visor con su receta y sus entradas.*
@@ -517,6 +517,21 @@ existente conserva su referencia canónica, uno nuevo recibe antes una hoja de
 referencia, y se reutilizan la canción (salvo que su letra nombre al
 protagonista anterior) y los fotogramas y clips de los planos en los que no
 sale (`options.reuse: ["song", "frames", "clips"]`).
+
+**La página de una producción** funciona como los estudios en los que se
+inspira: una cadena con sus etapas (hecha, en marcha, en pausa para revisar,
+fallida) y un aviso con lo siguiente que hay que hacer - elegir la toma de la
+canción (las tomas suenan ahí mismo), ver el animático y renderizar los
+clips (con los minutos de GPU que costará), reanudar tras un fallo (el error
+en palabras claras, el texto original a un clic) o continuar tras una
+edición - y cuatro pestañas: Storyboard (planos y pista de la canción), Ver
+(montaje final y animático), Calidad e Historial. Cada proyecto tiene su
+página **Vídeos** (una galería con portada, etapa y barra de progreso por
+vídeo) y su Resumen los enseña con un botón «Nuevo videoclip» que lo crea en
+ese proyecto. El botón «N activos» de la cabecera abre lo que se está
+haciendo ahora, con su progreso, un cancelar y un clic hasta la producción a
+la que pertenece. Los diálogos mantienen sus botones a la vista aunque sean
+largos.
 
 **Canción y letra**, en una producción, es un editor de vídeo puesto en
 vertical: la letra sincronizada con la canción en una línea (las secciones al

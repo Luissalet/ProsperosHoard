@@ -252,7 +252,8 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
           <span className="mono small muted">{clock(now)} / {clock(duration)}</span>
         </div>
       ) : (
-        <p className="small">{t("trackNoSong")}{songInfo.tags ? ` · ${songInfo.tags}` : ""}</p>
+        <p className="small">{((state.partial?.song?.song_asset_ids as string[] | undefined) || []).length ? t("trackPickTakeFirst")
+          : t("trackNoSong")}{songInfo.tags ? ` · ${songInfo.tags}` : ""}</p>
       )}
       {songId && !timing?.timed && hasLyrics && (
         <div className="row" style={{ gap: 8, marginBottom: 10 }}>

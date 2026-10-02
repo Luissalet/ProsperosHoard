@@ -76,7 +76,7 @@ with ids and pictures.
 | Narrated shorts | A topic (the script - hook, 5-9 segments with an English image prompt and stock keywords each, title, description, hashtags - is written by the local model through Hoard Link) or your own script becomes a vertical video as one resumable production: every sentence voiced (a voice-studio voice, Piper or Faustus TTS) with exact sentence times, word times from speech-to-text aligned back onto the script's own words (or a syllable-weighted estimate), a shot plan on the narration's clock filled with stock footage or generated stills (`auto`/`stock`/`generate`/`mix`, falling back to generation when nothing is found), optional Wan clips behind an animatic review, a music bed (none, an asset, ACE-Step instrumental, or a track from `data/music/`) that ducks under the voice with a sidechain compressor, -14 LUFS, word-highlighted "bold" captions, every aspect rendered, and a `publish.txt` with title, description, hashtags and the footage credits; an optional pause to read the script first, a script edit that redoes only what depends on it (the music is kept), and 2-8 variants in one call | The script's facts are the model's: read it (`settings.script_review`) before publishing; word timing without speech-to-text is an estimate; no uploading to the platforms |
 | Stock footage | Pexels and Pixabay search (videos or photos, filtered by orientation and length) with a free API key per provider, the smallest file that reaches the render's resolution, imported with provider, author, page and licence in its recipe, and credit lines built from them | Needs a key (Settings > Stock footage); results depend on English keywords |
 | Agent control | 53 MCP tools mirroring `/api/agent/*` (44 studio tools, 7 of them for the character kit and 3 for shorts and stock footage, plus 9 for the voice studio), compact id-first results, pictures only when explicitly asked (`include_image=true` - a text-only local model does not want one by default), errors with a code and a next step, an audited "What the assistant did" log | Jobs are polled (`studio_job`/`voice_job` can wait server-side); no push events |
-| Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Productions (with Recipes and New short), Voice, Jobs, Backends, Assistant activity, Settings (with the stock footage keys); dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
+| Interface | React studio: Overview, Cast (with each character's Kit: overview, model sheet, dataset, training, takes; pack import and the library), Generate, Library with lightbox, Designer, Audio, Timeline, Boards, Videos (each project's music videos and shorts) and Productions (all of them, with Recipes and New short), Voice, Jobs, Backends, Assistant activity, Settings (with the stock footage keys); dark and light, Spanish and English, keyboard shortcuts | Timeline editing is clip-level (duration, transition, camera, order, swap), not frame-level |
 
 ![Library lightbox on the photocard set: ten cards and the recipe panel with reuse, vary, upscale and animate](docs/media/03-photocards.png)
 *Actual application, synthetic demo data: the photocard set rendered for the five invented members, opened in the lightbox with its recipe and inputs.*
@@ -507,6 +507,20 @@ character keeps its canonical reference, a new one gets a reference sheet
 first, and the song (unless its lyrics name the old lead) and the stills
 and clips of the shots the lead is not in are reused
 (`options.reuse: ["song", "frames", "clips"]`).
+
+**A production's page** works like the studios it borrows from: a pipeline
+of its stages (done, running, paused for review, failed) and one banner with
+the next thing to do - pick the song take (the takes play right there),
+watch the animatic and render the clips (with the GPU minutes it will
+take), resume after a failure (the error in plain words, the raw text one
+click away) or continue after an edit - and four tabs: Storyboard (shots and
+the song track), Preview (final cut and animatic), QA and History. Each
+project has its own **Videos** page (a gallery with a cover, the stage and a
+progress bar per video) and its Overview shows them with a "New music video"
+button that makes it in that project. The header's "N active" button opens
+what is running now - with progress, a cancel, and a click through to the
+production it belongs to. Dialogs keep their buttons in view however long
+they get.
 
 **Song and lyrics** on a production is a video editor standing up: the
 lyrics timed to the song on one vertical line (sections beside them, a

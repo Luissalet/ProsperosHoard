@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { CheckCircle2, Circle, Pencil } from "lucide-react";
+import { CheckCircle2, Circle, Clapperboard, Pencil } from "lucide-react";
 import { api, fileUrl, thumbUrl } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AssetTile, useApp, useAsync } from "../components/ui";
+import { ProductionCard } from "./Productions";
+import { VideoModal } from "./VideoModal";
 
 export function OverviewView() {
   const { t } = useT();
@@ -12,6 +14,8 @@ export function OverviewView() {
   const recent = useAsync(() => api.assets(pid, { limit: 12 }), [pid, app.dataVersion]);
   const cast = useAsync(() => api.characters(pid), [pid, app.dataVersion]);
   const timelines = useAsync(() => api.timelines(pid), [pid, app.dataVersion]);
+  const productions = useAsync(() => api.productions(), [app.dataVersion]);
+  const [newVideo, setNewVideo] = useState(false);
   const [editing, setEditing] = useState(false);
   const [brief, setBrief] = useState("");
 
@@ -20,7 +24,9 @@ export function OverviewView() {
   const c = p.counts;
   const chars = cast.data?.items || [];
   const renders = (recent.data?.items || []).filter((a) => a.kind === "video" && a.source === "rendered");
+  const videos = (productions.data?.items || []).filter((x) => x.project_id === pid);
   const steps: [MessageKey, boolean, string][] = [
+    ["stepVideo", videos.some((x) => x.status === "done"), "video"],
     ["stepCast", c.characters > 0, "cast"],
     ["stepGenerate", chars.length > 0 && chars.every((x) => x.canonical_asset_id), "generate"],
     ["stepCards", (recent.data?.items || []).some((a) => a.source === "rendered" && a.kind === "image"), "designer"],
@@ -74,6 +80,19 @@ export function OverviewView() {
             <div className="stat"><b>{c.timelines}</b><span>{t("navTimeline")}</span></div>
           </div>
           <div className="card">
+            <h2><Clapperboard size={16} /> {t("videoTitle")}
+              <div className="card-actions">
+                {videos.length > 0 && <button className="btn sm ghost" onClick={() => app.go("video")}>{t("open")}</button>}
+                <button className="btn sm primary" onClick={() => setNewVideo(true)}>{t("newVideo")}</button>
+              </div>
+            </h2>
+            {videos.length === 0 ? <p className="small muted" style={{ margin: 0 }}>{t("overviewNoVideos")}</p> : (
+              <div className="prod-grid compact">
+                {videos.slice(0, 4).map((x) => <ProductionCard key={x.slug} p={x} compact onOpen={() => app.go("video", x.slug)} />)}
+              </div>
+            )}
+          </div>
+          <div className="card">
             <h2>{t("overviewCast")} <div className="card-actions"><button className="btn sm ghost" onClick={() => app.go("cast")}>{t("open")}</button></div></h2>
             <div className="row wrap" style={{ gap: 14 }}>
               {chars.map((ch) => (
@@ -105,6 +124,7 @@ export function OverviewView() {
           </div>
         </div>
       </div>
+      {newVideo && <VideoModal projectId={pid} onClose={() => setNewVideo(false)} onStarted={(slug) => { setNewVideo(false); app.go("video", slug); }} />}
     </>
   );
 }
