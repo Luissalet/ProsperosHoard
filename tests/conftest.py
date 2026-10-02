@@ -21,6 +21,20 @@ def _private_hoard_home(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("COMFYUI_DIR", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_family_hub(monkeypatch):
+    """No test talks to a real hub (events, notices, GPU lease, tool calls): the family is switched off unless a test fakes it."""
+    from prosperos_hoard.hoard_link import fam_notify, family
+
+    monkeypatch.setenv("HOARD_EVENTS", "0")
+    monkeypatch.setenv("HOARD_HUB_AUTOSTART", "0")
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "0")
+    monkeypatch.setattr(fam_notify, "hub_available", lambda timeout=1.0: False)
+    monkeypatch.setattr(fam_notify, "notify", lambda *a, **k: {"ok": False, "error": "hub unreachable"})
+    monkeypatch.setattr(family, "call", lambda app, tool, arguments=None, **k: {"ok": False, "app": app, "tool": tool, "status": None,
+                                                                              "error": "hub not reachable"})
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     d = tmp_path / "data"

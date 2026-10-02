@@ -25,6 +25,7 @@ behaves the same on Windows (spawn) and Linux.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -62,14 +63,21 @@ class Progress:
     `progress.cancelled()` lets long loops (ffmpeg, ComfyUI polling) check
     without writing."""
 
-    def __init__(self, store: Store, job_id: str):
+    def __init__(self, store: Store, job_id: str, on_progress: Optional[Callable[[str, float, Optional[str]], None]] = None):
         self.store = store
         self.job_id = job_id
+        self.on_progress = on_progress  # the family job events (throttled there; a failing hook never reaches the job)
 
     def __call__(self, fraction: float, message: Optional[str] = None) -> None:
         if self.store.is_cancel_requested(self.job_id):
             raise JobCancelled("cancelled")
-        self.store.update_job(self.job_id, progress=max(0.0, min(1.0, float(fraction))), message=message)
+        fraction = max(0.0, min(1.0, float(fraction)))
+        self.store.update_job(self.job_id, progress=fraction, message=message)
+        if self.on_progress is not None:
+            try:
+                self.on_progress(self.job_id, fraction, message)
+            except Exception:  # noqa: BLE001 - events are hints
+                logger.debug("progress event failed", exc_info=True)
 
     def cancelled(self) -> bool:
         return self.store.is_cancel_requested(self.job_id)
@@ -87,8 +95,11 @@ class JobQueue:
     def __init__(self, store: Store, gpu_targets: Optional[list[Optional[str]]] = None,
                  bind: Optional[Callable[[Optional[str]], None]] = None,
                  target_ready: Optional[Callable[[str], bool]] = None,
-                 accepts: Optional[Callable[[dict[str, Any]], bool]] = None):
-        """`gpu_targets`: one GPU worker per entry (None = the main ComfyUI,
+                 accepts: Optional[Callable[[dict[str, Any]], bool]] = None,
+                 events: Any = None, gpu_guard: Optional[Callable[[dict[str, Any]], Any]] = None):
+        """`events` (jobevents.JobEvents) hears queued / started / progress and the end of every job and tells the family hub;
+        `gpu_guard(job)` returns a context manager held while a GPU-lane job runs (the hub's GPU lease). Both are optional hints:
+        a failing one never reaches the job. `gpu_targets`: one GPU worker per entry (None = the main ComfyUI,
         a URL = a render-pool server); they all take jobs from the one GPU
         queue. `bind(target)` pins a worker thread to its server,
         `target_ready(url)` lets a pool worker skip taking jobs while its
@@ -106,6 +117,16 @@ class JobQueue:
         # for this card goes to one that holds it
         self._accepts = accepts
         self._claim_lock = threading.Lock()
+        self.events = events
+        self._gpu_guard = gpu_guard
+
+    def _event(self, name: str, *args: Any) -> None:
+        if self.events is None:
+            return
+        try:
+            getattr(self.events, name)(*args)
+        except Exception:  # noqa: BLE001 - events are hints
+            logger.debug("job event %s failed", name, exc_info=True)
 
     def register(self, type_: str, handler: Handler) -> None:
         self._handlers[type_] = handler
@@ -132,6 +153,7 @@ class JobQueue:
         if type_ not in self._handlers:
             raise ValueError(f"no handler for job type '{type_}'")
         job = self.store.create_job(type_, lane, params, inputs, project_id)
+        self._event("queued", job)
         self._wake["orchestrator" if type_ in ORCHESTRATOR_TYPES else lane].set()
         return job
 
@@ -192,18 +214,37 @@ class JobQueue:
             return job
 
     def _run_job(self, job: dict[str, Any]) -> None:
+        try:
+            self._run_job_inner(job)
+        finally:
+            try:
+                final = self.store.get_job(job["id"])
+            except NotFound:
+                return
+            if final["state"] in ("done", "failed", "cancelled"):
+                self._event("finished", final)
+
+    def _guard(self, job: dict[str, Any]) -> Any:
+        """The context a handler runs in: the hub's GPU lease on the GPU lane, nothing elsewhere."""
+        if self._gpu_guard is None or job.get("lane") != "gpu":
+            return contextlib.nullcontext()
+        return self._gpu_guard(job)
+
+    def _run_job_inner(self, job: dict[str, Any]) -> None:
         job_id = job["id"]
         handler = self._handlers.get(job["type"])
         if handler is None:
             self.store.update_job(job_id, state="failed", message=f"no handler registered for job type '{job['type']}'",
                                    finished_at=now_iso())
             return
-        progress = Progress(self.store, job_id)
+        progress = Progress(self.store, job_id, (lambda *a: self._event("progress", *a)) if self.events is not None else None)
         self.store.update_job(job_id, state="running", started_at=now_iso(), message="starting")
+        self._event("started", self.store.get_job(job_id))
         first_wait: Optional[float] = None
         while True:
             try:
-                outputs = handler(self.store.get_job(job_id), progress)
+                with self._guard(job):
+                    outputs = handler(self.store.get_job(job_id), progress)
             except WaitingForResources as wait_exc:
                 now = time.monotonic()
                 first_wait = first_wait if first_wait is not None else now

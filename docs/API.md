@@ -93,6 +93,20 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
      "matched_characters": ["Iris Volt"], "unknown_mentions": [], "template": "sdxl_txt2img", "seed": 11}
 ```
 
+### Family routes
+
+| Method | Path | Body / query |
+| --- | --- | --- |
+| GET | `/api/agent/tools` | - (the shared catalogue: every per-tool route with its argument schema and `readOnlyHint`) |
+| POST | `/api/agent/call` | `{name, arguments}` with `Authorization: Bearer <data/mcp-token>`; 401 without it, 404 for an unknown tool, 400 for a wrong argument (`missing_argument`, `unknown_argument`, `invalid_arguments`) |
+| POST | `/api/agent/production_export_lumiere` | `{production, aspect?, timeline_id?}` |
+| POST | `/api/agent/cast_import_character` | `{name, description?, look?, images?, source_ref?, project?}` |
+| POST | `/api/agent/production_from_storyboard` | `{title, shots[{text, duration_s?, image?}], source_ref?, project?, character_id?, lead_name?, lead_look?, song_asset_id?}` |
+| POST | `/api/agent/voice_tts` | `{text, voice?, lang?}` |
+| GET / PUT | `/api/family/settings` | `{"notify.via": auto\|hub\|off, "notify.language": es\|en}` |
+
+`/api/health` also carries a `hoard_link` block (the app's family id and whether it found the hub).
+
 ## UI routes
 
 | Method | Path | Notes |

@@ -86,6 +86,7 @@ export function SettingsView() {
             <div key={w.template} className="row small"><span className="mono">{w.template}</span><span className="pill">{w.kind}</span><span className="pill">{w.vram_class}</span></div>
           ))}
         </div>
+        <FamilyCard />
         <StockKeysCard />
       </div>
     </>
@@ -123,6 +124,37 @@ function WorkflowCard({ spec, onSaved }: { spec: WorkflowSpec; onSaved: () => vo
         </div>
       ))}
       {dirty && <button className="btn sm primary" style={{ alignSelf: "flex-start" }} onClick={save}>{t("save")}</button>}
+    </div>
+  );
+}
+
+function FamilyCard() {
+  const { t } = useT();
+  const app = useApp();
+  const family = useAsync(() => api.familySettings(), []);
+  const change = async (key: "notify.via" | "notify.language", value: string) => {
+    try {
+      await api.setFamilySettings({ [key]: value });
+      family.reload();
+      app.toast(t("saved"), "ok");
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    }
+  };
+  const f = family.data;
+  if (!f) return null;
+  const viaLabel: Record<string, string> = { auto: t("notifyViaAuto"), hub: t("notifyViaHub"), off: t("notifyViaOff") };
+  return (
+    <div className="card stack">
+      <label className="field">{t("notifyVia")}
+        <select value={f["notify.via"]} onChange={(e) => change("notify.via", e.target.value)} data-testid="notify-via">
+          {f.choices["notify.via"].map((v) => <option key={v} value={v}>{viaLabel[v] || v}</option>)}
+        </select>
+        <span className="hint">{t("notifyViaHelp")}</span></label>
+      <label className="field">{t("notifyLanguage")}
+        <select value={f["notify.language"]} onChange={(e) => change("notify.language", e.target.value)} data-testid="notify-language">
+          {f.choices["notify.language"].map((v) => <option key={v} value={v}>{v === "es" ? "Español" : "English"}</option>)}
+        </select></label>
     </div>
   );
 }
