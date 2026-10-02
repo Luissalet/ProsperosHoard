@@ -13,6 +13,13 @@ import pytest
 
 from prosperos_hoard import stock
 from prosperos_hoard.backend import ffmpeg_path
+from prosperos_hoard.hoard_link.web import safety
+
+
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    """Every stock host resolves to a public address, so the tests never depend on the network's DNS."""
+    monkeypatch.setattr(safety, "default_resolver", lambda host, port: ["93.184.216.34"])
 
 
 def make_mp4(path: Path, seconds: float = 3.0, size: str = "360x640") -> bytes:
@@ -107,6 +114,57 @@ def test_fetch_imports_with_credit(store, project, tmp_path):
     assert stock.credits([asset, asset]) == ["Video by Author 1 on Pexels - https://www.pexels.com/video/1/"]
 
 
+def _item(url: str) -> dict:
+    return {"provider": "pexels", "id": "9", "kind": "video", "ref": "pexels:9", "files": [{"url": url, "width": 1080, "height": 1920}]}
+
+
+def test_a_stock_file_on_a_private_address_is_never_fetched(store, project):
+    asked: list = []
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: asked.append(request) or httpx.Response(200, content=b"x")))
+    for bad in ("http://169.254.169.254/latest/meta-data", "http://127.0.0.1:8188/view", "http://10.0.0.5/a.mp4", "file:///etc/passwd"):
+        with pytest.raises(stock.StockError) as caught:
+            stock.fetch(store, project["id"], _item(bad), client=client)
+        assert caught.value.code == "stock_download_blocked", bad
+    assert asked == []
+
+
+def test_a_redirect_to_a_private_address_is_stopped_and_a_public_one_followed(store, project, tmp_path):
+    mp4 = make_mp4(tmp_path / "a.mp4")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "videos.pexels.com" and request.url.path == "/evil.mp4":
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data"})
+        if request.url.host == "videos.pexels.com" and request.url.path == "/moved.mp4":
+            return httpx.Response(301, headers={"location": "https://cdn.pexels.com/real.mp4"})
+        if request.url.host == "cdn.pexels.com":
+            return httpx.Response(200, content=mp4, headers={"content-type": "video/mp4"})
+        raise AssertionError(f"reached {request.url}")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(stock.StockError) as caught:
+            stock.fetch(store, project["id"], _item("https://videos.pexels.com/evil.mp4"), client=client)
+        assert caught.value.code == "stock_download_blocked"
+        asset = stock.fetch(store, project["id"], _item("https://videos.pexels.com/moved.mp4"), client=client)
+    assert asset["kind"] == "video"
+
+
+def test_a_huge_stock_file_is_refused_before_downloading_it(store, project, monkeypatch):
+    sent = {"bytes": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-length": str(stock.MAX_DOWNLOAD_BYTES + 1)}, content=b"x" * 10)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(stock.StockError) as caught:
+            stock.fetch(store, project["id"], _item("https://videos.pexels.com/big.mp4"), client=client)
+    assert caught.value.code == "too_large"
+    monkeypatch.setattr(stock, "MAX_DOWNLOAD_BYTES", 5)                      # and one that lies about its length is cut off
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"x" * 50))) as client:
+        with pytest.raises(stock.StockError) as caught:
+            stock.fetch(store, project["id"], _item("https://videos.pexels.com/lie.mp4"), client=client)
+    assert caught.value.code == "too_large"
+
+
 def test_stock_api_keys_and_search_import(client, tmp_path):
     c, app, _ = client
     r = c.put("/api/backend/stock", json={"pexels": "PKEY"})
@@ -127,3 +185,16 @@ def test_stock_api_keys_and_search_import(client, tmp_path):
     assert r.status_code == 400 and "unknown_ref" in r.text
     c.put("/api/backend/stock", json={"pexels": ""})
     assert c.get("/api/backend/stock").json()["providers"]["pexels"]["configured"] is False
+
+
+def test_the_app_own_client_connects_to_the_address_that_was_checked(tmp_path, monkeypatch):
+    connected: list = []
+    monkeypatch.setattr(safety, "pinned_transport",
+                        lambda ip, **kw: connected.append(ip) or httpx.MockTransport(lambda r: httpx.Response(200, content=b"data")))
+    dest = tmp_path / "out.bin"
+    stock._download(httpx.Client(), "https://videos.pexels.com/a.mp4", dest, pin=True)
+    assert connected == ["93.184.216.34"] and dest.read_bytes() == b"data"
+    monkeypatch.setattr(safety, "default_resolver", lambda host, port: ["10.1.2.3"])   # a name that points inside is refused
+    with pytest.raises(stock.StockError) as caught:
+        stock._download(httpx.Client(), "https://videos.pexels.com/a.mp4", dest, pin=True)
+    assert caught.value.code == "stock_download_blocked"
