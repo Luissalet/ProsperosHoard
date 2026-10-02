@@ -20,7 +20,6 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from . import mv_planner
@@ -49,6 +48,8 @@ from . import voices as voices_mod
 from .backend import Backend
 from .design import DesignError
 from .hoard_link import family
+from .hoard_link.guard import install_guard
+from .hoard_link.waiting import MAX_WAIT_S
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .family_settings import FamilySettings
 from .ids import new_id
@@ -60,33 +61,11 @@ logger = logging.getLogger("prosperos_hoard.api")
 
 MAX_UPLOAD_MEDIA = engine.MAX_MEDIA_BYTES
 MAX_UPLOAD_IMAGE = engine.MAX_IMAGE_BYTES
-MAX_WAIT_S = 300.0
 
 
 # ------------------------------------------------------------------ guard
 
-class GuardMiddleware(BaseHTTPMiddleware):
-    """Rejects DNS-rebinding Host headers and cross-site writes. No CORS
-    headers are ever added: a plain GET from a browser tab keeps working,
-    but scripted cross-origin writes are refused."""
-
-    def __init__(self, app, port: int):
-        super().__init__(app)
-        self.port = port
-        self.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
-        self.allowed_origins = {f"http://{h}" for h in self.allowed_hosts}
-
-    async def dispatch(self, request: Request, call_next):
-        host = request.headers.get("host", "")
-        if host not in self.allowed_hosts:
-            return JSONResponse({"error": "bad_host", "message": f"unexpected Host header '{host[:80]}'"}, status_code=400)
-        if request.method not in ("GET", "HEAD", "OPTIONS"):
-            origin = request.headers.get("origin")
-            if origin is not None and origin not in self.allowed_origins:
-                return JSONResponse({"error": "bad_origin", "message": "cross-origin write rejected"}, status_code=403)
-            if request.headers.get("sec-fetch-site") == "cross-site":
-                return JSONResponse({"error": "cross_site", "message": "cross-site write rejected"}, status_code=403)
-        return await call_next(request)
+# The request guard (Host, Origin and Fetch Metadata checks, HTTP and websockets) is `hoard_link.guard`, installed in create_app.
 
 
 # ----------------------------------------------------------------- errors
@@ -829,7 +808,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # they queue sub-jobs through; the workers start at the end of create_app
 
     app = FastAPI(title="Prospero's Hoard", version=__version__)
-    app.add_middleware(GuardMiddleware, port=port)
+    # strict_ports keeps the old rule: a Host that names a port must be this app's; PROSPERO_ALLOWED_HOSTS adds LAN / tailnet names.
+    install_guard(app, port_getter=lambda: port, allowed_env="PROSPERO_ALLOWED_HOSTS", strict_ports=True)
     app.state.store = store
     app.state.backend = backend
     app.state.queue = queue
