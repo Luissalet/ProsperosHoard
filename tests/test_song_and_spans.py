@@ -18,7 +18,7 @@ from test_productions import tiny_spec, wait_job
 
 # ------------------------------------------------------- atomic writes
 
-def test_replace_with_retry_survives_a_transient_lock(tmp_path, monkeypatch):
+def test_replace_with_retry_survives_a_transient_lock(tmp_path):
     src, dst = tmp_path / "a.tmp", tmp_path / "a.json"
     src.write_text("new", encoding="utf-8")
     dst.write_text("old", encoding="utf-8")
@@ -31,31 +31,37 @@ def test_replace_with_retry_survives_a_transient_lock(tmp_path, monkeypatch):
             raise PermissionError(13, "Access is denied")  # what WinError 5 maps to
         return real(a, b)
 
-    monkeypatch.setattr(util.os, "replace", flaky)
-    util.replace_with_retry(src, dst, delay=0.001)
+    util.replace_with_retry(src, dst, delay=0.001, replace=flaky)
     assert dst.read_text(encoding="utf-8") == "new" and calls["n"] == 3 and not src.exists()
 
 
-def test_replace_with_retry_gives_up_and_cleans_the_temp(tmp_path, monkeypatch):
+def test_replace_with_retry_gives_up_and_cleans_the_temp(tmp_path):
     src, dst = tmp_path / "b.tmp", tmp_path / "b.json"
     src.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(util.os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError(13, "denied")))
     with pytest.raises(PermissionError):
-        util.replace_with_retry(src, dst, attempts=3, delay=0.001)
+        util.replace_with_retry(src, dst, attempts=3, delay=0.001,
+                                replace=lambda a, b: (_ for _ in ()).throw(PermissionError(13, "denied")))
     assert not src.exists()
 
 
-def test_other_os_errors_are_not_retried(tmp_path, monkeypatch):
+def test_other_os_errors_are_not_retried(tmp_path):
     calls = {"n": 0}
 
     def missing(a, b):
         calls["n"] += 1
         raise FileNotFoundError(2, "nope")
 
-    monkeypatch.setattr(util.os, "replace", missing)
     with pytest.raises(FileNotFoundError):
-        util.replace_with_retry(tmp_path / "c", tmp_path / "d", delay=0.001)
+        util.replace_with_retry(tmp_path / "c", tmp_path / "d", delay=0.001, replace=missing)
     assert calls["n"] == 1
+
+
+def test_backend_json_writes_are_atomic_and_leave_no_temp(tmp_path):
+    target = tmp_path / "backend.json"
+    util.write_text_atomic(target, '{"a": 1}')
+    util.write_text_atomic(target, '{"a": 2}')
+    assert target.read_text(encoding="utf-8") == '{"a": 2}'
+    assert [p.name for p in tmp_path.iterdir()] == ["backend.json"]
 
 
 # ------------------------------------------------- stale "running" state
