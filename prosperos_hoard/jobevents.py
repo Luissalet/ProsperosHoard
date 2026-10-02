@@ -21,6 +21,7 @@ import time
 from typing import Any, Callable, Optional
 
 from . import productions
+from .hoard_link import fam_notify
 from .family_settings import FamilySettings
 from .store import NotFound, Store
 
@@ -184,18 +185,13 @@ def awaiting(store: Store, slug: str) -> str:
 
 
 class Notifier:
-    """Asks the family hub to tell the person that a production needs them."""
+    """Asks the family hub to tell the person that a production needs them. The `notify.via` switch is the shared `fam_notify.Router`
+    (`auto`: the hub when it answers; `hub`: always ask it); `off` is checked here first. Prospero has no channel of its own."""
 
     def __init__(self, store: Store, settings: FamilySettings, hub: Any = None, *, background: bool = True):
-        self.store, self.settings, self._hub, self.background = store, settings, hub, background
+        self.store, self.settings, self.background = store, settings, background
+        self.router = fam_notify.Router(lambda: settings.get("notify.via"), None, "Prospero's Hoard", hub=hub)
         self.sent: list[dict[str, Any]] = []        # what was asked of the hub, newest last (status and tests read it)
-
-    def hub(self) -> Any:
-        if self._hub is not None:
-            return self._hub
-        from .hoard_link import fam_notify
-
-        return fam_notify
 
     def production(self, job: dict[str, Any], title: str, url: str) -> None:
         via = self.settings.get("notify.via")
@@ -217,17 +213,14 @@ class Notifier:
         dedupe = "prospero:production:failed" if kind == "failed" else f"prospero:production:{slug}:{kind}:{job['id']}"
         args = (*notice, priority, url, "production", dedupe)
         if self.background:
-            threading.Thread(target=self._deliver, args=(via, *args), daemon=True, name="prospero-notify").start()
+            threading.Thread(target=self._deliver, args=args, daemon=True, name="prospero-notify").start()
         else:
-            self._deliver(via, *args)
+            self._deliver(*args)
 
-    def _deliver(self, via: str, title: str, body: str, priority: str, url: str, group: str, dedupe: str) -> None:
+    def _deliver(self, title: str, body: str, priority: str, url: str, group: str, dedupe: str) -> None:
         try:
-            hub = self.hub()
-            if via == "auto" and not hub.hub_available():
-                return
-            res = hub.notify(title, body, priority=priority, url=url, group=group, dedupe_key=dedupe)
-            self.sent.append({"title": title, "priority": priority, "ok": bool(res.get("ok")), "error": res.get("error", "")})
+            res = self.router.send(title, body, priority=priority, url=url, group=group, dedupe_key=dedupe)
+            self.sent.append({"title": title, "priority": priority, "ok": bool(res.get("ok")), "error": "" if res.get("ok") else res.get("why", "")})
             del self.sent[:-50]
         except Exception:  # noqa: BLE001
             log.debug("notification through the hub failed", exc_info=True)
