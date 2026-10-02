@@ -91,6 +91,8 @@ class TtsBody(BaseModel):
     text: str
     voice: Optional[str] = Field(None, description="A library voice (id or name) or an engine's own voice id; empty = the best installed engine.")
     lang: Optional[str] = None
+    engine: Optional[str] = Field(None, description="A speech engine id such as piper; a library voice's own engine wins. 400 unknown_engine when it is not installed here.")
+    speed: Optional[float] = Field(None, description="0.5 to 2.0; 1.0 is normal.")
 
 
 # ---------------------------------------------------------------- reading the app's own routes
@@ -274,7 +276,8 @@ def install(app: FastAPI, ctx: Context, app_id: str = "prospero") -> None:
     @app.post(PREFIX + "voice_tts")
     def agent_voice_tts(body: TtsBody):
         return ctx.agent("voice_tts", body.text[:80],
-                         lambda: family_tools.tts(store, ctx.tts_engines(), text=body.text, voice=body.voice, lang=body.lang))
+                         lambda: family_tools.tts(store, ctx.tts_engines(), text=body.text, voice=body.voice, lang=body.lang,
+                                                    engine_id=body.engine, speed=body.speed))
 
     # ----- settings
     @app.get("/api/family/settings")

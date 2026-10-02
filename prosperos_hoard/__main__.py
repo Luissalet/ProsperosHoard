@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 
 from . import __version__
+from .hoard_link.atomic import write_text_atomic
 from .api import create_app
 
 DEFAULT_PORT = 8815
@@ -67,7 +68,7 @@ def main() -> None:
         raw.setdefault("training", {"lora_dir": str(fake.lora_dir),
                                     "trainers": [{"kind": "fake", "name": "demo trainer", "delay": 0.01}]})
         fake.lora_dir.mkdir(parents=True, exist_ok=True)
-        backend_json.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        write_text_atomic(backend_json, json.dumps(raw, indent=2))
         print(f"[prosperos-hoard] demo mode: fake ComfyUI (procedural placeholder images) on 127.0.0.1:{fake_port}")
 
     static_dir = repo_root / "frontend" / "dist"

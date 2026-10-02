@@ -64,6 +64,12 @@ def test_lrc_round_trip():
     assert "[00:01.20]hello world" in exported
 
 
+def test_lrc_uses_the_shared_parser_and_never_writes_an_invalid_stamp():
+    lines = audio.parse_lrc("[ti:Song]\n[offset:+500]\n[00:10.00][00:20.00]chorus\n[00:12.00]\n[00:15.00]verse <00:15.50>two")
+    assert [(l["time_s"], l["text"]) for l in lines] == [(9.5, "chorus"), (14.5, "verse two"), (19.5, "chorus")]
+    assert audio.to_lrc([{"time_s": 59.996, "text": "x"}, {"time_s": 3.0, "text": ""}]) == "[01:00.00]x"   # carried, blank skipped
+
+
 def test_waveform_peaks_length():
     sig = np.random.default_rng(0).uniform(-1, 1, 44100).astype(np.float32)
     peaks = audio.waveform_peaks(sig, buckets=200)

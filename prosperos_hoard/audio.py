@@ -16,6 +16,7 @@ from typing import Any, Optional
 import numpy as np
 
 from . import procutil
+from .hoard_link.media import subs
 
 SAMPLE_RATE = 44100
 FRAME_SIZE = 2048
@@ -438,30 +439,15 @@ def _detect_sections(samples: np.ndarray, mags: np.ndarray, sr: int, duration_s:
 # LRC
 # ----------------------------------------------------------------------
 
-_LRC_TAG = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\](.*)")
-
-
 def parse_lrc(text: str) -> list[dict[str, Any]]:
-    lines = []
-    for raw in text.splitlines():
-        m = _LRC_TAG.match(raw.strip())
-        if not m:
-            continue
-        minutes, seconds, content = m.groups()
-        t = int(minutes) * 60 + float(seconds)
-        lines.append({"time_s": round(t, 3), "text": content.strip()})
-    lines.sort(key=lambda x: x["time_s"])
-    return lines
+    """LRC text -> `[{time_s, text}]` sorted by time (the shared parser: several stamps on one line, `[offset:]`, enhanced word tags
+    dropped, metadata tags ignored; a stamp with no text is dropped)."""
+    return [{"time_s": round(float(c.start_s), 3), "text": c.text} for c in subs.parse_lrc(text)]
 
 
 def to_lrc(lines: list[dict[str, Any]]) -> str:
-    out = []
-    for line in lines:
-        t = line["time_s"]
-        minutes = int(t // 60)
-        seconds = t - minutes * 60
-        out.append(f"[{minutes:02d}:{seconds:05.2f}]{line['text']}")
-    return "\n".join(out)
+    """`[{time_s, text}]` -> LRC text (`[mm:ss.xx]text`; a line with no text is skipped)."""
+    return subs.to_lrc([{"start_s": line["time_s"], "text": line["text"]} for line in lines]).rstrip("\n")
 
 
 # ----------------------------------------------------------------------

@@ -37,7 +37,7 @@ from .hoard_link.errors import Unavailable
 from .ids import new_id
 from .jobs import JobCancelled, WaitingForResources
 from .store import NotFound, Store
-from .util import now_iso, replace_with_retry
+from .util import now_iso, write_text_atomic
 from .workflows import convert as convert_mod
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -766,9 +766,7 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
             path = object_info_cache_path(backend.data_dir)
             if _object_info_cache_hash.get(str(path)) != digest:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = path.with_suffix(".tmp")
-                tmp.write_text(blob, encoding="utf-8")
-                replace_with_retry(tmp, path)
+                write_text_atomic(path, blob)
                 _object_info_cache_hash[str(path)] = digest
     except OSError:
         pass  # the cache is a convenience; never fail a job over it

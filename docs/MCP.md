@@ -34,7 +34,7 @@ Faustus reads the same information from `faustus-plugin.json`
   `queued | waiting_gpu | running | done | failed | cancelled`. `waiting_gpu`
   means "not enough free VRAM yet; retrying every 15 s for up to 30 min" and
   the message says how much is needed and free. Nothing is unloaded to make
-  room. Pass `wait_s` (up to 300) to wait on the server instead of polling.
+  room. Pass `wait_s` (up to 150, the family's longest wait) to wait on the server instead of polling.
 - **Pictures.** `studio_show` always returns them; finished
   `studio_generate_image` / `studio_edit_image` / `studio_animate` /
   `studio_job` / `studio_design` / `studio_photocard_set` results only
@@ -147,7 +147,7 @@ Four tools for the other apps of the Hoard family (also reachable through the hu
 | `production_export_lumiere` | `production` (slug), `aspect?`, `timeline_id?` | `{ok, project_id, url, imported_clips, skipped, files{xml, edl}}`; when the editor is not running or may not read the folder, `ok: false` with `error` and `hint`, and the files are still written to `data/exports/lumiere/` |
 | `cast_import_character` | `name`, `description?`, `look?`, `images[]` (paths in the allowed import folders), `source_ref?`, `project?` | `{ok, character_id, project_id, existing, images}`; the same name with the same `source_ref` returns the member that exists; the same name with another ref is `name_taken` |
 | `production_from_storyboard` | `title`, `shots[{text, duration_s?, image?}]` (at most 80), `source_ref?`, `project?`, `character_id?` or `lead_name?`/`lead_look?`, `song_asset_id?` | `{ok, production, project_id, shots, queued: false, next, view}`; durations become cut spans (4 s when only some are given); an `image` (asset id or path) is reused instead of generated |
-| `voice_tts` | `text` (at most 20000 characters), `voice?` (saved voice id or name, or an engine's own voice id), `lang?` | `{ok, path, engine_id, bytes}`: a WAV in `data/exports/tts/` |
+| `voice_tts` | `text` (at most 20000 characters), `voice?` (saved voice id or name, or an engine's own voice id), `lang?`, `engine?` (an installed engine id; a saved voice's own engine wins; `unknown_engine` otherwise), `speed?` (0.5 to 2.0) | `{ok, path, engine_id, bytes}`: a WAV in `data/exports/tts/` |
 
 ### Voice studio tools
 

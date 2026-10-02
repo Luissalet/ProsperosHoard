@@ -1,22 +1,22 @@
-"""Bring a video (or its audio) from a link into the library: YouTube, X,
-Instagram and the other sites yt-dlp knows. Used for references - a dance
-to take poses from, a look to copy - so a clip can be cut to a time range
-instead of downloading a whole concert.
+"""Bring a video (or its audio) from a link into the library: YouTube, X, Instagram and the other sites yt-dlp knows. Used for
+references - a dance to take poses from, a look to copy - so a clip can be cut to a time range instead of downloading a whole
+concert.
 
-Runs as a CPU-lane job ("download_media"); the file lands in the project as
-an ordinary imported asset whose recipe records the link.
+The download itself is Links Hoard's (`hoard_link.fam_media.download`: one yt-dlp, its updater and cookies for the whole family). When
+Links is not running the work is done here with the same yt-dlp finder the family uses (`hoard_link.media.bins`). Runs as a CPU-lane
+job ("download_media"); the file lands in the project as an ordinary imported asset whose recipe records the link.
 """
 
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import urlsplit
 
 from . import engine
-from .backend import ffmpeg_path
+from .hoard_link import fam_media, proc as hlproc
+from .hoard_link.media import bins
+from .hoard_link.web import safety
 from .ids import new_id
 from .store import Store
 
@@ -24,6 +24,9 @@ from .store import Store
 # three-hour stream from filling the disk
 MAX_DURATION_S = 20 * 60
 MAX_HEIGHT = 1080
+DOWNLOAD_TIMEOUT_S = 1800.0
+#: Links answers with these kinds when it cannot be reached; only then is the download done here.
+LOCAL_KINDS = frozenset({"hub_down", "app_down", "app_missing", "tool_missing"})
 
 
 class DownloadError(engine.EngineError):
@@ -31,97 +34,113 @@ class DownloadError(engine.EngineError):
 
 
 def check_url(url: str) -> str:
+    """The link, trimmed, when it is a public http(s) page (the shared SSRF check: no private, loopback, link-local or metadata
+    addresses, no credentials in the URL, no odd numeric hosts). A name that does not resolve here passes: the download says so."""
     url = (url or "").strip()
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise DownloadError("bad_url", "paste a full http(s) link (a YouTube, X or Instagram page)")
-    host = parts.hostname.lower()
-    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local") or re.fullmatch(r"[\d.]+", host):
-        raise DownloadError("bad_url", "only public video pages can be downloaded")
+    reason = safety.check_url(url)
+    if reason and not reason.startswith(safety.UNRESOLVABLE_PREFIX):
+        if not url.lower().startswith(("http://", "https://")):
+            raise DownloadError("bad_url", "paste a full http(s) link (a YouTube, X or Instagram page)")
+        raise DownloadError("bad_url", f"only public video pages can be downloaded ({reason})")
     return url
 
 
-def _ytdlp():
+def _sections(start_s: Optional[float], end_s: Optional[float]) -> Optional[list[list[float]]]:
+    if start_s is None and end_s is None:
+        return None
+    return [[float(start_s or 0), float(end_s if end_s is not None else 24 * 3600)]]
+
+
+def _via_links(url: str, tmp: Path, audio_only: bool, sections: Optional[list[list[float]]], say: Callable[..., None]) -> dict[str, Any]:
+    """Links Hoard's download of `url` into `tmp`: its view (`path`, `title`, `uploader`, `duration`), or a result with `kind`."""
+    say(0.05, "asking Links Hoard")
+    got = fam_media.download(url, format="audio" if audio_only else "video", quality=MAX_HEIGHT, dest_dir=str(tmp), sections=sections,
+                             max_duration_s=None if sections else MAX_DURATION_S, max_height=MAX_HEIGHT, save_link=False,
+                             timeout_s=DOWNLOAD_TIMEOUT_S)
+    if got.get("kind") == "timeout" and got.get("id"):
+        fam_media.cancel(got["id"])
+        got["error"] = "it is taking too long"
+    return got
+
+
+def _via_ytdlp(url: str, tmp: Path, audio_only: bool, sections: Optional[list[list[float]]], say: Callable[..., None]) -> dict[str, Any]:
+    """The same download with the yt-dlp this machine has (`bins.find("ytdlp")`: its own binary or `python -m yt_dlp`)."""
+    tool = bins.find("ytdlp")
+    if not tool:
+        raise DownloadError("ytdlp_missing", f"yt-dlp is not available: {tool.hint or 'pip install yt-dlp'}")
+    ffmpeg = bins.find("ffmpeg")
+    if sections and not ffmpeg:
+        raise DownloadError("no_ffmpeg", "cutting a section needs ffmpeg")
+    extra = (["--download-sections", f"*{sections[0][0]:g}-{sections[0][1]:g}", "--force-keyframes-at-cuts"] if sections
+             else ["--match-filter", f"duration<?{MAX_DURATION_S + 1}"])   # short enough, or no duration known
+    args = bins.build_ytdlp_args(url=url, format="audio" if audio_only else "video", quality=MAX_HEIGHT, dir=str(tmp),
+                                 has_ffmpeg=bool(ffmpeg), ffmpeg_path=ffmpeg.path if ffmpeg else None, extra=extra,
+                                 node_path=(bins.find("node").path or None), ytdlp_version=tool.version)
+    meta: dict[str, Any] = {}
+    errors: list[str] = []
+
+    def on_line(line: str) -> None:
+        event = bins.parse_ytdlp_line(line)
+        if not event:
+            return
+        if event["type"] == "progress":
+            total = event.get("total") or event.get("estimate") or 0
+            if total and event.get("downloaded"):
+                say(0.05 + 0.8 * min(1.0, event["downloaded"] / total), f"downloading {int(100 * event['downloaded'] / total)}%")
+        elif event["type"] == "meta":
+            meta.update(event["data"])
+
+    say(0.03, "reading the link")
     try:
-        import yt_dlp  # noqa: PLC0415 - optional, only for this feature
-    except ImportError:
-        raise DownloadError("ytdlp_missing", "yt-dlp is not installed in Prospero's environment: "
-                                             "pip install yt-dlp") from None
-    return yt_dlp
+        code = hlproc.run_streaming(tool.command(*args), on_line, stderr_line=errors.append, timeout=DOWNLOAD_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 - a timeout or a program that would not start: one readable message
+        raise DownloadError("download_failed", f"could not download that link: {str(exc)[:300]}") from None
+    if code != 0:
+        reason = bins.classify_failure("yt-dlp", "\n".join(errors), code)
+        raise DownloadError("download_failed", f"could not download that link ({reason}): {hlproc.tail_lines(chr(10).join(errors), 3, 300)}")
+    return {"title": meta.get("title"), "uploader": meta.get("uploader") or meta.get("channel"), "duration": meta.get("duration")}
 
 
 def download(store: Store, project_id: str, url: str, *, audio_only: bool = False, start_s: Optional[float] = None,
              end_s: Optional[float] = None, progress: Optional[Callable[..., None]] = None) -> dict[str, Any]:
     """Download `url` and import it into `project_id`. start_s/end_s cut a
-    section (ffmpeg); audio_only keeps an mp3."""
+    section (ffmpeg); audio_only keeps an mp3. Links Hoard does it when it is running, else this app does."""
     url = check_url(url)
     store.get_project(project_id)
     if start_s is not None and end_s is not None and end_s <= start_s:
         raise DownloadError("bad_range", "end_s must come after start_s")
-    yt_dlp = _ytdlp()
     tmp = store.data_dir / "tmp" / "downloads" / new_id("dl")
     tmp.mkdir(parents=True, exist_ok=True)
-    ffmpeg = ffmpeg_path()
     say = progress or (lambda *a, **k: None)
-
-    def hook(d: dict[str, Any]) -> None:
-        if d.get("status") == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-            done = d.get("downloaded_bytes") or 0
-            if total:
-                say(0.05 + 0.8 * min(1.0, done / total), f"downloading {int(100 * done / total)}%")
-
-    opts: dict[str, Any] = {
-        "outtmpl": str(tmp / "%(title).80s [%(id)s].%(ext)s"), "noplaylist": True, "quiet": True, "no_warnings": True,
-        "restrictfilenames": True, "progress_hooks": [hook], "noprogress": True,
-        # a list of filters is OR'ed: short enough, or no duration known (a
-        # single string would read "| !duration" as part of the number)
-        "match_filter": yt_dlp.utils.match_filter_func([f"duration < {MAX_DURATION_S + 1}", "!duration"])
-        if start_s is None else None,
-    }
-    if ffmpeg:
-        opts["ffmpeg_location"] = ffmpeg
-    if audio_only:
-        opts["format"] = "bestaudio/best"
-        if ffmpeg:
-            opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    elif ffmpeg:
-        opts["format"] = (f"bv*[height<={MAX_HEIGHT}][ext=mp4]+ba[ext=m4a]/b[height<={MAX_HEIGHT}][ext=mp4]/"
-                          f"bv*[height<={MAX_HEIGHT}]+ba/b[height<={MAX_HEIGHT}]/b")
-        opts["merge_output_format"] = "mp4"
-    else:
-        opts["format"] = f"b[height<={MAX_HEIGHT}][ext=mp4]/b"
-    if start_s is not None or end_s is not None:
-        if not ffmpeg:
-            raise DownloadError("no_ffmpeg", "cutting a section needs ffmpeg")
-        opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [(float(start_s or 0), float(end_s or 1e9))])
-        opts["force_keyframes_at_cuts"] = True
-    opts = {k: v for k, v in opts.items() if v is not None}
-    say(0.03, "reading the link")
+    sections = _sections(start_s, end_s)
+    info: dict[str, Any] = {}
+    backend = "links"
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as exc:  # noqa: BLE001 - yt-dlp raises many types; one readable message
-        shutil.rmtree(tmp, ignore_errors=True)
-        raise DownloadError("download_failed", f"could not download that link: {str(exc)[:300]}") from None
-    files = sorted((p for p in tmp.iterdir() if p.is_file() and not p.name.endswith((".part", ".ytdl"))),
-                   key=lambda p: p.stat().st_size, reverse=True)
-    if not files:
-        shutil.rmtree(tmp, ignore_errors=True)
-        raise DownloadError("download_failed", "the link gave no file (too long, private or not a video)")
-    path: Path = files[0]
-    title = str((info or {}).get("title") or path.stem)[:120]
-    say(0.9, "adding it to the library")
-    try:
-        asset = engine.import_asset(
+        got = _via_links(url, tmp, audio_only, sections, say)
+        if got.get("ok"):
+            info = got
+        elif got.get("kind") in LOCAL_KINDS:
+            backend = "yt-dlp"
+            info = _via_ytdlp(url, tmp, audio_only, sections, say)
+        else:
+            raise DownloadError("download_failed", f"could not download that link: {str(got.get('error') or 'unknown error')[:300]}")
+        path = Path(info["path"]) if info.get("path") else None
+        if path is None or not path.is_file():
+            files = sorted((p for p in tmp.iterdir() if p.is_file() and not p.name.endswith((".part", ".ytdl", ".json"))),
+                           key=lambda p: p.stat().st_size, reverse=True)
+            if not files:
+                raise DownloadError("download_failed", "the link gave no file (too long, private or not a video)")
+            path = files[0]
+        title = str(info.get("title") or path.stem)[:120]
+        say(0.9, "adding it to the library")
+        return engine.import_asset(
             store, project_id, path, "audio" if audio_only else "video", original_name=f"{title}{path.suffix}",
-            recipe={"operation": "download", "backend": "yt-dlp", "url": url, "title": title,
-                    "uploader": (info or {}).get("uploader"), "source_duration_s": (info or {}).get("duration"),
+            recipe={"operation": "download", "backend": backend, "url": url, "title": title,
+                    "uploader": info.get("uploader"), "source_duration_s": info.get("duration"),
                     **({"start_s": start_s} if start_s is not None else {}), **({"end_s": end_s} if end_s is not None else {})},
             tags=["download"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return asset
 
 
 def download_job(store: Store, job: dict[str, Any], progress) -> dict[str, Any]:

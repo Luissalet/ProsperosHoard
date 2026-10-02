@@ -20,7 +20,6 @@ import json
 import os
 import queue
 import re
-import signal
 import sys
 import threading
 from dataclasses import dataclass
@@ -28,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import procutil
+from .hoard_link import proc as hlproc
 
 # --------------------------------------------------------------------------- errors
 
@@ -568,13 +568,7 @@ def find_output(output_dir: Path, name: str) -> Optional[Path]:
 
 
 def _kill_process_tree(proc: Any) -> None:
-    if sys.platform == "win32":
-        procutil.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"])
-    else:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            proc.kill()
+    hlproc.kill_tree(proc, grace_s=0)
 
 
 def run_training(trainer: dict[str, Any], plan: dict[str, Any], *, dataset_dir: Path, output_dir: Path,
@@ -612,8 +606,6 @@ def run_training(trainer: dict[str, Any], plan: dict[str, Any], *, dataset_dir: 
         stdout=procutil.subprocess.PIPE, stderr=procutil.subprocess.STDOUT, text=True,
         cwd=str(cwd) if cwd else None, env=run_env,
     )
-    if sys.platform != "win32":
-        popen_kwargs["start_new_session"] = True
     proc = procutil.popen(argv, **popen_kwargs)
 
     line_queue: "queue.Queue[Optional[str]]" = queue.Queue()

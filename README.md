@@ -220,7 +220,7 @@ the server answers. Then open <http://127.0.0.1:8815>
 (`curl http://127.0.0.1:8815/api/health` answers `"service": "prosperos-hoard"`).
 
 Flags: `--port`, `--data-dir` (or `PROSPERO_DATA_DIR`), `--demo`,
-`--no-browser`. `--demo` starts the procedural demo backend (with `PROSPERO_DEMO_MOTION=1` its fake ComfyUI also lists the big video models - Wan 14B, VACE, Bernini-R - so those features can be tried), seeds an
+`--no-browser`. `PROSPERO_ALLOWED_HOSTS` (comma-separated) lets the API answer to a LAN or tailnet name. `--demo` starts the procedural demo backend (with `PROSPERO_DEMO_MOTION=1` its fake ComfyUI also lists the big video models - Wan 14B, VACE, Bernini-R - so those features can be tried), seeds an
 original five-member group with portraits, stage shots, a cover, a photocard
 set, a synthetic 30 s song with timed lyrics and an auto-cut timeline, and
 renders its preview video. To use your ComfyUI, leave it on
@@ -294,7 +294,7 @@ loading anything of its own.
 | `production_export_lumiere` | Write a production's cut as FCP7 XML + EDL and open it as a project in Lumiere's Hoard | no |
 | `cast_import_character` | A cast member from a name, a description, a look and reference images (the same name and `source_ref` twice is the same member) | no |
 | `production_from_storyboard` | A production draft from shots `{text, duration_s?, image?}`; not queued, it still needs a song | no |
-| `voice_tts` | Speak a text with a saved voice or the best installed engine; returns the path of a WAV | no |
+| `voice_tts` | Speak a text with a saved voice, a chosen engine (`engine`) or the best installed one, at a `speed` of 0.5 to 2.0; returns the path of a WAV | no |
 
 It works with any MCP client over stdio too:
 
@@ -335,7 +335,7 @@ Prospero joins the other Hoard apps through the shared family contract (the vend
 
 Prospero hosts no model. It asks [HoardLink](https://github.com/Luissalet/HoardLink)
 (vendored in [`prosperos_hoard/hoard_link/`](prosperos_hoard/hoard_link), a
-byte-identical copy of HoardLink 0.1.1) for the `image`/`video` backend
+byte-identical copy of HoardLink 0.8.0) for the `image`/`video` backend
 (ComfyUI) and `tts` (Faustus TTS, with Piper as the local fallback), the
 same resolver every Faustus plugin uses. Resolution order in one line: an
 explicit override in Settings, `data/backend.json` or a `HOARD_*`
@@ -345,6 +345,28 @@ loopback (ComfyUI on 8188). Music comes from ACE-Step through the same
 ComfyUI, or from a small documented HTTP server you point
 `HOARD_MUSIC_URL` at. The **Backends** screen and `studio_status` always
 say what was found and why; nothing is loaded or unloaded behind your back.
+
+### What comes from the family commons
+
+The shared library (HoardLink 0.8) replaces code this app used to carry:
+
+- **Downloads from a link** (Library > Download from a link, `studio_download_media`) go to the family's link downloader (Links Hoard)
+  first, with the same limits as before (sections, 20 minutes, 1080p). Only when it cannot be reached does Prospero run yt-dlp itself,
+  found with the shared tool finder (its own binary, or `python -m yt_dlp`). Links are checked with the shared public-address rules:
+  private, loopback, link-local and metadata addresses, numeric hosts and URLs with credentials are refused. Stock footage downloads
+  (Pexels, Pixabay) get the same check on every redirect, a connection pinned to the checked address and a 400 MB cap.
+- **Speech to text** (the faster-whisper engine of the voice studio) asks Funes's Hoard first (one Whisper for the family) and otherwise
+  uses the shared transcriber here, on the GPU when the hub lends it, with Whisper's inventions over silence filtered out.
+- **Speech for other apps**: `voice_tts` takes `engine` (an installed engine id; a saved voice's own engine wins) and `speed` (0.5 to 2.0).
+- **ffmpeg, ffprobe** are found by the shared finder (`HOARD_FFMPEG`, PATH, the usual Windows folders, then the bundled wheel); child
+  processes are the shared ones (a timeout or a cancelled render or training kills the whole process tree).
+- **Subtitles and lyrics**: SRT, VTT, TXT, LRC and the ASS text escape are shared (empty cues are skipped; LRC import reads several
+  stamps per line, `[offset:]` and enhanced word tags). Settings, a production's state and recipes are written atomically with
+  Windows lock retries; ids are the shared ULIDs.
+- **The guard** in front of the API (Host, Origin, cross-site checks, websockets too) is shared: a rejected request is a `403`
+  with a short message. `PROSPERO_ALLOWED_HOSTS` adds LAN or tailnet names (`studio.lan`, `*.ts.net`). A cross-site request that is not a
+  page navigation is refused. The MCP bridge ignores proxy variables and the longest server-side wait is 150 s (`wait_s`).
+- **Production notices** use the shared `auto | hub | off` router (a notice the hub holds for quiet hours counts as delivered).
 
 ### A music video from the app
 
@@ -422,7 +444,8 @@ to read (`clip_settings.cut_s`, or explicit `beats_*` options).
 **Library > Download from a link** brings a video (or just a section of
 it, or its audio) from YouTube, X, Instagram and the other sites yt-dlp
 knows, as an mp4 in the project (whole videos up to 20 minutes, or the
-section between two times). Animated GIFs import as videos.
+section between two times), through the family's downloader when it runs and
+with yt-dlp here otherwise. Animated GIFs import as videos.
 
 **Backends > These ComfyUI servers are only for Prospero**: when a server
 is idle, a job may load its model in place of the last job's instead of
