@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge } from "lucide-react";
+import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
@@ -186,6 +186,67 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   );
 }
 
+/** Every take of a shot (stills and clips), the one in use marked; pick two
+ * to see them side by side, or put an earlier one back. */
+function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState; shotKey: string; disabled: boolean; onUsed: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const takes = useAsync(() => api.productionTakes(state.slug, shotKey), [state.slug, shotKey]);
+  const [pick, setPick] = useState<string[]>([]);
+  const [compare, setCompare] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const data = takes.data?.shots[0];
+  if (!data) return null;
+  const clipTakes = Object.values(data.clips).flat();
+  const stillTakes = data.stills.map((s) => ({ asset_id: s.best || s.variants[0], current: s.current, still: true }));
+  const all = [...stillTakes.map((s) => ({ ...s, kind: "image" as const })), ...clipTakes.map((c) => ({ ...c, kind: "video" as const, still: false }))];
+  if (stillTakes.length < 2 && clipTakes.length < 2) return null;
+  const toggle = (id: string) => setPick((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p.slice(-1), id]));
+  const use = async (id: string) => {
+    setBusy(true);
+    try { await api.changeShots(state.slug, [{ key: shotKey, take: id }], false); app.toast(t("sbTakeUsed"), "ok"); onUsed(); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  const kindOf = (id: string) => all.find((x) => x.asset_id === id)?.kind || "image";
+  return (
+    <div className="field sb-takes-row">
+      <div className="row" style={{ gap: 8 }}>
+        <span className="grow">{t("sbTakes")} <span className="muted small">· {t("sbTakesHint")}</span></span>
+        <button type="button" className="btn sm" disabled={pick.length !== 2} onClick={() => setCompare(true)}><Columns2 size={13} /> {t("sbCompare")}</button>
+      </div>
+      <div className="row wrap" style={{ gap: 6 }}>
+        {all.map((x) => (
+          <div key={x.asset_id} className={`sb-take${x.current ? " current" : ""}${pick.includes(x.asset_id) ? " picked" : ""}`}>
+            <button type="button" className="tile" style={{ width: 112 }} onClick={() => toggle(x.asset_id)}
+              onDoubleClick={() => app.openAsset(x.asset_id, all.map((y) => y.asset_id))} title={x.kind === "video" ? t("sbClip") : t("sbStill")}>
+              <img src={`/api/assets/${x.asset_id}/thumb`} alt="" />
+              <span className="pill badge-dark sb-take-kind">{x.kind === "video" ? <Film size={10} /> : <Images size={10} />}{"quality" in x && x.quality === "draft" ? ` ${t("sbDraft")}` : ""}{"retake" in x && x.retake ? ` ${t("sbRetake")}` : ""}</span>
+            </button>
+            {x.current ? <span className="small muted">{t("sbTakeCurrent")}</span>
+              : <button type="button" className="btn xs" disabled={disabled || busy} onClick={() => use(x.asset_id)}>{t("sbTakeUse")}</button>}
+          </div>
+        ))}
+      </div>
+      {compare && pick.length === 2 && (
+        <Modal title={t("sbCompare")} wide onClose={() => setCompare(false)}>
+          <div className="sb-compare">
+            {pick.map((id) => (
+              <div key={id} className="stack" style={{ gap: 6 }}>
+                {kindOf(id) === "video"
+                  ? <video src={`/api/assets/${id}/file`} controls autoPlay loop muted playsInline />
+                  : <img src={`/api/assets/${id}/file`} alt="" />}
+                <button type="button" className="btn sm" disabled={disabled || busy || all.find((x) => x.asset_id === id)?.current}
+                  onClick={() => { setCompare(false); use(id); }}><Check size={13} /> {t("sbTakeUse")}</button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 export function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection }: {
   state: ProductionState; shot?: ProductionShot; after?: string | null; running: boolean;
   onPause: () => void; onClose: () => void; onSaved: () => void;
@@ -357,6 +418,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
         </label>
       )}
       <fieldset disabled={running || busy || (locked && !!shot?.locked)} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
+        {!isNew && <TakesRow state={state} shotKey={shot!.key} disabled={running || busy || (locked && !!shot?.locked)} onUsed={onSaved} />}
         {variants.length > 0 && (
           <div className="field">{t("sbStillPick")}
             <div className="row wrap" style={{ gap: 6 }}>

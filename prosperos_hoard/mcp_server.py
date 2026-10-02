@@ -660,7 +660,7 @@ def studio_timeline(
     "bleach_bypass", "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
     "lyric_style": "default"|"horror" (uppercase condensed captions with a slight per-line jitter)|"bold"|
     "pop" (one big word at a time)|"pulse" (the line swells on every beat)|"typewriter"|"handwritten"|"cinema",
-    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1},
+    "beat_fx": {"source": "kick"|"beats"|"downbeats"|"drums"|"bass"|"vocals"|"other" (a stem: its own attacks, once split with studio_stems), "zoom": 0-1, "flash": 0-1, "shake": 0-1},
     "framing": "fill"|"blur"|"fit" (how clips of another shape fill the frame)}.
     Returns a compact view: duration, clips_total, finishing and one page of clips with their index.
 
@@ -1070,7 +1070,8 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     "lead": true, "section": "chorus", "motion_prompt": "...", "refs": [...]}} adds a new shot;
     {"continue_from": "2"} makes its clip start on the last frame of shot 2's clip and end on its own
     still (one continuous take; null cuts again); {"locked": true} approves the shot: it can't change
-    and studio_production_regenerate keeps it ({"locked": false} to edit it again). Only
+    and studio_production_regenerate keeps it ({"locked": false} to edit it again); {"take": "<asset_id>"} puts
+    an earlier take back (studio_production_takes lists them). Only
     what depends on a changed shot is redone; run=true queues the production (it rebuilds the
     animatic and pauses again when animatic is on). The production must not be running.
 
@@ -1153,6 +1154,21 @@ def studio_production_settings(production: str, autopilot: Optional[bool] = None
     return _call("POST", "/api/agent/studio_production_settings", params={"production": production}, json=body)
 
 
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_takes(production: str, key: Optional[str] = None) -> dict[str, Any]:
+    """Every take a shot has had: its still sets and its clips, the one in use marked current / tomas de un plano.
+
+    Regenerating keeps the earlier takes; put one back with studio_production_shots
+    [{"key": "3", "take": "<asset_id>"}] (a still brings back its set and drops the clips made from the other
+    still; a clip just takes the place of the current one). Look at them with studio_show first. key: one shot,
+    or every shot when omitted.
+
+    Keywords: takes, previous version, older clip, undo regenerate, compare takes, tomas, version anterior,
+    clip anterior, deshacer regenerar, comparar tomas
+    """
+    return _call("POST", "/api/agent/studio_production_takes", params={"production": production, "key": key})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_production_regenerate(production: str, stage: str = "clips", keys: Optional[list[str]] = None,
                                  run: bool = True) -> dict[str, Any]:
@@ -1191,7 +1207,7 @@ def studio_production_finishing(production: str, finishing: dict[str, Any], rend
     finishing (all optional; {} = plain): {"color_grade": "teal_orange"|"sodium_night"|"bleach_bypass",
     "grain": 0-1, "vignette": true, "letterbox": true, "glitch_on_downbeats": true,
     "lyric_style": "default"|"horror"|"bold"|"pop"|"pulse"|"typewriter"|"handwritten"|"cinema",
-    "beat_fx": {"source": "kick"|"beats"|"downbeats", "zoom": 0-1, "flash": 0-1, "shake": 0-1},
+    "beat_fx": {"source": "kick"|"beats"|"downbeats"|"drums"|"bass"|"vocals"|"other" (a stem: its own attacks, once split with studio_stems), "zoom": 0-1, "flash": 0-1, "shake": 0-1},
     "framing": "fill"|"blur"|"fit"} - beat_fx punches in, flashes and shakes the picture on
     the bass drum (kick), every beat or every bar. Lyric styles: pop = one huge word at a time popping in,
     pulse = the whole line in caps swelling on every beat, typewriter = letters typed out, handwritten =
@@ -1224,11 +1240,29 @@ def studio_production_reframe(production: str, aspects: list[str], framing: Opti
                  json={"aspects": aspects, "framing": framing, "run": run})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_retake(asset_id: str, start_s: float, end_s: float, prompt: Optional[str] = None, quality: str = "draft",
+                  seed: Optional[int] = None, negative: Optional[str] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Redo only a stretch of a clip (start_s..end_s, at most ~4 s) and keep the rest / rehacer un tramo de un clip.
+
+    The frames just before and after stay as they are and guide the new stretch (Wan VACE), which follows
+    `prompt` ("she turns to the camera and smiles"); the result is a new clip with the stretch spliced in at
+    the clip's own fps and sound. quality "draft" (Wan 2.1 VACE 1.3B, quick) or "final" (Wan 2.2 Fun VACE
+    14B). Fails with no_vace when the model is not installed. Returns the job; look at it with studio_show.
+
+    Keywords: retake, redo part of a clip, fix a moment, repaint seconds, inpaint video, rehacer un tramo,
+    arreglar un momento del clip, repetir un trozo, retoque de video
+    """
+    return _call("POST", "/api/agent/studio_retake", json={"asset_id": asset_id, "start_s": start_s, "end_s": end_s,
+                                                          "prompt": prompt, "quality": quality, "seed": seed,
+                                                          "negative": negative, "wait_s": wait_s})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_stems(asset_id: str, force: bool = False, device: Optional[str] = None, wait_s: float = 0) -> dict[str, Any]:
     """Split a song into vocals, drums, bass and other (Demucs) / separar pistas.
 
-    Each stem becomes an audio asset of the song's project. Once split, lip sync (wan22_s2v, InfiniteTalk)
+    Each stem becomes an audio asset of the song's project, plus "instrumental" (the song without the voice). Once split, lip sync (wan22_s2v, InfiniteTalk)
     reads the clean vocals instead of the mix (the clip keeps the full mix as its sound) and "kick" beat
     effects read the drums. Runs in ComfyUI's Python on the card with most free memory (else the CPU,
     slower); installs Demucs into the data folder the first time. Existing stems are returned unless
@@ -1279,16 +1313,19 @@ def studio_spaces(
     project: str, action: str = "list", space: Optional[str] = None, name: Optional[str] = None,
     template: str = "blank", ops: Optional[list[dict[str, Any]]] = None, mode: str = "node",
     node_ids: Optional[list[str]] = None, force: bool = False, request: Optional[str] = None,
-    values: Optional[dict[str, Any]] = None,
+    values: Optional[dict[str, Any]] = None, group: Optional[str] = None, bundle: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
 
     action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot"|"short_film") | "get"
-    (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"all", node_ids, force) | "stop"
+    (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"upto" (run to here: the node and the stale nodes feeding it)|"all", node_ids, force) | "stop"
     (cancel a run and its renders) | "estimate" (space, mode, node_ids: renders, seconds and VRAM before a run,
     from this computer's own render times) | "build" (space, request: the local model draws or extends the graph
     from words) | "app" (space: its form - input nodes marked data.app_input, results marked data.app_output) |
     "app_run" (space, values {input node id: text | asset id(s) | character id}: fill the form and run it) |
+    "export" (space, group?: a reusable technique - nodes and wires without this project's media, cast by name,
+    the models it needs) | "import" (bundle from export, name, space?: a new space, or added into that one;
+    cast nodes are bound to this project's cast by name, empty media nodes are listed in to_fill) |
     "delete" | "restore". list marks the spaces usable as apps (`app`).
     Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
     "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
@@ -1304,7 +1341,11 @@ def studio_spaces(
     (many); combine
     {audio_start_s} joins the clips wired into "clips" in wire order, with input audio (a song under them);
     variations {mode "angles"|"expressions"|"ages"|"lighting"|"storyboard"|"custom" (data.custom: one change per
-    line), count 1-9} edits each wired image (input image) once per change, keeping everything else; group
+    line), count 1-9} edits each wired image (input image) once per change, keeping everything else;
+    composite {layers: [{blend "normal"|"screen"|"multiply"|"overlay"|"add"|"lighten"|"darken"|"softlight"|
+    "difference", opacity 0-1, scale (of the background's width), x, y (0-1 centre), key "black"|"white"}] one per
+    layer in wire order} lays the pictures or clips wired into "layers" over each one wired into "background"
+    (a clip when any input is a clip); group
     {title, color} with w/h is a frame that holds nodes together (no wires);
     list (items: anything; data.unticked drops items); note {text}.
     camera: film language ids from studio_cinema, {"shot", "angle", "move" (clips), "lens", "light",
@@ -1320,11 +1361,13 @@ def studio_spaces(
     unless force=true.
 
     Keywords: space, canvas, node graph, workflow, references, character sheet, wire, run all, chain shots, last
-    frame, join clips, upscale, espacio, lienzo, nodos, flujo, hoja de personaje, conectar, ejecutar todo, unir clips
+    frame, join clips, upscale, composite, layers, technique, template, espacio, lienzo, nodos, flujo, hoja de
+    personaje, conectar, ejecutar todo, unir clips, capas, componer, tecnica, plantilla
     """
     return _call("POST", "/api/agent/studio_spaces", params={"project": project}, json={
         "action": action, "space": space, "name": name, "template": template, "ops": ops or [], "mode": mode,
-        "node_ids": node_ids or [], "force": force, "request": request, "values": values or {}})
+        "node_ids": node_ids or [], "force": force, "request": request, "values": values or {}, "group": group,
+        "bundle": bundle})
 
 
 @tool(_ro(readOnlyHint=True))

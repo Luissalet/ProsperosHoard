@@ -212,9 +212,17 @@ class SpaceAgentBody(BaseModel):
     ops: list[dict[str, Any]] = Field(default_factory=list)  # edit: add_node / set / connect / disconnect / remove / move
     request: Optional[str] = None  # build: what to make, in words (the local model draws the graph)
     values: dict[str, Any] = Field(default_factory=dict)  # app_run: {input node id: text | asset id(s) | character id}
+    group: Optional[str] = None    # export: only this group of the space
+    bundle: Optional[dict[str, Any]] = None  # import: a technique from action=export
     mode: str = "node"
     node_ids: list[str] = Field(default_factory=list)
     force: bool = False
+
+
+class SpaceImportBody(BaseModel):
+    bundle: dict[str, Any]          # a technique (GET /api/spaces/{id}/export)
+    name: Optional[str] = None
+    space: Optional[str] = None     # add it to this space instead of making a new one
 
 
 class EnhancePromptBody(BaseModel):
@@ -644,6 +652,17 @@ class ReframeBody(BaseModel):
     wait_s: float = 0
 
 
+class RetakeBody(BaseModel):
+    asset_id: str
+    start_s: float                              # the stretch to redo, in the clip's own seconds
+    end_s: float
+    prompt: Optional[str] = None                # what happens in it (default: the scene continues naturally)
+    quality: str = "draft"                      # draft (Wan 2.1 VACE 1.3B, fast) | final (Wan 2.2 Fun VACE 14B)
+    seed: Optional[int] = None
+    negative: Optional[str] = None
+    wait_s: float = 0
+
+
 class StemsBody(BaseModel):
     asset_id: str
     force: bool = False                         # split again even if the stems exist
@@ -851,6 +870,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
     queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
     queue.register("reframe", lambda job, p: engine.reframe_job(store, job, p))
+    queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -2756,6 +2776,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             return engine.combine_clips(store, project_id, body["clips"], body.get("audio_asset_id"),
                                         float(body.get("audio_start_s") or 0))
 
+        def composite(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            return engine.composite_media(store, project_id, body["background"], body["layers"])
+
         def cancel(self, job_id: str) -> None:
             queue.cancel(job_id)
 
@@ -2866,6 +2889,27 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                            **({"deleted_at": sp["deleted_at"]} if sp.get("deleted_at") else {})}
                           for sp in store.list_spaces(project_id, deleted=deleted)]}
 
+    def op_space_import(project_id: str, bundle: Any, name: Optional[str] = None, into: Optional[str] = None) -> dict[str, Any]:
+        store.get_project(project_id)
+        if into:
+            space = store.get_space(into)
+            if space["project_id"] != project_id:
+                raise spaces_mod.SpaceError("wrong_project", "that space belongs to another project")
+            graph, report = spaces_mod.import_technique(store, project_id, bundle, space["graph"])
+            saved = store.save_space_graph(space["id"], graph, None, None)
+        else:
+            graph, report = spaces_mod.import_technique(store, project_id, bundle)
+            saved = store.create_space(project_id, (name or str((bundle or {}).get("name") or "Technique"))[:120], graph)
+        return {**report, "space": space_view(saved, compact=True)}
+
+    @app.get("/api/spaces/{space_id}/export")
+    def space_export(space_id: str, group: Optional[str] = None):
+        return spaces_mod.export_technique(store, store.get_space(space_id), group)
+
+    @app.post("/api/projects/{project_id}/spaces/import")
+    def space_import(project_id: str, body: SpaceImportBody):
+        return op_space_import(project_id, body.bundle, body.name, body.space)
+
     @app.post("/api/projects/{project_id}/spaces")
     def create_space(project_id: str, body: SpaceCreateBody):
         if body.template not in spaces_mod.TEMPLATES:
@@ -2891,8 +2935,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_space_run(space_id: str, body: SpaceRunBody) -> dict[str, Any]:
         space = store.get_space(space_id)
-        if body.mode not in ("node", "downstream", "all"):
-            raise spaces_mod.SpaceError("bad_mode", "mode is node, downstream or all")
+        if body.mode not in ("node", "downstream", "upto", "all"):
+            raise spaces_mod.SpaceError("bad_mode", "mode is node, downstream, upto or all")
         order = spaces_mod.run_order(space["graph"], body.mode, body.node_ids)
         if not order:
             raise spaces_mod.SpaceError("nothing_to_run", "no picture, clip or song node to run there")
@@ -3106,6 +3150,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if body.action == "create":
                 return space_view(store.create_space(project, body.name or "Space", spaces_mod.template_graph(body.template)),
                                   compact=True)
+            if body.action == "import":
+                return op_space_import(project, body.bundle, body.name, body.space)
             if not body.space:
                 raise spaces_mod.SpaceError("space_required", "pass the space id (action=list shows them)")
             space = store.get_space(body.space)
@@ -3129,12 +3175,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 return op_space_app(space["id"])
             if body.action == "app_run":
                 return op_space_app_run(space["id"], body.values)
+            if body.action == "export":
+                return spaces_mod.export_technique(store, space, body.group)
             if body.action == "delete":
                 return space_view(store.delete_space(space["id"]), compact=True)
             if body.action == "restore":
                 return space_view(store.restore_space(space["id"]), compact=True)
-            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, stop, estimate, build, app, "
-                                                      "app_run, delete, restore")
+            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, import, edit, run, stop, estimate, build, "
+                                                      "app, app_run, export, delete, restore")
         return agent("studio_spaces", f"{body.action}:{body.space or body.name or ''}", run)
 
     @app.post("/api/agent/studio_prompt_enhance")
@@ -3313,6 +3361,23 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             for m in motions:
                 if isinstance(m, dict) and m.get("asset_id") and store.get_asset(str(m["asset_id"]))["kind"] != "video":
                     raise engine.EngineError("bad_motion_ref", f"motion reference {m['asset_id']} is not a video")
+        for change in body.changes:
+            # a retake chosen as a take joins its clip's history first
+            if isinstance(change, dict) and change.get("take") and change.get("key") is not None:
+                try:
+                    a = store.get_asset(str(change["take"]))
+                except NotFound:
+                    continue
+                src = (a.get("recipe") or {}).get("retake_of") if a["kind"] == "video" else None
+                if src:
+                    with productions_mod.lock_for(slug):
+                        state = productions_mod.load_state(store.data_dir, slug)
+                        for ck, takes in productions_mod.shot_takes(state, str(change["key"]))["clips"].items():
+                            if any(t["asset_id"] == src for t in takes):
+                                productions_mod.remember_take(state, "clips", ck, {"asset_id": a["id"], "retake_of": src,
+                                                                                 "quality": (a.get("recipe") or {}).get("quality") or "final"})
+                                productions_mod.save_state(store.data_dir, state)
+                                break
         result = productions_mod.update_shots(store.data_dir, slug, body.changes)
         if body.run and result["changed"]:
             result["job"] = engine.job_view(queue_production(slug))
@@ -3540,6 +3605,33 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_reframe(body: ReframeBody):
         return agent("studio_reframe", body.asset_id, lambda: op_reframe(body))
 
+    def op_retake(body: RetakeBody) -> dict[str, Any]:
+        clip = store.get_asset(body.asset_id)
+        if clip["kind"] != "video":
+            raise engine.EngineError("not_video", "a retake redoes part of a clip")
+        if body.quality not in ("draft", "final"):
+            raise engine.EngineError("bad_quality", "quality is draft or final")
+        if not 0 <= body.start_s < body.end_s:
+            raise engine.EngineError("bad_range", "start_s must be before end_s")
+        engine.retake_plan(float(clip.get("duration_s") or body.end_s), body.start_s, body.end_s)
+        info = engine._object_info(backend) or {}
+        if info and not engine.retake_installed(info)[body.quality]:
+            raise engine.EngineError("no_vace", ("a draft retake needs wan2.1_vace_1.3B_fp16" if body.quality == "draft" else
+                                                 "a final retake needs both wan2.2_fun_vace 14B experts and the t2v 4-step LoRAs")
+                                     + " in ComfyUI/models")
+        job = queue.enqueue("retake", "gpu", {**body.model_dump(exclude={"wait_s"})}, project_id=clip["project_id"])
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/assets/{asset_id}/retake")
+    def asset_retake(asset_id: str, body: RetakeBody):
+        return op_retake(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/studio_retake")
+    def agent_retake(body: RetakeBody):
+        return agent("studio_retake", body.asset_id, lambda: op_retake(body))
+
     def op_stems(body: StemsBody) -> dict[str, Any]:
         from . import stems as stems_mod
         asset = store.get_asset(body.asset_id)
@@ -3583,6 +3675,42 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_reframe")
     def agent_production_reframe(production: str, body: ProductionReframeBody):
         return agent("studio_production_reframe", production, lambda: op_production_reframe(production, body))
+
+    def op_production_takes(slug: str, key: Optional[str] = None) -> dict[str, Any]:
+        state = productions_mod.load_state(store.data_dir, slug)
+        keys = [key] if key else [s["key"] for s in (state.get("spec") or {}).get("shots") or []]
+        known = {s["key"] for s in (state.get("spec") or {}).get("shots") or []}
+        if key and key not in known:
+            raise productions_mod.ProductionError("bad_changes", f"unknown shot key '{key}'")
+        shots = [productions_mod.shot_takes(state, k) for k in keys]
+        for sh in shots:
+            # retakes of a clip (studio_retake) are takes of its shot too
+            for ck, takes in sh["clips"].items():
+                seen = {t["asset_id"] for t in takes}
+                for t in list(takes):
+                    for a in _retakes_of(state, t["asset_id"]):
+                        if a["id"] not in seen:
+                            seen.add(a["id"])
+                            takes.append({"asset_id": a["id"], "quality": (a.get("recipe") or {}).get("quality"),
+                                          "retake": True, "current": False})
+        return {"production": slug, "shots": shots,
+                "hint": "put one back with studio_production_shots([{\"key\": K, \"take\": asset_id}])"}
+
+    def _retakes_of(state: dict[str, Any], clip_id: str) -> list[dict[str, Any]]:
+        pid = state.get("project_id")
+        if not pid:
+            return []
+        items = store.list_assets(pid, kind="video", query=clip_id, limit=20)["items"]
+        return [a for a in items if (a.get("recipe") or {}).get("operation") == "retake"
+                and (a.get("recipe") or {}).get("retake_of") == clip_id]
+
+    @app.get("/api/productions/{slug}/takes")
+    def production_takes(slug: str, key: Optional[str] = None):
+        return op_production_takes(slug, key)
+
+    @app.post("/api/agent/studio_production_takes")
+    def agent_production_takes(production: str, key: Optional[str] = None):
+        return agent("studio_production_takes", production, lambda: op_production_takes(production, key))
 
     def op_production_regenerate(slug: str, body: ProductionRegenerateBody) -> dict[str, Any]:
         out = productions_mod.regenerate_unlocked(store.data_dir, slug, body.stage, body.keys)

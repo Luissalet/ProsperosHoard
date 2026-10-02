@@ -143,3 +143,69 @@ def test_regenerate_and_promote_over_http(client):
     assert r.status_code == 200 and r.json()["promoted"] == []
     s = c.post(f"/api/agent/studio_production_settings?production={slug}", json={"clip_quality": "draft"}).json()
     assert s["settings"]["clip_quality"] == "draft"
+
+
+def test_earlier_takes_are_kept_and_can_come_back(store, project):
+    slug, stills = _ready(store, project)
+    studio = ClipStudio(store)
+    first = dict(_clips(store, slug, studio)["done"]["clips"]["items"])
+    prod.regenerate_unlocked(store.data_dir, slug, "clips", ["1"])
+    second = _clips(store, slug, studio)["done"]["clips"]["items"]
+    assert second["1"] != first["1"]
+    state = prod.load_state(store.data_dir, slug)
+    takes = prod.shot_takes(state, "1")
+    assert [t["asset_id"] for t in takes["clips"]["1"]] == [first["1"], second["1"]]
+    assert [t["current"] for t in takes["clips"]["1"]] == [False, True]
+    assert takes["stills"][0]["current"] and takes["stills"][0]["variants"] == [stills["1"]]
+    prod.update_shots(store.data_dir, slug, [{"key": "1", "take": first["1"]}])
+    state = prod.load_state(store.data_dir, slug)
+    assert state["done"]["clips"]["items"]["1"] == first["1"] and state["status"] == "queued"
+    with pytest.raises(prod.ProductionError):
+        prod.update_shots(store.data_dir, slug, [{"key": "1", "take": "a_nope"}])
+    # a continuation picked by hand stays even though shot 2's clip is not the one it started from
+    prod.regenerate_unlocked(store.data_dir, slug, "clips", ["3"])
+    _clips(store, slug, studio)
+    state = prod.load_state(store.data_dir, slug)
+    old3 = prod.shot_takes(state, "3")["clips"]["3"][0]["asset_id"]
+    prod.update_shots(store.data_dir, slug, [{"key": "3", "take": old3}])
+    assert prod.load_state(store.data_dir, slug)["done"]["clips"]["items"]["3"] == old3
+
+
+def test_a_still_take_brings_its_set_back(store, project):
+    slug, stills = _ready(store, project)
+    state = prod.load_state(store.data_dir, slug)
+    prod.remember_take(state, "frames", "2", {"variants": ["a_old1", "a_old2"], "seed": 7})
+    prod.save_state(store.data_dir, state)
+    prod.update_shots(store.data_dir, slug, [{"key": "2", "take": "a_old2"}])
+    frames = prod.load_state(store.data_dir, slug)["done"]["frames"]["items"]
+    assert frames["2"] == {"variants": ["a_old1", "a_old2"], "best": "a_old2", "seed": 7}
+
+
+def test_takes_over_http(client):
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Takes http"}).json()["id"]
+    slug, _ = _ready(store, {"id": pid})
+    _clips(store, slug, ClipStudio(store))
+    r = c.post(f"/api/agent/studio_production_takes?production={slug}&key=2")
+    assert r.status_code == 200, r.text
+    assert r.json()["shots"][0]["clips"]["2"][0]["current"] is True
+    assert c.get(f"/api/productions/{slug}/takes").json()["shots"][2]["key"] == "3"
+    assert c.get(f"/api/productions/{slug}/takes?key=9").status_code == 400
+
+
+def test_a_retake_of_a_clip_is_a_take_of_its_shot(client):
+    c, app, _ = client
+    store = app.state.store
+    pid = c.post("/api/projects", json={"name": "Retake takes"}).json()["id"]
+    slug, _ = _ready(store, {"id": pid})
+    state = _clips(store, slug, ClipStudio(store))
+    clip = state["done"]["clips"]["items"]["1"]
+    src = store.get_asset(clip)
+    fixed = store.create_asset(project_id=pid, kind="video", file_path=src["file_path"], duration_s=src.get("duration_s"),
+                               source="generated", recipe={"operation": "retake", "retake_of": clip, "quality": "draft"})["id"]
+    takes = c.get(f"/api/productions/{slug}/takes?key=1").json()["shots"][0]["clips"]["1"]
+    assert [t.get("retake", False) for t in takes] == [False, True] and takes[1]["asset_id"] == fixed
+    r = c.patch(f"/api/productions/{slug}/shots", json={"changes": [{"key": "1", "take": fixed}], "run": False})
+    assert r.status_code == 200, r.text
+    assert prod.load_state(store.data_dir, slug)["done"]["clips"]["items"]["1"] == fixed

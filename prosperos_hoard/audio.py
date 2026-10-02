@@ -302,7 +302,7 @@ def analyze_samples(samples: np.ndarray, sr: int = SAMPLE_RATE) -> dict[str, Any
     }
 
 
-HIT_SOURCES = ("kick", "beats", "downbeats")
+HIT_SOURCES = ("kick", "beats", "downbeats", "onsets")
 
 
 def beat_hits(samples: np.ndarray, source: str = "kick", sr: int = SAMPLE_RATE,
@@ -312,13 +312,15 @@ def beat_hits(samples: np.ndarray, source: str = "kick", sr: int = SAMPLE_RATE,
     "kick": peaks of the low band (< 150 Hz) onset envelope - the bass drum
     and big bass notes, which is what the eye expects a punch on; "beats":
     the beat grid (downbeats full strength, the rest softer); "downbeats":
-    one per bar. Silent or beatless audio gives no hits."""
+    one per bar; "onsets": peaks of the whole-spectrum onset envelope (every
+    attack - for a stem: each drum hit, each sung syllable). Silent or
+    beatless audio gives no hits."""
     if source not in HIT_SOURCES:
         raise ValueError(f"source must be one of {', '.join(HIT_SOURCES)}")
     samples = np.asarray(samples, dtype=np.float32)
     if len(samples) < FRAME_SIZE * 2 or float(np.abs(samples).max(initial=0.0)) < 1e-4:
         return []
-    if source != "kick":
+    if source not in ("kick", "onsets"):
         analysis = analyze_samples(samples, sr)
         downs = [round(float(t), 3) for t in analysis["downbeats"]]
         if source == "downbeats":
@@ -326,7 +328,7 @@ def beat_hits(samples: np.ndarray, source: str = "kick", sr: int = SAMPLE_RATE,
         down_set = set(downs)
         return [(round(float(t), 3), 1.0 if round(float(t), 3) in down_set else 0.55) for t in analysis["beat_times"]]
     mags = _stft_mags(samples)
-    low = _flux(mags, 0, _band_bins(sr, FRAME_SIZE, 150.0))
+    low = _flux(mags, 0, _band_bins(sr, FRAME_SIZE, 150.0)) if source == "kick" else _flux(mags)
     if low.max() <= 0:
         return []
     ref = float(np.percentile(low[low > 0], 97)) if np.any(low > 0) else float(low.max())

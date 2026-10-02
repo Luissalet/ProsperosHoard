@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn, Ratio, AudioLines, Scissors } from "lucide-react";
+import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn, Ratio, AudioLines, Scissors, RefreshCw } from "lucide-react";
 import { api, fileUrl, type Asset, type Board } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, Stars, useApp, useAsync } from "./ui";
@@ -88,6 +88,10 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   };
 
   const [reframeHow, setReframeHow] = useState("fill");
+  const [retakeFrom, setRetakeFrom] = useState(1);
+  const [retakeTo, setRetakeTo] = useState(2);
+  const [retakePrompt, setRetakePrompt] = useState("");
+  const [retakeQuality, setRetakeQuality] = useState<"draft" | "final">("draft");
   const [stemList, setStemList] = useState<Record<string, string>>({});
   useEffect(() => {
     setStemList({});
@@ -230,16 +234,16 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               <button className="btn sm" disabled={busy} title={t("stemsHint")} onClick={async () => {
                 setBusy(true);
                 try {
-                  const r = await api.makeStems(asset.id, Object.keys(stemList).length === 4);
+                  const r = await api.makeStems(asset.id, ["vocals", "drums", "bass", "other"].every((k) => stemList[k]));
                   if (r.job) { app.toast(t("stemsQueued"), "ok"); app.refreshJobs(); }
                   setStemList(r.stems);
                 } catch (e) { app.toast((e as Error).message, "bad"); }
                 finally { setBusy(false); }
-              }}><Scissors size={13} /> {Object.keys(stemList).length === 4 ? t("stemsAgain") : t("stemsMake")}</button>
+              }}><Scissors size={13} /> {["vocals", "drums", "bass", "other"].every((k) => stemList[k]) ? t("stemsAgain") : t("stemsMake")}</button>
             </div>
             {Object.keys(stemList).length > 0 && (
               <div className="stack" style={{ gap: 4 }}>
-                {["vocals", "drums", "bass", "other"].filter((k) => stemList[k]).map((k) => (
+                {["vocals", "drums", "bass", "other", "instrumental"].filter((k) => stemList[k]).map((k) => (
                   <div key={k} className="row" style={{ gap: 6 }}>
                     <span className="small mono" style={{ width: 60 }}>{t(`stem_${k}` as never)}</span>
                     <audio controls preload="none" src={`/api/assets/${stemList[k]}/file`} style={{ flex: 1, height: 30 }} />
@@ -247,6 +251,24 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
                 ))}
               </div>
             )}
+          </div>
+        )}
+        {asset.kind === "video" && (
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="small muted" title={t("retakeHint")}><Scissors size={13} /> {t("retakeTitle")}</span>
+            <div className="row wrap" style={{ gap: 6 }}>
+              <label className="row small" style={{ gap: 4 }}>{t("trackFrom")}<input type="number" min={0} step={0.1} value={retakeFrom}
+                style={{ width: 70 }} onChange={(e) => setRetakeFrom(Number(e.target.value))} />s</label>
+              <label className="row small" style={{ gap: 4 }}>{t("retakeTo")}<input type="number" min={0} step={0.1} value={retakeTo}
+                style={{ width: 70 }} onChange={(e) => setRetakeTo(Number(e.target.value))} />s</label>
+              <select value={retakeQuality} onChange={(e) => setRetakeQuality(e.target.value as "draft" | "final")} style={{ width: "auto" }}>
+                <option value="draft">{t("sbDraft")}</option><option value="final">{t("sbFinal")}</option>
+              </select>
+            </div>
+            <input value={retakePrompt} placeholder={t("retakePh")} onChange={(e) => setRetakePrompt(e.target.value)} />
+            <button className="btn sm" disabled={busy || retakeTo <= retakeFrom} onClick={() => run(t("retakeTitle"),
+              () => api.retake(asset.id, { start_s: retakeFrom, end_s: retakeTo, prompt: retakePrompt || undefined, quality: retakeQuality }))}>
+              <RefreshCw size={13} /> {t("retakeGo")}</button>
           </div>
         )}
         {(asset.kind === "image" || asset.kind === "video") && (

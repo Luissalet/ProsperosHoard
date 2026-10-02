@@ -45,7 +45,7 @@ def fake_python(tmp_path, store):
 def test_a_song_splits_into_four_stems_once(store, project, fake_python):
     song = _song(store, project, 3.0)
     out = stems.separate(store, song, fake_python, lambda *_: None, device="cpu")
-    assert set(out["stems"]) == set(stems.STEMS) and out["device"] == "cpu" and not out["reused"]
+    assert set(out["stems"]) == set(stems.STEMS) | {"instrumental"} and out["device"] == "cpu" and not out["reused"]
     vocals = store.get_asset(out["stems"]["vocals"])
     assert vocals["kind"] == "audio" and vocals["recipe"]["derived_from"] == song and "stem" in vocals["tags"]
     assert (store.data_dir / vocals["file_path"]).stat().st_size > 1000
@@ -97,3 +97,26 @@ def test_stems_over_http(client, tmp_path):
     assert r.status_code == 400
     r = c.post(f"/api/assets/{song}/stems", json={"asset_id": song, "device": "cpu"})
     assert r.status_code == 200 and r.json()["job"]["type"] == "stems"
+
+
+def test_effects_can_follow_one_stem():
+    from prosperos_hoard import audio, video
+    sr = audio.SAMPLE_RATE
+    x = np.zeros(sr * 4, dtype=np.float32)
+    for t in (0.5, 1.25, 2.0, 3.1):  # bright clicks: every attack, not only bass
+        i = int(t * sr)
+        x[i:i + 400] = np.sin(2 * np.pi * 3000 * np.arange(400) / sr) * np.exp(-np.arange(400) / 80)
+    hits = audio.beat_hits(x, "onsets")
+    assert len(hits) == 4 and abs(hits[0][0] - 0.5) < 0.05
+    assert video.validate_finishing({"beat_fx": {"source": "vocals", "zoom": 0.4}})["beat_fx"]["source"] == "vocals"
+    with pytest.raises(video.RenderError):
+        video.validate_finishing({"beat_fx": {"source": "piano"}})
+
+
+def test_the_instrumental_is_mixed_from_the_stems(store, project, fake_python):
+    song = _song(store, project, 2.0)
+    out = stems.separate(store, song, fake_python, lambda *_: None, device="cpu")
+    inst = store.get_asset(out["stems"]["instrumental"])
+    assert inst["recipe"]["stem"] == "instrumental" and set(inst["recipe"]["input_asset_ids"]) == {
+        out["stems"]["drums"], out["stems"]["bass"], out["stems"]["other"]}
+    assert stems.existing(store, song)["instrumental"] == inst["id"]

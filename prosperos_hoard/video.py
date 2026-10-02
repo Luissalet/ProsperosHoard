@@ -66,7 +66,9 @@ FINISHING_KEYS = {"color_grade", "grain", "vignette", "letterbox", "glitch_on_do
 # "zoom"|"flash"|"shake": 0-1}). They are applied per clip, with only that
 # clip's hits in the expressions, so a three-minute song never builds a
 # command line longer than Windows allows.
-BEAT_FX_SOURCES = ("kick", "beats", "downbeats")
+BEAT_FX_SOURCES = ("kick", "beats", "downbeats", "drums", "bass", "vocals", "other")
+# a stem as the source: the hits are that stem's own attacks (split the song first)
+STEM_HIT_SOURCE = {"drums": "onsets", "bass": "kick", "vocals": "onsets", "other": "onsets"}
 BEAT_FX_TAU = {"zoom": 0.14, "flash": 0.09, "shake": 0.10}
 LYRIC_STYLES = ("default", "horror", "bold", "pop", "pulse", "typewriter", "handwritten", "cinema")
 # how a clip of another shape fills the frame: cropped to fill, fitted over a
@@ -763,9 +765,12 @@ def render_timeline(
     progress: Optional[Callable[[float, Optional[str]], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     beat_audio_path: Optional[Path] = None,
+    stem_paths: Optional[dict[str, Path]] = None,
 ) -> dict[str, Any]:
     """`beat_audio_path`: the song's drums stem, when it was split - the
-    "kick" beat effects read the bass drum there instead of in the mix."""
+    "kick" beat effects read the bass drum there instead of in the mix.
+    `stem_paths`: every stem of the song, for effects driven by one stem
+    ("vocals", "bass"...); without it they fall back to the mix's kick."""
     ffmpeg = ffmpeg_path()
     if not ffmpeg:
         raise RenderError("ffmpeg not found (install ffmpeg or the imageio-ffmpeg wheel)")
@@ -818,7 +823,13 @@ def render_timeline(
         from . import audio as audio_mod  # numpy-only; only a render with beat effects pays for it
         try:
             source = fx.get("source") or "kick"
-            beat_src = beat_audio_path if (beat_audio_path and source == "kick") else asset_path_for(timeline["audio_asset_id"])
+            stem = (stem_paths or {}).get(source) if source in STEM_HIT_SOURCE else None
+            if stem:
+                beat_src, source = stem, STEM_HIT_SOURCE[source]
+            elif source in STEM_HIT_SOURCE:
+                beat_src, source = beat_audio_path or asset_path_for(timeline["audio_asset_id"]), "kick"
+            else:
+                beat_src = beat_audio_path if (beat_audio_path and source == "kick") else asset_path_for(timeline["audio_asset_id"])
             samples = audio_mod.decode_to_mono(beat_src)
             hits = audio_mod.beat_hits(samples, source)
         except Exception:  # noqa: BLE001 - an unreadable song renders without the effect, not at all
