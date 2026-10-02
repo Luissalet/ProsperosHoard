@@ -177,7 +177,15 @@ def test_vtt_time_carries_seconds_into_minutes():
 
 def test_srt_time_carries_seconds_into_minutes_at_hour_boundary():
     # 3599.9996s must round to 01:00:00,000, not "00:59:60,000" or "00:59:59,1000".
-    assert ve._srt_time(3599.9996) == "01:00:00,000"
+    srt = ve.segments_to_srt([{"start_s": 3599.9996, "end_s": 3601.0, "text": "x"}])
+    assert srt.splitlines()[1] == "01:00:00,000 --> 01:00:01,000"
+
+
+def test_subtitle_files_skip_empty_cues_and_escape_vtt_text():
+    segments = [{"start_s": 0, "end_s": 1, "text": "  "}, {"start_s": 1, "end_s": 2, "text": "a < b & c"}]
+    assert ve.segments_to_srt(segments).splitlines()[0] == "1"                       # the empty cue takes no number
+    assert "a &lt; b &amp; c" in ve.segments_to_vtt(segments)
+    assert ve.segments_to_txt(segments) == "a < b & c"
 
 
 def test_transcript_segment_to_dict():
@@ -205,3 +213,52 @@ def test_real_faster_whisper_transcription(tmp_path):
     eng = ve.FasterWhisperEngine(model_size="tiny")
     result = eng.transcribe(wav_path, language="en", word_timestamps=False)
     assert "segments" in result and isinstance(result["text"], str)
+
+
+def test_ffmpeg_lookup_is_the_shared_one_and_procutil_decodes_text():
+    from prosperos_hoard import backend, procutil
+    from prosperos_hoard.hoard_link.media import bins
+
+    assert backend.ffmpeg_path() == bins.find("ffmpeg").path
+    exe = backend.ffmpeg_path()
+    assert exe and backend.ffmpeg_version(exe).lower().startswith("ffmpeg version")
+    done = procutil.run([exe, "-version"], text=True, timeout=10, capture_output=True)   # old keyword still accepted
+    assert done.returncode == 0 and isinstance(done.stdout, str)
+    assert isinstance(procutil.run([exe, "-version"], timeout=10).stdout, bytes)         # bytes unless text=True
+
+
+def _transcript(**over):
+    base = {"ok": True, "via": "funes", "language": "es", "text": "hola mundo", "duration_s": 2.0, "model": "small", "device": "cuda",
+            "segments": [{"start_s": 0.0, "end_s": 2.0, "text": " hola mundo ", "words": [
+                {"start_s": 0.0, "end_s": 0.9, "word": "hola", "p": 0.9}, {"start_s": 1.0, "end_s": 2.0, "word": "mundo", "p": 0.8}]}]}
+    base.update(over)
+    return base
+
+
+def test_the_faster_whisper_engine_asks_the_family_and_keeps_its_old_result_shape(monkeypatch, tmp_path):
+    asked = {}
+    monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, **kw: asked.update(path=path, **kw) or _transcript())
+    out = ve.FasterWhisperEngine(model_size="tiny").transcribe(tmp_path / "a.wav", language=None, word_timestamps=True)
+    assert asked["language"] == "auto" and asked["model"] == "tiny" and asked["word_timestamps"] is True
+    assert out == {"language": "es", "text": "hola mundo", "segments": [{"start_s": 0.0, "end_s": 2.0, "text": "hola mundo", "words": [
+        {"start_s": 0.0, "end_s": 0.9, "word": "hola"}, {"start_s": 1.0, "end_s": 2.0, "word": "mundo"}]}]}
+    plain = ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav", language="es", word_timestamps=False)
+    assert plain["segments"][0]["words"] == [] and asked["language"] == "es"
+
+
+def test_the_faster_whisper_engine_tells_apart_nobody_to_ask_from_a_failed_job(monkeypatch, tmp_path):
+    for kind in ("hub_down", "app_down", "app_missing", "tool_missing"):
+        monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, _k=kind, **kw: {"ok": False, "kind": _k, "error": "x", "via": "local"})
+        with pytest.raises(ve.EngineNotInstalled):
+            ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav")
+    monkeypatch.setattr(ve.fam_media, "transcribe", lambda path, **kw: {"ok": False, "kind": "tool_error", "error": "bad audio", "via": "funes"})
+    with pytest.raises(ve.TranscriptionFailed, match="bad audio"):
+        ve.FasterWhisperEngine().transcribe(tmp_path / "a.wav")
+
+
+def test_the_engine_counts_as_installed_when_funes_can_do_it(monkeypatch):
+    monkeypatch.setattr(ve, "_spec_installed", lambda name: False)
+    monkeypatch.setattr(ve.fam_media, "available", lambda service="media", timeout=1.0: service == "stt")
+    assert ve.FasterWhisperEngine().is_installed() is True
+    monkeypatch.setattr(ve.fam_media, "available", lambda service="media", timeout=1.0: False)
+    assert ve.FasterWhisperEngine().is_installed() is False

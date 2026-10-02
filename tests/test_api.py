@@ -33,8 +33,31 @@ def test_health(client):
 def test_guard_rejects_bad_host(client):
     c, _, _ = client
     r = c.get("/api/health", headers={"Host": "evil.example:9999"})
-    assert r.status_code == 400
-    assert r.json()["error"] == "bad_host"
+    assert r.status_code == 403                                  # the shared guard's answer
+    assert "local access" in r.json()["error"]
+    assert c.get("/api/health", headers={"Host": "127.0.0.1:9999"}).status_code == 403   # a local name on another port: pinned
+    assert c.get("/api/health", headers={"Host": "localhost:8815"}).status_code == 200
+
+
+def test_guard_also_covers_websockets_and_lan_names_from_the_environment(client, monkeypatch, data_dir, tmp_path):
+    c, app, _ = client
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with c.websocket_connect("/ws/nothing", headers={"Host": "evil.example:8815"}):
+            pass
+    from prosperos_hoard.api import create_app
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PROSPERO_ALLOWED_HOSTS", "studio.lan")
+    other = create_app(data_dir, port=8816)
+    try:
+        with TestClient(other, base_url="http://studio.lan:8816") as lan:
+            assert lan.get("/api/health").status_code == 200
+        with TestClient(other, base_url="http://evil.example:8816") as bad:
+            assert bad.get("/api/health").status_code == 403
+    finally:
+        other.state.queue.stop()
 
 
 def test_guard_rejects_cross_origin_and_cross_site_writes(client):
@@ -47,7 +70,10 @@ def test_guard_rejects_cross_origin_and_cross_site_writes(client):
 
 def test_guard_allows_plain_get_navigation(client):
     c, _, _ = client
-    assert c.get("/api/health", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+    nav = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+    assert c.get("/api/health", headers=nav).status_code == 200                        # a link followed from another site
+    assert c.get("/api/health", headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors"}).status_code == 403
+    assert c.get("/api/health", headers={**nav, "Sec-Fetch-Dest": "iframe"}).status_code == 403   # embedded in a frame
 
 
 def test_errors_are_json_with_code_and_message(client):

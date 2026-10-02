@@ -224,7 +224,7 @@ con dos CPU) antes de que el servidor responda. Después abre
 `"service": "prosperos-hoard"`).
 
 Opciones: `--port`, `--data-dir` (o `PROSPERO_DATA_DIR`), `--demo` y
-`--no-browser`. `--demo` arranca el backend procedural de demostración (con `PROSPERO_DEMO_MOTION=1` su ComfyUI falso lista además los modelos de vídeo grandes - Wan 14B, VACE, Bernini-R - para poder probar esas funciones) y
+`--no-browser`. `PROSPERO_ALLOWED_HOSTS` (separados por comas) deja que la API responda a un nombre de la red local o de la tailnet. `--demo` arranca el backend procedural de demostración (con `PROSPERO_DEMO_MOTION=1` su ComfyUI falso lista además los modelos de vídeo grandes - Wan 14B, VACE, Bernini-R - para poder probar esas funciones) y
 crea un grupo original de cinco miembros con retratos, fotos en el
 escenario, una portada, un set de photocards, una canción sintética de 30 s
 con la letra sincronizada y un montaje automático, y renderiza su vista
@@ -299,7 +299,7 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `production_export_lumiere` | Escribe el montaje de una producción como FCP7 XML + EDL y lo abre como proyecto en Lumiere's Hoard | no |
 | `cast_import_character` | Un miembro del reparto a partir de un nombre, una descripción, un aspecto e imágenes de referencia (el mismo nombre y `source_ref` dos veces es el mismo miembro) | no |
 | `production_from_storyboard` | Un borrador de producción a partir de planos `{text, duration_s?, image?}`; no se encola, aún necesita una canción | no |
-| `voice_tts` | Lee un texto con una voz guardada o el mejor motor instalado; devuelve la ruta de un WAV | no |
+| `voice_tts` | Lee un texto con una voz guardada, un motor elegido (`engine`) o el mejor instalado, a una `speed` de 0,5 a 2,0; devuelve la ruta de un WAV | no |
 
 También funciona con cualquier cliente MCP por stdio:
 
@@ -339,11 +339,36 @@ Prospero se une a las demás apps Hoard con el contrato común de la familia (el
   leer esa carpeta, la respuesta lo dice y los archivos se quedan ahí. Lumiere solo puede leer algunas carpetas (`LUMIERE_FILE_ROOTS`):
   permite la carpeta de datos de Prospero.
 
+## Lo que viene de la librería común de la familia
+
+La librería compartida (HoardLink 0.8) sustituye código que esta app llevaba por su cuenta:
+
+- **Descargas desde un enlace** (Biblioteca > Descargar de un enlace, `studio_download_media`): van primero al descargador de la familia
+  (Links Hoard), con los mismos límites de antes (tramos, 20 minutos, 1080p). Solo si no responde, Prospero ejecuta yt-dlp él mismo,
+  localizado con el buscador de herramientas compartido (su binario o `python -m yt_dlp`). Los enlaces pasan por las reglas compartidas de
+  direcciones públicas: se rechazan direcciones privadas, de bucle local, de enlace local y de metadatos, hosts numéricos y URL con
+  credenciales. Las descargas de stock (Pexels, Pixabay) pasan la misma comprobación en cada redirección, con la conexión fijada a la
+  dirección comprobada y un tope de 400 MB.
+- **Voz a texto** (el motor faster-whisper del estudio de voz): pregunta primero a Funes's Hoard (un solo Whisper para la familia) y, si no
+  está, usa aquí el transcriptor compartido, en la GPU cuando el hub la presta, filtrando lo que Whisper se inventa sobre el silencio.
+- **Voz para otras apps**: `voice_tts` admite `engine` (el id de un motor instalado; el motor de una voz guardada manda) y `speed` (0,5 a 2,0).
+- **ffmpeg y ffprobe** los encuentra el buscador compartido (`HOARD_FFMPEG`, PATH, las carpetas habituales de Windows y después la rueda
+  incluida); los procesos hijos son los compartidos (un tiempo agotado, o un render o entrenamiento cancelado, mata todo el árbol).
+- **Subtítulos y letras**: SRT, VTT, TXT, LRC y el escapado de texto ASS son compartidos (se omiten las líneas vacías; al importar LRC se
+  leen varias marcas por línea, `[offset:]` y las marcas de palabra). Los ajustes, el estado de una producción y las recetas se escriben de
+  forma atómica con reintentos ante bloqueos de Windows; los ids son los ULID compartidos.
+- **El guardia** delante de la API (Host, Origin, comprobaciones entre sitios, también websockets) es el compartido: una petición rechazada
+  recibe un `403` con un mensaje corto. `PROSPERO_ALLOWED_HOSTS` añade nombres de la red local o de la tailnet (`studio.lan`, `*.ts.net`).
+  Se rechaza una petición entre sitios que no sea una navegación. El puente MCP ignora las variables de proxy y la espera más larga en el
+  servidor es de 150 s (`wait_s`).
+- **Avisos de producción**: usan el selector compartido `auto | hub | off` (un aviso que el hub retiene por horas de silencio cuenta como
+  entregado).
+
 ## Modelos compartidos (HoardLink)
 
 Prospero no aloja ningún modelo. Pide a [HoardLink](https://github.com/Luissalet/HoardLink)
 (incluido en [`prosperos_hoard/hoard_link/`](prosperos_hoard/hoard_link),
-copia byte a byte de HoardLink 0.1.1) el backend de `image`/`video`
+copia byte a byte de HoardLink 0.8.0) el backend de `image`/`video`
 (ComfyUI) y de `tts` (el TTS de Faustus, con Piper como alternativa local),
 el mismo resolutor que usan todos los plugins de Faustus. El orden de
 resolución, en una línea: un ajuste explícito en Ajustes, en
@@ -428,7 +453,8 @@ las opciones `beats_*`).
 **Biblioteca > Descargar de un enlace** trae un vídeo (o solo un trozo, o
 su audio) de YouTube, X, Instagram y los demás sitios que conoce yt-dlp,
 como mp4 en el proyecto (vídeos enteros de hasta 20 minutos, o el trozo
-entre dos tiempos). Los GIF animados entran como vídeos.
+entre dos tiempos), con el descargador de la familia cuando está en marcha y
+con yt-dlp aquí si no. Los GIF animados entran como vídeos.
 
 **Backends > Estos ComfyUI son solo para Prospero**: cuando un servidor
 está libre, un trabajo puede cargar su modelo en lugar del anterior en vez

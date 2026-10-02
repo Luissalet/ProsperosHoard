@@ -14,7 +14,12 @@ Reglas para agentes de código que trabajen en este repositorio.
    `Studio`; en los tests, `app.state.short_hooks`).
 2. **`mcp_server.py` es un script independiente**: solo stdlib, `httpx` y
    `mcp`. Nunca `from . import ...`. Se lanza por ruta absoluta.
-3. **No edites `prosperos_hoard/hoard_link/*`** (copia exacta, ver
+3. **Lo que ya hace la librería común no se reescribe aquí**: descargas de
+   enlaces (`fam_media.download`), voz a texto (`fam_media.transcribe`),
+   guardia de Host/Origin (`hoard_link.guard`), avisos (`fam_notify.Router`),
+   comprobación SSRF (`hoard_link.web.safety`), espera máxima de 150 s
+   (`hoard_link.waiting`).
+   **No edites `prosperos_hoard/hoard_link/*`** (copia exacta, ver
    `VENDORED.txt`). Si falta algo, envuélvelo en `backend.py`.
 4. **Cada operación visible tiene su ruta `/api/agent/<tool>` y su
    herramienta MCP** con el mismo nombre; las respuestas de agente son
@@ -22,15 +27,23 @@ Reglas para agentes de código que trabajen en este repositorio.
    docstrings llevan una línea `Keywords:` en inglés y español.
 5. **Los archivos se sirven por id**, nunca por una ruta del cliente. Las
    importaciones por ruta pasan por `engine.resolve_import_path`.
-6. **Escrituras atómicas con `util.replace_with_retry`** (o
-   `util.write_text_atomic`), nunca `Path.replace`/`os.replace` a pelo: en
-   Windows el reemplazo falla (WinError 5/32) mientras otro lector tiene el
-   archivo abierto.
-7. **Procesos hijos siempre con `procutil`** (CREATE_NO_WINDOW en Windows,
-   UTF-8). Nada de `multiprocessing`. `pathlib` y `encoding="utf-8"` siempre.
+6. **Escrituras atómicas con `util.write_text_atomic`** (o
+   `util.replace_with_retry`; ambos son `hoard_link.atomic`, `util` solo
+   los reexporta), nunca `Path.write_text`/`Path.replace`/`os.replace` a pelo
+   sobre un archivo de estado o de ajustes (`backend.json`, `state.json`,
+   recetas): en Windows el reemplazo falla (WinError 5/32) mientras otro lector
+   tiene el archivo abierto.
+7. **Procesos hijos siempre con `procutil`** (envuelve `hoard_link.proc`:
+   CREATE_NO_WINDOW en Windows, UTF-8, un tiempo agotado o una cancelación
+   matan el árbol; para cancelar usa `hoard_link.proc.kill_tree`, no
+   `proc.kill()`). ffmpeg, ffprobe y yt-dlp se buscan con
+   `hoard_link.media.bins` (`backend.ffmpeg_path()` es un atajo). Nada de
+   `multiprocessing`. `pathlib` y `encoding="utf-8"` siempre.
 8. **ffmpeg**: los filtros reciben nombres relativos con `cwd` en la carpeta de
    trabajo (la carpeta de Windows se llama «Prospero's Hoard»); la letra pasa
-   por `video.ass_escape`.
+   por `video.ass_escape` (que es `hoard_link.media.subs.ass_escape`).
+   SRT/VTT/TXT/LRC también son `hoard_link.media.subs`; `ids.py` es
+   `hoard_link.ids`.
 9. **Antes de dar un cambio por bueno**: `pytest -q` en verde,
    `npm run build` sin errores de TypeScript y, si tocas la interfaz,
    `python3 scripts/screenshots.py` para revisar las capturas.

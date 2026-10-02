@@ -40,7 +40,8 @@ def _app_url() -> str:
 APP_URL = _app_url()
 # one INFO line per HTTP request would flood the MCP host's stderr log
 logging.getLogger("httpx").setLevel(logging.WARNING)
-_client = httpx.Client(base_url=APP_URL, timeout=httpx.Timeout(30.0, read=600.0))
+# trust_env=False: a proxy variable in the environment must never route this loopback call through a proxy
+_client = httpx.Client(base_url=APP_URL, timeout=httpx.Timeout(30.0, read=600.0), trust_env=False)
 
 mcp = FastMCP(
     APP_NAME,
@@ -701,7 +702,7 @@ def studio_jobs(state: Optional[str] = None, limit: int = 10) -> dict[str, Any]:
 def studio_job(job_id: str, wait_s: float = 0, include_image: bool = False) -> Any:
     """One job's state, progress and message; when done, its asset ids, and a picture of the results
     only when include_image=true (default false: use studio_show once you actually need to look).
-    wait_s (up to 300) waits server-side until the job finishes - use 30-120 instead of polling in a
+    wait_s (up to 150) waits server-side until the job finishes - use 30-120 instead of polling in a
     tight loop. waiting_gpu means it is waiting for free VRAM (normal); failed carries the reason.
 
     Keywords: job status, poll job, check progress, is it done, estado del trabajo, revisar progreso, ya esta
@@ -915,7 +916,7 @@ def voice_resynthesize_segment(job_id: str, index: int, text: Optional[str] = No
 @tool(_ro(readOnlyHint=True))
 def voice_job(job_id: str, wait_s: float = 0) -> dict[str, Any]:
     """One voice-studio job's (audiobook, dub, engine install) state, progress and message; when done,
-    its full outputs (chapters, segments, file paths). wait_s (up to 300) waits server-side instead of
+    its full outputs (chapters, segments, file paths). wait_s (up to 150) waits server-side instead of
     polling in a tight loop - use 30-120 for an audiobook or dub job, which can take a while.
 
     Keywords: voice job status, dub progress, audiobook progress, estado del trabajo de voz, progreso doblaje
@@ -1773,16 +1774,18 @@ def production_from_storyboard(title: str, shots: list[dict[str, Any]], source_r
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None) -> dict[str, Any]:
+def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None, engine: Optional[str] = None,
+              speed: Optional[float] = None) -> dict[str, Any]:
     """Speak a text and get the audio file's path / leer un texto en voz alta y obtener la ruta del audio.
 
     voice: a library voice (id or name) or an engine's own voice id; empty = the best installed engine. lang is
-    the language code (es, en...). The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to
+    the language code (es, en...). engine: an engine id such as piper (a library voice's own engine wins; unknown_engine
+    when it is not installed); speed: 0.5 to 2.0, 1.0 normal. The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to
     save the audio as a project asset instead.
 
     Keywords: tts, text to speech, narrate, speak, family, narration, texto a voz, narrar, locución, audio de un texto
     """
-    return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang})
+    return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang, "engine": engine, "speed": speed})
 
 
 def main() -> None:

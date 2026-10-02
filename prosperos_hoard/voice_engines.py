@@ -25,6 +25,8 @@ from typing import Any, Optional
 
 from . import procutil
 from . import voices as voices_mod
+from .hoard_link import fam_media
+from .hoard_link.media import subs
 
 
 class EngineNotInstalled(RuntimeError):
@@ -343,9 +345,14 @@ class STTEngine:
         raise NotImplementedError
 
 
+class TranscriptionFailed(ValueError):
+    """The transcription ran and failed (a clean message for the person; the API answers 400)."""
+
+
 class FasterWhisperEngine(STTEngine):
-    """faster-whisper (CTranslate2 Whisper): the primary STT engine - word
-    timestamps, runs on CPU, much faster than the reference implementation."""
+    """faster-whisper, the primary STT engine: word timestamps, and the family's one Whisper. The work goes to Funes's Hoard through the
+    hub when it runs (one model in memory for every app); without it `hoard_link.media.stt.Transcriber` runs here, on the GPU when the
+    hub lends it (a lease) and on the CPU otherwise. Whisper's inventions on silence ("Thanks for watching") are filtered out."""
 
     id = "faster-whisper"
     label = "faster-whisper"
@@ -354,32 +361,25 @@ class FasterWhisperEngine(STTEngine):
         languages=["auto", "en", "es", "fr", "de", "it", "pt", "ja", "zh", "ru", "ko", "ar", "hi"],
         streaming=False, needs_gpu=False,
     )
-    _cache: dict[str, Any] = {}
 
     def __init__(self, model_size: str = "small"):
         self.model_size = model_size
 
     def is_installed(self) -> bool:
-        return _spec_installed("faster_whisper")
+        return _spec_installed("faster_whisper") or fam_media.available("stt")
 
     def transcribe(self, path: Path, language: Optional[str] = None, word_timestamps: bool = True) -> dict[str, Any]:
-        if not self.is_installed():
-            raise EngineNotInstalled(self.id, self.install_hint())
-        from faster_whisper import WhisperModel  # type: ignore[import-not-found]
-
-        model = FasterWhisperEngine._cache.get(self.model_size)
-        if model is None:
-            model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-            FasterWhisperEngine._cache[self.model_size] = model
-        segments, info = model.transcribe(str(path), language=language, word_timestamps=word_timestamps)
-        out = []
-        text_parts = []
-        for seg in segments:
-            words = [{"start_s": round(w.start, 3), "end_s": round(w.end, 3), "word": w.word}
-                     for w in (seg.words or [])] if word_timestamps and seg.words else []
-            out.append(TranscriptSegment(seg.start, seg.end, seg.text.strip(), words).to_dict())
-            text_parts.append(seg.text.strip())
-        return {"language": info.language, "text": " ".join(text_parts).strip(), "segments": out}
+        done = fam_media.transcribe(str(path), language=language or "auto", model=self.model_size, word_timestamps=word_timestamps)
+        if not done.get("ok"):
+            if done.get("kind") in ("hub_down", "app_down", "app_missing", "tool_missing"):
+                raise EngineNotInstalled(self.id, "Funes's Hoard is not running and faster-whisper is not installed here: "
+                                                  + self.install_hint())
+            raise TranscriptionFailed(str(done.get("error") or "the transcription failed"))
+        segments = [TranscriptSegment(float(s["start_s"]), float(s["end_s"]), str(s["text"]).strip(),
+                                      [{"start_s": round(w["start_s"], 3), "end_s": round(w["end_s"], 3), "word": w["word"]}
+                                       for w in (s.get("words") or [])] if word_timestamps else []).to_dict()
+                    for s in done.get("segments") or []]
+        return {"language": done.get("language") or language, "text": done.get("text", "").strip(), "segments": segments}
 
 
 class OpenAIWhisperEngine(STTEngine):
@@ -462,53 +462,16 @@ def best_installed_stt(engines: list[STTEngine], prefer: Optional[str] = None) -
 
 # ---------------------------------------------------------- subtitle export
 
-def _split_ms(t: float) -> tuple[int, int, int, int]:
-    """`t` seconds -> (hours, minutes, seconds, milliseconds), rounded to the
-    nearest millisecond *before* splitting into fields so a value like
-    59.9996s carries into the next second (and, at a minute/hour boundary,
-    into the next minute/hour) instead of producing an out-of-range field
-    such as "59,1000" or "01:60.000" (both invalid in SRT/VTT)."""
-    total_ms = int(round(max(0.0, t) * 1000))
-    ms = total_ms % 1000
-    total_s = total_ms // 1000
-    s = total_s % 60
-    total_m = total_s // 60
-    m = total_m % 60
-    h = total_m // 60
-    return h, m, s, ms
-
-
-def _srt_time(t: float) -> str:
-    h, m, s, ms = _split_ms(t)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def _vtt_time(t: float) -> str:
-    h, m, s, ms = _split_ms(t)
-    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-
-
 def segments_to_srt(segments: list[dict[str, Any]]) -> str:
-    lines = []
-    for i, seg in enumerate(segments, 1):
-        lines.append(str(i))
-        lines.append(f"{_srt_time(seg['start_s'])} --> {_srt_time(seg['end_s'])}")
-        lines.append(seg.get("text", "").strip())
-        lines.append("")
-    return "\n".join(lines)
+    return subs.to_srt(subs.cues_from_segments(segments))
 
 
 def segments_to_vtt(segments: list[dict[str, Any]]) -> str:
-    lines = ["WEBVTT", ""]
-    for seg in segments:
-        lines.append(f"{_vtt_time(seg['start_s'])} --> {_vtt_time(seg['end_s'])}")
-        lines.append(seg.get("text", "").strip())
-        lines.append("")
-    return "\n".join(lines)
+    return subs.to_vtt(subs.cues_from_segments(segments))
 
 
 def segments_to_txt(segments: list[dict[str, Any]]) -> str:
-    return "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip())
+    return subs.to_txt(subs.cues_from_segments(segments), speakers=False).rstrip("\n")
 
 
 def install_engine(engine: Any, python: Optional[str] = None) -> dict[str, Any]:

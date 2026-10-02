@@ -45,7 +45,7 @@ when asked.
 
 | Engine | id | Notes | Install |
 | --- | --- | --- | --- |
-| faster-whisper | `faster-whisper` | primary; word-level timestamps, runs on CPU (`int8`) | `pip install faster-whisper` |
+| faster-whisper | `faster-whisper` | primary; word-level timestamps. Asks Funes's Hoard through the hub first (one Whisper for the family); otherwise the shared transcriber runs here, on the GPU when the hub lends it, else on the CPU. Silence hallucinations are filtered | `pip install faster-whisper` (only needed without Funes) |
 | OpenAI Whisper | `whisper` | heavier fallback for setups that already have it | `pip install openai-whisper` |
 
 `best_installed_tts`/`best_installed_stt` pick the first installed engine
