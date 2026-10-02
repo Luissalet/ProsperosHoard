@@ -771,6 +771,8 @@ export interface ProductionShot {
   cast?: string[];   // exactly these cast members (by name)
   start_s?: number;  // placed on exactly this stretch of the song
   end_s?: number;
+  locked?: boolean;  // approved: kept when the rest is regenerated
+  continue_from?: string; // its clip starts on the last frame of this shot's clip
 }
 
 export interface ShotRef { asset_id: string; use: string }
@@ -849,7 +851,7 @@ export interface ProductionState {
   recipe: { name: string; reuse: string[]; cast: { lead: string } } | null;
   spec: { title?: string; lead?: { name: string; look: string; palette?: string[] }; shots?: ProductionShot[];
           timeline?: { aspects?: string[]; finishing?: Finishing }; cast?: CastMember[]; cast_per_shot?: number } & Record<string, unknown>;
-  settings: { animatic: boolean; animatic_autocontinue: boolean; qa: { enabled: boolean; max_retries: number } };
+  settings: { animatic: boolean; animatic_autocontinue: boolean; qa: { enabled: boolean; max_retries: number }; clip_quality?: "draft" | "final" };
   done: Record<string, any>;
   lineage: { at: string; stage: string; event: string; [k: string]: unknown }[];
   qa?: { last?: QaScorecard };
@@ -1230,7 +1232,7 @@ export const api = {
     request<{ asset_id: string; start_s: number; start_from: string; seconds: number }>("POST", `/api/productions/${slug}/canvas`, { seconds, start_s }),
   setProductionFinishing: (slug: string, finishing: Finishing, render = true) =>
     request<{ finishing: Finishing; rerender: string[]; job?: Job }>("PATCH", `/api/productions/${slug}/finishing`, { finishing, render }),
-  setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown> }) =>
+  setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown>; clip_quality?: "draft" | "final" }) =>
     request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/api/productions/${slug}/settings`, body),
   exportToLumiere: (production: string, timelineId?: string, aspect?: string) =>
     request<{ ok: boolean; project_id?: string; url?: string; imported_clips?: number; error?: string; hint?: string; files: { xml: string; edl: string } }>(
@@ -1251,6 +1253,10 @@ export const api = {
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
     request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
   videoFrames: (assetId: string, count = 6) => request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}`),
+  regenerateUnlocked: (slug: string, stage: "frames" | "clips", keys?: string[], run = true) =>
+    request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/regenerate`, { stage, keys, run }),
+  promoteClips: (slug: string, keys?: string[], run = true) =>
+    request<{ promoted: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/promote`, { keys, run }),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
     request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),

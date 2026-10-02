@@ -240,6 +240,7 @@ class ProductionSettingsBody(BaseModel):
     animatic_autocontinue: Optional[bool] = None
     song_review: Optional[bool] = None
     qa: Optional[dict[str, Any]] = None
+    clip_quality: Optional[str] = None          # draft (fast 5B clips) | final
 
 
 class ExportTimelineBody(BaseModel):
@@ -325,6 +326,7 @@ class GenerateImageBody(BaseModel):
     audio_seconds: Optional[float] = None
     # first and last frame (template wan22_flf2v): the image the clip ends on
     end_asset_id: Optional[str] = None
+    end_optional: bool = False                  # drop the end frame (not fail) when that model is missing
     # film language (cinema.py): {shot, angle, move, lens, light, composition} ids whose terms join the prompt
     camera: Optional[dict[str, str]] = None
     consistent: bool = False
@@ -630,6 +632,17 @@ class ProductionShotsBody(BaseModel):
     run: bool = True
 
 
+class ProductionRegenerateBody(BaseModel):
+    stage: str = "clips"                        # frames (stills and their clips) | clips
+    keys: Optional[list[str]] = None            # only these shots (locked ones are still kept)
+    run: bool = True
+
+
+class ProductionPromoteBody(BaseModel):
+    keys: Optional[list[str]] = None            # only the drafts of these shots
+    run: bool = True
+
+
 class QaRunBody(BaseModel):
     production: Optional[str] = None
     stage: str = "all"
@@ -892,10 +905,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                                             (body.template_params or {}).get("sing_engine")),
                                            "template_params": None})
         if body.end_asset_id and body.template in ("auto_clip", "wan22_i2v_14b", "wan22_ti2v"):
-            if not engine.flf_installed(object_info or {}):
+            if engine.flf_installed(object_info or {}):
+                body = body.model_copy(update={"template": "wan22_flf2v", "driving_asset_id": None, "driving_start_s": None})
+            elif body.end_optional:
+                body = body.model_copy(update={"end_asset_id": None})
+            else:
                 raise engine.EngineError("no_flf", "a clip that ends on a given frame needs Wan 2.2 14B image-to-video "
                                                    "(both experts and the 4-step LoRAs) in ComfyUI")
-            body = body.model_copy(update={"template": "wan22_flf2v", "driving_asset_id": None, "driving_start_s": None})
         extra_refs = [r for r in (body.reference_asset_ids or []) if r]
         available_loras = comfy_driver.lora_choices(object_info) if object_info else None
         adapter_route = False
@@ -3448,6 +3464,34 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_settings")
     def agent_production_settings(production: str, body: ProductionSettingsBody):
         return agent("studio_production_settings", production, lambda: op_production_settings(production, body))
+
+    def op_production_regenerate(slug: str, body: ProductionRegenerateBody) -> dict[str, Any]:
+        out = productions_mod.regenerate_unlocked(store.data_dir, slug, body.stage, body.keys)
+        if body.run and (out["regenerated"] or out["chained"]):
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.post("/api/productions/{slug}/regenerate")
+    def production_regenerate(slug: str, body: ProductionRegenerateBody):
+        return op_production_regenerate(slug, body)
+
+    @app.post("/api/agent/studio_production_regenerate")
+    def agent_production_regenerate(production: str, body: ProductionRegenerateBody):
+        return agent("studio_production_regenerate", production, lambda: op_production_regenerate(production, body))
+
+    def op_production_promote(slug: str, body: ProductionPromoteBody) -> dict[str, Any]:
+        out = productions_mod.promote_clips(store.data_dir, slug, body.keys)
+        if body.run and (out["promoted"] or out["chained"]):
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.post("/api/productions/{slug}/promote")
+    def production_promote(slug: str, body: ProductionPromoteBody):
+        return op_production_promote(slug, body)
+
+    @app.post("/api/agent/studio_production_promote")
+    def agent_production_promote(production: str, body: ProductionPromoteBody):
+        return agent("studio_production_promote", production, lambda: op_production_promote(production, body))
 
     def production_preflight(slug: str) -> dict[str, Any]:
         """What would stop the production's next run, before it starts:

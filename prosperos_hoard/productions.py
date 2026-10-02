@@ -54,6 +54,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "animatic": True,
     "animatic_autocontinue": False,
     "qa": {"enabled": False, "thresholds": {}, "max_retries": 2},
+    "clip_quality": "final",
 }
 
 # Wan's stock negative lists "static" and "motionless frame" among the things
@@ -586,6 +587,21 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         shot.setdefault("motion_prompt", "subtle motion")
         shot["clip_seed"] = _int(shot.get("clip_seed", 5000 + number), f"spec.shots[{i}].clip_seed", 0, 2**31 - 2)
         shot["crowd"] = bool(shot.get("crowd", False))
+        if shot.get("locked"):
+            shot["locked"] = True
+        else:
+            shot.pop("locked", None)
+        cont = shot.get("continue_from")
+        if cont not in (None, ""):
+            cont = str(cont)
+            if cont == key or cont not in seen:
+                raise ProductionError("bad_spec", f"spec.shots[{i}].continue_from must name an earlier shot")
+            shot["continue_from"] = cont
+            shot["motion"] = "move"
+            if not shot.get("clips"):
+                shot["clips"] = [0]
+        else:
+            shot.pop("continue_from", None)
         if shot.get("sing"):
             shot["sing"] = True
             if not shot.get("clips"):
@@ -673,6 +689,10 @@ def normalise_settings(settings: Any) -> dict[str, Any]:
             out["qa"]["thresholds"] = qa["thresholds"]
         if qa.get("max_retries") is not None:
             out["qa"]["max_retries"] = _int(qa["max_retries"], "settings.qa.max_retries", 0, 5)
+    if settings.get("clip_quality") is not None:
+        if settings["clip_quality"] not in ("draft", "final"):
+            raise ProductionError("bad_settings", "settings.clip_quality is 'draft' (fast 5B clips) or 'final'")
+        out["clip_quality"] = settings["clip_quality"]
     for key, value in settings.items():
         if key not in out:
             out[key] = value  # forward-compatible extras (kept, not interpreted)
@@ -1310,7 +1330,28 @@ class Run:
             return None
         return "pause"
 
-    def clip_body(self, shot: dict[str, Any], variant: int) -> dict[str, Any]:
+    def clip_body(self, shot: dict[str, Any], variant: int, start: Optional[str] = None) -> dict[str, Any]:
+        """The generate body of one clip. `start` (the last frame of the clip
+        this shot continues) replaces the still as the first frame; the still
+        then becomes the frame it ends on, when the end-frame model is in."""
+        body = self._clip_body(shot, variant)
+        draft = (self.state.get("settings") or {}).get("clip_quality") == "draft"
+        plain = body["template"] == "auto_clip" and not body.get("driving_asset_id")
+        if start and body["template"] not in ("wan22_s2v", "auto_sing"):
+            own = body["reference_asset_id"]
+            body["reference_asset_id"] = start
+            if plain and not draft and own:
+                body.update({"end_asset_id": own, "end_optional": True})
+            body["prompt"] += ". It continues the previous shot without a cut"
+        elif start:
+            body["reference_asset_id"] = start
+        if draft and plain:
+            body["template"] = "wan22_ti2v"  # fast drafts; promote re-renders them on the 14B model
+            body.pop("end_asset_id", None)
+            body.pop("end_optional", None)
+        return body
+
+    def _clip_body(self, shot: dict[str, Any], variant: int) -> dict[str, Any]:
         settings = self.spec.get("clip_settings") or {}
         key = shot_key(shot["key"], variant)
         template = settings.get("template") or "auto_clip"
@@ -1393,24 +1434,54 @@ class Run:
         return {"width": 832, "height": 480} if w > h else {"width": 480, "height": 832}
 
     def stage_clips(self) -> None:
+        """Every shot's clips. A shot that continues another (`continue_from`)
+        waits for that clip and starts on its last frame; one whose source
+        clip never comes falls back to its own still."""
         pid = self.project_id
         items = self.items("clips")
         pending = self.pending("clips")
-        for shot in self.spec.get("shots") or []:
-            for variant in shot.get("clips") or []:
-                key = shot_key(shot["key"], variant)
-                if key in items or key in pending:
-                    continue
-                reuse = (shot.get("reuse_clips") or {}).get(key)
-                if reuse and _asset_ok(self.store, reuse):
-                    items[key] = copy_asset(self.store, reuse, pid)["id"]
-                    self.log("reused_clip", key=key, asset_id=items[key])
-                    continue
-                body = self.clip_body(shot, variant)
-                if not body["reference_asset_id"]:
-                    raise ProductionError("missing_frame", f"shot {key} has no still to animate")
-                pending[key] = self.studio.generate(pid, body)["id"]
-                self.save()
+        entry = self.state["done"]["clips"]
+        quality = entry.setdefault("quality", {})
+        chained = entry.setdefault("chained", {})
+        drop_stale_chains(self.state)
+        draft = (self.state.get("settings") or {}).get("clip_quality") == "draft"
+        shots = {s["key"]: s for s in self.spec.get("shots") or []}
+        tried: set[str] = set()
+
+        def submit(fallback: bool) -> bool:
+            sent = False
+            for shot in self.spec.get("shots") or []:
+                for variant in shot.get("clips") or []:
+                    key = shot_key(shot["key"], variant)
+                    if key in items or key in pending or key in tried:
+                        continue
+                    reuse = (shot.get("reuse_clips") or {}).get(key)
+                    if reuse and _asset_ok(self.store, reuse):
+                        items[key] = copy_asset(self.store, reuse, pid)["id"]
+                        self.log("reused_clip", key=key, asset_id=items[key])
+                        continue
+                    start = None
+                    src = shot.get("continue_from") if variant == 0 else None
+                    if src and src in shots and 0 in (shots[src].get("clips") or []):
+                        src_key = shot_key(src, 0)
+                        if src_key in items:
+                            start = engine.last_frame(self.store, items[src_key], pid)["id"]
+                            chained[key] = {"from": items[src_key], "start": start}
+                        elif not fallback:
+                            continue  # its source clip comes first
+                        else:
+                            self.log("chain_fallback", key=key, source=src_key)
+                    body = self.clip_body(shot, variant, start)
+                    if not body["reference_asset_id"]:
+                        raise ProductionError("missing_frame", f"shot {key} has no still to animate")
+                    pending[key] = self.studio.generate(pid, body)["id"]
+                    quality[key] = "draft" if body["template"] == "wan22_ti2v" and draft else "final"
+                    if not start:
+                        chained.pop(key, None)
+                    tried.add(key)
+                    sent = True
+                    self.save()
+            return sent
 
         def done(key: str, job: dict[str, Any]) -> None:
             ids = _asset_ids(job)
@@ -1418,7 +1489,15 @@ class Run:
                 items[key] = ids[0]
                 self.log("clip", key=key, asset_id=ids[0])
 
-        self.wait_jobs("clips", done, "clips")
+        while True:
+            sent = submit(False)
+            if pending:
+                self.wait_jobs("clips", done, "clips")
+                continue
+            if not sent and not submit(True) and not pending:
+                break
+            if pending:
+                self.wait_jobs("clips", done, "clips")
         self.state["done"]["clips"]["complete"] = True
 
     def stage_photocards(self) -> None:
@@ -1568,6 +1647,127 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
 
 # ----------------------------------------------------------- change shots
 
+def drop_stale_chains(state: dict[str, Any]) -> list[str]:
+    """Clips that continue another one start on its last frame: when that
+    clip changed (regenerated, promoted, deleted), theirs goes too, down the
+    whole chain. Returns the clip keys dropped."""
+    entry = (state.get("done") or {}).get("clips") or {}
+    clips = entry.get("items") or {}
+    chained = entry.get("chained") or {}
+    shots = {s["key"]: s for s in (state.get("spec") or {}).get("shots") or []}
+    dropped: list[str] = []
+    changed = True
+    while changed:
+        changed = False
+        for key, shot in shots.items():
+            ck = shot_key(key, 0)
+            src = shot.get("continue_from")
+            link = chained.get(ck)
+            if ck not in clips:
+                continue
+            stale = (src and link and clips.get(shot_key(src, 0)) != link.get("from")) or (not src and link) \
+                or (src and not link and shot_key(src, 0) in clips)
+            if stale:
+                clips.pop(ck, None)
+                chained.pop(ck, None)
+                dropped.append(ck)
+                changed = True
+    return dropped
+
+
+def _requeue(state: dict[str, Any], message: str) -> None:
+    """After shots or clips were dropped: the stages that depend on them are
+    rebuilt on the next run."""
+    spec = state["spec"]
+    frames = (state["done"].get("frames") or {}).get("items") or {}
+    if "frames" in state["done"]:
+        state["done"]["frames"]["complete"] = all(s["key"] in frames for s in spec.get("shots") or [])
+    if "clips" in state["done"]:
+        state["done"]["clips"]["complete"] = False
+    for stage in ("animatic", "album", "timeline", "report"):
+        state["done"].pop(stage, None)
+    state.get("partial", {}).pop("timeline", None)
+    state["review"] = {}
+    state["status"] = "queued"
+    state["message"] = message
+
+
+def _editable(data_dir: Path, slug: str) -> dict[str, Any]:
+    state = load_state(data_dir, slug)
+    if is_legacy(state):
+        raise ProductionError("legacy_production", "a scripted production cannot be edited here; run it from a recipe")
+    if is_running(state, data_dir):
+        raise ProductionError("production_running", "the production is running; wait for it to pause or finish")
+    return state
+
+
+def regenerate_unlocked(data_dir: Path, slug: str, stage: str = "clips", keys: Optional[list[str]] = None) -> dict[str, Any]:
+    """"Redo everything I didn't approve": every shot not `locked` (or just
+    `keys` among them) gets a new seed for its still (stage "frames", which
+    also redoes its clips) or for its clips (stage "clips"). Approved shots
+    and what they made stay. Returns the shots redone and those kept."""
+    if stage not in ("frames", "clips"):
+        raise ProductionError("bad_stage", "stage is 'frames' (stills and their clips) or 'clips'")
+    with lock_for(slug):
+        state = _editable(data_dir, slug)
+        shots = state["spec"].get("shots") or []
+        frames = (state["done"].get("frames") or {}).get("items") or {}
+        clips = (state["done"].get("clips") or {}).get("items") or {}
+        wanted = {str(k) for k in keys} if keys else None
+        unknown = sorted((wanted or set()) - {s["key"] for s in shots})
+        if unknown:
+            raise ProductionError("bad_changes", f"unknown shot key(s) {', '.join(unknown)}")
+        redone, kept = [], []
+        for shot in shots:
+            key = shot["key"]
+            if wanted is not None and key not in wanted:
+                continue
+            if shot.get("locked"):
+                kept.append(key)
+                continue
+            mine = [k for k in clips if split_key(k)[0] == key]
+            if stage == "frames":
+                if key not in frames and not mine:
+                    continue
+                shot["seed"] = int(shot["seed"]) + 1000
+                frames.pop(key, None)
+            elif not mine:
+                continue
+            shot["clip_seed"] = int(shot["clip_seed"]) + 1000
+            for ck in mine:
+                clips.pop(ck, None)
+            redone.append(key)
+        chain = drop_stale_chains(state)
+        if redone or chain:
+            _requeue(state, f"regenerating {stage} of shot(s) {', '.join(redone)}")
+            log(state, "review", "regenerated_unlocked", what=stage, keys=redone, kept=kept, chained=chain)
+        save_state(data_dir, state)
+        return {"slug": slug, "stage": stage, "regenerated": redone, "kept": kept, "chained": chain,
+                "status": state["status"]}
+
+
+def promote_clips(data_dir: Path, slug: str, keys: Optional[list[str]] = None) -> dict[str, Any]:
+    """Draft clips (fast 5B) to final: switches `clip_quality` to final and
+    drops the draft clips (all, or those of the shots in `keys`) so the next
+    run renders them again on the 14B model with the same seeds."""
+    with lock_for(slug):
+        state = _editable(data_dir, slug)
+        entry = state["done"].get("clips") or {}
+        clips = entry.get("items") or {}
+        quality = entry.get("quality") or {}
+        wanted = {str(k) for k in keys} if keys else None
+        drafts = [k for k in clips if quality.get(k) == "draft" and (wanted is None or split_key(k)[0] in wanted)]
+        state["settings"] = normalise_settings({**(state.get("settings") or {}), "clip_quality": "final"})
+        for k in drafts:
+            clips.pop(k, None)
+        chain = drop_stale_chains(state)
+        if drafts or chain:
+            _requeue(state, f"rendering {len(drafts)} draft clip(s) as final")
+        log(state, "review", "promoted_clips", keys=drafts, chained=chain)
+        save_state(data_dir, state)
+        return {"slug": slug, "promoted": drafts, "chained": chain, "status": state["status"]}
+
+
 def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
     """"Change shots": per shot key, pick another variant as the best still
     (`best`: a variant index or one of its asset ids), turn its clip on or
@@ -1644,12 +1844,39 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 raise ProductionError("bad_changes", f"unknown shot key '{change.get('key')}'")
             key = str(change["key"])
             shot = shots[key]
+            if change.get("locked") is not None:
+                if change["locked"]:
+                    shot["locked"] = True
+                else:
+                    shot.pop("locked", None)
+                log(state, "review", "locked_shot" if change["locked"] else "unlocked_shot", key=key)
+            touches = set(change) - {"key", "locked", "section", "after"}
+            if shot.get("locked") and touches:
+                raise ProductionError("shot_locked", f"shot {key} is approved (locked); unlock it to change "
+                                                     f"{', '.join(sorted(touches))}")
+            if "continue_from" in change:
+                cont = change["continue_from"]
+                cont = str(cont) if cont not in (None, "") else None
+                if cont is not None and (cont == key or cont not in shots):
+                    raise ProductionError("bad_changes", f"shot {key}: continue_from must name another shot")
+                if cont != shot.get("continue_from"):
+                    if cont:
+                        shot["continue_from"] = cont
+                        shot["motion"] = "move"
+                        if not shot.get("clips"):
+                            shot["clips"] = [0]
+                    else:
+                        shot.pop("continue_from", None)
+                    clips.pop(shot_key(key, 0), None)
             if change.get("delete"):
                 if len(order) <= 1:
                     raise ProductionError("bad_changes", "a production needs at least one shot")
                 order[:] = [s for s in order if s["key"] != key]
                 shots.pop(key)
                 frames.pop(key, None)
+                for other in order:
+                    if other.get("continue_from") == key:
+                        other.pop("continue_from")  # it starts on its own still again
                 for ck in [k for k in clips if split_key(k)[0] == key]:
                     clips.pop(ck, None)
                 for section_keys in board.values():
@@ -1773,6 +2000,8 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
             changed.append(key)
             log(state, "review", "changed_shot", key=key, change={k: v for k, v in change.items() if k != "key"})
         _check_spans(spec)
+        if drop_stale_chains(state) and not changed:
+            changed.append("chain")
         if changed:
             if "frames" in state["done"]:
                 state["done"]["frames"]["complete"] = all(s["key"] in frames for s in spec.get("shots") or [])
