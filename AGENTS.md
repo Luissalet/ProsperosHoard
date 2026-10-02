@@ -109,6 +109,18 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `studio_production_shots` para cambiar planos (se rehace el animático y
   vuelve a parar), o `studio_production_continue` para renderizar los clips.
   No continúes sin que el usuario lo apruebe.
+- **«Quita a X del reparto»**: `studio_cast(action="delete", id)`; se
+  recupera con `action="restore"` (`action="deleted"` los lista). Si
+  responde `in_use`, di qué producción lo usa y borra con `force=true` solo
+  si el usuario lo confirma.
+- **«Que el escenario / la guitarra salga siempre igual»**: un lugar o un
+  objeto es una entrada del reparto: `studio_cast(action="create",
+  kind="location"|"prop", name, fields={"prompt": aspecto})`; genera su
+  imagen (`studio_generate_image` con «@Nombre, wide establishing shot,
+  empty» o «@Nombre, the object alone, plain background»), enséñala y, si
+  le gusta, `studio_cast(action="update", id, fields={"canonical_asset_id"})`.
+  Desde ahí cada `@Nombre` en un prompt (también en los planos de una
+  producción) mete su imagen como referencia numerada con Qwen-Image 2.1.
 - **«Que el personaje salga siempre igual» / "keep X consistent"**: mira su
   kit (`studio_character_adapters(action="list")`). Sin adaptador para el
   motor del proyecto: `studio_character_sheet` (necesita canónica) →

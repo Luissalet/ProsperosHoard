@@ -142,9 +142,23 @@ LANGUAGE_NAMES = {"en": "English", "es": "Spanish (Spain)", "fr": "French", "it"
 SECTIONS = ("intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro")
 
 
+def _elements_part(elements: Optional[list[dict[str, Any]]]) -> str:
+    """The project's places and objects: the planner writes them as @Name
+    so each shot that shows them gets their reference image."""
+    rows = [e for e in elements or [] if str(e.get("name") or "").strip()][:12]
+    if not rows:
+        return ""
+    lines = "\n".join(f"- @{e['name']} ({'place' if e.get('element') == 'location' else 'object'})"
+                      + (f": {str(e.get('look') or '').strip()[:160]}" if str(e.get("look") or "").strip() else "")
+                      for e in rows)
+    return ("Places and objects of this project. When a shot shows one, write it in the prompt exactly as @Name "
+            "(with the @); its look comes from its reference image, so do not describe it again. Use them where they "
+            "fit the concept, not in every shot:\n" + lines + "\n")
+
+
 def plan_messages(concept: str, lead_name: str, lead_look: str, n_shots: int, language: str,
                   compose_song: bool, duration_s: float, lyrics: Optional[str] = None,
-                  genre: Optional[str] = None) -> list[dict[str, Any]]:
+                  genre: Optional[str] = None, elements: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
     lang = LANGUAGE_NAMES.get(language, language)
     song_part = (
         "Also write the song: \"song\": {\"tags\": comma-separated sound description for a music model (genre, "
@@ -163,7 +177,8 @@ def plan_messages(concept: str, lead_name: str, lead_look: str, n_shots: int, la
     user = (
         f"Concept: {concept.strip()}\n"
         f"Lead character: {lead_name} - {lead_look.strip() or 'use the reference image'}\n"
-        f"Plan {n_shots} shots.\n"
+        + _elements_part(elements)
+        + f"Plan {n_shots} shots.\n"
         "Rules for every shot:\n"
         "- \"prompt\": English, one concrete filmable frame: setting, action or pose, framing (wide/medium/close-up), "
         "light and colour. When the lead is in the shot, describe only the scene, pose and action, not the "
@@ -293,7 +308,8 @@ def looks_english(lyrics: str) -> bool:
 def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: str, lead_name: str, lead_look: str,
          n_shots: int = 10, language: str = "en", compose_song: bool = True, duration_s: float = 120.0,
          lyrics: Optional[str] = None, genre: Optional[str] = None,
-         on_bad_reply: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
+         on_bad_reply: Optional[Callable[[str], None]] = None,
+         elements: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     """``on_bad_reply(text)`` sees a reply that could not be read (the app
     keeps the last one on disk to see what the model did)."""
     if not concept.strip():
@@ -305,7 +321,7 @@ def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: st
     budget = min(12000, 1000 + 220 * n_shots + (1800 if compose_song else 0))
     try:
         reply = chat(plan_messages(concept, lead_name, lead_look, n_shots, language, compose_song, duration_s, lyrics,
-                                   genre), budget, 0.8)
+                                   genre, elements), budget, 0.8)
     except ProductionError:
         raise
     except Exception as exc:  # noqa: BLE001 - no model resident, server down...
@@ -319,7 +335,7 @@ def plan(chat: Callable[[list[dict[str, Any]], int, float], str], *, concept: st
         if on_bad_reply:
             on_bad_reply(reply)
         messages = plan_messages(concept, lead_name, lead_look, n_shots, language, compose_song, duration_s, lyrics,
-                                 genre)
+                                 genre, elements)
         messages += [{"role": "assistant", "content": str(reply or "")[:6000]},
                      {"role": "user", "content": (
                          f"That answer could not be used ({first.message}). Answer again with only the JSON object, "

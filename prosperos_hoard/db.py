@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -26,6 +26,8 @@ _ADDED_COLUMNS = [
     ("projects", "image_engine", "TEXT NOT NULL DEFAULT 'auto'"),
     ("characters", "kit_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("projects", "deleted_at", "TEXT"),  # in the trash since (v9); NULL = live
+    ("characters", "element", "TEXT NOT NULL DEFAULT 'character'"),  # character | location | prop (v10)
+    ("characters", "deleted_at", "TEXT"),  # deleted (recoverable) since (v10); NULL = live
 ]
 
 _SCHEMA = """

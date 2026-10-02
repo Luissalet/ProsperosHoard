@@ -143,7 +143,7 @@ def build_pack(store: Store, character_id: str, dest: Path, *, include_dataset: 
         adapters.append((entry, src))
     doc = {
         "format": FORMAT, "version": FORMAT_VERSION, "exported_at": now_iso(), "app": f"prosperos-hoard {__version__}",
-        "character": {k: char.get(k) for k in ("name", "role", "bio", "prompt", "negative", "palette", "voice", "notes")},
+        "character": {k: char.get(k) for k in ("name", "role", "bio", "prompt", "negative", "palette", "voice", "notes", "element")},
         "kit": {"trigger": kit["trigger"], "use_adapters": kit["use_adapters"], "identity": kit.get("identity"),
                 "good_seeds": kit.get("good_seeds") or [], "history": kit.get("history") or [],
                 "adapters": [e for e, _ in adapters], "sheet_views": kit["sheet"].get("views") or []},
@@ -253,7 +253,8 @@ def import_pack(store: Store, backend: Optional[Backend], project_id: str, path:
     palette = [c for c in ch.get("palette") or [] if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c)][:12]
     voice = ch.get("voice") if isinstance(ch.get("voice"), dict) else None
     char = store.create_character(project_id, name, role=ch.get("role"), bio=ch.get("bio"), prompt=ch.get("prompt"),
-                                  negative=ch.get("negative"), palette=palette, voice=voice, notes=ch.get("notes"))
+                                  negative=ch.get("negative"), palette=palette, voice=voice, notes=ch.get("notes"),
+                                  element=ch.get("element") if ch.get("element") in ("character", "location", "prop") else "character")
     tag = charkit.char_tag(char["id"])
     canonical_id: Optional[str] = None
     refs: list[str] = []

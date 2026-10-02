@@ -25,8 +25,8 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_status` | - |
 | GET | `/api/agent/studio_projects` | `?query&limit&offset` |
 | POST | `/api/agent/studio_create_project` | `{name, brief?, image_engine?}` |
-| POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields}` |
-| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
+| POST | `/api/agent/studio_cast?project=` | `{action, kind, id?, name?, fields, force?}`; `action` is `list`, `create`, `update`, `delete`, `restore` or `deleted`; `kind` is `character`, `location`, `prop` or `group` (a place or an object is a cast entry with `element` set) |
+| POST | `/api/agent/studio_generate_image?project=` | `{prompt, style?, negative?, aspect?, width?, height?, steps?, cfg?, sampler?, scheduler?, seed?, count, reference_asset_id?, reference_asset_ids?, strength?, template?, engine?, checkpoint?, use_character_reference, use_element_references (true), consistent, characters?, use_adapters, prefer_adapter, wait_s}` -> adds `matched_elements` (places/objects mentioned; on Qwen-Image 2.1 their images go in as numbered references after the call's own), `adapters`/`adapter_notes` (only when non-empty) and `route: "adapter"` (only when `prefer_adapter` took that path) to the usual result |
 | POST | `/api/agent/studio_edit_image` | `{asset_id, operation, prompt?, strength?, mask_asset_id?, count, seed?, width?, height?, scale?, model?, wait_s}`; `operation` is `img2img`, `inpaint`, `hires`, `upscale` (`scale` 2 or 4, default 2, at most 8192 px on a side; `model`), `remove_background`, `reuse` or `vary` |
 | POST | `/api/agent/studio_animate` | `{asset_id, prompt?, engine (auto\|wan14b\|wan\|animate\|svd), driving_asset_id?, driving_start_s?, pose_prompt?, seconds?, frames, fps, motion, seed?, wait_s}`: with `driving_asset_id` the image's character performs that video's motion (Wan Animate 2) |
 | POST | `/api/agent/studio_compose?project=` | `{tags, lyrics, bpm, duration, key, language, time_signature, seed?, count, wait_s}` -> job (ACE-Step 1.5; an mp3/wav audio asset) |
@@ -122,7 +122,11 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET / POST | `/api/projects/{id}/groups` | create `{name, fields: {concept, member_ids, colours, logo_asset_id}}` |
 | PATCH | `/api/groups/{id}` | `{name?, fields}` |
 | GET | `/api/style-presets?project=` | presets with defaults |
-| POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, unknown_mentions, reference_asset_id, style_defaults`) |
+| DELETE | `/api/characters/{id}?force=` | take a character, place or object out of the cast (recoverable); `in_use` while an unfinished production has it as its lead |
+| POST | `/api/characters/{id}/restore` | back into the cast (refused when another entry took its name) |
+| GET | `/api/projects/{id}/characters/deleted` | the deleted cast entries that can come back |
+| DELETE | `/api/groups/{id}` | delete a group (its members stay) |
+| POST | `/api/projects/{id}/compose-prompt` | `{prompt, negative?, style?, engine?, references?}` -> final prompt preview (`positive_prompt, negative_prompt, matched_characters, matched_elements, element_references, added_references[{name, element, asset_id, index}], unknown_mentions, reference_asset_id, style_defaults`); with `engine: "qwen21"` the mentioned places/objects with an image are numbered after the call's `references` exactly as the render will |
 | POST | `/api/projects/{id}/generate` | same body as the agent route; returns the full job |
 | POST | `/api/assets/{id}/edit` | `{asset_id, operation, ...}` |
 | POST | `/api/assets/{id}/animate` | same body as `studio_animate` |

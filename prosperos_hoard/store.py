@@ -183,7 +183,7 @@ class Store:
             "(SELECT COUNT(*) FROM assets WHERE project_id=? AND kind='image') images, "
             "(SELECT COUNT(*) FROM assets WHERE project_id=? AND kind='video') videos, "
             "(SELECT COUNT(*) FROM assets WHERE project_id=? AND kind='audio') audio, "
-            "(SELECT COUNT(*) FROM characters WHERE project_id=?) characters, "
+            "(SELECT COUNT(*) FROM characters WHERE project_id=? AND deleted_at IS NULL) characters, "
             "(SELECT COUNT(*) FROM groups WHERE project_id=?) groups, "
             "(SELECT COUNT(*) FROM timelines WHERE project_id=?) timelines",
             (project_id,) * 7,
@@ -616,8 +616,8 @@ class Store:
             """INSERT INTO characters
                (id, project_id, name, role, bio, prompt, negative, palette_json,
                 reference_asset_ids_json, canonical_asset_id, voice_json, notes,
-                created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                created_at, updated_at, element)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 cid, project_id, name,
                 fields.get("role"), fields.get("bio"), fields.get("prompt"),
@@ -625,7 +625,7 @@ class Store:
                 dumps(fields.get("reference_asset_ids", [])),
                 fields.get("canonical_asset_id"),
                 dumps(fields.get("voice")) if fields.get("voice") else None,
-                fields.get("notes"), ts, ts,
+                fields.get("notes"), ts, ts, fields.get("element") or "character",
             ),
         )
         self.conn.commit()
@@ -640,6 +640,7 @@ class Store:
         d["reference_asset_ids"] = loads(d.pop("reference_asset_ids_json"), [])
         d["voice"] = loads(d.pop("voice_json"), None)
         d["kit"] = loads(d.pop("kit_json", None), {}) or {}
+        d["element"] = d.get("element") or "character"
         return d
 
     def set_character_kit(self, character_id: str, kit: dict[str, Any]) -> dict[str, Any]:
@@ -653,10 +654,13 @@ class Store:
         return self.get_character(character_id)
 
     def _check_character_fields(self, fields: dict[str, Any]) -> None:
-        allowed = {"role", "bio", "prompt", "negative", "palette", "reference_asset_ids", "canonical_asset_id", "voice", "notes", "name"}
+        allowed = {"role", "bio", "prompt", "negative", "palette", "reference_asset_ids", "canonical_asset_id", "voice", "notes", "name",
+                   "element"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"unknown character field(s): {', '.join(sorted(unknown))}; allowed: {', '.join(sorted(allowed))}")
+        if fields.get("element") is not None and fields["element"] not in ("character", "location", "prop"):
+            raise ValueError("element must be 'character', 'location' or 'prop'")
         palette = fields.get("palette")
         if palette is not None:
             if not isinstance(palette, list) or len(palette) > 12 or not all(isinstance(c, str) and _HEX_RE.match(c) for c in palette):
@@ -682,7 +686,7 @@ class Store:
                    for c in self.list_characters(current["project_id"])):
                 raise ValueError(f"this project already has a character called '{new_name}'")
             fields["name"] = new_name
-        simple = {"name", "role", "bio", "prompt", "negative", "notes", "canonical_asset_id"}
+        simple = {"name", "role", "bio", "prompt", "negative", "notes", "canonical_asset_id", "element"}
         cols, params = [], []
         for key in simple:
             if key in fields and fields[key] is not None:
@@ -702,11 +706,43 @@ class Store:
         self.conn.commit()
         return self.get_character(character_id)
 
-    def list_characters(self, project_id: str) -> list[dict[str, Any]]:
+    def list_characters(self, project_id: str, deleted: bool = False) -> list[dict[str, Any]]:
+        """The project's live cast (characters, places and objects); with
+        `deleted=True`, the deleted entries that can still be restored."""
         rows = self.conn.execute(
-            "SELECT id FROM characters WHERE project_id=? ORDER BY created_at ASC", (project_id,)
+            f"SELECT id FROM characters WHERE project_id=? AND deleted_at IS {'NOT ' if deleted else ''}NULL "
+            "ORDER BY created_at ASC", (project_id,)
         ).fetchall()
         return [self.get_character(r["id"]) for r in rows]
+
+    def delete_character(self, character_id: str) -> dict[str, Any]:
+        """Take a cast entry out of the cast (recoverable): it no longer
+        answers to its @mention nor shows in its groups, but productions
+        and lineage that name it still resolve, and `restore_character`
+        brings it back as it was."""
+        char = self.get_character(character_id)
+        if not char.get("deleted_at"):
+            self.conn.execute("UPDATE characters SET deleted_at=?, updated_at=? WHERE id=?",
+                              (now_iso(), now_iso(), character_id))
+            self.conn.commit()
+        return self.get_character(character_id)
+
+    def restore_character(self, character_id: str) -> dict[str, Any]:
+        char = self.get_character(character_id)
+        if not char.get("deleted_at"):
+            return char
+        if any(c["name"].lower() == char["name"].lower() for c in self.list_characters(char["project_id"])):
+            raise ValueError(f"this project already has someone called '{char['name']}' again; rename that one first")
+        self.conn.execute("UPDATE characters SET deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), character_id))
+        self.conn.commit()
+        return self.get_character(character_id)
+
+    def delete_group(self, group_id: str) -> dict[str, Any]:
+        """Delete a group (its members stay in the cast)."""
+        group = self.get_group(group_id)
+        self.conn.execute("DELETE FROM groups WHERE id=?", (group_id,))
+        self.conn.commit()
+        return group
 
     # -------------------------------------------------------------- groups
     def _check_group_fields(self, project_id: str, fields: dict[str, Any]) -> None:
@@ -718,6 +754,8 @@ class Store:
             char = self.get_character(cid)
             if char["project_id"] != project_id:
                 raise ValueError(f"character {cid} belongs to another project")
+            if char["element"] != "character":
+                raise ValueError(f"{char['name']} is a {char['element']}, not a character: groups are made of characters")
         if len(set(fields.get("member_ids") or [])) != len(fields.get("member_ids") or []):
             raise ValueError("member_ids lists a character twice")
         colours = fields.get("colours")
@@ -753,7 +791,9 @@ class Store:
         if not row:
             raise NotFound("group", group_id)
         d = row_to_dict(row)
-        d["member_ids"] = loads(d.pop("member_ids_json"), [])
+        gone = {r["id"] for r in self.conn.execute(
+            "SELECT id FROM characters WHERE project_id=? AND deleted_at IS NOT NULL", (d["project_id"],)).fetchall()}
+        d["member_ids"] = [m for m in loads(d.pop("member_ids_json"), []) if m not in gone]
         d["colours"] = loads(d.pop("colours_json"), [])
         return d
 

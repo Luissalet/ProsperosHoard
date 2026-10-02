@@ -216,6 +216,25 @@ def list_productions(data_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def productions_led_by(data_dir: Path, character_id: str, unfinished: bool = True) -> list[str]:
+    """Names of the productions whose lead is this cast entry (by default
+    only the ones that have not finished: those still read it)."""
+    root = productions_dir(data_dir)
+    names = []
+    for folder in sorted(root.iterdir()) if root.is_dir() else []:
+        if not (folder / "state.json").is_file() or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", folder.name):
+            continue
+        try:
+            state = load_state(data_dir, folder.name)
+        except (ProductionError, NotFound, OSError):
+            continue
+        if is_legacy(state) or (unfinished and state.get("status") == "done"):
+            continue
+        if ((state.get("spec") or {}).get("lead") or {}).get("character_id") == character_id:
+            names.append(state.get("name") or state["slug"])
+    return names
+
+
 def productions_of_project(data_dir: Path, project_id: str) -> list[dict[str, Any]]:
     """The productions whose pictures, clips and cut live in `project_id`."""
     return [p for p in list_productions(data_dir) if p.get("project_id") == project_id]
@@ -851,6 +870,7 @@ def copy_character(store: Store, src: dict[str, Any], project_id: str) -> tuple[
         return existing, False
     canonical = copy_asset(store, src["canonical_asset_id"], project_id)["id"] if _asset_ok(store, src.get("canonical_asset_id")) else None
     char = store.create_character(project_id, src["name"], role=src.get("role"), bio=src.get("bio"), prompt=src.get("prompt"),
+                                  element=src.get("element") or "character",
                                   negative=src.get("negative"), palette=src.get("palette") or [],
                                   canonical_asset_id=canonical, voice=src.get("voice"))
     src_kit = src.get("kit") or {}

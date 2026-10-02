@@ -91,10 +91,13 @@ export interface Voice {
   speed?: number;
 }
 
+export type CastElement = "character" | "location" | "prop";
+
 export interface Character {
   id: string;
   project_id: string;
   name: string;
+  element?: CastElement;
   role: string | null;
   bio: string | null;
   prompt: string | null;
@@ -452,6 +455,9 @@ export interface Composed {
   positive_prompt: string;
   negative_prompt: string;
   matched_characters: string[];
+  matched_elements?: string[];
+  element_references?: { name: string; element: CastElement; asset_id: string }[];
+  added_references?: { name: string; element: CastElement; asset_id: string; index: number }[];
   unknown_mentions: string[];
   reference_asset_id: string | null;
   style: string | null;
@@ -941,14 +947,19 @@ export const api = {
   createCharacter: (pid: string, name: string, fields: Partial<Character>) =>
     request<Character>("POST", `/api/projects/${pid}/characters`, { name, fields }),
   updateCharacter: (id: string, fields: Partial<Character>) => request<Character>("PATCH", `/api/characters/${id}`, { fields }),
+  deleteCharacter: (id: string, force = false) =>
+    request<{ deleted: string; name: string }>("DELETE", `/api/characters/${id}${force ? "?force=true" : ""}`),
+  restoreCharacter: (id: string) => request<Character>("POST", `/api/characters/${id}/restore`),
+  deletedCharacters: (pid: string) => request<{ items: Character[] }>("GET", `/api/projects/${pid}/characters/deleted`),
+  deleteGroup: (id: string) => request<{ deleted: string; name: string }>("DELETE", `/api/groups/${id}`),
   groups: (pid: string) => request<{ items: Group[] }>("GET", `/api/projects/${pid}/groups`),
   createGroup: (pid: string, name: string, fields: Partial<Group>) =>
     request<Group>("POST", `/api/projects/${pid}/groups`, { name, fields }),
   updateGroup: (id: string, fields: Partial<Group>) => request<Group>("PATCH", `/api/groups/${id}`, { fields }),
 
   styles: (pid?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project: pid })}`),
-  compose: (pid: string, prompt: string, negative: string, style: string | null) =>
-    request<Composed>("POST", `/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style }),
+  compose: (pid: string, prompt: string, negative: string, style: string | null, opts: { engine?: string; references?: number } = {}) =>
+    request<Composed>("POST", `/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style, ...opts }),
   imageEngines: (pid?: string) => request<ImageEngines>("GET", `/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
   generate: (pid: string, body: Record<string, unknown>) =>
     request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/api/projects/${pid}/generate`, body),

@@ -173,7 +173,7 @@ def studio_services() -> dict[str, Any]:
 def studio_video_plan(
     concept: str, character_id: Optional[str] = None, lead_name: Optional[str] = None, lead_look: Optional[str] = None,
     shots: int = 10, language: str = "en", song_asset_id: Optional[str] = None, lyrics: Optional[str] = None,
-    genre: Optional[str] = None, duration_s: float = 120,
+    genre: Optional[str] = None, duration_s: float = 120, project: Optional[str] = None,
 ) -> dict[str, Any]:
     """Draft a music video: the local model plans the shot list (and song tags + lyrics) from a concept.
 
@@ -181,12 +181,15 @@ def studio_video_plan(
     character_id: the lead from studio_cast (its canonical image keeps the look), or lead_name + lead_look.
     language: the lyrics' language - ask the user, do not assume. song_asset_id: use an existing song
     (pass its lyrics to follow them) instead of composing one. genre: the sound (e.g. "80s disco-funk").
+    project: the video's project (default: the lead's); its places and objects (studio_cast kind
+    location/prop) are offered to the planner, which writes them in the shots as @Name.
 
     Keywords: music video, videoclip, plan shots, storyboard, write lyrics, planificar videoclip, guion de planos, letra
     """
     return _call("POST", "/api/agent/studio_video_plan", json={
         "concept": concept, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look, "shots": shots,
-        "language": language, "song_asset_id": song_asset_id, "lyrics": lyrics, "genre": genre, "duration_s": duration_s})
+        "language": language, "song_asset_id": song_asset_id, "lyrics": lyrics, "genre": genre, "duration_s": duration_s,
+        "project": project})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
@@ -320,9 +323,16 @@ def studio_create_project(name: str, brief: Optional[str] = None, image_engine: 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_cast(
     project: str, action: str = "list", kind: str = "character", id: Optional[str] = None,
-    name: Optional[str] = None, fields: Optional[dict[str, Any]] = None,
+    name: Optional[str] = None, fields: Optional[dict[str, Any]] = None, force: bool = False,
 ) -> dict[str, Any]:
-    """List, create or update the cast. action "list" | "create" | "update"; kind "character" | "group".
+    """List, create, update or delete the cast. action "list" | "create" | "update" | "delete" | "restore" |
+    "deleted" (the deleted entries that can come back); kind "character" | "location" | "prop" | "group".
+    delete takes a character/place/object out of the cast (recoverable with restore; refused with in_use
+    while an unfinished production has it as its lead, unless force=true); a deleted group is gone.
+    Locations (a stage, a street) and props (a guitar, a jacket) are cast entries like characters: an
+    @Name, a look (prompt) and a reference image (canonical_asset_id). Mentioned in a prompt, their look
+    is inlined and, on Qwen-Image 2.1, their image goes in as a numbered reference so the place or the
+    object stays the same from shot to shot (use_element_references=false in generate turns that off).
     Character fields: role, bio, prompt (the look, inlined wherever @Name appears), negative, palette
     (hex list), canonical_asset_id (reference image), canonical_crop (crop that image into the canonical:
     "left_third"|"middle_third"|"right_third" - one pose of a turnaround sheet - or [x, y, w, h] fractions;
@@ -330,11 +340,11 @@ def studio_cast(
     Group fields: concept, member_ids (ordered character ids), colours, logo_asset_id.
     update needs `id`. Names must be unique in a project (they are the @mention).
 
-    Keywords: character, cast, group, members, create a member, personaje, reparto, grupo, miembros, crear miembro
+    Keywords: character, cast, group, members, location, prop, element, personaje, reparto, grupo, miembros, lugar, objeto
     """
     return _call(
         "POST", "/api/agent/studio_cast", params={"project": project},
-        json={"action": action, "kind": kind, "id": id, "name": name, "fields": fields or {}},
+        json={"action": action, "kind": kind, "id": id, "name": name, "fields": fields or {}, "force": force},
     )
 
 
@@ -348,7 +358,7 @@ def studio_generate_image(
     scheduler: Optional[str] = None, seed: Optional[int] = None, count: int = 1,
     reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
     strength: Optional[float] = None, template: Optional[str] = None, engine: Optional[str] = None,
-    wait_s: float = 0, use_character_reference: bool = False,
+    wait_s: float = 0, use_character_reference: bool = False, use_element_references: bool = True,
     checkpoint: Optional[str] = None, consistent: bool = False, include_image: bool = False,
     characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
     model: Optional[str] = None,
@@ -356,7 +366,9 @@ def studio_generate_image(
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
     inlined, and use_character_reference=true also uses the first mentioned character's canonical image
-    as the img2img reference. style: a preset name ("Studio portrait", "Film still 35mm", "Anime cel",
+    as the img2img reference. Mentioned places and objects (studio_cast kind location/prop) with a
+    reference image go in as numbered references on Qwen-Image 2.1 (use_element_references=false turns
+    that off); with consistent=true a second character gets its own numbered reference too. style: a preset name ("Studio portrait", "Film still 35mm", "Anime cel",
     "Pastel dream", "Neon night city", "Album art minimal"). aspect: 1:1, 9:16, 16:9, 2:3, 3:2, 4:5.
     engine: "auto" (default, and the project's own setting when neither is given) | "qwen21" | "flux" | "sdxl" -
     which image model family to use; "auto" picks Qwen-Image 2.1 when it is installed (best prompt
@@ -399,6 +411,7 @@ def studio_generate_image(
         "model": model,
         "reference_asset_ids": reference_asset_ids, "strength": strength,
         "template": template, "engine": engine, "wait_s": wait_s, "use_character_reference": use_character_reference,
+        "use_element_references": use_element_references,
         "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
         "use_adapters": use_adapters, "prefer_adapter": prefer_adapter,
     }

@@ -1,17 +1,17 @@
 import { useState } from "react";
 import {
-  ArrowDown, ArrowUp, Clock, IdCard, ImagePlus, Layers, Loader2, Pencil, Sparkles, Trash2, UploadCloud, UserPlus, Users,
-  Volume2, Wand2, X,
+  ArrowDown, ArrowUp, Box, Clock, IdCard, ImagePlus, Layers, Loader2, MapPin, Pencil, Sparkles, Trash2, UploadCloud, UserPlus,
+  Users, Volume2, Wand2, X,
 } from "lucide-react";
-import { api, fileUrl, thumbUrl, type Character, type Group, type LibraryEntry, type PackInspect } from "../api";
+import { api, ApiError, fileUrl, thumbUrl, type CastElement, type Character, type Group, type LibraryEntry, type PackInspect } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, ConfirmButton, Empty, Modal, useApp, useAsync } from "../components/ui";
 import { CharacterKitModal } from "./CharacterKit";
 
-type Draft = { id?: string; name: string; role: string; bio: string; prompt: string; negative: string; palette: string;
+type Draft = { id?: string; element: CastElement; name: string; role: string; bio: string; prompt: string; negative: string; palette: string;
   canonical_asset_id: string | null; crop: string; voice_backend: string; voice_id: string; speed: number };
 
-const emptyDraft: Draft = { name: "", role: "", bio: "", prompt: "", negative: "", palette: "#ff4d8d", canonical_asset_id: null,
+const emptyDraft: Draft = { element: "character", name: "", role: "", bio: "", prompt: "", negative: "", palette: "#ff4d8d", canonical_asset_id: null,
   crop: "full", voice_backend: "piper", voice_id: "es_ES-davefx-medium", speed: 1 };
 
 export function CastView() {
@@ -20,6 +20,8 @@ export function CastView() {
   const pid = app.projectId!;
   const chars = useAsync(() => api.characters(pid), [pid, app.dataVersion]);
   const groups = useAsync(() => api.groups(pid), [pid, app.dataVersion]);
+  const deleted = useAsync(() => api.deletedCharacters(pid), [pid, app.dataVersion]);
+  const [forceDelete, setForceDelete] = useState<string | null>(null);
   const voices = useAsync(() => api.voices(), []);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picking, setPicking] = useState(false);
@@ -30,12 +32,28 @@ export function CastView() {
   const [importing, setImporting] = useState<{ file: File; inspect: PackInspect; rename: string } | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [library, setLibrary] = useState(false);
+  const [tab, setTab] = useState<CastElement>(() => {
+    try { return (sessionStorage.getItem("prospero.castTab") as CastElement) || "character"; } catch { return "character"; }
+  });
+  const pickTab = (k: CastElement) => { setTab(k); try { sessionStorage.setItem("prospero.castTab", k); } catch { /* ignore */ } };
 
-  const list = chars.data?.items || [];
-  const byId = Object.fromEntries(list.map((c) => [c.id, c]));
+  const all = chars.data?.items || [];
+  const byId = Object.fromEntries(all.map((c) => [c.id, c]));
+  const elementOf = (c: Character): CastElement => c.element || "character";
+  const list = all.filter((c) => elementOf(c) === tab);
+  const people = all.filter((c) => elementOf(c) === "character");
+  const count = (k: CastElement) => all.filter((c) => elementOf(c) === k).length;
+  const newLabel = tab === "location" ? t("newLocation") : tab === "prop" ? t("newProp") : t("newCharacter");
+  const newIcon = tab === "location" ? <MapPin size={16} /> : tab === "prop" ? <Box size={16} /> : <UserPlus size={16} />;
+  const startNew = () => setDraft({ ...emptyDraft, element: tab });
+  const refPrompt = (c: Character) => elementOf(c) === "location"
+    ? `@${c.name}, wide establishing shot, empty, no people, no characters, even light`
+    : elementOf(c) === "prop"
+      ? `@${c.name}, the object alone, centred on a plain light background, soft studio light, product shot`
+      : `@${c.name}, full body character portrait, front view, plain studio background, even light`;
 
   const edit = (c: Character) => setDraft({
-    id: c.id, name: c.name, role: c.role || "", bio: c.bio || "", prompt: c.prompt || "", negative: c.negative || "",
+    id: c.id, element: elementOf(c), name: c.name, role: c.role || "", bio: c.bio || "", prompt: c.prompt || "", negative: c.negative || "",
     palette: c.palette.join(" "), canonical_asset_id: c.canonical_asset_id, crop: "full", voice_backend: c.voice?.backend || "piper",
     voice_id: c.voice?.voice_id || "es_ES-davefx-medium", speed: c.voice?.speed || 1,
   });
@@ -47,7 +65,8 @@ export function CastView() {
       palette: draft.palette.split(/[\s,]+/).filter(Boolean),
       canonical_asset_id: draft.canonical_asset_id || undefined,
       ...(draft.canonical_asset_id && draft.crop !== "full" ? { canonical_crop: draft.crop } : {}),
-      voice: { backend: draft.voice_backend, voice_id: draft.voice_id, speed: draft.speed },
+      ...(draft.element === "character" ? { voice: { backend: draft.voice_backend, voice_id: draft.voice_id, speed: draft.speed } } : {}),
+      ...(draft.id ? {} : { element: draft.element }),
     } as Partial<Character> & { canonical_crop?: string };
     try {
       if (draft.id) await api.updateCharacter(draft.id, { ...fields, name: draft.name });
@@ -57,6 +76,27 @@ export function CastView() {
     } catch (e) {
       app.toast((e as Error).message, "bad");
     }
+  };
+
+  const remove = async (force = false) => {
+    if (!draft?.id) return;
+    try {
+      const r = await api.deleteCharacter(draft.id, force);
+      app.toast(t("castDeleted", { name: r.name }), "ok");
+      setDraft(null);
+      setForceDelete(null);
+      app.bump();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "in_use") setForceDelete(e.message);
+      else app.toast((e as Error).message, "bad");
+    }
+  };
+  const restore = async (c: Character) => {
+    try { await api.restoreCharacter(c.id); app.toast(t("castRestored", { name: c.name }), "ok"); app.bump(); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+  };
+  const removeGroup = async (g: Group) => {
+    try { await api.deleteGroup(g.id); app.bump(); } catch (e) { app.toast((e as Error).message, "bad"); }
   };
 
   const speak = async (c: Character) => {
@@ -145,14 +185,23 @@ export function CastView() {
               onChange={(e) => { const f = e.target.files?.[0]; if (f) pickPackFile(f); e.target.value = ""; }} />
           </label>
           <button className="btn" onClick={() => setLibrary(true)}><Layers size={16} /> {t("kitLibraryTitle")}</button>
-          <button className="btn" onClick={() => setGroupDraft({ name: "", concept: "", members: list.map((c) => c.id) })}><Users size={16} /> {t("newGroup")}</button>
-          <button className="btn primary" onClick={() => setDraft({ ...emptyDraft })}><UserPlus size={16} /> {t("newCharacter")}</button>
+          <button className="btn" onClick={() => setGroupDraft({ name: "", concept: "", members: people.map((c) => c.id) })}><Users size={16} /> {t("newGroup")}</button>
+          <button className="btn primary" onClick={startNew}>{newIcon} {newLabel}</button>
         </div>
       </div>
 
+      <div className="tabs-bar">
+        {([["character", t("castTabCharacters")], ["location", t("castTabLocations")], ["prop", t("castTabProps")]] as [CastElement, string][]).map(([k, label]) => (
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => pickTab(k)}>
+            {label}{count(k) > 0 && <span className="muted small"> · {count(k)}</span>}
+          </button>
+        ))}
+      </div>
+
       {list.length === 0 ? (
-        <Empty icon={<UserPlus size={34} />} text={t("noCast")}>
-          <button className="btn primary" onClick={() => setDraft({ ...emptyDraft })}><UserPlus size={16} /> {t("newCharacter")}</button>
+        <Empty icon={tab === "location" ? <MapPin size={34} /> : tab === "prop" ? <Box size={34} /> : <UserPlus size={34} />}
+          text={tab === "location" ? t("noLocations") : tab === "prop" ? t("noProps") : t("noCast")}>
+          <button className="btn primary" onClick={startNew}>{newIcon} {newLabel}</button>
         </Empty>
       ) : (
         <div className="cast-grid">
@@ -164,8 +213,10 @@ export function CastView() {
                     onClick={() => app.openAsset(c.canonical_asset_id!)} style={{ cursor: "zoom-in" }} />
                 )}
                 {!c.canonical_asset_id && (
-                  <button className="btn sm primary portrait-cta" title={t("makeRefHint")} onClick={() => {
-                    try { sessionStorage.setItem(`prospero.prompt.${c.project_id}`, `@${c.name}, full body character portrait, front view, plain studio background, even light`); } catch { /* ignore */ }
+                  <button className="btn sm primary portrait-cta"
+                    title={elementOf(c) === "location" ? t("elementRefHintLocation") : elementOf(c) === "prop" ? t("elementRefHintProp") : t("makeRefHint")}
+                    onClick={() => {
+                    try { sessionStorage.setItem(`prospero.prompt.${c.project_id}`, refPrompt(c)); } catch { /* ignore */ }
                     app.toast(t("makeRefToast", { name: c.name }), "info");
                     app.go("generate");
                   }}><Wand2 size={14} /> {t("makeRef")}</button>
@@ -190,9 +241,11 @@ export function CastView() {
                   </div>
                 )}
                 <div className="row">
-                  <button className="btn sm" onClick={() => speak(c)} disabled={speaking === c.id}>
-                    {speaking === c.id ? <Loader2 size={14} className="spin" /> : <Volume2 size={14} />} {t("voiceTest")}
-                  </button>
+                  {elementOf(c) === "character" && (
+                    <button className="btn sm" onClick={() => speak(c)} disabled={speaking === c.id}>
+                      {speaking === c.id ? <Loader2 size={14} className="spin" /> : <Volume2 size={14} />} {t("voiceTest")}
+                    </button>
+                  )}
                   <button className="btn sm ghost" onClick={() => setKitCharId(c.id)}><Sparkles size={14} /> {t("kitButton")}</button>
                   <button className="btn sm ghost" onClick={() => edit(c)}><Pencil size={14} /> {t("edit")}</button>
                 </div>
@@ -200,6 +253,23 @@ export function CastView() {
             </article>
           ))}
         </div>
+      )}
+
+      {(deleted.data?.items || []).length > 0 && (
+        <details className="card" style={{ marginTop: 16 }}>
+          <summary className="small muted" style={{ cursor: "pointer" }}>{t("castDeletedList", { n: deleted.data!.items.length })}</summary>
+          <div className="stack" style={{ marginTop: 10, gap: 6 }}>
+            {deleted.data!.items.map((c) => (
+              <div key={c.id} className="row" style={{ background: "var(--surface-2)", borderRadius: 8, padding: "6px 10px" }}>
+                {c.canonical_asset_id
+                  ? <img src={thumbUrl({ id: c.canonical_asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover" }} />
+                  : c.element === "location" ? <MapPin size={16} /> : c.element === "prop" ? <Box size={16} /> : <UserPlus size={16} />}
+                <span className="grow">{c.name} <span className="muted small">{c.element === "location" ? t("elementLocation") : c.element === "prop" ? t("elementProp") : c.role || ""}</span></span>
+                <button className="btn sm" onClick={() => restore(c)}>{t("trashRestore")}</button>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       <h2 style={{ margin: "30px 0 12px", fontSize: 18 }}>{t("groups")}</h2>
@@ -210,6 +280,7 @@ export function CastView() {
               <h2>{g.name}
                 <div className="card-actions">
                   <button className="btn sm ghost" onClick={() => setGroupDraft({ id: g.id, name: g.name, concept: g.concept || "", members: g.member_ids })}><Pencil size={14} /> {t("edit")}</button>
+                  <ConfirmButton onConfirm={() => removeGroup(g)} className="btn sm ghost danger"><Trash2 size={14} /></ConfirmButton>
                   <button className="btn sm primary" onClick={() => photocards(g)} disabled={rendering === g.id}>
                     {rendering === g.id ? <Loader2 size={14} className="spin" /> : <IdCard size={14} />} {t("photocardSet")}
                   </button>
@@ -232,15 +303,21 @@ export function CastView() {
       )}
 
       {draft && (
-        <Modal title={draft.id ? draft.name : t("newCharacter")} onClose={() => setDraft(null)}
-          footer={<><button className="btn ghost" onClick={() => setDraft(null)}>{t("cancel")}</button>
+        <Modal title={draft.id ? draft.name : draft.element === "location" ? t("newLocation") : draft.element === "prop" ? t("newProp") : t("newCharacter")} onClose={() => { setDraft(null); setForceDelete(null); }}
+          footer={<>
+            {draft.id && (forceDelete
+              ? <button className="btn danger" title={forceDelete} onClick={() => remove(true)}><Trash2 size={14} /> {t("castDeleteAnyway")}</button>
+              : <ConfirmButton onConfirm={() => remove()} className="btn ghost danger"><Trash2 size={14} /> {t("delete")}</ConfirmButton>)}
+            <span className="grow" />
+            <button className="btn ghost" onClick={() => { setDraft(null); setForceDelete(null); }}>{t("cancel")}</button>
             <button className="btn primary" onClick={save} disabled={!draft.name.trim()}>{t("save")}</button></>}>
           <div className="stack">
+            {forceDelete && <p className="small warn-text" style={{ margin: 0 }}>{forceDelete}</p>}
             <div className="grid-2">
               <label className="field">{t("name")}<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus /></label>
               <label className="field">{t("role")}<input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} /></label>
             </div>
-            <label className="field">{t("lookPrompt")}<textarea value={draft.prompt} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} /></label>
+            <label className="field">{draft.element === "location" ? t("lookLocation") : draft.element === "prop" ? t("lookProp") : t("lookPrompt")}<textarea value={draft.prompt} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} /></label>
             <div className="grid-2">
               <label className="field">{t("negative")}<input value={draft.negative} onChange={(e) => setDraft({ ...draft, negative: e.target.value })} /></label>
               <label className="field">{t("palette")} <span className="hint">{t("paletteHint")}</span>
@@ -256,7 +333,8 @@ export function CastView() {
                 <button className="btn sm" onClick={() => setPicking(true)}>{t("pickReference")}</button>
                 {draft.canonical_asset_id && <button className="btn sm ghost" onClick={() => setDraft({ ...draft, canonical_asset_id: null })}><X size={14} /></button>}
               </div>
-              {draft.canonical_asset_id && (
+              {draft.element !== "character" && <p className="muted small" style={{ margin: "6px 0 0" }}>{t("elementRefNote")}</p>}
+              {draft.canonical_asset_id && draft.element === "character" && (
                 <label className="field" style={{ marginTop: 8 }}>{t("canonicalCrop")} <span className="hint">{t("cropHint")}</span>
                   <select value={draft.crop} onChange={(e) => setDraft({ ...draft, crop: e.target.value })}>
                     <option value="full">{t("cropFull")}</option>
@@ -266,6 +344,7 @@ export function CastView() {
                   </select></label>
               )}
             </div>
+            {draft.element === "character" && <>
             <div className="grid-3">
               <label className="field">{t("voiceBackend")}
                 <select value={draft.voice_backend} onChange={(e) => setDraft({ ...draft, voice_backend: e.target.value })}>
@@ -279,6 +358,7 @@ export function CastView() {
                 <input type="range" min={0.5} max={2} step={0.05} value={draft.speed} onChange={(e) => setDraft({ ...draft, speed: Number(e.target.value) })} /></label>
             </div>
             <p className="muted small" style={{ margin: 0 }}>{t("noVoiceCloning")}</p>
+            </>}
           </div>
         </Modal>
       )}
@@ -304,7 +384,7 @@ export function CastView() {
                 ))}
                 <select value="" onChange={(e) => e.target.value && setGroupDraft({ ...groupDraft, members: [...groupDraft.members, e.target.value] })}>
                   <option value="">+ {t("addMember")}</option>
-                  {list.filter((c) => !groupDraft.members.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {people.filter((c) => !groupDraft.members.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
             </div>
