@@ -1147,6 +1147,47 @@ def studio_canvas(production: str, seconds: float = 8.0, start_s: Optional[float
                  json={"seconds": seconds, "start_s": start_s, "lyrics": lyrics})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_spaces(
+    project: str, action: str = "list", space: Optional[str] = None, name: Optional[str] = None,
+    template: str = "blank", ops: Optional[list[dict[str, Any]]] = None, mode: str = "node",
+    node_ids: Optional[list[str]] = None, force: bool = False,
+) -> dict[str, Any]:
+    """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
+
+    action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot") | "get" (space) |
+    "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"all", node_ids, force) | "delete" | "restore".
+    Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
+    "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
+    count, engine, seed} with inputs prompt (text) and refs (image); video {prompt, quality "draft"|"final",
+    seconds, audio_start_s, motion_start_s, seed} with inputs start (image: one clip per image), prompt,
+    motion (video: copy its moves) and audio (audio: the character sings it, lip sync); music {tags, lyrics,
+    duration, bpm, count} with input prompt; list (items: anything; data.unticked drops items); note {text}.
+    ops (edit): {"op": "add_node", "id", "type", "x", "y", "data"} | {"op": "set", "id", "data"} |
+    {"op": "move", "id", "x", "y"} | {"op": "connect", "source", "source_handle"?, "target", "target_handle"} |
+    {"op": "disconnect", "source", "target", "target_handle"?} | {"op": "remove", "id"}.
+    A run is a job: poll studio_job, then action="get" shows each node's status and outputs (asset ids;
+    look at them with studio_show). "all" skips nodes whose inputs did not change unless force=true.
+
+    Keywords: space, canvas, node graph, workflow, references, character sheet, wire, run all, espacio, lienzo,
+    nodos, flujo, hoja de personaje, conectar, ejecutar todo
+    """
+    return _call("POST", "/api/agent/studio_spaces", params={"project": project}, json={
+        "action": action, "space": space, "name": name, "template": template, "ops": ops or [], "mode": mode,
+        "node_ids": node_ids or [], "force": force})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_prompt_enhance(text: str, kind: str = "image") -> dict[str, Any]:
+    """Improve a prompt with the local language model (keeps @Name and <imageN> tags) / mejorar prompt.
+
+    kind: "image" | "video" | "music". Returns {"text"}.
+
+    Keywords: enhance prompt, improve prompt, rewrite prompt, mejorar prompt, reescribir prompt
+    """
+    return _call("POST", "/api/agent/studio_prompt_enhance", json={"text": text, "kind": kind})
+
+
 @tool(_ro(readOnlyHint=True))
 def studio_export_timeline(production: Optional[str] = None, aspect: Optional[str] = None,
                            timeline_id: Optional[str] = None) -> dict[str, Any]:

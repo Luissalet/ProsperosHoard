@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -123,6 +123,19 @@ CREATE TABLE IF NOT EXISTS boards (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_boards_project ON boards(project_id);
+
+CREATE TABLE IF NOT EXISTS spaces (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    graph_json TEXT NOT NULL DEFAULT '{}',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_spaces_project ON spaces(project_id);
 
 CREATE TABLE IF NOT EXISTS timelines (
     id TEXT PRIMARY KEY,

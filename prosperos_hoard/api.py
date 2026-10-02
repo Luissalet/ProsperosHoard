@@ -32,6 +32,7 @@ from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import exporters
 from . import productions as productions_mod
+from . import spaces as spaces_mod
 from . import qa as qa_mod
 from . import recipes as recipes_mod
 from . import shorts as shorts_mod
@@ -87,6 +88,10 @@ class GuardMiddleware(BaseHTTPMiddleware):
 # ----------------------------------------------------------------- errors
 
 def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
+    if isinstance(exc, spaces_mod.SpaceError):
+        return 400, {"error": exc.code, "message": exc.message}
+    if isinstance(exc, ValueError) and str(exc).startswith("stale:"):
+        return 409, {"error": "stale", "message": str(exc)}
     if isinstance(exc, AssetInUse):
         return 409, {"error": "asset_in_use", "message": str(exc)}
     if isinstance(exc, ProjectBusy):
@@ -163,6 +168,44 @@ class TrashBody(BaseModel):
     ids: Optional[list[str]] = None
     project: Optional[str] = None
     projects: Optional[list[str]] = None  # trashed projects to restore / delete for good
+
+
+class SpaceCreateBody(BaseModel):
+    name: str = "Space"
+    template: str = "blank"   # blank | reference_film | singing_shot
+
+
+class SpaceSaveBody(BaseModel):
+    graph: dict[str, Any]
+    version: Optional[int] = None  # the version it was loaded at: a newer save in between is refused (409 stale)
+    name: Optional[str] = None
+
+
+class SpaceRunBody(BaseModel):
+    mode: str = "node"            # node | downstream | all
+    node_ids: list[str] = Field(default_factory=list)
+    force: bool = False           # "all": run even the nodes whose inputs did not change
+
+
+class SpaceNodeStateBody(BaseModel):
+    excluded: Optional[list[str]] = None   # outputs unticked so they do not flow downstream
+    outputs: Optional[list[str]] = None    # pick an earlier run's outputs back
+
+
+class SpaceAgentBody(BaseModel):
+    action: str = "list"          # list | get | create | edit | run | delete | restore
+    space: Optional[str] = None
+    name: Optional[str] = None
+    template: str = "blank"
+    ops: list[dict[str, Any]] = Field(default_factory=list)  # edit: add_node / set / connect / disconnect / remove / move
+    mode: str = "node"
+    node_ids: list[str] = Field(default_factory=list)
+    force: bool = False
+
+
+class EnhancePromptBody(BaseModel):
+    text: str
+    kind: str = "image"   # image | video | music
 
 
 class CanvasBody(BaseModel):
@@ -846,7 +889,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 )
             all_refs = [primary] + [r for r in extra_refs if r != primary]
             all_refs += [r for r in kontext["reference_asset_ids"] if r not in all_refs][:max(0, 10 - len(all_refs))]
-            composed = {"positive_prompt": kontext["instruction"], "negative_prompt": "", "style": None,
+            composed = {"positive_prompt": kontext["instruction"],
+                        "negative_prompt": ", ".join(x for x in (body.negative, kontext.get("negative_extra")) if x),
+                        "style": None,
                        "style_defaults": {}, "matched_characters": kontext["matched_characters"],
                        "matched_elements": kontext["matched_elements"],
                        "unknown_mentions": kontext["unknown_mentions"], "reference_asset_id": primary}
@@ -2643,6 +2688,197 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                               stage_hooks=production_hooks["stage_hooks"])
 
     queue.register("production", _production_job)
+
+    # ---------------------------------------------------------------- spaces
+    # The node canvas (spaces.py): graph saved by the UI or an agent, runs
+    # as an orchestrator job that waits for the generate/compose jobs.
+
+    def _space_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        p = job["params"]
+        return spaces_mod.run_space(store, studio, p["space_id"], p.get("mode") or "node", p.get("node_ids") or [],
+                                    progress=progress, force=bool(p.get("force")))
+
+    queue.register("space_run", _space_job)
+
+    def space_view(space: dict[str, Any], compact: bool = False) -> dict[str, Any]:
+        state = space["state"]
+        live = {}
+        for nid, st in state.items():
+            st = dict(st)
+            if st.get("status") == "running":
+                jobs = []
+                for jid in st.get("jobs") or []:
+                    try:
+                        j = store.get_job(jid)
+                        jobs.append({"id": jid, "state": j["state"], "progress": j.get("progress") or 0})
+                    except NotFound:
+                        continue
+                st["job_states"] = jobs
+            if compact:
+                st = {k: v for k, v in st.items() if k in ("status", "outputs", "error", "excluded")}
+            live[nid] = st
+        out = {"id": space["id"], "project_id": space["project_id"], "name": space["name"], "version": space["version"],
+               "updated_at": space["updated_at"], "graph": space["graph"], "state": live}
+        if space.get("deleted_at"):
+            out["deleted_at"] = space["deleted_at"]
+        return out
+
+    def _space_cover(space: dict[str, Any]) -> Optional[str]:
+        for st in space["state"].values():
+            for aid in reversed(st.get("outputs") or []):
+                return aid
+        return None
+
+    @app.get("/api/projects/{project_id}/spaces")
+    def list_spaces(project_id: str, deleted: bool = False):
+        return {"items": [{"id": sp["id"], "name": sp["name"], "updated_at": sp["updated_at"], "version": sp["version"],
+                           "nodes": len(sp["graph"].get("nodes") or []), "cover": _space_cover(sp),
+                           **({"deleted_at": sp["deleted_at"]} if sp.get("deleted_at") else {})}
+                          for sp in store.list_spaces(project_id, deleted=deleted)]}
+
+    @app.post("/api/projects/{project_id}/spaces")
+    def create_space(project_id: str, body: SpaceCreateBody):
+        if body.template not in spaces_mod.TEMPLATES:
+            raise spaces_mod.SpaceError("unknown_template", f"templates: {', '.join(spaces_mod.TEMPLATES)}")
+        return space_view(store.create_space(project_id, body.name, spaces_mod.template_graph(body.template)))
+
+    @app.get("/api/spaces/{space_id}")
+    def get_space(space_id: str):
+        return space_view(store.get_space(space_id))
+
+    @app.put("/api/spaces/{space_id}")
+    def save_space(space_id: str, body: SpaceSaveBody):
+        graph = spaces_mod.validate_graph(body.graph)
+        return space_view(store.save_space_graph(space_id, graph, body.version, body.name))
+
+    @app.delete("/api/spaces/{space_id}")
+    def delete_space(space_id: str):
+        return space_view(store.delete_space(space_id), compact=True)
+
+    @app.post("/api/spaces/{space_id}/restore")
+    def restore_space(space_id: str):
+        return space_view(store.restore_space(space_id), compact=True)
+
+    def op_space_run(space_id: str, body: SpaceRunBody) -> dict[str, Any]:
+        space = store.get_space(space_id)
+        if body.mode not in ("node", "downstream", "all"):
+            raise spaces_mod.SpaceError("bad_mode", "mode is node, downstream or all")
+        order = spaces_mod.run_order(space["graph"], body.mode, body.node_ids)
+        if not order:
+            raise spaces_mod.SpaceError("nothing_to_run", "no picture, clip or song node to run there")
+        for nid in order:
+            store.patch_space_state(space_id, nid, {"status": "queued", "error": None})
+        job = queue.enqueue("space_run", "cpu", {"space_id": space_id, "mode": body.mode, "node_ids": body.node_ids,
+                                                 "force": body.force, "name": space["name"]},
+                            project_id=space["project_id"])
+        return {"job": engine.job_view(job), "nodes": order}
+
+    @app.post("/api/spaces/{space_id}/run")
+    def run_space(space_id: str, body: SpaceRunBody):
+        return op_space_run(space_id, body)
+
+    @app.patch("/api/spaces/{space_id}/nodes/{node_id}")
+    def space_node_state(space_id: str, node_id: str, body: SpaceNodeStateBody):
+        st = (store.get_space(space_id)["state"].get(node_id)) or {}
+        patch: dict[str, Any] = {}
+        if body.excluded is not None:
+            patch["excluded"] = [a for a in body.excluded if a in (st.get("outputs") or [])]
+        if body.outputs is not None:
+            known = {a for r in st.get("runs") or [] for a in r.get("outputs") or []} | set(st.get("outputs") or [])
+            unknown = [a for a in body.outputs if a not in known]
+            if unknown:
+                raise spaces_mod.SpaceError("bad_outputs", "outputs must come from this node's runs")
+            patch.update({"outputs": list(body.outputs), "excluded": [], "status": "done"})
+        return space_view({**store.get_space(space_id), "state": store.patch_space_state(space_id, node_id, patch)})
+
+    def op_enhance_prompt(body: EnhancePromptBody) -> dict[str, Any]:
+        text = body.text.strip()
+        if not text:
+            raise engine.EngineError("empty_prompt", "write something to improve first")
+        what = {"image": "a still image (subject, setting, framing, lens, light, colour)",
+                "video": "a short video clip (subject, action, camera move, light; one continuous shot)",
+                "music": "a song for a music model (genre, tempo, instruments, voice, mood, as comma-separated tags)"}.get(body.kind, "an image")
+        messages = [{"role": "system", "content": "You rewrite prompts for local image, video and music models. Answer with the "
+                                                  "improved prompt only, in English, one paragraph, no quotes, no preamble."},
+                    {"role": "user", "content": f"Improve this prompt for {what}. Keep every name written as @Name and every "
+                                                f"<imageN> tag exactly as it is; keep the idea, add concrete visual detail.\n\n{text}"}]
+        out = studio.chat(messages, 400, 0.6).strip().strip('"')
+        return {"text": out or text}
+
+    @app.post("/api/prompt/enhance")
+    def enhance_prompt(body: EnhancePromptBody):
+        return op_enhance_prompt(body)
+
+    def _apply_space_ops(graph: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
+        """Agent edits of a graph: add_node {id?, type, x?, y?, data?},
+        set {id, data} (merged), move {id, x, y}, connect {source,
+        source_handle?, target, target_handle}, disconnect {source, target,
+        target_handle?}, remove {id}."""
+        nodes = {n["id"]: n for n in graph.get("nodes") or []}
+        edges = list(graph.get("edges") or [])
+        for i, op in enumerate(ops):
+            kind = op.get("op")
+            if kind == "add_node":
+                nid = str(op.get("id") or f"{op.get('type', 'node')}{len(nodes) + 1}")
+                while nid in nodes:
+                    nid += "x"
+                nodes[nid] = {"id": nid, "type": op.get("type"), "x": float(op.get("x") or 80 * len(nodes)),
+                              "y": float(op.get("y") or 0), "data": dict(op.get("data") or {})}
+            elif kind == "set":
+                n = nodes.get(str(op.get("id")))
+                if not n:
+                    raise spaces_mod.SpaceError("no_node", f"op {i}: no node {op.get('id')}")
+                n["data"] = {**(n.get("data") or {}), **dict(op.get("data") or {})}
+            elif kind == "move":
+                n = nodes.get(str(op.get("id")))
+                if not n:
+                    raise spaces_mod.SpaceError("no_node", f"op {i}: no node {op.get('id')}")
+                n["x"], n["y"] = float(op.get("x") or 0), float(op.get("y") or 0)
+            elif kind == "connect":
+                edges.append({"id": f"e{len(edges)}-{op.get('source')}-{op.get('target')}", "source": op.get("source"),
+                              "source_handle": op.get("source_handle"), "target": op.get("target"),
+                              "target_handle": op.get("target_handle")})
+            elif kind == "disconnect":
+                edges = [e for e in edges if not (e["source"] == op.get("source") and e["target"] == op.get("target")
+                                                  and (not op.get("target_handle") or e["target_handle"] == op.get("target_handle")))]
+            elif kind == "remove":
+                nid = str(op.get("id"))
+                nodes.pop(nid, None)
+                edges = [e for e in edges if nid not in (e["source"], e["target"])]
+            else:
+                raise spaces_mod.SpaceError("bad_op", f"op {i}: use add_node, set, move, connect, disconnect or remove")
+        return spaces_mod.validate_graph({"nodes": list(nodes.values()), "edges": edges, "viewport": graph.get("viewport")})
+
+    @app.post("/api/agent/studio_spaces")
+    def agent_spaces(project: str, body: SpaceAgentBody):
+        def run():
+            if body.action == "list":
+                return list_spaces(project)
+            if body.action == "create":
+                return space_view(store.create_space(project, body.name or "Space", spaces_mod.template_graph(body.template)),
+                                  compact=True)
+            if not body.space:
+                raise spaces_mod.SpaceError("space_required", "pass the space id (action=list shows them)")
+            space = store.get_space(body.space)
+            if space["project_id"] != project:
+                raise spaces_mod.SpaceError("wrong_project", "that space belongs to another project")
+            if body.action == "get":
+                return space_view(space, compact=True)
+            if body.action == "edit":
+                graph = _apply_space_ops(space["graph"], body.ops)
+                return space_view(store.save_space_graph(space["id"], graph, None, body.name), compact=True)
+            if body.action == "run":
+                return op_space_run(space["id"], SpaceRunBody(mode=body.mode, node_ids=body.node_ids, force=body.force))
+            if body.action == "delete":
+                return space_view(store.delete_space(space["id"]), compact=True)
+            if body.action == "restore":
+                return space_view(store.restore_space(space["id"]), compact=True)
+            raise spaces_mod.SpaceError("bad_action", "actions: list, get, create, edit, run, delete, restore")
+        return agent("studio_spaces", f"{body.action}:{body.space or body.name or ''}", run)
+
+    @app.post("/api/agent/studio_prompt_enhance")
+    def agent_prompt_enhance(body: EnhancePromptBody):
+        return agent("studio_prompt_enhance", body.kind, lambda: op_enhance_prompt(body))
 
     def _job_state(job_id: str) -> Optional[str]:
         try:
