@@ -1097,6 +1097,15 @@ export const api = {
   setProductionSong: (slug: string, body: SongChange) =>
     request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(
       "PUT", `/api/productions/${slug}/song`, body),
+  productionPreflight: (slug: string) =>
+    request<{ ok: boolean; items: { level: "error" | "warn" | "info"; code: string; message: string; startable?: boolean }[] }>(
+      "GET", `/api/productions/${slug}/preflight`),
+  setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown> }) =>
+    request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/api/productions/${slug}/settings`, body),
+  timelineExportUrl: (timelineId: string, format: "zip" | "xml" | "edl" = "zip", name?: string) =>
+    `/api/timelines/${timelineId}/export${q({ format, name })}`,
+  composeSong: (pid: string, body: { tags: string; lyrics: string; bpm?: number; duration?: number; key?: string; language?: string; count?: number }) =>
+    request<{ job: Job }>("POST", `/api/projects/${pid}/compose`, body),
   timeProductionLyrics: (slug: string) =>
     request<{ lyrics_asset_id: string | null; lines: number }>("POST", `/api/productions/${slug}/time-lyrics`),
   allAssets: (params: Record<string, string | number | boolean | undefined> = {}) =>

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines, Download, Loader2, Mic, Pause, Play, RefreshCw, Save, Sparkles, Square, Timer } from "lucide-react";
+import { AudioLines, Download, Loader2, Mic, Music, Pause, Play, RefreshCw, Save, Sparkles, Square, Timer, Upload, Wand2 } from "lucide-react";
 import { api, fileUrl, type Analysis, type Asset } from "../api";
 import { useT } from "../i18n";
-import { Empty, fmtTime, useApp, useAsync } from "../components/ui";
+import { Empty, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
 
 const ENERGY_COLOURS: Record<string, string> = { low: "rgba(122,167,255,0.10)", mid: "rgba(245,194,107,0.10)", high: "rgba(255,77,141,0.16)" };
 
@@ -63,6 +63,52 @@ function Waveform({ peaks, analysis, duration, time, onSeek }: {
     }}>
       <canvas ref={ref} />
     </div>
+  );
+}
+
+/** Compose a song from the Audio screen: style, words, tempo, length; the takes land in the song list. */
+function ComposeModal({ pid, onClose }: { pid: string; onClose: () => void }) {
+  const { t } = useT();
+  const app = useApp();
+  const [tags, setTags] = useState("");
+  const [lyrics, setLyrics] = useState("[Verse]\n\n[Chorus]\n");
+  const [bpm, setBpm] = useState(120);
+  const [duration, setDuration] = useState(90);
+  const [key, setKey] = useState("C major");
+  const [language, setLanguage] = useState("en");
+  const [count, setCount] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      await api.composeSong(pid, { tags: tags.trim(), lyrics: lyrics.trim() || "[Instrumental]", bpm, duration, key, language, count });
+      app.toast(t("composeQueued", { n: count }), "ok");
+      app.refreshJobs();
+      onClose();
+    } catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={t("composeTitle")} onClose={onClose} wide footer={(
+      <>
+        <span className="hint grow">{t("composeHint")}</span>
+        <button className="btn" onClick={onClose}>{t("cancel")}</button>
+        <button className="btn primary" disabled={busy || !tags.trim()} onClick={go}>{busy ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {t("composeGo", { n: count })}</button>
+      </>
+    )}>
+      <div className="stack">
+        <label className="field">{t("songStyle")}<input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="dream pop, female vocal, airy synths, 80s drum machine" autoFocus /></label>
+        <div className="row wrap" style={{ gap: 10 }}>
+          <label className="field" style={{ width: 90 }}>BPM<input type="number" min={40} max={220} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} /></label>
+          <label className="field" style={{ width: 120 }}>{t("songDuration")}<input type="number" min={10} max={240} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></label>
+          <label className="field" style={{ width: 130 }}>{t("songKey")}<input value={key} onChange={(e) => setKey(e.target.value)} /></label>
+          <label className="field" style={{ width: 100 }}>{t("songLanguage")}<input value={language} onChange={(e) => setLanguage(e.target.value)} /></label>
+          <label className="field" style={{ width: 100 }}>{t("songTakesN")}
+            <select value={count} onChange={(e) => setCount(Number(e.target.value))}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
+        </div>
+        <label className="field">{t("sbLyrics")}<textarea rows={12} className="mono" value={lyrics} onChange={(e) => setLyrics(e.target.value)} /></label>
+      </div>
+    </Modal>
   );
 }
 
@@ -207,6 +253,22 @@ export function AudioView() {
     }
   };
 
+  const [composing, setComposing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const songJobs = app.jobs.filter((j) => j.type === "compose_song" && j.project_id === pid && ["queued", "waiting_gpu", "running"].includes(j.state));
+  const uploadSong = async (file: File) => {
+    setUploading(true);
+    try { const a = await api.upload(pid, file); app.bump(); if (a.kind === "audio") setSongId(a.id); }
+    catch (e) { app.toast((e as Error).message, "bad"); }
+    finally { setUploading(false); }
+  };
+  const songActions = (
+    <>
+      <button className="btn primary" onClick={() => setComposing(true)}><Music size={15} /> {t("composeTitle")}</button>
+      <label className="btn">{uploading ? <Loader2 size={15} className="spin" /> : <Upload size={15} />} {t("audioImport")}
+        <input type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadSong(f); e.target.value = ""; }} /></label>
+    </>
+  );
   const analysis = song?.analysis;
   const duration = analysis?.duration_s || song?.duration_s || 0;
   const currentLine = lines.reduce((acc, l, i) => (l.time_s !== null && l.time_s <= time ? i : acc), -1);
@@ -219,10 +281,23 @@ export function AudioView() {
           {backend.data && !backend.data.music.some((m) => m.available) && (
             <span className="pill" title={backend.data.music.map((m) => m.reason).join("\n")}>{t("musicNotInstalled")}</span>
           )}
+          {songActions}
         </div>
       </div>
+      {composing && <ComposeModal pid={pid} onClose={() => setComposing(false)} />}
+      {songJobs.length > 0 && (
+        <div className="card stack" style={{ marginBottom: 14, gap: 6 }}>
+          {songJobs.map((j) => (
+            <div key={j.id} className="row" style={{ gap: 10 }}>
+              <Loader2 size={15} className="spin" />
+              <span className="small grow ellipsis">{t("composing")} · {String((j.params as { tags?: string }).tags || "")}</span>
+              <div style={{ width: 200 }}><Progress value={j.progress} waiting={j.state === "waiting_gpu"} /></div>
+            </div>
+          ))}
+        </div>
+      )}
       {songList.length === 0 ? <Empty icon={<AudioLines size={34} />} text={t("noSongs")}>
-        <button className="btn primary" onClick={() => app.go("library")}>{t("upload")}</button></Empty> : (
+        <div className="row" style={{ gap: 8, justifyContent: "center" }}>{songActions}</div></Empty> : (
         <div className="stack">
           <div className="card stack">
             <div className="row wrap">

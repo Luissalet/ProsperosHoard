@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clapperboard, Film, Loader2, Minus, Plus, Scissors, Wand2 } from "lucide-react";
+import { Clapperboard, FileDown, Film, Loader2, Minus, Plus, Scissors, Wand2 } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Analysis, type Asset, type Clip, type LyricClip, type Timeline } from "../api";
 import { useT } from "../i18n";
 import { Empty, JobState, Modal, Progress, fmtTime, useApp, useAsync } from "../components/ui";
@@ -97,6 +97,7 @@ export function TimelineView() {
           <button className="btn" onClick={() => setAutoOpen(true)}><Wand2 size={16} /> {t("autoCut")}</button>
           <button className="btn primary" onClick={() => render("preview")} disabled={!tl}><Film size={16} /> {t("renderPreview")}</button>
           <button className="btn" onClick={() => render("final")} disabled={!tl}>{t("renderFinal")}</button>
+          {tl && <a className="btn" href={api.timelineExportUrl(tl.id)} download title={t("exportEditorsHint")}><FileDown size={15} /> {t("exportEditors")}</a>}
         </div>
       </div>
 

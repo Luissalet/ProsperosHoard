@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   ArrowDown, ArrowUp, Clock, IdCard, ImagePlus, Layers, Loader2, Pencil, Sparkles, Trash2, UploadCloud, UserPlus, Users,
-  Volume2, X,
+  Volume2, Wand2, X,
 } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Character, type Group, type LibraryEntry, type PackInspect } from "../api";
 import { useT } from "../i18n";
@@ -162,6 +162,13 @@ export function CastView() {
                 {c.canonical_asset_id && (
                   <img src={thumbUrl({ id: c.canonical_asset_id, thumb_path: "x", kind: "image" })} alt={c.name}
                     onClick={() => app.openAsset(c.canonical_asset_id!)} style={{ cursor: "zoom-in" }} />
+                )}
+                {!c.canonical_asset_id && (
+                  <button className="btn sm primary portrait-cta" title={t("makeRefHint")} onClick={() => {
+                    try { sessionStorage.setItem(`prospero.prompt.${c.project_id}`, `@${c.name}, full body character portrait, front view, plain studio background, even light`); } catch { /* ignore */ }
+                    app.toast(t("makeRefToast", { name: c.name }), "info");
+                    app.go("generate");
+                  }}><Wand2 size={14} /> {t("makeRef")}</button>
                 )}
                 {c.role && <span className="pill badge-dark role" style={{ background: "rgba(10,6,14,.72)", color: "#fff" }}>{c.role}</span>}
               </div>

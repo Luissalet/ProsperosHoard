@@ -522,12 +522,32 @@ what is running now - with progress, a cancel, and a click through to the
 production it belongs to. Dialogs keep their buttons in view however long
 they get.
 
+**Autopilot** (a switch on the production, or when creating it) runs every
+stage without stopping - the first song take, no animatic review - and the
+creation dialog shows what the run will cost on this machine (stills,
+clips, GPU hours) before anything starts. Before a run, the page checks what
+would stop it - ComfyUI down (with a Start button), no music model for a
+song still to compose, no ffmpeg, no GPU with enough free memory - and says
+so in plain words. A finished cut downloads for **Premiere Pro or DaVinci
+Resolve** (FCP7 XML + CMX 3600 EDL, the lyrics as markers, the media
+referenced where they live on this computer), from the production's Preview
+tab or the Timeline screen (`studio_export_timeline`).
+
+The **Audio** screen composes songs too (style, lyrics, BPM, length, key,
+takes) and imports audio files; a character without a reference image gets
+a "Make a reference" button that opens Generate with a portrait prompt, and
+any picture in the viewer can become a character's reference image in one
+click.
+
 **Song and lyrics** on a production is a video editor standing up: the
 lyrics timed to the song on one vertical line (sections beside them, a
 playhead while it plays) and a **shot track** next to them. Shots are laid
 one after another - dragged in from the shot list, or **Add next** - then
 moved or trimmed at either edge (they snap to the lyric lines; Alt places
-freely), and each block shows the words it plays over. A placed shot plays
+freely, and they snap to the song's beats too: bar lines are drawn across the
+track), and each block shows the words it plays over and how many bars it lasts.
+Where the cut put the shots left off the track shows as faint marks; click one
+to pin that shot there. A placed shot plays
 exactly there in the animatic and the final cut (`span {start_s, end_s}` on
 the shot; spans cannot overlap); shots left off the track are placed by the
 cut by their section. Clicking lines (shift for several) makes a new shot for

@@ -869,6 +869,8 @@ class Run:
             try:
                 current = load_state(self.store.data_dir, self.slug)
                 self.state["review"] = current.get("review", self.state.get("review", {}))
+                if current.get("settings"):
+                    self.state["settings"] = current["settings"]  # changed from the page mid-run
             except (NotFound, ProductionError):
                 pass
             save_state(self.store.data_dir, self.state)
@@ -1690,6 +1692,29 @@ def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:
         log(state, "review", "changed_lyrics", lines=len([l for l in lyrics.splitlines() if l.strip()]))
         save_state(data_dir, state)
         return {"slug": slug, "status": state["status"]}
+
+
+def update_settings(data_dir: Path, slug: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Change a production's settings (animatic review, autocontinue, song
+    review, QA) between runs; a running one picks them up at its next pause."""
+    if not isinstance(patch, dict):
+        raise ProductionError("bad_settings", "settings must be an object")
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if is_legacy(state):
+            raise ProductionError("legacy_production", "a scripted production has no settings to change")
+        merged = dict(state.get("settings") or {})
+        for key, value in patch.items():
+            if key == "qa" and isinstance(value, dict):
+                merged["qa"] = {**(merged.get("qa") or {}), **value}
+            else:
+                merged[key] = value
+        state["settings"] = normalise_settings(merged)
+        if "song_review" in patch:
+            state["settings"]["song_review"] = bool(patch["song_review"])
+        log(state, "review", "changed_settings", **{k: v for k, v in patch.items() if k != "qa"})
+        save_state(data_dir, state)
+        return state["settings"]
 
 
 SONG_COMPOSE_FIELDS = ("tags", "lyrics", "bpm", "duration", "key", "language", "time_signature", "seed", "count")

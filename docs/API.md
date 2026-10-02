@@ -196,6 +196,9 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | DELETE | `/api/projects/{id}` | to the trash (with its productions); 409 `project_busy` with live jobs (also `POST /api/agent/studio_delete_project {project}`) |
 | GET | `/api/trash/projects` | deleted projects |
 | POST | `/api/projects/{id}/restore` / `/purge` | bring it back / delete it for good (only from the trash); `studio_trash` takes `projects=[...]` for both |
+| PATCH | `/api/productions/{slug}/settings` | `{autopilot?, animatic?, animatic_autocontinue?, song_review?, qa?}` (also `POST /api/agent/studio_production_settings?production=`) |
+| GET | `/api/productions/{slug}/preflight` | `{ok, items:[{level: error\|warn\|info, code: comfy_down\|comfy_autostart\|no_music_model\|no_ffmpeg\|gpu_busy, message, startable?}]}` |
+| GET | `/api/timelines/{id}/export?format=zip\|xml\|edl&name=` | the cut for Premiere / Resolve: FCP7 XML (lyrics as markers), CMX 3600 EDL, or a zip with both and a README (also `POST /api/agent/studio_export_timeline {production, aspect} \| {timeline_id}`) |
 | GET | `/api/assets` | `kind?, query?, limit, offset, project?`: assets across every project, each with `project_name` (the pickers' "all projects") |
 | PUT | `/api/productions/{slug}/lyrics` | `{lyrics, run}`: the song's lyrics with section tags |
 | PUT | `/api/productions/{slug}/cast` | `{cast [{asset_id, name, note}], per_shot?, run}` -> `{cast, cast_per_shot, redraw, status}`: the background cast; crowd shots take only these |
