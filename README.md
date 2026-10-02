@@ -894,3 +894,10 @@ Configure (or `training` in `data/backend.json`):
 MIT - see [LICENSE](LICENSE). Bundled fonts keep their own licences: SIL
 Open Font License (`prosperos_hoard/fonts/*/OFL.txt`), except Special Elite
 (Apache License 2.0, `prosperos_hoard/fonts/SpecialElite/LICENSE.txt`).
+
+
+## Shared services (HoardLink 0.8.1)
+
+Downloads use Links through the family media client, and synthesis remains available through voice_tts. Existing local backend discovery is retained.
+
+The vendored copy is maintained by HoardLink’s sync script. Windows validation and the family service contract are documented in HoardLink’s `docs/commons/windows-validation.md` and `docs/commons/services.md`.
