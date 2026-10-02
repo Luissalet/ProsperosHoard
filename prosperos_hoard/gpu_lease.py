@@ -27,6 +27,12 @@ WAIT_S = 120.0
 DEFAULT_MB = 7000
 #: job type -> the VRAM class it needs (an image job's class comes from its engine)
 TYPE_CLASS = {"animate": "wan", "compose_song": "ace", "character_sheet": "qwen21", "edit_image": "qwen21"}
+#: an edit's class comes from its operation (an upscale is not a 12 GB edit model)
+EDIT_CLASS = {"upscale": "esrgan", "remove_background": "birefnet", "pose_map": "control", "depth_map": "control"}
+#: a generate job with a clip template needs the video model, not the image engine
+TEMPLATE_CLASS = {"wan22_ti2v": "wan", "wan22_i2v_14b": "wan14b", "wan22_flf2v": "wan14b", "auto_clip": "wan14b",
+                  "wan21_infinitetalk": "wan14b", "wan22_s2v": "wan_s2v", "auto_sing": "wan_s2v",
+                  "wan_animate2": "wan_animate", "ace15_song": "ace"}
 
 
 def enabled() -> bool:
@@ -35,6 +41,10 @@ def enabled() -> bool:
 
 def vram_class(job: dict[str, Any], resolve_image_engine: Optional[Callable[[], str]] = None) -> str:
     params = job.get("params") or {}
+    if job["type"] == "edit_image" and params.get("operation") in EDIT_CLASS:
+        return EDIT_CLASS[params["operation"]]
+    if job["type"] == "generate_image" and params.get("template") in TEMPLATE_CLASS:
+        return TEMPLATE_CLASS[params["template"]]
     if job["type"] == "generate_image":
         picked = str(params.get("engine") or "auto")
         if picked != "auto":

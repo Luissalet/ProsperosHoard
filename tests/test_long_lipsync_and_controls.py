@@ -103,3 +103,16 @@ def test_a_lip_sync_video_is_trimmed_to_the_line(tmp_path):
     probe = subprocess.run([exe, "-hide_banner", "-i", str(dst)], capture_output=True, text=True).stderr
     assert "Duration: 00:00:01.5" in probe
     assert engine._trim_video_bytes(src.read_bytes(), 10) == src.read_bytes()
+
+
+def test_the_gpu_lease_is_sized_by_operation_and_template():
+    from prosperos_hoard import gpu_lease
+    est = {"control": 3000, "esrgan": 2500, "wan14b": 10000, "wan_s2v": 12000, "qwen21": 12000}
+    edit = lambda op: {"type": "edit_image", "params": {"operation": op}}
+    gen = lambda tpl: {"type": "generate_image", "params": {"template": tpl}}
+    assert gpu_lease.estimate_mb(edit("pose_map"), est) == 3000
+    assert gpu_lease.estimate_mb(edit("upscale"), est) == 2500
+    assert gpu_lease.estimate_mb(edit("img2img"), est) == 12000
+    assert gpu_lease.estimate_mb(gen("wan21_infinitetalk"), est) == 10000
+    assert gpu_lease.estimate_mb(gen("auto_sing"), est) == 12000
+    assert gpu_lease.vram_class({"type": "generate_image", "params": {"engine": "qwen21"}}) == "qwen21"
