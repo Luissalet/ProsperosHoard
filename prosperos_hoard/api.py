@@ -2637,11 +2637,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def _hook(self, name: str) -> Any:
             return (getattr(app.state, "short_hooks", None) or {}).get(name)
 
-        def chat(self, messages: list[dict[str, Any]], max_tokens: int, temperature: float) -> str:
+        def chat(self, messages: list[dict[str, Any]], max_tokens: int, temperature: float,
+                 effort: Optional[str] = None) -> str:
             hook = self._hook("chat")
             if hook:
                 return hook(messages, max_tokens, temperature)
-            return backend.link.sync.chat(messages=messages, max_tokens=max_tokens, temperature=temperature).text
+            return backend.link.sync.chat(messages=messages, max_tokens=max_tokens, temperature=temperature,
+                                          effort=effort).text
 
         def synthesize(self, voice: dict[str, Any], text: str) -> tuple[bytes, str]:
             hook = self._hook("synthesize")
@@ -2802,8 +2804,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                   "improved prompt only, in English, one paragraph, no quotes, no preamble."},
                     {"role": "user", "content": f"Improve this prompt for {what}. Keep every name written as @Name and every "
                                                 f"<imageN> tag exactly as it is; keep the idea, add concrete visual detail.\n\n{text}"}]
-        out = studio.chat(messages, 400, 0.6).strip().strip('"')
-        return {"text": out or text}
+        # a rewrite needs no reasoning: a thinking model would spend the budget thinking and answer nothing
+        out = studio.chat(messages, 600, 0.6, effort="off").strip().strip('"')
+        if not out:
+            raise engine.EngineError("empty_answer", "the local model gave no answer: try again or use another model")
+        return {"text": out}
 
     @app.post("/api/prompt/enhance")
     def enhance_prompt(body: EnhancePromptBody):
