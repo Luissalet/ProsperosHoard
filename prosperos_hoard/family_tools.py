@@ -174,9 +174,11 @@ def production_from_storyboard(store: Store, backend: Any, *, title: str, shots:
 
 # ---------------------------------------------------------------- voice_tts
 
-def tts(store: Store, tts_engines: list[Any], *, text: str, voice: Optional[str], lang: Optional[str]) -> dict[str, Any]:
+def tts(store: Store, tts_engines: list[Any], *, text: str, voice: Optional[str], lang: Optional[str],
+        engine_id: Optional[str] = None, speed: Optional[float] = None) -> dict[str, Any]:
     """Speak `text` with a library voice (id or name), an engine's own voice id, or the best engine installed; the audio is a WAV file
-    in the data folder and `path` says where."""
+    in the data folder and `path` says where. `engine_id` picks the engine (a library voice's own engine wins; `unknown_engine` when
+    it is not one of ours) and `speed` (0.5..2.0) is passed to the engine."""
     text = (text or "").strip()
     if not text:
         raise engine.EngineError("empty_text", "give the text to speak")
@@ -185,6 +187,14 @@ def tts(store: Store, tts_engines: list[Any], *, text: str, voice: Optional[str]
     spec: dict[str, Any] = {}
     if lang:
         spec["language"] = lang.strip()[:10]
+    if speed is not None:
+        try:
+            spec["speed"] = float(speed)
+        except (TypeError, ValueError):
+            raise engine.EngineError("bad_speed", "speed is a number from 0.5 to 2.0") from None
+        if not 0.5 <= spec["speed"] <= 2.0:
+            raise engine.EngineError("bad_speed", "speed is a number from 0.5 to 2.0 (1.0 is normal)")
+    wanted_engine = (engine_id or "").strip()
     wanted = (voice or "").strip()
     if wanted:
         library = None
@@ -196,14 +206,22 @@ def tts(store: Store, tts_engines: list[Any], *, text: str, voice: Optional[str]
             spec["voice_id"] = library["id"]
         else:
             spec["voice_ref"] = wanted
-    if "voice_id" not in spec:
+    if "voice_id" not in spec and wanted_engine:
+        try:
+            chosen = ve.get_engine(tts_engines, wanted_engine)
+        except KeyError:
+            chosen = None
+        if chosen is None or not chosen.is_installed():
+            raise engine.EngineError("unknown_engine", f"'{wanted_engine}' is not an installed speech engine here (Voice > Engines lists them)")
+        spec["engine_id"] = chosen.id
+    if "voice_id" not in spec and "engine_id" not in spec:
         picked = ve.best_installed_tts(tts_engines)
         if picked is None:
             raise engine.EngineError("tts_not_installed", "no text-to-speech engine is installed (Voice > Engines installs Piper or another)")
         spec["engine_id"] = picked.id
-    wav, engine_id = voice_lab.synthesize_with_spec(store, tts_engines, spec, text)
+    wav, used_engine = voice_lab.synthesize_with_spec(store, tts_engines, spec, text)
     folder = store.data_dir / "exports" / "tts"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{new_id('tts')}.wav"
     path.write_bytes(wav)
-    return {"ok": True, "path": str(path), "engine_id": engine_id, "bytes": len(wav)}
+    return {"ok": True, "path": str(path), "engine_id": used_engine, "bytes": len(wav)}
