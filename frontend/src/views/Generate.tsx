@@ -4,6 +4,7 @@ import { api, fileUrl, thumbUrl, type Asset, type Character, type Composed, type
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, Empty, JobState, Progress, useApp, useAsync, useDebounced } from "../components/ui";
 import { EngineBar } from "./EngineBar";
+import { useSlashMenu } from "../components/Slash";
 import { useDeleteAssets } from "../components/useDeleteAssets";
 import { Trash2 } from "lucide-react";
 
@@ -83,6 +84,7 @@ export function GenerateView() {
   const [picked, setPicked] = useState<string[] | null>(null);
   const del = useDeleteAssets();
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const slash = useSlashMenu(prompt, setPrompt, textRef);
 
   useEffect(() => { sessionStorage.setItem(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
 
@@ -147,6 +149,7 @@ export function GenerateView() {
 
   const onPromptChange = (value: string, caret: number) => {
     setPrompt(value);
+    slash.update(value, caret);
     const before = value.slice(0, caret);
     const m = before.match(/(^|[^\w])@([\w\- ]{0,24})$/u);
     const r = refs.length ? before.match(/<(\w{0,6})$/u) : null;
@@ -282,6 +285,7 @@ export function GenerateView() {
               <textarea ref={textRef} value={prompt} placeholder={t("promptPlaceholder")} aria-label={t("prompt")}
                 onChange={(e) => onPromptChange(e.target.value, e.target.selectionStart)}
                 onKeyDown={(e) => {
+                  if (slash.onKeyDown(e)) return;
                   if (menu && menuSize) {
                     if (e.key === "ArrowDown") { e.preventDefault(); setMenu({ ...menu, index: (menu.index + 1) % menuSize }); }
                     if (e.key === "ArrowUp") { e.preventDefault(); setMenu({ ...menu, index: (menu.index - 1 + menuSize) % menuSize }); }
@@ -289,6 +293,7 @@ export function GenerateView() {
                     if (e.key === "Escape") setMenu(null);
                   } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) queue();
                 }} />
+              {slash.menu}
               {menu?.kind === "<" && refSuggestions.length > 0 && (
                 <div className="mention-menu">
                   {refSuggestions.map((r, i) => (

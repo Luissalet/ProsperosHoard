@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
+import { useSlashMenu } from "../components/Slash";
 
 // the song sections a shot can illustrate (what the planner writes)
 export const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
@@ -162,7 +163,11 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
   const entry = shot ? frames[shot.key] || {} : {};
   const variants = entry.variants || [];
   const [prompt, setPrompt] = useState(shot?.prompt || "");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const slash = useSlashMenu(prompt, setPrompt, promptRef, { clips: true });
   const [motionPrompt, setMotionPrompt] = useState(shot?.motion_prompt || "");
+  const motionInputRef = useRef<HTMLInputElement>(null);
+  const motionSlash = useSlashMenu(motionPrompt, setMotionPrompt, motionInputRef, { clips: true });
   const [lead, setLead] = useState(shot ? shot.lead : true);
   const [motion, setMotion] = useState<"still" | "move">(shot?.motion || "move");
   const [clip, setClip] = useState(shot ? shot.clips.length > 0 : true);
@@ -308,7 +313,12 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
           </div>
         )}
         <label className="field">{t("sbPrompt")}
-          <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t("sbPromptPh")} />
+          <div className="slash-wrap">
+            <textarea ref={promptRef} rows={3} value={prompt} placeholder={t("sbPromptPh")}
+              onChange={(e) => { setPrompt(e.target.value); slash.update(e.target.value, e.target.selectionStart); }}
+              onKeyDown={(e) => { slash.onKeyDown(e); }} />
+            {slash.menu}
+          </div>
           <span className="hint">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
         </label>
         {elements.length > 0 && (
@@ -370,7 +380,12 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
         )}
         {motion === "move" && (
           <label className="field">{t("sbMotionPrompt")}
-            <input value={motionPrompt} onChange={(e) => setMotionPrompt(e.target.value)} placeholder={t("sbMotionPh")} />
+            <span className="slash-wrap" style={{ display: "block" }}>
+              <input ref={motionInputRef} value={motionPrompt} placeholder={t("sbMotionPh")} style={{ width: "100%" }}
+                onChange={(e) => { setMotionPrompt(e.target.value); motionSlash.update(e.target.value, e.target.selectionStart); }}
+                onKeyDown={(e) => { motionSlash.onKeyDown(e); }} />
+              {motionSlash.menu}
+            </span>
             <span className="row wrap" style={{ gap: 4, marginTop: 4 }}>
               <span className="hint">{t("sbCamera")}</span>
               {CAMERA.map((c) => (
