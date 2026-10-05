@@ -54,24 +54,27 @@ export function Vitals() {
   return (
     <div className="vitals" ref={box}>
       <button className="vitals-pill" onClick={() => setOpen(!open)} title={t("vitalsTitle")} aria-expanded={open}>
-        {!d ? <span className="muted small">{t("vitalsNa")}</span> : (
+        {!d || (!gpus.length && !ram && d.host?.cpu_pct == null) ? <span className="muted small">{t("vitalsNa")}</span> : (
           <>
             {gpus.length > 0 && (
               <>
-                <span className="mono small">{util != null ? `${util}%` : "GPU"}</span>
-                <span className="tanks" aria-hidden="true">
+                <span className="vitals-gpus">
                   {gpus.map((g) => {
-                    const p = (g.used_mb / Math.max(1, g.total_mb)) * 100;
-                    return <span key={g.index} className={`tank ${lvl(p)}`} style={{ flexGrow: Math.max(1, g.total_mb / 1024) }}
-                      title={`GPU ${g.index} · ${gb(g.used_mb)}/${gb(g.total_mb)} GB`}><span style={{ width: `${p}%` }} /></span>;
+                    const p = Math.min(100, Math.max(0, (g.used_mb / Math.max(1, g.total_mb)) * 100));
+                    const label = `GPU ${g.index} · VRAM ${gb(g.used_mb)}/${gb(g.total_mb)} GB (${Math.round(p)}%)`;
+                    return <span key={g.index} className="vitals-gpu" title={`${g.name} · ${label}`} aria-label={label}>
+                      <span className="vitals-gpu-label mono">G{g.index} <strong>{Math.round(p)}%</strong></span>
+                      <span className={`tank ${lvl(p)}`} aria-hidden="true"><span style={{ width: `${p}%` }} /></span>
+                    </span>;
                   })}
                 </span>
-                <span className="mono small">{gb(used)}<span className="muted">/{Math.round(total / 1024)} GB</span></span>
-                {hot != null && <span className={`mono small ${hot >= 85 ? "err-text" : hot >= 75 ? "warn-text" : "muted"}`}>{Math.round(hot)}°</span>}
+                <span className="mono small vitals-total">{gb(used)}<span className="muted">/{Math.round(total / 1024)} GB</span></span>
+                {util != null && <span className="mono small vitals-compute">GPU {util}%</span>}
+                {hot != null && <span className={`mono small vitals-host ${hot >= 85 ? "err-text" : hot >= 75 ? "warn-text" : "muted"}`}>{Math.round(hot)}°</span>}
               </>
             )}
-            {ramPct != null && <span className="mono small">RAM <span className={ramPct >= 90 ? "err-text" : ""}>{ramPct}%</span></span>}
-            {d.host?.cpu_pct != null && <span className="mono small">CPU {Math.round(d.host.cpu_pct)}%</span>}
+            {ramPct != null && <span className="mono small vitals-host">RAM <span className={ramPct >= 90 ? "err-text" : ""}>{ramPct}%</span></span>}
+            {d.host?.cpu_pct != null && <span className="mono small vitals-host">CPU {Math.round(d.host.cpu_pct)}%</span>}
           </>
         )}
       </button>

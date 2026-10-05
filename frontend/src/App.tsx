@@ -1,11 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
-  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow,
+  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
+import "./studio.css";
 import { api, type Job, type Project } from "./api";
 import { I18nContext, detectLang, makeT, type Lang, type MessageKey } from "./i18n";
 import { AppContext, type Route, useToasts } from "./components/ui";
@@ -13,7 +14,7 @@ import { Lightbox } from "./components/Lightbox";
 import { ProjectsView } from "./views/Projects";
 import { OverviewView } from "./views/Overview";
 import { CastView } from "./views/Cast";
-import { GenerateView } from "./views/Generate";
+import { StudioView } from "./views/Studio";
 import { LibraryView } from "./views/Library";
 import { DesignerView } from "./views/Designer";
 import { AudioView } from "./views/Audio";
@@ -93,13 +94,33 @@ export default function App() {
   const [demo, setDemo] = useState(false);
   const [lightbox, setLightbox] = useState<{ id: string; list: string[] } | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsOpener = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const closeTools = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setToolsOpen(false); }
+      if (event.key !== "Tab") return;
+      const drawer = document.querySelector(".tools-drawer");
+      const controls = [...(drawer?.querySelectorAll<HTMLElement>('button:not([disabled]), input, select, a[href]') || [])].filter((el) => el.getClientRects().length);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", closeTools);
+    return () => {
+      document.removeEventListener("keydown", closeTools);
+      if (toolsOpener.current?.isConnected) toolsOpener.current.focus();
+    };
+  }, [toolsOpen]);
+  const [toolQuery, setToolQuery] = useState("");
   const { toast, host } = useToasts();
   const t = useMemo(() => makeT(lang), [lang]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; writeStore("prospero.theme", theme); }, [theme]);
   useEffect(() => { writeStore("prospero.lang", lang); document.documentElement.lang = lang; }, [lang]);
   useEffect(() => {
-    const onHash = () => { setRoute(parseHash()); setLightbox(null); };
+    const onHash = () => { setRoute(parseHash()); setLightbox(null); setToolsOpen(false); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -185,7 +206,7 @@ export default function App() {
   else if (section === "video") view = <ProductionsView key={`${projectId}/${route.arg || ""}`} projectId={projectId!} />;
   else if (section === "spaces") view = <Suspense fallback={null}><SpacesView key={projectId} /></Suspense>;
   else if (section === "cast") view = <CastView key={projectId} />;
-  else if (section === "generate") view = <GenerateView key={projectId} />;
+  else if (section === "generate") view = <StudioView key={projectId} />;
   else if (section === "library") view = <LibraryView key={projectId} />;
   else if (section === "designer") view = <DesignerView key={projectId} />;
   else if (section === "audio") view = <AudioView key={projectId} />;
@@ -204,13 +225,25 @@ export default function App() {
     <I18nContext.Provider value={{ t, lang }}>
       <AppContext.Provider value={ctx}>
         <div className="app">
-          <aside className="sidebar">
+          <aside className="studio-rail" aria-label={t("studio")}>
+            <button className="rail-logo" onClick={() => go("projects")} title={t("navProjects")}><img src="/favicon-192.png" alt={t("appName")} /></button>
+            {PROJECT_SECTIONS.filter((s) => ["generate", "spaces", "cast", "timeline", "audio", "designer"].includes(s.id)).map((s) =>
+              <button key={s.id} className={section === s.id ? "active" : ""} onClick={() => go(s.id)}
+                title={t(s.key)} disabled={!projectId && !projects.length}><s.icon size={21} /><span>{t(s.key)}</span></button>)}
+            <button onClick={(e) => { toolsOpener.current = e.currentTarget; setToolsOpen(true); setToolQuery(""); }} aria-expanded={toolsOpen}><Menu size={21} /><span>{lang === "es" ? "Herramientas" : "Tools"}</span></button>
+            <div className="spacer" />
+            <button onClick={() => go("settings")}><SettingsIcon size={21} /><span>{t("navSettings")}</span></button>
+          </aside>
+          {toolsOpen && <div className="tools-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); setToolsOpen(false); } }}>
+          <aside className="sidebar tools-drawer" role="dialog" aria-modal="true" aria-label={lang === "es" ? "Todas las herramientas" : "All tools"}>
             <div className="brand">
               <div className="brand-mark"><img src="/favicon-192.png" alt="" width={28} height={28} /></div>
               <div>
                 <div className="brand-name">{t("appName")}</div>
               </div>
+              <button className="btn icon ghost" style={{ marginLeft: "auto" }} onClick={() => setToolsOpen(false)} aria-label={t("close")}><X size={18} /></button>
             </div>
+            <label className="tool-search"><Search size={16} /><input autoFocus value={toolQuery} onChange={(e) => setToolQuery(e.target.value)} placeholder={lang === "es" ? "Buscar una herramienta…" : "Find a tool…"} /></label>
             <div className="project-switch">
               <select value={projectId || ""} onChange={(e) => setProject(e.target.value || null)} aria-label={t("navProjects")}>
                 <option value="">{t("noProject")}</option>
@@ -219,9 +252,9 @@ export default function App() {
             </div>
             <nav className="nav-group">
               <div className="nav-label">{t("studio")}</div>
-              {PROJECT_SECTIONS.map((s) => (
+              {PROJECT_SECTIONS.filter((s) => t(s.key).toLowerCase().includes(toolQuery.toLowerCase())).map((s) => (
                 <button key={s.id} className={`nav-item${section === s.id && projectId ? " active" : ""}`} disabled={!projectId && !projects.length}
-                  onClick={() => go(s.id)}>
+                  onClick={() => { go(s.id); setToolsOpen(false); }}>
                   <s.icon size={17} /> {t(s.key)}
                   {s.id === "library" && current && <span className="count">{current.counts.assets}</span>}
                   {s.id === "cast" && current && <span className="count">{current.counts.characters}</span>}
@@ -230,8 +263,8 @@ export default function App() {
             </nav>
             <nav className="nav-group">
               <div className="nav-label">{t("global")}</div>
-              {GLOBAL_SECTIONS.map((s) => (
-                <button key={s.id} className={`nav-item${section === s.id ? " active" : ""}`} onClick={() => go(s.id)}>
+              {GLOBAL_SECTIONS.filter((s) => t(s.key).toLowerCase().includes(toolQuery.toLowerCase())).map((s) => (
+                <button key={s.id} className={`nav-item${section === s.id ? " active" : ""}`} onClick={() => { go(s.id); setToolsOpen(false); }}>
                   <s.icon size={17} /> {t(s.key)}
                   {s.id === "jobs" && active.length > 0 && <span className="pill accent">{active.length}</span>}
                 </button>
@@ -250,19 +283,25 @@ export default function App() {
               </div>
               <div className="muted small">{t("shortcuts")}</div>
             </div>
-          </aside>
+          </aside></div>}
           <main className="main">
             <header className="topbar">
-              <div className="crumbs">
-                {needsProject && current && <><span className="ellipsis">{current.name}</span><span>/</span></>}
-                <strong>{t(title)}</strong>
-              </div>
+              <button className="btn icon ghost mobile-menu" onClick={(e) => { toolsOpener.current = e.currentTarget; setToolsOpen(true); setToolQuery(""); }} aria-label={lang === "es" ? "Abrir herramientas" : "Open tools"} aria-expanded={toolsOpen}><Menu size={21} /></button>
+              <strong className="studio-name">{t("appName")}</strong>
+              <select className="studio-project" aria-label={t("navProjects")} value={projectId || ""} onChange={(e) => setProject(e.target.value || null)}>
+                <option value="">{t("noProject")}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
+                {[["generate", lang === "es" ? "Crear" : "Create"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
+                  <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
+              </nav>
               <div className="spacer" />
-              <Vitals />
+              <div className="studio-vitals"><Vitals /></div>
               {demo && <span className="pill gold" title={t("demoHint")}>{t("demoBadge")}</span>}
               <JobsMenu />
+              <button className="btn icon ghost theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={theme === "dark" ? t("themeLight") : t("themeDark")}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
             </header>
-            <div className="content">{view}</div>
+            <div className={`content studio-content section-${section}`} aria-label={t(title)}>{view}</div>
           </main>
         </div>
         {lightbox && <Lightbox assetId={lightbox.id} list={lightbox.list} onClose={() => setLightbox(null)}

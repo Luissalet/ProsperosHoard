@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import time
 from typing import Any, Callable, Optional
@@ -350,6 +351,41 @@ def _refs_note(n: int) -> str:
             "(same design, colours and proportions).")
 
 
+REFERENCE_ROLES = {
+    "identity": "preserve this person's face, hair, body proportions and identity",
+    "outfit": "use only this clothing, accessories and footwear; do not copy the wearer's identity",
+    "setting": "keep this location, its architecture, props and background people consistent",
+    "style": "use this visual style, lighting and colour treatment",
+    "pose": "copy this body pose and hand positions, without changing identity or clothing",
+}
+
+
+def _reference_roles(store: Store, graph: dict[str, Any], state: dict[str, Any], node_id: str) -> dict[str, list[str]]:
+    """Carry optional source purposes through lists, preserving the actual reference order."""
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    roles: dict[str, list[str]] = {}
+
+    def visit(nid: str, handle: Optional[str], seen: set[str]) -> None:
+        if nid in seen:
+            return
+        node = by_id[nid]
+        data = node.get("data") or {}
+        role = data.get("ref_role")
+        if role in REFERENCE_ROLES:
+            for kind, aid in node_outputs(store, graph, state, nid, handle):
+                if kind == "image" and role not in roles.setdefault(aid, []):
+                    roles[aid].append(role)
+        if node["type"] == "list":
+            for e in graph["edges"]:
+                if e["target"] == nid:
+                    visit(e["source"], e.get("source_handle"), seen | {nid})
+
+    for e in graph["edges"]:
+        if e["target"] == node_id and e["target_handle"] == "refs":
+            visit(e["source"], e.get("source_handle"), set())
+    return roles
+
+
 def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_id: str) -> list[dict[str, Any]]:
     """The operations one run of a generator node makes: [{"op": "generate"
     | "compose", "body": {...}}]. Raises SpaceError when an input it needs
@@ -363,9 +399,12 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
     own = str(data.get("prompt") or "").strip()
     if t == "image":
         common, items = prompt_parts(store, graph, state, node_id)
-        refs = list(dict.fromkeys(v for k, v in ins.get("refs", []) if k == "image"))[:8]
+        refs = list(dict.fromkeys(v for k, v in ins.get("refs", []) if k == "image"))
+        roles = _reference_roles(store, graph, state, node_id)
         pose = next((v for k, v in ins.get("pose", []) if k == "image"), None)
         layout = next((v for k, v in ins.get("layout", []) if k == "image"), None)
+        if len(refs) + bool(pose) + bool(layout) > 10:
+            raise SpaceError("too_many_references", "a picture accepts at most 10 references, including pose and layout; remove a reference or split the branch")
         if not common and not items and not own and not refs:
             raise SpaceError("needs_prompt", "write what the picture shows or wire a text into its prompt")
         ops = []
@@ -379,6 +418,7 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                 prompt = f"{prompt}. {SHEET_SUFFIX}"
             if refs and "<image" not in prompt:
                 prompt += _refs_note(len(refs))
+            role_text = " ".join(f"<image{i + 1}>: {REFERENCE_ROLES[role]}." for i, aid in enumerate(refs) for role in roles.get(aid, []))
             all_refs = list(refs)
             if pose:
                 all_refs.append(pose)
@@ -388,6 +428,8 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                 all_refs.append(layout)
                 prompt += (f" <image{len(all_refs)}> is a depth map of the layout: keep that composition, camera angle and "
                            "the depth of every shape, and take no colours from it.")
+            if role_text:
+                prompt = prompt[:3900 - len(role_text) - 1] + " " + role_text
             body: dict[str, Any] = {"prompt": prompt[:3900], "count": max(1, min(int(data.get("count") or 1), 8)),
                                     "aspect": data.get("aspect") or ("16:9" if data.get("preset") == "sheet" else "1:1"),
                                     "engine": data.get("engine") or None}
@@ -406,12 +448,21 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
         audio = next((v for k, v in ins.get("audio", []) if k == "audio"), None)
         motion = next((v for k, v in ins.get("motion", []) if k == "video"), None)
         end = next((v for k, v in ins.get("end", []) if k == "image"), None)
+        if sum(bool(x) for x in (audio, motion, end)) > 1:
+            raise SpaceError("conflicting_guides", "use one guide per clip: audio, motion or end frame. Disconnect the others or make another branch")
+        try:
+            seconds = float(data.get("seconds") if data.get("seconds") is not None else (4.8 if audio else 3 if motion else 5))
+        except (ValueError, TypeError):
+            seconds = float("nan")
+        maximum = (19 if data.get("sing_engine") == "s2v" else 90) if audio else 5 if motion else 20
+        if not math.isfinite(seconds) or isinstance(data.get("seconds"), bool) or not 1 <= seconds <= maximum:
+            raise SpaceError("bad_duration", f"clip duration must be between 1 and {maximum} seconds for this mode")
         quality = data.get("quality") or "final"
         ops = []
         pairs = [(st_, it) for st_ in starts for it in (items or [None])][:MAX_FANOUT]
         for i, (start, item) in enumerate(pairs):
             texts = common + ([item] if item else []) + ([own] if own else [])
-            prompt = ". ".join(texts) or "subtle natural motion"
+            prompt = ". ".join(texts) or "the subject takes several clear steps and turns, continuous visible movement, consistent appearance and setting"
             if cam:
                 prompt = f"{prompt}, {cam}"
             body = {"prompt": prompt[:3900], "reference_asset_id": start, "count": 1}
@@ -420,17 +471,18 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             if audio:
                 engine_pick = data.get("sing_engine") or "auto"
                 longest = 19.0 if engine_pick == "s2v" else 90.0
-                seconds = max(1.0, min(float(data.get("seconds") or 4.8), longest))
                 body.update({"template": "auto_sing", "audio_asset_id": audio,
                              "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0)), "audio_seconds": seconds,
                              **({"template_params": {"sing_engine": engine_pick}} if engine_pick != "auto" else {})})
             elif motion:
                 body.update({"template": "auto_clip", "driving_asset_id": motion,
-                             "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0))})
+                             "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0)),
+                             "template_params": {"length": int(round(seconds * 24)) + 1, "pose_prompt": prompt}})
             elif end:
-                body.update({"template": "auto_clip", "end_asset_id": end})
+                body.update({"template": "auto_clip", "end_asset_id": end, "template_params": {"seconds": seconds}})
             else:
                 body["template"] = "wan22_ti2v" if quality == "draft" else "auto_clip"
+                body["template_params"] = {"length": int(round(seconds * 24)) + 1} if quality == "draft" else {"seconds": seconds}
             ops.append({"op": "generate", "body": body})
         return ops
     if t == "music":
@@ -586,6 +638,53 @@ def _wants_last_frames(graph: dict[str, Any], node_id: str) -> bool:
     return any(e["source"] == node_id and e.get("source_handle") == "last" for e in graph["edges"])
 
 
+def _prepare_input_frames(store: Store, studio: Any, space_id: str, graph: dict[str, Any], node_id: str, pid: str) -> None:
+    """A new last-frame wire must work with a clip made before the wire existed.
+
+    Derive only missing frames from selected existing clips, including wires
+    through lists. Never regenerate the source just to obtain its final frame.
+    """
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    sources: set[str] = set()
+    seen: set[str] = set()
+
+    def visit(target: str) -> None:
+        if target in seen:
+            return
+        seen.add(target)
+        for edge in graph["edges"]:
+            if edge["target"] != target:
+                continue
+            source = by_id.get(edge["source"], {})
+            if source.get("type") == "video" and edge.get("source_handle") == "last":
+                sources.add(edge["source"])
+            elif source.get("type") == "list":
+                visit(edge["source"])
+
+    visit(node_id)
+    for source in sorted(sources):
+        state = store.get_space(space_id)["state"].get(source) or {}
+        excluded = set(state.get("excluded") or [])
+        frames = dict(state.get("last_frames") or {})
+        for clip in state.get("outputs") or []:
+            if clip in excluded:
+                continue
+            if frames.get(clip):
+                try:
+                    if store.get_asset(frames[clip])["kind"] == "image":
+                        continue
+                except NotFound:
+                    pass
+            try:
+                frames[clip] = studio.last_frame(clip, pid)["id"]
+            except JobCancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 - retain the source clip and report the failed derivation
+                raise SpaceError("last_frame_unavailable", f"could not prepare the last frame of {source}: {str(getattr(exc, 'message', exc))[:200]}") from exc
+            # Preserve each successful derivation even if another selected clip fails.
+            store.patch_space_state(space_id, source, {"last_frames": frames})
+
+
 def _split_lines(text: str, limit: int) -> list[str]:
     out = []
     for line in text.splitlines():
@@ -624,8 +723,9 @@ def run_space(store: Store, studio: Any, space_id: str, mode: str = "node", node
             tick(f"wave {wave_no + 1}/{len(waves)}: {', '.join(wave)}")
             started.clear()
             for nid in wave:
-                state = store.get_space(space_id)["state"]
                 try:
+                    _prepare_input_frames(store, studio, space_id, graph, nid, pid)
+                    state = store.get_space(space_id)["state"]
                     ops = plan_node(store, graph, state, nid)
                 except SpaceError as exc:
                     store.patch_space_state(space_id, nid, {"status": "failed", "error": exc.message, "jobs": []})
@@ -794,7 +894,12 @@ def _op_template(op: dict[str, Any]) -> tuple[str, float]:
         tpl = "wan21_infinitetalk" if pick == "infinitetalk" or (pick != "s2v" and secs > 10) else "wan22_s2v"
         return tpl, n * max(1.0, secs / (10.0 if tpl == "wan21_infinitetalk" else 4.8))
     if t == "auto_clip":
-        return ("wan22_flf2v" if b.get("end_asset_id") else "wan22_i2v_14b"), n
+        params = b.get("template_params") or {}
+        if b.get("driving_asset_id"):
+            return "wan_animate2", n * float(params.get("length", 73)) / 73
+        return ("wan22_flf2v" if b.get("end_asset_id") else "wan22_i2v_14b"), n * float(params.get("seconds", 5)) / 5
+    if t == "wan22_ti2v":
+        return t, n * float((b.get("template_params") or {}).get("length", 121)) / 121
     if t:
         return t, n
     return ("qwen21_edit" if b.get("reference_asset_ids") or b.get("reference_asset_id") else "qwen21_txt2img"), n
@@ -901,7 +1006,7 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
                 continue
             per = medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)
             secs += per * units
-            node_renders += max(1, int(round(units))) if op["op"] != "compose" else max(1, int(op["body"].get("count") or 1))
+            node_renders += max(1, int(op["body"].get("count") or 1))
             templates.add(tpl)
             peak = max(peak, int((vram_mb or {}).get(TEMPLATE_VRAM.get(tpl, ""), 0)))
         per_node[nid] = max(1, node_renders or len(ops))
@@ -1021,7 +1126,7 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
     ops: list[dict[str, Any]] = []
     wires: list[tuple[str, Optional[str], str, str]] = []
     types = {ids[str(n.get("id") or n["type"])]: n["type"] for n in raw}
-    data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality"),
+    data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality", "seconds"),
                  "music": ("tags", "lyrics", "duration", "bpm"), "assistant": ("prompt", "as_list", "items"),
                  "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",),
                  "clip_edit": ("prompt", "mode", "quality")}
@@ -1165,7 +1270,19 @@ def template_graph(name: str) -> dict[str, Any]:
     sheets wired into a picture and a clip (the reference-driven short);
     "singing_shot": a cast member + a song into a lip-synced clip;
     "blank": nothing."""
-    if name == "reference_film":
+    if name == "character_outfit_motion":
+        nodes = [
+            {"id": "person", "type": "asset", "x": 0, "y": 0, "data": {"title": "Person", "kind": "image", "asset_ids": [], "ref_role": "identity"}},
+            {"id": "outfit", "type": "asset", "x": 0, "y": 500, "data": {"title": "Outfit", "kind": "image", "asset_ids": [], "ref_role": "outfit"}},
+            {"id": "frame", "type": "image", "x": 410, "y": 90, "data": {"title": "Dress the person", "count": 1, "aspect": "16:9", "prompt": "The person from the identity reference wears the outfit reference, full body, same location. Preserve the person's face and hair."}},
+            {"id": "motion", "type": "asset", "x": 410, "y": 850, "data": {"title": "Motion guide (optional)", "kind": "video", "asset_ids": []}},
+            {"id": "clip", "type": "video", "x": 880, "y": 100, "data": {"title": "Perform the movement", "quality": "final", "seconds": 3, "prompt": "the person dances energetically, takes clear steps and makes a full turn, same face, hair, clothing and room"}},
+        ]
+        edges = [{"source": "person", "target": "frame", "target_handle": "refs"},
+                 {"source": "outfit", "target": "frame", "target_handle": "refs"},
+                 {"source": "frame", "target": "clip", "target_handle": "start"},
+                 {"source": "motion", "target": "clip", "target_handle": "motion"}]
+    elif name == "reference_film":
         nodes = [
             {"id": "style", "type": "text", "x": 0, "y": -140, "data": {"text": "STYLE: realistic live-action feature film, "
                                                                             "natural light, 35mm lens, shallow depth of field"}},
@@ -1227,7 +1344,7 @@ def template_graph(name: str) -> dict[str, Any]:
     return validate_graph({"nodes": nodes, "edges": edges})
 
 
-TEMPLATES = ("blank", "reference_film", "singing_shot", "short_film")
+TEMPLATES = ("blank", "character_outfit_motion", "reference_film", "singing_shot", "short_film")
 
 
 # ---------------------------------------------------------------- techniques

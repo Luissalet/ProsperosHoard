@@ -186,7 +186,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
             </div>
           </h2>
           {script.description && <p className="small muted" style={{ marginTop: -6 }}>{script.description}</p>}
-          <table className="list small">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list small">
             <tbody>
               {script.segments.map((seg, i) => (
                 <tr key={i}>
@@ -195,7 +195,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
       {state.status === "awaiting_review" && animatic?.renders && (

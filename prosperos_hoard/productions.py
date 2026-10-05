@@ -582,7 +582,8 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         if shot.get("motion", "move") not in ("still", "move"):
             raise ProductionError("bad_spec", f"spec.shots[{i}].motion must be 'still' or 'move'")
         shot.setdefault("motion", "move")
-        shot.setdefault("motion_prompt", "subtle motion")
+        shot.setdefault("motion_prompt", "Continuous visible subject movement, natural changing poses throughout the shot."
+                        if shot.get("motion") != "still" else "Locked camera, restrained natural movement.")
         shot["clip_seed"] = _int(shot.get("clip_seed", 5000 + number), f"spec.shots[{i}].clip_seed", 0, 2**31 - 2)
         shot["crowd"] = bool(shot.get("crowd", False))
         if shot.get("locked"):
@@ -1242,7 +1243,12 @@ class Run:
             text += ". " + "; ".join(notes)
         # the background cast: each member's image goes in as a reference
         # and the text pins the background to exactly them, as drawn
-        crowd = cast_for_shot(self.spec, shot)[:max(0, 10 - first + 1 - len(refs))]
+        crowd = cast_for_shot(self.spec, shot)
+        capacity = max(0, 10 - first + 1 - len(refs))
+        if len(crowd) > capacity:
+            raise ProductionError("too_many_references", f"shot {shot['key']}: its lead, {len(refs)} references and "
+                                  f"{len(crowd)} background characters exceed 10 images; reduce references or "
+                                  "choose a smaller explicit background cast")
         if crowd:
             start = first + len(refs)
             who = ", ".join(f"{m['name']} (<image{start + i}>{', ' + m['note'] if m.get('note') else ''})"
@@ -1372,7 +1378,11 @@ class Run:
         template = settings.get("template") or "auto_clip"
         if template in ("wan22_ti2v", "auto") and not settings.get("template_pinned"):
             template = "auto_clip"  # the old default: the best clip model installed now
-        text = shot.get("motion_prompt") or "subtle motion"
+        text = shot.get("motion_prompt") or (
+            "Continuous visible subject movement throughout the shot, natural body movement and changing poses."
+            if shot.get("motion") != "still" else "Locked camera; restrained natural movement, stable composition.")
+        if shot.get("motion") != "still" and text.strip().lower() == "subtle motion":
+            text = "Continuous visible subject movement throughout the shot, natural body movement and changing poses."
         if cast_for_shot(self.spec, shot):
             # the still already holds the background cast; the clip must not
             # add anybody to it
@@ -1909,7 +1919,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 section = str(new.get("section") or near.get("section") or "").lower()
                 shot = {"key": key, "prompt": str(new["prompt"]).strip()[:2000], "lead": bool(new.get("lead", True)),
                         "motion": "still" if new.get("motion") == "still" else "move",
-                        "motion_prompt": str(new.get("motion_prompt") or "subtle motion")[:2000],
+                        "motion_prompt": str(new.get("motion_prompt") or "Continuous visible subject movement throughout the shot.")[:2000],
                         "seed": 3000 + 10 * number, "clip_seed": 5000 + number,
                         "variants": int(near.get("variants") or 1), "best": 0,
                         "clips": [0] if new.get("clip", new.get("motion") != "still") else [],
@@ -2110,6 +2120,51 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
         save_state(data_dir, state)
         changed = list(dict.fromkeys(changed))
         return {"slug": slug, "changed": changed, "status": state["status"]}
+
+
+def set_script_segments(data_dir: Path, slug: str, *, text: Optional[str] = None,
+                        segments: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    """Optional script/lyric fragments with explicit text and shot timing links."""
+    from . import script_segments
+
+    if (text is None) == (segments is None):
+        raise ProductionError("bad_segments", "give text to import, or segments to edit")
+    with lock_for(slug):
+        state = load_state(data_dir, slug)
+        if is_running(state, data_dir):
+            raise ProductionError("production_running", "wait for the production to pause or finish")
+        if is_legacy(state) or state.get("kind") == "short":
+            raise ProductionError("bad_segments", "use the narrated short script editor for this production")
+        shots = {s["key"]: s for s in state["spec"].get("shots") or []}
+        try:
+            rows = script_segments.validate(script_segments.parse_text(text) if text is not None else segments, set(shots))
+        except ValueError as exc:
+            raise ProductionError("bad_segments", str(exc)) from None
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            if row["shot_key"] and row["start_s"] is not None and row["end_s"] is not None:
+                grouped.setdefault(row["shot_key"], []).append(row)
+        changed = []
+        for key, linked in grouped.items():
+            span = (min(r["start_s"] for r in linked), max(r["end_s"] for r in linked))
+            if shot_span(shots[key]) != span:
+                if shots[key].get("locked"):
+                    raise ProductionError("shot_locked", f"shot {key} is approved; unlock it before changing its timing")
+                _set_span(shots[key], span)
+                changed.append(key)
+        _check_spans(state["spec"])
+        state["spec"]["script_segments"] = rows
+        if changed:
+            for stage in ("animatic", "timeline", "report"):
+                state["done"].pop(stage, None)
+            state.get("partial", {}).pop("timeline", None)
+            state["review"] = {}
+            state["status"] = "queued"
+            state["message"] = "script timing changed"
+        log(state, "review", "changed_script_segments", count=len(rows), retimed=changed)
+        save_state(data_dir, state)
+        return {"slug": slug, "segments": rows, "retimed": changed,
+                "timed": sum(r["start_s"] is not None and r["end_s"] is not None for r in rows)}
 
 
 def set_song_lyrics(data_dir: Path, slug: str, lyrics: str) -> dict[str, Any]:

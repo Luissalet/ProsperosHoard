@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check } from "lucide-react";
-import { api, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
+import { api, fileUrl, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
@@ -143,6 +143,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
           const hasClip = Object.keys(clips).some((k) => k === shot.key || k.startsWith(`${shot.key}v`));
           return (
             <div key={shot.key} className={`sb-item${shot.locked ? " locked" : ""}`}>
+              {best && <button className="btn xs shot-preview-action" onClick={() => app.openAsset(clips[shot.key] || best)} title={t("zoom")}>{t("zoom")}</button>}
               <button className="btn xs icon sb-lock" disabled={running || acting} title={shot.locked ? t("sbUnlockHint") : t("sbLockHint")}
                 onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
               <button className="tile sb-tile" title={shot.prompt} onClick={() => setEditing({ shot })}>
@@ -219,11 +220,12 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
       <div className="row wrap" style={{ gap: 6 }}>
         {all.map((x) => (
           <div key={x.asset_id} className={`sb-take${x.current ? " current" : ""}${pick.includes(x.asset_id) ? " picked" : ""}`}>
-            <button type="button" className="tile" style={{ width: 112 }} onClick={() => toggle(x.asset_id)}
-              onDoubleClick={() => app.openAsset(x.asset_id, all.map((y) => y.asset_id))} title={x.kind === "video" ? t("sbClip") : t("sbStill")}>
+            <button type="button" className="tile" style={{ width: 112 }} onClick={() => app.openAsset(x.asset_id, all.map((y) => y.asset_id))}
+              title={x.kind === "video" ? t("sbClip") : t("sbStill")}>
               <img src={`/api/assets/${x.asset_id}/thumb`} alt="" />
               <span className="pill badge-dark sb-take-kind">{x.kind === "video" ? <Film size={10} /> : <Images size={10} />}{"quality" in x && x.quality === "draft" ? ` ${t("sbDraft")}` : ""}{"retake" in x && x.retake ? ` ${t("sbRetake")}` : ""}{"edit" in x && x.edit ? ` ${t("sbEdited")}` : ""}</span>
             </button>
+            <label className="check small"><input type="checkbox" checked={pick.includes(x.asset_id)} onChange={() => toggle(x.asset_id)} />{t("sbCompare")}</label>
             {x.current ? <span className="small muted">{t("sbTakeCurrent")}</span>
               : <button type="button" className="btn xs" disabled={disabled || busy} onClick={() => use(x.asset_id)}>{t("sbTakeUse")}</button>}
           </div>
@@ -418,20 +420,20 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
           <span className="hint">{locked ? t("sbApprovedHint") : t("sbLockHint")}</span>
         </label>
       )}
-      <fieldset disabled={running || busy || (locked && !!shot?.locked)} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
-        {!isNew && <TakesRow state={state} shotKey={shot!.key} disabled={running || busy || (locked && !!shot?.locked)} onUsed={onSaved} />}
+      {!isNew && <TakesRow state={state} shotKey={shot!.key} disabled={running || busy || (locked && !!shot?.locked)} onUsed={onSaved} />}
         {variants.length > 0 && (
           <div className="field">{t("sbStillPick")}
             <div className="row wrap" style={{ gap: 6 }}>
               {variants.map((id, i) => (
-                <button key={id} type="button" className={`tile${i === best ? " selected" : ""}`} style={{ width: 120 }}
-                  onClick={() => setBest(i)} onDoubleClick={() => app.openAsset(id, variants)}>
+                <div key={id} style={{ width: 120 }}><button type="button" className={`tile${i === best ? " selected" : ""}`} style={{ width: 120 }}
+                  onClick={() => app.openAsset(id, variants)} aria-label={`${t("zoom")} ${i + 1}`}>
                   <img src={`/api/assets/${id}/thumb`} alt="" />
-                </button>
+                </button><button className="btn sm" disabled={running || busy || (locked && !!shot?.locked)} onClick={() => setBest(i)}>{i === best ? t("sbTakeCurrent") : t("sbTakeUse")}</button></div>
               ))}
             </div>
           </div>
         )}
+      <fieldset disabled={running || busy || (locked && !!shot?.locked)} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
         <label className="field">{t("sbPrompt")}
           <div className="slash-wrap">
             <textarea ref={promptRef} rows={3} value={prompt} placeholder={t("sbPromptPh")}
@@ -528,7 +530,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
             <span className="hint">{t("sbMotionRefHint")}</span>
             {motionRef ? (
               <div className="row wrap" style={{ gap: 8 }}>
-                <img src={thumbUrl({ id: motionRef.asset_id, thumb_path: "x", kind: "video" })} alt="" style={{ width: 96, height: 54, objectFit: "cover", borderRadius: 6 }} />
+                <a href={fileUrl(motionRef.asset_id)} onClick={(e) => { e.preventDefault(); app.openAsset(motionRef.asset_id); }} aria-label={t("zoom")}><img src={thumbUrl({ id: motionRef.asset_id, thumb_path: "x", kind: "video" })} alt="" style={{ width: 96, height: 54, objectFit: "cover", borderRadius: 6 }} /></a>
                 <label className="row" style={{ gap: 4 }}>{t("sbMotionFrom")}
                   <input style={{ width: 70 }} value={motionStart} onChange={(e) => setMotionStart(e.target.value)} /></label>
                 <input className="grow" value={motionRef.prompt} placeholder={t("sbMotionRefPromptPh")}
@@ -576,7 +578,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
           <div className="stack" style={{ gap: 6 }}>
             {refs.map((r, i) => (
               <div key={r.asset_id} className="row" style={{ gap: 8 }}>
-                <img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} />
+                <a href={fileUrl(r.asset_id)} onClick={(e) => { e.preventDefault(); app.openAsset(r.asset_id); }} aria-label={t("zoom")}><img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} /></a>
                 <span className="mono small">{`<image${firstTag + i}>`}</span>
                 <input className="grow" value={r.use} placeholder={t("sbRefUsePh")}
                   onChange={(e) => setRefs(refs.map((x, j) => (j === i ? { ...x, use: e.target.value } : x)))} />

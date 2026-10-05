@@ -31,7 +31,9 @@ function Waveform({ peaks, analysis, duration, time, onSeek, lang }: {
         ctx.fillRect((s.start_s / duration) * w, 0, ((s.end_s - s.start_s) / duration) * w, h);
         ctx.fillStyle = muted;
         ctx.font = "11px 'Space Grotesk Variable', sans-serif";
-        ctx.fillText(`${sectionLabel(s.label, lang)} · ${energyWord(s.energy, lang)}`, (s.start_s / duration) * w + 6, 14);
+        const label = `${sectionLabel(s.label, lang)} · ${energyWord(s.energy, lang)}`;
+        const available = ((s.end_s - s.start_s) / duration) * w - 12;
+        if (ctx.measureText(label).width <= available) ctx.fillText(label, (s.start_s / duration) * w + 6, 14);
       }
     }
     const mid = h / 2 + 6;

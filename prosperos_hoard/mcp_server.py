@@ -482,10 +482,25 @@ def studio_edit_image(
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_outpaint(asset_id: str, width: int, height: int, prompt: str, anchor_x: float = 0.5,
+                    anchor_y: float = 0.5, seed: Optional[int] = None, wait_s: float = 0):
+    """Expand an image canvas and generate the new border through the existing inpaint queue.
+    Keeps the original asset, records its hash and creates exact black/white repaint mask and expanded canvas.
+    Width/height: multiples of 8, 64..4096, cannot shrink the original. Anchors 0..1 locate the original.
+    Uses the original checkpoint when available; inspect installed workflows/models first. Returns canvas, mask
+    and job (poll studio_job); completion requires a real output, not merely a queued job.
+    Keywords: outpaint, extend image, expand canvas, generar bordes, ampliar lienzo, conservar original.
+    """
+    return _call('POST','/api/agent/studio_outpaint',json={'asset_id':asset_id,'width':width,'height':height,
+                 'prompt':prompt,'anchor_x':anchor_x,'anchor_y':anchor_y,'seed':seed,'wait_s':wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "auto", frames: int = 14, fps: int = 7,
                    motion: int = 127, seed: Optional[int] = None, wait_s: float = 0, include_image: bool = False,
                    driving_asset_id: Optional[str] = None, driving_start_s: float = 0.0,
-                   pose_prompt: Optional[str] = None, seconds: Optional[float] = None) -> Any:
+                   pose_prompt: Optional[str] = None, seconds: Optional[float] = None,
+                   project_id: Optional[str] = None) -> Any:
     """Turn a still image into a video clip, or make its character copy the motion of a video / animar.
 
     engine: "auto" (Wan Animate 2 when driving_asset_id is given, else Wan 2.2 I2V 14B when
@@ -494,7 +509,8 @@ def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "a
     cranes up from the feet to the head"). With driving_asset_id (a video asset: a dance, a stunt,
     from driving_start_s) the character of the image performs that motion frame by frame; prompt
     then describes the background and pose_prompt names the motion ("a person dancing"). seconds:
-    clip length (14B: 5 s default; Animate: 24 fps, up to 5 s). frames/fps/motion are SVD settings.
+    clip length (14B/5B: 5 s default; Animate: 24 fps, up to 5 s). frames/fps/motion are SVD settings.
+    project_id saves the result in that project when reusing a reference from another project.
     The output is an mp4 video asset; poll studio_job. include_image=true returns a picture when done.
 
     Keywords: animate image, image to video, make it move, camera move, orbit, dance like this video,
@@ -507,6 +523,8 @@ def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "a
                      "pose_prompt": pose_prompt})
     if seconds:
         body["seconds"] = seconds
+    if project_id:
+        body["project_id"] = project_id
     return _with_preview(_call("POST", "/api/agent/studio_animate", json=body), include_image)
 
 
@@ -1006,6 +1024,21 @@ def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = Non
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_segments(production: str, text: Optional[str] = None,
+                               segments: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    """Optional script/lyrics import and text-to-shot links / guion y letra por tomas.
+
+    Give text (TXT, SRT, VTT or LRC) to import, or the complete segments list to edit.
+    Each segment has id, text, optional start_s/end_s and shot_key. Untimed text stays untimed.
+    Linked complete ranges place existing shots on those times, rejecting overlaps.
+    No generation is queued; original images and clips remain. This is optional.
+    Keywords: script, lyrics, subtitle import, text shot matching, guion, letra, segmentos, vincular tomas
+    """
+    return _call("POST", "/api/agent/studio_production_segments", params={"production": production},
+                 json={"text": text, "segments": segments})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_production_script(production: str, script: Optional[Any] = None, run: bool = True) -> dict[str, Any]:
     """Read or replace the script of a narrated short / ver o cambiar el guion de un short.
 
@@ -1318,7 +1351,7 @@ def studio_spaces(
 ) -> dict[str, Any]:
     """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
 
-    action: "list" | "create" (name, template "blank"|"reference_film"|"singing_shot"|"short_film") | "get"
+    action: "list" | "create" (name, template "blank"|"character_outfit_motion"|"reference_film"|"singing_shot"|"short_film") | "get"
     (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"upto" (run to here: the node and the stale nodes feeding it)|"all", node_ids, force) | "stop"
     (cancel a run and its renders) | "estimate" (space, mode, node_ids: renders, seconds and VRAM before a run,
     from this computer's own render times) | "build" (space, request: the local model draws or extends the graph

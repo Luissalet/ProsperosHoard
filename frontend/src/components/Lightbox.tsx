@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Dices, Download, Eraser, Film, Heart, Maximize2, Minimize2, Repeat, Sparkles, Trash2, Wand2, X, ZoomIn, Ratio, AudioLines, Scissors, RefreshCw } from "lucide-react";
 import { api, fileUrl, type Asset, type Board, type ClipEditMode, type ClipEditPlan, type ClipEditRequest } from "../api";
 import { useT, type MessageKey } from "../i18n";
-import { AssetPicker, ConfirmButton, Stars, useApp, useAsync } from "./ui";
+import { AssetPicker, ConfirmButton, Stars, useApp, useAsync, useDialog } from "./ui";
 import { assetName, kindName, sourceName } from "../messages";
 
 export function Lightbox({ assetId, list, onClose, onNavigate }: {
@@ -11,6 +11,10 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   const { t, lang } = useT();
   const app = useApp();
   const [asset, setAsset] = useState<Asset | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const { isTop, layer } = useDialog(dialogRef, onClose);
   const [zoom, setZoom] = useState(false);
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
@@ -22,16 +26,18 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   useEffect(() => {
     let alive = true;
     setZoom(false);
+    setAsset(null);
+    setLoadError("");
     api.asset(assetId).then((a) => {
       if (!alive) return;
       setAsset(a);
       setTags(a.tags.join(", "));
       setNotes(a.notes || "");
       setEditPrompt(String((a.recipe?.params as Record<string, unknown> | undefined)?.positive_prompt || ""));
-    }).catch((e) => app.toast(e.message, "bad"));
+    }).catch((e) => { if (alive) setLoadError(e.message); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetId]);
+  }, [assetId, retry]);
 
   const idx = list.indexOf(assetId);
   const move = (d: number) => {
@@ -52,9 +58,9 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!isTop()) return;
       const el = e.target as HTMLElement;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
-      if (e.key === "Escape") onClose();
       if (typing) return;
       if (e.key === "ArrowRight" || e.key === "j" || e.key === "J") move(1);
       if (e.key === "ArrowLeft" || e.key === "k" || e.key === "K") move(-1);
@@ -111,7 +117,10 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
     }
   };
 
-  if (!asset) return <div className="overlay" onClick={onClose} />;
+  if (!asset) return <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal="true" aria-label={t("open")}>
+    <div className="lightbox-loading"><button className="btn" onClick={onClose}><X size={16} />{t("close")}</button>
+      {loadError ? <><p role="alert">{loadError}</p><button className="btn" onClick={() => setRetry((n) => n + 1)}>{lang === "es" ? "Reintentar" : "Retry"}</button></>
+        : <p role="status">{lang === "es" ? "Cargando el archivo…" : "Loading the file…"}</p>}</div></div>;
   const recipe = asset.recipe;
   const params = (recipe?.params || {}) as Record<string, unknown>;
   const fromComfy = recipe?.backend === "comfyui";
@@ -123,7 +132,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   ];
 
   return (
-    <div className="overlay" role="dialog" aria-label={assetName(asset.name, lang) || asset.id}>
+    <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal="true" aria-label={assetName(asset.name, lang) || asset.id}>
       <div className="lightbox-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="lightbox-tools">
           <button className="btn sm" onClick={onClose}><X size={15} /> {t("close")}</button>
@@ -224,6 +233,12 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
               onClick={() => run(t("editInstruction"), () => api.generate(asset.project_id, {
                 prompt: editPrompt, engine: "auto", reference_asset_id: asset.id, reference_asset_ids: [asset.id], count: 1 }))}>
               <Sparkles size={14} /> {t("editInstruction")}
+            </button>
+            <button className="btn sm" disabled={busy || !editPrompt.trim() || !asset.width || !asset.height || Math.ceil((asset.width || 0)*1.5/8)*8>4096 || Math.ceil((asset.height || 0)*1.5/8)*8>4096}
+              title={lang === 'es' ? 'Amplía el lienzo un 50 % y genera los bordes con el prompt. Conserva el recurso original y la máscara.' : 'Enlarge the canvas by 50% and generate the border from the prompt. Keeps the original asset and mask.'}
+              onClick={() => run(lang === 'es' ? 'Ampliar lienzo' : 'Outpaint', () => api.outpaint(asset.id, {
+                width:Math.ceil((asset.width || 0)*1.5/8)*8, height:Math.ceil((asset.height || 0)*1.5/8)*8, prompt:editPrompt }))}>
+              <ZoomIn size={14} /> {lang === 'es' ? 'Ampliar lienzo +50 %' : 'Outpaint +50%'}
             </button>
           </div>
         )}

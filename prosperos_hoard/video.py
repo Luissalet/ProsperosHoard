@@ -312,12 +312,23 @@ def build_image_clip_cmd(
 def build_video_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float, trim_start_s: float,
     extra_vf: str = "", framing: str = "fill", focus: tuple[float, float] = (0.5, 0.5),
+    source_duration_s: Optional[float] = None, source_fit: str = "stretch",
 ) -> list[str]:
-    # tpad clones the last frame when the source is shorter than the clip
-    # (a 2 s SVD animation placed on a 3 s beat slot) so every clip has the
-    # exact length the timeline says.
-    vf = (f"{framing_vf(width, height, framing, *focus)},fps={fps},"
-          f"tpad=stop_mode=clone:stop_duration={duration_s:.3f},format=yuv420p") + (f",{extra_vf}" if extra_vf else "")
+    if source_fit not in ("stretch", "hold", "error"):
+        raise RenderError("source_fit must be stretch, hold or error")
+    available = None if source_duration_s is None else max(0.0, source_duration_s - trim_start_s)
+    timing = "setpts=PTS-STARTPTS,"
+    padding = 2 / fps
+    if available is not None and available + 1 / fps < duration_s:
+        if source_fit == "hold":
+            padding = duration_s
+        elif source_fit == "error" or available < duration_s * 0.65:
+            raise RenderError(f"source is too short ({available:.2f}s for {duration_s:.2f}s). "
+                              "Shorten the shot or generate a longer take; use hold only for an intentional still ending.")
+        else:
+            timing = f"setpts={duration_s / available:.8f}*(PTS-STARTPTS),"
+    vf = (f"{timing}{framing_vf(width, height, framing, *focus)},fps={fps},"
+          f"tpad=stop_mode=clone:stop_duration={padding:.3f},format=yuv420p") + (f",{extra_vf}" if extra_vf else "")
     return [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-ss", f"{trim_start_s:.3f}", "-i", str(src),
         "-t", f"{duration_s + 0.5 / fps:.3f}", "-vf", vf, "-frames:v", str(max(1, round(duration_s * fps))),
@@ -826,6 +837,7 @@ def render_timeline(
             hits = []
 
     clip_paths: list[Path] = []
+    source_adjustments: list[dict[str, Any]] = []
     for i, clip in enumerate(clips):
         check_cancel()
         out_clip = work_dir / f"clip_{i:03d}.mp4"
@@ -838,8 +850,16 @@ def render_timeline(
         framing = finishing.get("framing") or "fill"
         focus = (float(clip.get("focus_x", 0.5)), float(clip.get("focus_y", 0.5)))
         if clip["kind"] == "video":
+            from .audio import probe_duration_s
+            source_s = probe_duration_s(src)
+            fit = clip.get("source_fit") or ("error" if clip.get("synced") else "stretch")
+            available = (source_s or duration) - float(clip.get("trim_start_s", 0.0))
+            if available + 1 / fps < duration:
+                source_adjustments.append({"asset_id": clip["asset_id"], "source_fit": fit,
+                                           "available_s": round(available, 3), "target_s": round(duration, 3)})
             cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)),
-                                       extra_vf=extra, framing=framing, focus=focus)
+                                       extra_vf=extra, framing=framing, focus=focus, source_duration_s=source_s,
+                                       source_fit=fit)
         else:
             cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"), extra_vf=extra,
                                        framing=framing, focus=focus)
@@ -898,4 +918,5 @@ def render_timeline(
         total_duration, ffmpeg_progress, cwd=work_dir, should_cancel=should_cancel,
     )
     report(1.0, "done")
-    return {"path": str(out_path), "width": width, "height": height, "fps": fps, "duration_s": round(total_duration, 3)}
+    return {"path": str(out_path), "width": width, "height": height, "fps": fps, "duration_s": round(total_duration, 3),
+            "source_adjustments": source_adjustments}

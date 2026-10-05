@@ -11,9 +11,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  Aperture, ArrowLeft, AudioLines, Check, Copy, FileText, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
+  Aperture, ArrowLeft, AudioLines, Check, Copy, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
   Music, Play, Plus, RotateCcw, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
-  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload,
+  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload, Search, ChevronRight, Undo2, Redo2, Save,
 } from "lucide-react";
 import {
   ApiError, api, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
@@ -23,6 +23,7 @@ import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "../components/ui";
 import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
+import { EditHistory, SaveQueue, freeNodePosition } from "../spaceEditing";
 
 // ------------------------------------------------------------ the node model
 
@@ -42,7 +43,7 @@ const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
 };
 const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit"];
 const APP_INPUTS: SpaceNodeType[] = ["text", "asset", "cast"];
-const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#f0a04b", any: "#9a95a6" };
+const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#69c5d4", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
   assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2, clip_edit: Wand2,
@@ -56,14 +57,14 @@ const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "cl
   "combine", "list", "note", "group"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
-  video: { prompt: "", quality: "draft" }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
+  video: { prompt: "", quality: "final", seconds: 5 }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
   list: { unticked: [] }, note: { text: "" },
   assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
   variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" }, composite: { layers: [] },
   clip_edit: { prompt: "", mode: "auto", quality: "draft" },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
-  text: 260, asset: 260, cast: 230, image: 300, video: 300, music: 290, list: 260, note: 220, assistant: 290, edit: 250, combine: 280,
+  text: 280, asset: 290, cast: 290, image: 340, video: 340, music: 310, list: 280, note: 260, assistant: 310, edit: 280, combine: 310,
   variations: 270, group: 620, composite: 300, clip_edit: 290,
 };
 
@@ -155,11 +156,50 @@ interface Ctx {
   setExcluded: (id: string, excluded: string[]) => void;
   pickRun: (id: string, outputs: string[]) => void;
   pickAssets: (id: string, kind: string) => void;
+  appendAssets: (id: string, ids: string[]) => void;
+  toast: (message: string) => void;
   open: (assetId: string, list: string[]) => void;
   touched: () => void;
   exportTechnique: (group?: string) => void;
 }
 const SpaceCtx = createContext<Ctx>(null as unknown as Ctx);
+
+const NODE_PURPOSE: Record<SpaceNodeType, [string, string]> = {
+  text: ["Un prompt reutilizable", "A reusable prompt"], asset: ["Fotos, vídeos o audio", "Photos, videos or audio"],
+  cast: ["Personajes, lugares y objetos", "Characters, places and props"], image: ["Combinar referencias y crear imágenes", "Combine references and create images"],
+  video: ["Animar, copiar movimiento o sincronizar labios", "Animate, transfer motion or sync lips"], music: ["Componer música y canciones", "Compose music and songs"],
+  list: ["Elegir entradas y hacer lotes", "Select inputs and make batches"], note: ["Anotar una idea en el lienzo", "Keep an idea on the canvas"],
+  assistant: ["Crear prompts o tomas con el asistente", "Write prompts or shots with the assistant"], edit: ["Ampliar, quitar fondo, pose o profundidad", "Upscale, remove background, pose or depth"],
+  combine: ["Montar clips en el orden conectado", "Join clips in connection order"], variations: ["Ángulos, expresiones y storyboards", "Angles, expressions and storyboards"],
+  group: ["Agrupar y guardar una técnica", "Group nodes and save a technique"], composite: ["Superponer imágenes y vídeos", "Layer images and videos"],
+  clip_edit: ["Reimaginar un vídeo existente", "Reimagine an existing video"],
+};
+
+function NodePalette({ choices, onPick, onClose, connected }: {
+  choices: { kind: SpaceNodeType; handle?: string }[]; onPick: (choice: { kind: SpaceNodeType; handle?: string }) => void; onClose: () => void; connected: boolean;
+}) {
+  const { t, lang } = useT();
+  const [query, setQuery] = useState("");
+  const found = choices.filter((c) => `${t(TYPE_LABEL[c.kind])} ${NODE_PURPOSE[c.kind][lang === "es" ? 0 : 1]} ${c.kind}`.toLowerCase().includes(query.toLowerCase()));
+  return <div className="sp-palette" role="dialog" aria-label={lang === "es" ? "Añadir nodo" : "Add node"} onKeyDown={(e) => {
+    if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+    const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>(".sp-palette-option"));
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); buttons[(current + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus(); }
+    if (e.key === "Enter" && e.target instanceof HTMLInputElement && found.length) { e.preventDefault(); onPick(found[0]); }
+  }}>
+    <div className="sp-palette-head"><strong>{connected ? t("spMenuWire") : t("spMenuAdd")}</strong><button className="btn sm icon ghost" onClick={onClose} aria-label={t("close")}><X size={16} /></button></div>
+    <label className="sp-palette-search"><Search size={16} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+      aria-label={lang === "es" ? "Buscar nodo" : "Search nodes"} placeholder={lang === "es" ? "Buscar una herramienta…" : "Search a tool…"} /></label>
+    <div className="sp-palette-results">{found.map((choice) => {
+      const Icon = TYPE_ICON[choice.kind];
+      return <button className="sp-palette-option" key={`${choice.kind}-${choice.handle || ""}`} onClick={() => onPick(choice)}>
+        <Icon size={19} /><span><strong>{t(TYPE_LABEL[choice.kind])}</strong><small>{NODE_PURPOSE[choice.kind][lang === "es" ? 0 : 1]}</small></span><ChevronRight size={14} />
+      </button>;
+    })}{!found.length && <p className="small muted">{t("spMenuNone")}</p>}</div>
+    <p className="sp-palette-help">{lang === "es" ? "↑ ↓ para elegir · Intro para añadir · Esc para cerrar" : "↑ ↓ to choose · Enter to add · Esc to close"}</p>
+  </div>;
+}
 
 /** Client-side mirror of spaces.node_outputs, for previews (lists, wires). */
 function resolveOutputs(ctx: Pick<Ctx, "nodes" | "edges" | "state" | "characters">, id: string, handle?: string | null, depth = 0): [Port, string][] {
@@ -211,7 +251,8 @@ function resolveOutputs(ctx: Pick<Ctx, "nodes" | "edges" | "state" | "characters
 function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boolean; onClick?: () => void }) {
   const [fallback, setFallback] = useState(false);
   return (
-    <button className={`sp-thumb${dim ? " dim" : ""}`} onClick={onClick} title={id}>
+    <button className={`sp-thumb nodrag${dim ? " dim" : ""}`} onClick={onClick} title={id} aria-label={`Preview ${port}`} draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/prospero-asset", id); e.dataTransfer.effectAllowed = "copy"; }}>
       {port === "audio" ? <div className="sp-thumb-icon"><AudioLines size={18} /></div>
         : fallback && port === "video" ? <video src={`/api/assets/${id}/file`} muted preload="metadata" />
           : <img src={fallback ? `/api/assets/${id}/file` : `/api/assets/${id}/thumb`} alt="" loading="lazy"
@@ -332,7 +373,7 @@ function CameraPicker({ value, onChange, clips }: { value?: Record<string, strin
 // ------------------------------------------------------------ the node
 
 const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: NodeProps<SpNode>) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const ctx = useContext(SpaceCtx);
   const { kind, data } = nd;
   const st = ctx.state[id];
@@ -342,6 +383,17 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
   const runnable = GENERATORS.includes(kind);
   const busy = st?.status === "queued" || st?.status === "running";
   const out = outputPort(kind, data);
+  const [uploading, setUploading] = useState(false);
+  const words = (es: string, en: string) => lang === "es" ? es : en;
+  const roleSelect = <label className="sp-role nodrag">{words("Usar como", "Use as")}
+    <select value={data.ref_role || ""} onChange={(e) => set({ ref_role: e.target.value })}>
+      <option value="">{words("Referencia libre", "Free reference")}</option>
+      <option value="identity">{words("Identidad / persona", "Identity / person")}</option>
+      <option value="outfit">{words("Vestuario", "Outfit")}</option>
+      <option value="setting">{words("Escenario y fondo", "Setting and background")}</option>
+      <option value="style">{words("Estilo visual", "Visual style")}</option>
+      <option value="pose">{words("Pose", "Pose")}</option>
+    </select></label>;
 
   // what the text node feeds decides how "Improve" rewrites it
   const textKind = (): "image" | "video" | "music" => {
@@ -365,6 +417,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               onClick={() => { if (k !== (data.kind || "image")) set({ kind: k, asset_ids: [] }); }}>{t(k === "image" ? "spKindImage" : k === "video" ? "spKindVideo" : "spKindAudio")}</button>
           ))}
         </div>
+        {(data.kind || "image") === "image" && roleSelect}
         <div className="sp-thumbs">
           {ids.map((a) => (
             <div key={a} className="sp-thumb-wrap">
@@ -374,6 +427,26 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           ))}
           <button className="sp-thumb sp-add nodrag" onClick={() => ctx.pickAssets(id, data.kind || "image")} title={t("spAddFromLibrary")}><Plus size={18} /></button>
         </div>
+        <label className={`btn sm sp-upload nodrag${uploading ? " disabled" : ""}`}>
+          {uploading ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}{words("Subir archivo", "Upload file")}
+          <input type="file" hidden multiple disabled={uploading} accept={`${data.kind || "image"}/*`} onChange={async (e) => {
+            const files = Array.from(e.target.files || []); e.target.value = "";
+            if (!files.length) return;
+            setUploading(true);
+            const added: string[] = [];
+            try {
+              for (const file of files) {
+                const asset = await api.upload(ctx.projectId, file);
+                if (asset.kind !== (data.kind || "image")) throw new Error(words("El archivo no es del tipo seleccionado", "The file does not match the selected media type"));
+                added.push(asset.id);
+              }
+            } catch (error) { ctx.toast((error as Error).message); }
+            finally {
+              if (added.length) ctx.appendAssets(id, added);
+              setUploading(false);
+            }
+          }} />
+        </label>
       </>
     );
   } else if (kind === "cast") {
@@ -388,8 +461,9 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             return items.length ? <optgroup key={el} label={t(key)}>{items.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null;
           })}
         </select>
-        {c?.canonical_asset_id ? <div className="sp-cast-img" onClick={() => ctx.open(c.canonical_asset_id!, [c.canonical_asset_id!])}>
-          <Thumb id={c.canonical_asset_id} port="image" /></div>
+        {roleSelect}
+        {c?.canonical_asset_id ? <div className="sp-cast-img">
+          <Thumb id={c.canonical_asset_id} port="image" onClick={() => ctx.open(c.canonical_asset_id!, [c.canonical_asset_id!])} /></div>
           : c ? <p className="small muted">{t("spCastNoRef")}</p> : null}
       </>
     );
@@ -417,12 +491,14 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
       <>
         <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={t("spVideoPh")} />
         <div className="sp-opts nodrag">
-          {!wired.has("audio") && !wired.has("motion") && (
+          {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && (
             <div className="seg">
               <button className={data.quality === "draft" ? "on" : ""} onClick={() => set({ quality: "draft" })} title={t("spDraftHint")}>{t("spDraft")}</button>
               <button className={data.quality !== "draft" ? "on" : ""} onClick={() => set({ quality: "final" })} title={t("spFinalHint")}>{t("spFinal")}</button>
             </div>
           )}
+          {!wired.has("audio") && <label className="sp-num">{t("spLength")}<input type="number" min={1} max={wired.has("motion") ? 5 : 20} step={0.1}
+            value={data.seconds ?? (wired.has("motion") ? 3 : 5)} onChange={(e) => set({ seconds: Number(e.target.value) })} />s</label>}
           {wired.has("audio") && <>
             <LinePicker nodeId={id} onPick={(start, secs) => set({ audio_start_s: start, seconds: secs })} />
             <label className="sp-num" title={t("spAudioStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.audio_start_s ?? 0}
@@ -441,9 +517,12 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               onChange={(e) => set({ motion_start_s: Number(e.target.value) })} />s</label>
           )}
         </div>
+        {["audio", "motion", "end"].filter((h) => wired.has(h)).length > 1 && <p className="sp-error" role="alert">{words("Conecta una sola guía: audio, movimiento o fotograma final.", "Connect one guide: audio, motion or end frame.")}</p>}
         <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion")
           : wired.has("end") ? t("spModeEnd") : t("spModeAnimate")}</div>
         <CameraPicker value={data.camera} onChange={(c) => set({ camera: c })} clips />
+        <label className="sp-num nodrag">{words("Semilla", "Seed")}<input type="number" min={0} value={data.seed ?? ""} placeholder={words("Aleatoria", "Random")}
+          onChange={(e) => set({ seed: e.target.value === "" ? null : Number(e.target.value) })} /></label>
       </>
     );
   } else if (kind === "music") {
@@ -627,11 +706,11 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
     outputs = (
       <div className="sp-outputs">
         {st.error && <div className="sp-error small">{st.error}</div>}
-        {list.length > 0 && <div className="sp-thumbs">
+        {list.length > 0 && <div className={`sp-thumbs${list.length === 1 ? " sp-single-result" : ""}`}>
           {list.map((a) => (
             <div key={a} className="sp-thumb-wrap">
               <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />
-              <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")}
+              <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")} aria-pressed={!ex.has(a)}
                 onClick={() => ctx.setExcluded(id, ex.has(a) ? [...ex].filter((x) => x !== a) : [...ex, a])}><Check size={11} /></button>
             </div>
           ))}
@@ -657,12 +736,13 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
     <div className={`sp-node sp-${kind}${selected ? " selected" : ""}${busy ? " busy" : ""}`}>
       <div className="sp-head">
         <Icon size={14} />
-        <span className="sp-title">{t(TYPE_LABEL[kind])}</span>
-        <span className="sp-id">{id}</span>
+        <input className="sp-node-name nodrag" aria-label={words("Nombre del nodo", "Node name")} value={data.title ?? t(TYPE_LABEL[kind])}
+          onChange={(e) => set({ title: e.target.value })} />
         <StatusChip st={st} />
-        <span className="grow" />
+      </div>
+      <div className="sp-node-actions nodrag">
         {runnable && <>
-          <button className="btn xs icon ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} /></button>
+          <button className="btn xs ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} />{words("Generar", "Generate")}</button>
           <button className="btn xs icon ghost nodrag" title={t("spRunUpto")} disabled={busy} onClick={() => ctx.run(id, "upto")}><ListEnd size={13} /></button>
           <button className="btn xs icon ghost nodrag" title={t("spRunDown")} disabled={busy} onClick={() => ctx.run(id, "downstream")}><FastForward size={13} /></button>
         </>}
@@ -695,6 +775,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         </div>
       )}
       <div className="sp-body">{appLabel}{body}{outputs}</div>
+      <div className="sp-node-foot"><span>{t(TYPE_LABEL[kind])}</span><span>{inputs.filter(([h]) => wired.has(h)).length ? words("Entradas conectadas", "Inputs connected") : id}</span></div>
     </div>
   );
 });
@@ -712,7 +793,7 @@ const GroupNodeView = memo(function GroupNodeView({ id, data: nd, selected }: No
         <input className="nodrag" value={nd.data.title || ""} placeholder={t("spGroupPh")} style={{ color }}
           onChange={(e) => ctx.update(id, { title: e.target.value })} />
         <span className="grow" />
-        {["#b48cf0", "#7fa6d9", "#5bbf86", "#f0a04b", "#e07a6e", "#9a95a6"].map((c) => (
+        {["#b48cf0", "#7fa6d9", "#5bbf86", "#eb80c6", "#e07a6e", "#9a95a6"].map((c) => (
           <button key={c} className="sp-group-dot nodrag" style={{ background: c }} onClick={() => ctx.update(id, { color: c })} />
         ))}
         <button className="btn xs icon ghost nodrag" title={t("spExportGroup")} onClick={() => ctx.exportTechnique(id)}><Download size={12} /></button>
@@ -731,7 +812,7 @@ const OPEN_AS_APP = new Set<string>();
 
 /** A space as a form: the marked inputs as fields, the marked generators as
  * results. Running it writes the values into the graph and runs it all. */
-function AppView({ spaceId, onRan, state }: { spaceId: string; onRan: () => void; state: Record<string, SpaceNodeState> }) {
+function AppView({ spaceId, onRan, state, beforeRun }: { spaceId: string; onRan: () => void; state: Record<string, SpaceNodeState>; beforeRun: () => Promise<boolean> }) {
   const { t } = useT();
   const app = useApp();
   const ctx = useContext(SpaceCtx);
@@ -739,6 +820,7 @@ function AppView({ spaceId, onRan, state }: { spaceId: string; onRan: () => void
   const [values, setValues] = useState<Record<string, any>>({});
   const [picking, setPicking] = useState<{ node: string; kind: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const stateKey = Object.entries(state).map(([k, v]) => `${k}:${v.status}:${(v.outputs || []).join(",")}:${(v.excluded || []).length}`).join("|");
   useEffect(() => {
     api.spaceApp(spaceId).then((v) => {
@@ -756,14 +838,17 @@ function AppView({ spaceId, onRan, state }: { spaceId: string; onRan: () => void
   if (!view) return <div className="sp-app"><Loader2 size={18} className="spin" /></div>;
   const running = view.outputs.some((o) => o.status === "queued" || o.status === "running") || busy;
   const go = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
+      if (!await beforeRun()) return;
       const res = await api.runSpaceApp(spaceId, values);
       setView(res.app);
       onRan();
       app.refreshJobs();
     } catch (e) { app.toast((e as Error).message, "bad"); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
   return (
     <div className="sp-app">
@@ -825,15 +910,17 @@ function AppView({ spaceId, onRan, state }: { spaceId: string; onRan: () => void
 // ------------------------------------------------------------ the editor
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
+type EditSnapshot = { graph: SpaceGraph; name: string };
+type SpaceDraft = EditSnapshot & { baseVersion: number | null; updatedAt: string };
 
 function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   // the app context is a new object on every app render (jobs poll): read it through refs in timers
   const appRef = useRef(app);
   appRef.current = app;
-  const tRef = useRef(t);
-  tRef.current = t;
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const flow = useReactFlow();
   const updateInternals = useUpdateNodeInternals();
   const [space, setSpace] = useState<Space | null>(null);
@@ -843,28 +930,132 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const [name, setName] = useState("");
   const [save, setSave] = useState<SaveState>("saved");
   const [dirty, setDirty] = useState(0);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [storageError, setStorageError] = useState(false);
+  const [recovery, setRecovery] = useState<SpaceDraft | null>(null);
+  const recoveryRef = useRef<SpaceDraft | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const [runSubmitting, setRunSubmitting] = useState(false);
+  const runRequest = useRef(false);
+  const conflictRef = useRef(false);
+  const [historyFlags, setHistoryFlags] = useState({ undo: false, redo: false });
+  const history = useRef(new EditHistory<EditSnapshot>({ graph: { nodes: [], edges: [] }, name: "" }));
+  const [tabId] = useState(() => {
+    try {
+      const existing = sessionStorage.getItem("prospero.editing-tab");
+      if (existing) return existing;
+      const id = crypto.randomUUID(); sessionStorage.setItem("prospero.editing-tab", id); return id;
+    } catch { return crypto.randomUUID(); }
+  });
+  const draftPrefix = `prospero.space-draft.${spaceId}`;
+  const draftKey = `${draftPrefix}.${tabId}`;
+  const recoveredKey = useRef(draftKey);
   const [picking, setPicking] = useState<{ id: string; kind: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; fx: number; fy: number; from?: { node: string; handle: string; type: "source" | "target" } } | null>(null);
   const [polling, setPolling] = useState(false);
   const version = useRef<number | null>(null);
   const viewport = useRef<{ x: number; y: number; zoom: number } | undefined>(undefined);
-  const saving = useRef<Promise<void>>(Promise.resolve());
   const latest = useRef({ nodes, edges, name });
   latest.current = { nodes, edges, name };
+  const liveNodes = useCallback((update: (value: SpNode[]) => SpNode[]) => {
+    const next = update(latest.current.nodes); latest.current = { ...latest.current, nodes: next }; setNodes(next);
+  }, []);
+  const liveEdges = useCallback((update: (value: Edge[]) => Edge[]) => {
+    const next = update(latest.current.edges); latest.current = { ...latest.current, edges: next }; setEdges(next);
+  }, []);
+  const snapshot = useCallback((includeViewport = false): EditSnapshot => ({
+    graph: toGraph(latest.current.nodes, latest.current.edges, includeViewport ? viewport.current : undefined), name: latest.current.name,
+  }), []);
+  const persistDraft = useCallback(() => {
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ ...snapshot(true), baseVersion: version.current, updatedAt: new Date().toISOString() }));
+      setStorageError(false);
+    } catch { setStorageError(true); }
+  }, [draftKey, snapshot]);
+  const queueRef = useRef<SaveQueue<EditSnapshot> | null>(null);
+  if (!queueRef.current) queueRef.current = new SaveQueue({
+    read: () => snapshot(true),
+    write: async (value) => {
+      if (version.current === null || recoveryRef.current || conflictRef.current) throw new Error(langRef.current === "es" ? "Revisa el borrador antes de guardar." : "Review the draft before saving.");
+      setSave("saving");
+      const res = await api.saveSpace(spaceId, value.graph, version.current, value.name.trim() || undefined);
+      version.current = res.version;
+      if (latest.current.name === value.name && res.name !== value.name) { latest.current.name = res.name; setName(res.name); }
+    },
+    onSaved: () => {
+      setSave("saved"); setSaveError("");
+      if (!recoveryRef.current) { try { localStorage.removeItem(draftKey); } catch { /* do not claim a local copy */ } }
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 409) { conflictRef.current = true; setConflict(true); }
+      setSave("error"); setSaveError((err as Error).message); persistDraft();
+    },
+  });
+  const queue = queueRef.current;
+  const updateHistoryFlags = useCallback(() => setHistoryFlags({ undo: history.current.canUndo, redo: history.current.canRedo }), []);
+  const markDirty = useCallback((group?: string, recordHistory = true) => {
+    if (version.current === null || recoveryRef.current) return;
+    if (recordHistory) { history.current.commit(snapshot(), group); updateHistoryFlags(); }
+    queue.changed(); persistDraft(); setSave("dirty"); setDirty((d) => d + 1);
+  }, [queue, persistDraft, snapshot, updateHistoryFlags]);
   const wrap = useRef<HTMLDivElement>(null);
+  const focusNode = (id: string) => {
+    const bounds = wrap.current?.getBoundingClientRect();
+    const node = flow.getInternalNode(id);
+    if (bounds && bounds.width <= 600 && node) {
+      // A tall card must stay readable: focus by width and pan vertically,
+      // rather than shrinking every control to fit the available height.
+      const width = node.measured.width || node.width || 340;
+      const height = node.measured.height || node.height || 700;
+      const zoom = Math.max(1, Math.min(1.15, (bounds.width - 32) / width));
+      const left = Math.max(16, (bounds.width - width * zoom) / 2);
+      const top = Math.max(16, (bounds.height - height * zoom) / 2);
+      const position = node.internals.positionAbsolute;
+      void flow.setViewport({ x: left - position.x * zoom, y: top - position.y * zoom, zoom }, { duration: 250 });
+    } else {
+      void flow.fitView({ nodes: [{ id }], padding: .3, maxZoom: 1, duration: 250 });
+    }
+  };
+  const focusNodeRef = useRef(focusNode);
+  focusNodeRef.current = focusNode;
+  const addOpener = useRef<HTMLButtonElement>(null);
+  const closeMenu = () => { setMenu(null); addOpener.current?.focus(); };
   const characters = useAsync(() => api.characters(app.projectId!), [app.projectId]);
   const chars = useMemo(() => (characters.data?.items || []), [characters.data]);
 
-  const load = useCallback(async (fit = false) => {
+  const load = useCallback(async (fit = false, keepHistory = false) => {
+    setLoadError("");
+    try {
     const s = await api.space(spaceId);
     setSpace(s);
     setName(s.name);
     version.current = s.version;
     const rf = toRf(s.graph);
+    latest.current = { nodes: rf.nodes, edges: rf.edges, name: s.name };
     setNodes(rf.nodes);
     setEdges(rf.edges);
     setState(s.state);
     viewport.current = s.graph.viewport;
+    if (keepHistory) history.current.commit(snapshot()); else history.current.reset(snapshot());
+    updateHistoryFlags(); queue.clean(); setSave("saved"); setSaveError(""); conflictRef.current = false; setConflict(false);
+    let draft: SpaceDraft | null = null;
+    try {
+      // Separate tab journals: a successful save in one tab must not erase another tab's unsaved work.
+      const candidates: { key: string; draft: SpaceDraft }[] = [];
+      for (const key of Object.keys(localStorage).filter(k => k === draftPrefix || k.startsWith(`${draftPrefix}.`))) {
+        try {
+          const stored = JSON.parse(localStorage.getItem(key) || "null") as SpaceDraft | null;
+          if (!stored || typeof stored.name !== "string" || !Array.isArray(stored.graph?.nodes) || !Array.isArray(stored.graph?.edges)
+            || !stored.graph.nodes.every(n => typeof n.id === "string" && ADDABLE.includes(n.type) && typeof n.x === "number" && typeof n.y === "number")) continue;
+          if (JSON.stringify({ graph: stored.graph, name: stored.name }) !== JSON.stringify({ graph: s.graph, name: s.name })) candidates.push({ key, draft: stored });
+          else if (key === draftKey) localStorage.removeItem(key);
+        } catch { /* one malformed journal must not hide other recoverable drafts */ }
+      }
+      const selected = candidates.find(c => c.key === draftKey) || candidates.sort((a, b) => String(b.draft.updatedAt).localeCompare(String(a.draft.updatedAt)))[0];
+      if (selected) { draft = selected.draft; recoveredKey.current = selected.key; }
+    } catch { /* malformed or unavailable storage does not block the server version */ }
+    recoveryRef.current = draft; setRecovery(draft);
     // re-measure the ports once laid out (and once the fonts are in): a wire
     // whose handle was measured too early is otherwise not drawn
     const ids = rf.nodes.map((n) => n.id);
@@ -875,39 +1066,49 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       else flow.fitView({ padding: 0.2, maxZoom: 1 });
     }, 30);
     if (Object.values(s.state).some((x) => x.status === "queued" || x.status === "running")) setPolling(true);
-  }, [spaceId, flow, updateInternals]);
+    } catch (e) { setLoadError((e as Error).message); }
+  }, [spaceId, flow, updateInternals, snapshot, updateHistoryFlags, queue, draftKey, draftPrefix]);
 
-  useEffect(() => { load(true).catch((e) => appRef.current.toast((e as Error).message, "bad")); }, [load]);
+  useEffect(() => { void load(true); }, [load]);
 
-  const markDirty = useCallback(() => { setSave("dirty"); setDirty((d) => d + 1); }, []);
-
-  // debounced, versioned saves, one at a time
-  const flush = useCallback(() => {
-    saving.current = saving.current.then(async () => {
-      const { nodes: n, edges: e, name: nm } = latest.current;
-      setSave("saving");
-      try {
-        const res = await api.saveSpace(spaceId, toGraph(n, e, viewport.current), version.current, nm.trim() || undefined);
-        version.current = res.version;
-        setSave("saved");
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
-          appRef.current.toast(tRef.current("spStale"), "info");
-          await load(false);
-          setSave("saved");
-        } else {
-          setSave("error");
-          appRef.current.toast((err as Error).message, "bad");
-        }
-      }
-    });
-    return saving.current;
-  }, [spaceId, load]);
+  const flush = useCallback(async () => {
+    if (version.current === null || recoveryRef.current || conflictRef.current) return false;
+    return queue.flush();
+  }, [queue]);
+  // Leaving via global navigation must not cancel the pending debounce and
+  // discard the last edit. The promise already in flight still runs in order.
+  useEffect(() => () => { if (queue.isDirty && !conflictRef.current && !recoveryRef.current) void flush(); }, [flush, queue]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || conflict || recovery) return;
     const id = setTimeout(flush, 700);
     return () => clearTimeout(id);
-  }, [dirty, flush]);
+  }, [dirty, flush, conflict, recovery]);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (queue.isDirty || recoveryRef.current) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [queue]);
+  const restoreDraft = () => {
+    const draft = recoveryRef.current;
+    if (!draft) return;
+    const rf = toRf(draft.graph);
+    liveNodes(() => rf.nodes); liveEdges(() => rf.edges); latest.current.name = draft.name; setName(draft.name);
+    viewport.current = draft.graph.viewport;
+    if (draft.graph.viewport) void flow.setViewport(draft.graph.viewport);
+    recoveryRef.current = null; setRecovery(null);
+    if (draft.baseVersion !== version.current) { conflictRef.current = true; setConflict(true); }
+    markDirty();
+  };
+  const undoRedo = (redo = false) => {
+    if (recoveryRef.current) return;
+    const value = redo ? history.current.redo() : history.current.undo();
+    if (!value) return;
+    const rf = toRf(value.graph);
+    liveNodes(() => rf.nodes); liveEdges(() => rf.edges); latest.current.name = value.name; setName(value.name);
+    updateHistoryFlags(); markDirty(undefined, false);
+  };
 
   // poll the state while something runs
   useEffect(() => {
@@ -926,15 +1127,17 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   }, [polling, spaceId]);
 
   const run = useCallback(async (mode: "node" | "downstream" | "upto" | "all", ids: string[] = [], force = false) => {
-    await flush();
+    if (runRequest.current) return;
+    runRequest.current = true; setRunSubmitting(true);
     try {
+      if (!await flush()) return;
       const res = await api.runSpace(spaceId, mode, ids, force);
       setState((s) => ({ ...s, ...Object.fromEntries(res.nodes.map((n) => [n, { ...(s[n] || {}), status: "queued" as const, error: null }])) }));
       setPolling(true);
       appRef.current.refreshJobs();
     } catch (e) {
       appRef.current.toast((e as Error).message, "bad");
-    }
+    } finally { runRequest.current = false; setRunSubmitting(false); }
   }, [flush, spaceId]);
 
   const addNode = useCallback((kind: SpaceNodeType, at?: { x: number; y: number }, data?: Record<string, unknown>) => {
@@ -946,11 +1149,15 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       pos = flow.screenToFlowPosition({ x: (r?.left || 0) + (r?.width || 800) / 2, y: (r?.top || 0) + (r?.height || 600) / 2 });
       pos = { x: pos.x - WIDTH[kind] / 2 + (taken.size % 5) * 24, y: pos.y - 80 + (taken.size % 5) * 24 };
     }
-    const node: SpNode = { id, type: "sp", position: pos, data: { kind, data: { ...DEFAULT_DATA[kind], ...(data || {}) } }, style: { width: WIDTH[kind] } };
-    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { ...node, selected: true }]);
-    markDirty();
+    if (kind !== "group") pos = freeNodePosition(pos, { width: WIDTH[kind], height: ["image", "video", "clip_edit", "music"].includes(kind) ? 650 : 420 },
+      latest.current.nodes.filter(n => n.data.kind !== "group").map(n => ({ ...n.position, width: n.measured?.width || Number(n.style?.width) || WIDTH[n.data.kind], height: n.measured?.height || 650 })));
+    const node: SpNode = { id, type: kind === "group" ? "grp" : "sp", position: pos, data: { kind, data: { ...DEFAULT_DATA[kind], ...(data || {}) } },
+      style: { width: WIDTH[kind], ...(kind === "group" ? { height: 380 } : {}) }, ...(kind === "group" ? { zIndex: -1 } : {}) };
+    liveNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { ...node, selected: true }]);
+    markDirty(`add:${id}`);
+    setTimeout(() => focusNodeRef.current(id), 60);
     return id;
-  }, [flow, markDirty]);
+  }, [flow, markDirty, liveNodes]);
 
   const connectOk = useCallback((c: Connection | Edge) => {
     const { nodes: ns, edges: es } = latest.current;
@@ -967,15 +1174,15 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     return !makesLoop(es, src.id, dst.id);
   }, []);
 
-  const connect = useCallback((c: Connection) => {
+  const connect = useCallback((c: Connection, historyGroup?: string) => {
     if (!connectOk(c)) return;
     const src = latest.current.nodes.find((n) => n.id === c.source)!;
     const sh = c.sourceHandle && c.sourceHandle !== "out" ? c.sourceHandle : null;
     const e = edgeOf({ id: `e-${c.source}-${sh || "o"}-${c.target}-${c.targetHandle}`.slice(0, 120), source: c.source, source_handle: sh,
       target: c.target, target_handle: c.targetHandle || "" }, src.data.kind, src.data.data);
-    setEdges((es) => [...es, e]);
-    markDirty();
-  }, [connectOk, markDirty]);
+    liveEdges((es) => [...es, e]);
+    markDirty(historyGroup);
+  }, [connectOk, markDirty, liveEdges]);
 
   // dropping a wire on empty canvas offers the nodes that fit it
   const onConnectEnd: OnConnectEnd = useCallback((event, cs) => {
@@ -1022,23 +1229,28 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     setMenu(null);
     if (!from) return;
     setTimeout(() => {
-      if (from.type === "source") connect({ source: from.node, sourceHandle: from.handle, target: id, targetHandle: choice.handle || null });
-      else connect({ source: id, sourceHandle: choice.kind === "cast" ? (from.handle === "prompt" ? "text" : "image") : "out", target: from.node, targetHandle: from.handle });
+      if (from.type === "source") connect({ source: from.node, sourceHandle: from.handle, target: id, targetHandle: choice.handle || null }, `add:${id}`);
+      else connect({ source: id, sourceHandle: choice.kind === "cast" ? (from.handle === "prompt" ? "text" : "image") : "out", target: from.node, targetHandle: from.handle }, `add:${id}`);
     }, 0);
   };
 
   const ctx: Ctx = {
     projectId: app.projectId!, state, characters: chars, edges, nodes,
-    update: (id, patch) => {
-      setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, data: { ...n.data.data, ...patch } } } : n)));
-      // an asset node switching kind re-colours (and may invalidate) its wires
-      if ("kind" in patch) setEdges((es) => es.filter((e) => e.source !== id));
+    toast: (message) => app.toast(message, "bad"),
+    appendAssets: (id, ids) => {
+      liveNodes((ns) => ns.map((n) => n.id === id ? { ...n, data: { ...n.data, data: { ...n.data.data, asset_ids: [...new Set([...(n.data.data.asset_ids || []), ...ids])] } } } : n));
       markDirty();
+    },
+    update: (id, patch) => {
+      liveNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, data: { ...n.data.data, ...patch } } } : n)));
+      // an asset node switching kind re-colours (and may invalidate) its wires
+      if ("kind" in patch) liveEdges((es) => es.filter((e) => e.source !== id));
+      markDirty(`node:${id}:${Object.keys(patch).join(",")}`);
     },
     run: (id, mode) => run(mode, [id]),
     remove: (id) => {
-      setNodes((ns) => ns.filter((n) => n.id !== id));
-      setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+      liveNodes((ns) => ns.filter((n) => n.id !== id));
+      liveEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
       markDirty();
     },
     duplicate: (id) => {
@@ -1057,7 +1269,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     touched: markDirty,
     exportTechnique: async (group) => {
       try {
-        await flush();
+        if (!await flush()) return;
         const bundle = await api.exportSpace(spaceId, group);
         const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
         const a = document.createElement("a");
@@ -1089,11 +1301,11 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     if (!c || node.type !== "grp" || !c.nodes.size) return;
     const dx = node.position.x - c.group.x;
     const dy = node.position.y - c.group.y;
-    setNodes((ns) => ns.map((n) => {
+    liveNodes((ns) => ns.map((n) => {
       const p0 = c.nodes.get(n.id);
       return p0 ? { ...n, position: { x: p0.x + dx, y: p0.y + dy } } : n;
     }));
-  }, []);
+  }, [liveNodes]);
 
   // what a full run would cost: renders, minutes and the biggest engine
   const [est, setEst] = useState<SpaceEstimate | null>(null);
@@ -1109,12 +1321,12 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   // the assistant that builds part of the graph from one sentence
   const [building, setBuilding] = useState<{ open: boolean; text: string; busy: boolean }>({ open: false, text: "", busy: false });
   const build = async () => {
-    if (!building.text.trim()) return;
+    if (!building.text.trim() || building.busy) return;
     setBuilding((b) => ({ ...b, busy: true }));
     try {
-      await flush();
+      if (!await flush()) { setBuilding((b) => ({ ...b, busy: false })); return; }
       const res = await api.buildSpace(spaceId, building.text.trim());
-      await load(false);
+      await load(false, true);
       setTimeout(() => flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 }), 120);
       app.toast(res.note || t("spBuilt", { n: res.added.length }), "ok");
       setBuilding({ open: false, text: "", busy: false });
@@ -1126,20 +1338,29 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const [appMode, setAppMode] = useState(() => { const v = OPEN_AS_APP.has(spaceId); OPEN_AS_APP.delete(spaceId); return v; });
 
   const onNodesChange = useCallback((changes: NodeChange<SpNode>[]) => {
-    setNodes((ns) => applyNodeChanges(changes, ns));
+    liveNodes((ns) => applyNodeChanges(changes, ns));
+    if (changes.some((c) => c.type === "remove")) {
+      const ids = new Set(latest.current.nodes.map((n) => n.id));
+      liveEdges((es) => es.filter((e) => ids.has(e.source) && ids.has(e.target)));
+    }
     if (changes.some((c) => c.type === "remove" || (c.type === "position" && c.dragging === false)
       || (c.type === "dimensions" && c.resizing === false))) markDirty();
-  }, [markDirty]);
+  }, [markDirty, liveNodes, liveEdges]);
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    setEdges((es) => applyEdgeChanges(changes, es));
+    liveEdges((es) => applyEdgeChanges(changes, es));
     if (changes.some((c) => c.type === "remove")) markDirty();
-  }, [markDirty]);
+  }, [markDirty, liveEdges]);
 
   // Ctrl+D duplicates, Ctrl+Enter runs the selected generators
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
+      if (el?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      if (recoveryRef.current || version.current === null) return;
+      if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) {
+        e.preventDefault(); undoRedo(e.shiftKey || e.key.toLowerCase() === "y"); return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); void flush(); return; }
       const sel = latest.current.nodes.filter((n) => n.selected);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && sel.length) { e.preventDefault(); sel.forEach((n) => ctx.duplicate(n.id)); }
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -1175,24 +1396,42 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
 
   const busyCount = Object.values(state).filter((x) => x.status === "queued" || x.status === "running").length;
   const dark = (document.documentElement.dataset.theme || "dark") === "dark";
+  const words = (es: string, en: string) => lang === "es" ? es : en;
+  if (!space) return <section className="card sp-load-state">
+    <button className="btn" onClick={onBack}><ArrowLeft size={15} />{t("spAll")}</button>
+    {loadError ? <div role="alert"><h2>{words("No se pudo abrir el flujo", "Could not open the workflow")}</h2><p>{loadError}</p>
+      <button className="btn primary" onClick={() => void load(true)}>{t("recheck")}</button></div>
+      : <p role="status"><Loader2 size={18} className="spin" /> {t("loading")}</p>}
+  </section>;
 
   return (
     <SpaceCtx.Provider value={ctx}>
       <div className="space-editor">
         <div className="sp-toolbar">
-          <button className="btn sm ghost" onClick={async () => { await flush(); onBack(); }}><ArrowLeft size={15} /> {t("spAll")}</button>
-          <input className="sp-name" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { if (space && name.trim() && name !== space.name) markDirty(); }}
+          <button className="btn sm ghost" onClick={async () => { if (await flush()) onBack(); }}><ArrowLeft size={15} /> {t("spAll")}</button>
+          <input className="sp-name" value={name} disabled={!!recovery} onChange={(e) => { latest.current.name = e.target.value; setName(e.target.value); markDirty("name"); }}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} aria-label={t("name")} />
-          <span className={`sp-save small ${save}`}>{t(save === "saved" ? "spSaved" : save === "saving" ? "spSaving" : save === "error" ? "spSaveError" : "spUnsaved")}</span>
-          <div className="sp-add-bar" style={appMode ? { display: "none" } : undefined}>
-            {ADDABLE.map((k) => {
-              const I = TYPE_ICON[k];
-              return <button key={k} className="btn sm ghost" title={t(TYPE_LABEL[k])} onClick={() => addNode(k)}><I size={14} /><span className="sp-add-label">{t(TYPE_LABEL[k])}</span></button>;
-            })}
+          <span className={`sp-save small ${save}`} role="status">{t(save === "saved" ? "spSaved" : save === "saving" ? "spSaving" : save === "error" ? "spSaveError" : "spUnsaved")}</span>
+          <div className="sp-edit-actions" role="group" aria-label={words("Historial de edición", "Edit history")}>
+            <button className="btn sm ghost icon" aria-label={words("Deshacer", "Undo")} title={words("Deshacer cambios del lienzo · Ctrl+Z", "Undo canvas edits · Ctrl+Z")} disabled={!historyFlags.undo || !!recovery} onClick={() => undoRedo()}><Undo2 size={16} /></button>
+            <button className="btn sm ghost icon" aria-label={words("Rehacer", "Redo")} title={words("Rehacer · Ctrl+Mayús+Z / Ctrl+Y", "Redo · Ctrl+Shift+Z / Ctrl+Y")} disabled={!historyFlags.redo || !!recovery} onClick={() => undoRedo(true)}><Redo2 size={16} /></button>
+            <button className="btn sm ghost icon" aria-label={words("Guardar flujo", "Save workflow")} title={words("Guardar flujo · Ctrl+S", "Save workflow · Ctrl+S")} disabled={save === "saved" || save === "saving" || !!recovery || conflict} onClick={() => void flush()}><Save size={16} /></button>
           </div>
+          {!appMode && <button ref={addOpener} disabled={!!recovery} className="btn sm sp-add-node" aria-expanded={!!menu} onClick={() => {
+            if (menu) { closeMenu(); return; }
+            const r = wrap.current?.getBoundingClientRect();
+            const at = flow.screenToFlowPosition({ x: (r?.left || 0) + (r?.width || 800) / 2, y: (r?.top || 0) + 140 });
+            setMenu({ x: 16, y: 16, fx: at.x, fy: at.y });
+          }}><Plus size={16} />{lang === "es" ? "Añadir nodo" : "Add node"}</button>}
+          {!appMode && nodes.length > 0 && <select className="sp-focus-node" aria-label={lang === "es" ? "Acercar a un nodo" : "Focus a node"} value="" onChange={(e) => {
+            const id = e.target.value;
+            if (!id) return;
+            setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
+            focusNode(id);
+          }}><option value="">{lang === "es" ? "Acercar a…" : "Focus on…"}</option>{nodes.map((n) => <option key={n.id} value={n.id}>{n.data.data.title || t(TYPE_LABEL[n.data.kind])}</option>)}</select>}
           <span className="grow" />
           <div className="sp-build">
-            <button className={`btn sm ghost${building.open ? " sp-on" : ""}`} title={t("spBuildHint")} onClick={() => setBuilding((b) => ({ ...b, open: !b.open }))}>
+            <button disabled={!!recovery || conflict} className={`btn sm ghost${building.open ? " sp-on" : ""}`} title={t("spBuildHint")} onClick={() => setBuilding((b) => ({ ...b, open: !b.open }))}>
               <Wand2 size={14} /> {t("spBuild")}</button>
             {building.open && (
               <div className="sp-build-pop">
@@ -1207,7 +1446,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
               </div>
             )}
           </div>
-          <button className={`btn sm ghost${appMode ? " sp-on" : ""}`} title={t("spAppHint")} onClick={async () => { await flush(); setAppMode((v) => !v); }}>
+          <button disabled={!!recovery || conflict} className={`btn sm ghost${appMode ? " sp-on" : ""}`} title={t("spAppHint")} onClick={async () => { if (await flush()) setAppMode((v) => !v); }}>
             {appMode ? <Workflow size={14} /> : <AppWindow size={14} />} {appMode ? t("spCanvas") : t("spApp")}</button>
           {est && est.renders > 0 && (
             <span className="pill sp-est" title={t("spEstHint", { vram: est.vram_mb ? `${Math.round(est.vram_mb / 1024)} GB` : "?" })}>
@@ -1219,18 +1458,52 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
             try { await api.stopSpace(spaceId); app.toast(t("spStopped"), "info"); setState((await api.space(spaceId)).state); }
             catch (e) { app.toast((e as Error).message, "bad"); }
           }}><Square size={12} /> {t("spStop")}</button>}
-          <button className="btn sm ghost icon" title={t("spExportHint")} onClick={() => ctx.exportTechnique()}><Download size={15} /></button>
+          <button disabled={!!recovery || conflict} className="btn sm ghost icon" title={t("spExportHint")} onClick={() => ctx.exportTechnique()}><Download size={15} /></button>
           <button className="btn sm ghost icon" title={t("spFit")} onClick={() => flow.fitView({ padding: 0.2, maxZoom: 1, duration: 300 })}><Maximize size={15} /></button>
-          <button className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
-          <button className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}><Play size={14} /> {t("spRunAll")}</button>
+          <details className="sp-workflow-more"><summary className="btn sm ghost">{lang === "es" ? "Opciones" : "Options"}</summary>
+            <div><button disabled={!!recovery || conflict} className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
+              <p className="small muted">{lang === "es" ? "Rehacer también las ramas que no han cambiado." : "Regenerate even branches that have not changed."}</p></div>
+          </details>
+          <button disabled={!!recovery || conflict || runSubmitting} className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}>{runSubmitting ? <Loader2 size={14} className="spin" /> : <Play size={14} />} {t("spRunAll")}</button>
         </div>
-        {appMode && <AppView spaceId={spaceId} onRan={() => { setPolling(true); }} state={state} />}
-        <div className="sp-canvas" ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} style={appMode ? { display: "none" } : undefined}>
+        {recovery && <div className="sp-recovery" role="region" aria-label={words("Borrador recuperable", "Recoverable draft")}>
+          <div><strong>{words("Hay cambios sin guardar en este navegador", "This browser has unsaved changes")}</strong>
+            <p>{words(`Borrador: ${recovery.name}. Puedes recuperarlo o conservar la versión del servidor que ves debajo.`, `Draft: ${recovery.name}. Recover it, or keep the server version shown below.`)}</p></div>
+          <div className="row wrap"><button className="btn primary" onClick={restoreDraft}>{words("Recuperar borrador", "Recover draft")}</button>
+            <ConfirmButton className="btn" armedLabel={words("Confirmar descartar borrador", "Confirm discard draft")} onConfirm={() => {
+              try { localStorage.removeItem(recoveredKey.current); } catch { setStorageError(true); }
+              recoveryRef.current = null; setRecovery(null);
+            }}>{words("Descartar borrador", "Discard draft")}</ConfirmButton></div>
+        </div>}
+        {(saveError || conflict) && !recovery && <div className="sp-recovery" role="alert">
+          <div><strong>{conflict ? words("Hay otra versión en el servidor", "The server has another version") : words("El flujo no se ha guardado", "The workflow has not been saved")}</strong>
+            <p>{conflict ? words("Tus cambios siguen aquí. Revisa la versión guardada o confirma que quieres sustituirla por la tuya.", "Your edits remain here. Review the saved version, or confirm that you want to replace it with yours.")
+              : storageError ? words("Tus cambios siguen en esta pestaña. Reintenta el guardado antes de salir, ejecutar o exportar.", "Your edits remain in this tab. Retry saving before leaving, running or exporting.")
+                : words("Conservamos un borrador local. Reintenta el guardado antes de ejecutar o exportar.", "A local draft is retained. Retry saving before running or exporting.")}</p>
+            {saveError && <span className="small muted">{saveError}</span>}</div>
+          <div className="row wrap">{conflict ? <>
+            <button className="btn" onClick={() => void load(false)}>{words("Ver versión guardada", "View saved version")}</button>
+            <ConfirmButton className="btn primary" armedLabel={words("Confirmar guardar mi versión", "Confirm save my version")} onConfirm={async () => {
+              try {
+                const current = await api.space(spaceId); version.current = current.version;
+                conflictRef.current = false; setConflict(false); await flush();
+              } catch (e) { setSaveError((e as Error).message); }
+            }}>{words("Guardar mi versión", "Save my version")}</ConfirmButton>
+          </> : <button className="btn primary" disabled={save === "saving"} onClick={() => void flush()}>{words("Reintentar guardado", "Retry save")}</button>}</div>
+        </div>}
+        {loadError && space && <div className="sp-recovery" role="alert"><p>{loadError}</p><button className="btn" onClick={() => void load(false)}>{t("recheck")}</button></div>}
+        {storageError && <p className="sp-storage-error" role="alert">{words("No se pudo conservar una copia local. Mantén esta pestaña abierta hasta guardar.", "Could not retain a local copy. Keep this tab open until saved.")}</p>}
+        {appMode && <AppView spaceId={spaceId} beforeRun={flush} onRan={() => { void load(false, true); setPolling(true); }} state={state} />}
+        <div className="sp-canvas" inert={!!recovery} ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} style={appMode ? { display: "none" } : undefined}>
           <ReactFlow<SpNode, Edge>
             nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} onConnectEnd={onConnectEnd}
+            onNodeDoubleClick={(_, n) => focusNode(n.id)}
             isValidConnection={connectOk} onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag}
-            onMoveEnd={(_, vp) => { viewport.current = vp; }}
+            onMoveEnd={(_, vp) => {
+              if (JSON.stringify(viewport.current) === JSON.stringify(vp)) return;
+              viewport.current = vp; if (space) markDirty(undefined, false);
+            }}
             onPaneClick={() => setMenu(null)}
             onPaneContextMenu={(e) => {
               e.preventDefault();
@@ -1247,18 +1520,16 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
           {nodes.length === 0 && space && (
             <div className="sp-empty">
               <Workflow size={30} />
-              <p>{t("spEmptyCanvas")}</p>
+              <h2>{lang === "es" ? "De una idea a un flujo" : "From an idea to a workflow"}</h2>
+              <p>{lang === "es" ? "Añade una foto o arrastra archivos aquí. Conecta sus puertos con una imagen o un clip para empezar." : "Add a photo or drop files here. Connect its ports to a picture or a clip to begin."}</p>
+              <button className="btn primary" onClick={() => addOpener.current?.click()}><Plus size={16} />{lang === "es" ? "Añadir el primer nodo" : "Add the first node"}</button>
             </div>
           )}
+          <div className="sp-canvas-guide">{(["text", "image", "video", "audio"] as Port[]).map((p) => <span key={p}><i style={{ background: PORT_COLOR[p] }} />{t(`spOut_${p}` as MessageKey)}</span>)}
+            <span className="sp-wire-help">{lang === "es" ? "Arrastra un puerto a otro nodo o al lienzo vacío" : "Drag a port to a node or onto empty canvas"}</span></div>
           {menu && (
-            <div className="sp-menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
-              <div className="sp-menu-head small muted">{menu.from ? t("spMenuWire") : t("spMenuAdd")}</div>
-              {menuChoices.length === 0 && <div className="small muted" style={{ padding: 8 }}>{t("spMenuNone")}</div>}
-              {menuChoices.map((c) => {
-                const I = TYPE_ICON[c.kind];
-                return <button key={`${c.kind}-${c.handle || ""}`} onClick={() => pickFromMenu(c)}><I size={14} /> {t(TYPE_LABEL[c.kind])}
-                  {c.handle && <span className="muted small"> · {t(`spIn_${c.handle}` as MessageKey)}</span>}</button>;
-              })}
+            <div className="sp-menu" style={{ left: Math.max(8, Math.min(menu.x, (wrap.current?.clientWidth || 800) - 320)), top: Math.max(8, Math.min(menu.y, (wrap.current?.clientHeight || 600) - 460)) }}>
+              <NodePalette key={`${menu.fx}-${menu.fy}-${menu.from?.node || ""}`} choices={menuChoices} onPick={pickFromMenu} onClose={closeMenu} connected={!!menu.from} />
             </div>
           )}
         </div>
@@ -1281,6 +1552,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
 
 const TEMPLATES: { id: string; icon: typeof Workflow; title: MessageKey; hint: MessageKey }[] = [
   { id: "blank", icon: Plus, title: "spTplBlank", hint: "spTplBlankHint" },
+  { id: "character_outfit_motion", icon: User, title: "spTplIdentity", hint: "spTplIdentityHint" },
   { id: "reference_film", icon: Film, title: "spTplFilm", hint: "spTplFilmHint" },
   { id: "singing_shot", icon: AudioLines, title: "spTplSing", hint: "spTplSingHint" },
   { id: "short_film", icon: Bot, title: "spTplShort", hint: "spTplShortHint" },
@@ -1294,6 +1566,7 @@ export function SpacesView() {
   const [trash, setTrash] = useState(false);
   const list = useAsync(() => api.spaces(pid, trash), [pid, trash, app.dataVersion]);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
 
   if (spaceId) {
     return <ReactFlowProvider><Editor key={spaceId} spaceId={spaceId} onBack={() => app.go("spaces")} /></ReactFlowProvider>;
@@ -1308,7 +1581,7 @@ export function SpacesView() {
     } catch (e) { app.toast((e as Error).message, "bad"); }
     finally { setBusy(false); }
   };
-  const items: SpaceSummary[] = list.data?.items || [];
+  const items: SpaceSummary[] = (list.data?.items || []).filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
 
   return (
     <>
@@ -1333,8 +1606,20 @@ export function SpacesView() {
         </div>
       </div>
       {!trash && (
+        <>
+        <section className="sp-start-workflow">
+          <div className="sp-start-copy"><h2>{lang === "es" ? "Tu personaje. Otro vestuario. El movimiento que quieras." : "Your character. A new outfit. Your chosen movement."}</h2>
+            <p>{lang === "es" ? "Combina tus referencias, revisa cada resultado y conecta la toma siguiente. Cada rama conserva sus versiones." : "Combine your references, review each result and connect the next shot. Every branch keeps its versions."}</p>
+            <button className="btn primary" disabled={busy} onClick={() => create("character_outfit_motion")}><Workflow size={17} />{lang === "es" ? "Crear flujo con referencias" : "Create a reference workflow"}</button>
+            <button className="btn ghost" disabled={busy} onClick={() => create("blank")}><Plus size={16} />{t("spTplBlank")}</button></div>
+          <div className="sp-start-diagram" aria-label={lang === "es" ? "Persona y vestuario producen una imagen; imagen y movimiento producen un clip" : "Person and outfit create a picture; picture and motion create a clip"}>
+            <div className="sp-start-sources"><span><User />{lang === "es" ? "Persona" : "Person"}</span><span><Layers2 />{lang === "es" ? "Vestuario" : "Outfit"}</span></div>
+            <ChevronRight className="sp-start-link" /><div className="sp-start-middle"><span><ImageIcon />{t("spNodeImage")}</span><span><Film />{lang === "es" ? "Movimiento opcional" : "Optional motion"}</span></div>
+            <ChevronRight className="sp-start-link" /><span className="sp-start-result"><Play />{t("spNodeVideo")}</span>
+          </div>
+        </section>
         <div className="sp-templates">
-          {TEMPLATES.map((tpl) => (
+          {TEMPLATES.filter((tpl) => !["blank", "character_outfit_motion"].includes(tpl.id)).map((tpl) => (
             <button key={tpl.id} className="sp-template" disabled={busy} onClick={() => create(tpl.id)}>
               <tpl.icon size={20} />
               <strong>{t(tpl.title)}</strong>
@@ -1342,14 +1627,19 @@ export function SpacesView() {
             </button>
           ))}
         </div>
+        </>
       )}
+      <div className="sp-list-head"><h2>{trash ? t("spTrash") : lang === "es" ? "Tus flujos" : "Your workflows"}</h2>
+        <label className="sp-palette-search"><Search size={15} /><input value={query} onChange={(e) => setQuery(e.target.value)} aria-label={lang === "es" ? "Buscar flujos" : "Search workflows"}
+          placeholder={lang === "es" ? "Buscar por nombre" : "Search by name"} /></label></div>
       {items.length === 0 ? (!list.loading && <Empty icon={<LayoutTemplate size={34} />} text={trash ? t("spTrashEmpty") : t("spNone")} />) : (
         <div className="sp-grid">
           {items.map((s) => (
             <div key={s.id} className="sp-card">
-              <button className="sp-cover" onClick={() => !trash && app.go("spaces", s.id)} disabled={trash}>
-                {s.cover ? <Thumb id={s.cover} port="image" /> : <Workflow size={30} />}
-              </button>
+              <div className="sp-cover">
+                {s.cover ? <Thumb id={s.cover} port="image" onClick={() => app.openAsset(s.cover!)} />
+                  : <button className="sp-cover-open" aria-label={`${t("spOpen")} · ${s.name}`} onClick={() => app.go("spaces", s.id)} disabled={trash}><Workflow size={30} /></button>}
+              </div>
               <div className="sp-card-meta">
                 <strong className="ellipsis">{s.name}{s.app && <span className="pill accent sp-app-badge"><AppWindow size={10} /> {t("spApp")}</span>}</strong>
                 <span className="small muted">{t("spNodesN", { n: s.nodes })} · {timeAgo(s.updated_at, lang)}</span>
@@ -1369,8 +1659,6 @@ export function SpacesView() {
           ))}
         </div>
       )}
-      <p className="small muted" style={{ marginTop: 18 }}><FileText size={12} /> {t("spAgentHint")}</p>
     </>
   );
 }
-

@@ -42,8 +42,8 @@ function highlight(text: string, names: string[], fragments: string[]) {
   return parts.map((p, i) => (typeof p === "string" ? <span key={i}>{p}</span> : <mark key={i}>{p.m}</mark>));
 }
 
-export function GenerateView() {
-  const { t } = useT();
+export function GenerateView({ onAnimate }: { onAnimate?: (asset: Asset) => void } = {}) {
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const chars = useAsync(() => api.characters(pid), [pid]);
@@ -72,6 +72,22 @@ export function GenerateView() {
   const [seedLocked, setSeedLocked] = useState(false);
   const [count, setCount] = useState(2);
   const [refs, setRefs] = useState<Asset[]>([]);
+  const [refRoles, setRefRoles] = useState<Record<string, string>>({});
+  const [refsHydrated, setRefsHydrated] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    let draft: { ids?: string[]; roles?: Record<string, string> } = {};
+    try { draft = JSON.parse(sessionStorage.getItem(`prospero.image-refs.${pid}`) || "{}"); } catch { /* fresh draft */ }
+    Promise.all((Array.isArray(draft.ids) ? draft.ids.slice(0, 10) : []).map((id) => api.asset(id).catch(() => null))).then((assets) => {
+      if (!alive) return;
+      setRefs(assets.filter((a): a is Asset => !!a && a.kind === "image")); setRefRoles(draft.roles || {}); setRefsHydrated(true);
+    });
+    return () => { alive = false; };
+  }, [pid]);
+  useEffect(() => {
+    if (refsHydrated) try { sessionStorage.setItem(`prospero.image-refs.${pid}`, JSON.stringify({ ids: refs.map((a) => a.id), roles: refRoles })); } catch { /* storage unavailable */ }
+  }, [pid, refs, refRoles, refsHydrated]);
+  const [preview, setPreview] = useState<string | null>(null);
   const [useCharRef, setUseCharRef] = useState(false);
   const [strength, setStrength] = useState(0.6);
   const [picking, setPicking] = useState(false);
@@ -90,7 +106,17 @@ export function GenerateView() {
   useEffect(() => { sessionStorage.setItem(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
 
   // live final-prompt preview
-  const dPrompt = useDebounced(prompt, 300);
+  const roleInstructions: Record<string, string> = {
+    identity: "Use this reference for the subject's identity, face and proportions. Preserve these features.",
+    outfit: "Use only the clothing, outfit and accessories from this reference, not its person's identity.",
+    setting: "Use this reference for the location and background, not its people.",
+    style: "Use this reference for lighting, colour palette and visual style, not its subject identity.",
+    pose: "Use this reference for pose and body position, keeping the selected subject's identity.",
+  };
+  const referenceDirection = refs.map((asset, i) => refRoles[asset.id] && roleInstructions[refRoles[asset.id]]
+    ? `<image${i + 1}>: ${roleInstructions[refRoles[asset.id]]}` : "").filter(Boolean).join("\n");
+  const effectivePrompt = [prompt, referenceDirection].filter(Boolean).join("\n");
+  const dPrompt = useDebounced(effectivePrompt, 300);
   const dNegative = useDebounced(negative, 300);
 
   useEffect(() => { setEngineSel(null); }, [pid]);
@@ -105,7 +131,7 @@ export function GenerateView() {
   const sdLike = resolved === "sdxl" || resolved === "sd15" || resolved === "custom";
   const maxRefs = MAX_REFS[resolved] ?? 1;
   const defaults = ENGINE_DEFAULTS[resolved] || ENGINE_DEFAULTS.sdxl;
-  useEffect(() => { if (refs.length > maxRefs) setRefs(refs.slice(0, maxRefs)); }, [maxRefs]);
+  const referencesOverflow = refs.length > maxRefs;
   const refSized = !sdLike && refs.length > 0;
   useEffect(() => {
     if (!dPrompt.trim()) { setComposed(null); return; }
@@ -114,7 +140,7 @@ export function GenerateView() {
   }, [dPrompt, dNegative, style, pid, resolved, refs.length]);
   const autoRefs = useCharRef ? [] : composed?.added_references || [];
   // a multi-reference edit only uses the references its instruction names
-  const unnamedRefs = refs.map((_, i) => `<image${i + 1}>`).filter((tag) => !prompt.includes(tag));
+  const unnamedRefs = refs.map((_, i) => `<image${i + 1}>`).filter((tag) => !effectivePrompt.includes(tag));
   const hadRefs = useRef(false);
   useEffect(() => {
     // first reference in: follow its size; last one out: back to a ratio
@@ -199,9 +225,10 @@ export function GenerateView() {
   const customs: WorkflowSpec[] = workflows.data?.custom || [];
 
   const queue = async () => {
+    if (referencesOverflow) return;
     setBusy(true);
     const body: Record<string, unknown> = {
-      prompt, negative: negative || null, style: style || null, seed, count,
+      prompt: effectivePrompt, negative: negative || null, style: style || null, seed, count,
     };
     if (aspect !== "ref" || !refSized) {
       const [w, h] = ASPECTS[aspect] || ASPECTS["1:1"];
@@ -252,14 +279,18 @@ export function GenerateView() {
       try { addRef(await api.upload(pid, file)); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); }
     }
   };
-  const addRef = (a: Asset) => setRefs((cur) => (cur.some((x) => x.id === a.id) ? cur
-    : maxRefs <= 1 ? [a] : [...cur, a].slice(0, maxRefs)));
+  const addRef = (a: Asset) => {
+    if (a.kind !== "image") { app.toast(lang === "es" ? "Usa una imagen como referencia." : "Use an image as a reference.", "bad"); return; }
+    if (refs.length >= maxRefs && maxRefs > 1) { app.toast(lang === "es" ? "Has llegado al límite de referencias de este motor." : "This engine's reference limit is reached.", "bad"); return; }
+    setRefs((cur) => cur.some((x) => x.id === a.id) ? cur : maxRefs <= 1 ? [a] : [...cur, a].slice(0, maxRefs));
+  };
   const engineLine = [
     ENGINE_LABELS[resolved] || customTemplate || resolved,
     refs.length ? (sdLike ? t("genModeImg2img") : t("genModeEdit", { n: refs.length })) : useCharRef && !sdLike ? t("genModeConsistent") : t("genModeTxt2img"),
   ].join(" · ");
 
   const recentItems = recent.data?.items || [];
+  const previewAsset = recentItems.find((a) => a.id === preview) || recentItems[0];
   const toggleCompare = (id: string) => {
     if (!compare) return;
     setCompare(compare.includes(id) ? compare.filter((x) => x !== id) : [...compare, id].slice(-4));
@@ -369,6 +400,13 @@ export function GenerateView() {
               </div>
             </h2>
             {del.bar}
+            {previewAsset && <div className="image-result-monitor">
+              <div className="monitor-toolbar"><span className="ellipsis grow">{previewAsset.name || t("results")}</span>
+                {onAnimate && <button className="btn sm primary" onClick={() => onAnimate(previewAsset)}>{t("animate")}</button>}
+                <button className="btn sm" onClick={() => app.openAsset(previewAsset.id, recentItems.map((a) => a.id))}>{lang === "es" ? "Ampliar" : "Enlarge"}</button>
+              </div>
+              <button className="monitor-image" onClick={() => app.openAsset(previewAsset.id, recentItems.map((a) => a.id))}><img src={fileUrl(previewAsset.id)} alt={previewAsset.name || ""} /></button>
+            </div>}
             {compare && compare.length < 2 && <p className="muted small">{t("compareHint")}</p>}
             {compare && compare.length >= 2 && (
               <div className="compare" style={{ gridTemplateColumns: `repeat(${compare.length}, 1fr)`, marginBottom: 14 }}>
@@ -388,7 +426,7 @@ export function GenerateView() {
                 {recentItems.map((a) => (
                   <AssetTile key={a.id} asset={a} selected={compare?.includes(a.id) || picked?.includes(a.id)} selecting={!!picked}
                     onClick={() => (picked ? setPicked(picked.includes(a.id) ? picked.filter((x) => x !== a.id) : [...picked, a.id])
-                      : compare ? toggleCompare(a.id) : app.openAsset(a.id, recentItems.map((x) => x.id)))} />
+                      : compare ? toggleCompare(a.id) : (setPreview(a.id), app.openAsset(a.id, recentItems.map((x) => x.id))))} />
                 ))}
               </div>
             )}
@@ -418,7 +456,7 @@ export function GenerateView() {
             <label className="field" style={{ gridColumn: "1 / -1" }}>{t("count")} <span className="mono">{count}</span>
               <input type="range" min={1} max={8} value={count} onChange={(e) => setCount(Number(e.target.value))} /></label>
           </div>
-          {maxRefs > 0 && (
+          {(maxRefs > 0 || refs.length > 0) && (
             <div className="field">{maxRefs > 1 ? t("referencesSlot", { n: maxRefs }) : sdLike ? t("referenceSlot") : t("referenceEditSlot")}
               <div className={`drop-slot${dragOver ? " over" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
@@ -427,20 +465,32 @@ export function GenerateView() {
                   {refs.length === 0 && t("referenceDrop")}
                   {refs.map((r, i) => (
                     <span key={r.id} className="ref-chip" title={r.name || undefined}>
-                      <img src={thumbUrl(r)} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6 }} />
+                      <button className="reference-mini" onClick={() => app.openAsset(r.id, refs.map((a) => a.id))} aria-label={lang === "es" ? "Ampliar referencia" : "Enlarge reference"}><img src={thumbUrl(r)} alt={r.name || ""} /></button>
                       {maxRefs > 1 && <span className="mono small">{`<image${i + 1}>`}</span>}
-                      <button className="btn sm icon ghost" onClick={() => setRefs(refs.filter((x) => x.id !== r.id))}><X size={12} /></button>
+                      {maxRefs > 1 && <select aria-label={lang === "es" ? "Uso de la referencia · opcional" : "Reference use · optional"} value={refRoles[r.id] || ""} onChange={(e) => setRefRoles({ ...refRoles, [r.id]: e.target.value })}>
+                        <option value="">{lang === "es" ? "Uso libre" : "Free use"}</option><option value="identity">{lang === "es" ? "Personaje" : "Identity"}</option>
+                        <option value="outfit">{lang === "es" ? "Vestuario" : "Outfit"}</option><option value="setting">{lang === "es" ? "Entorno" : "Setting"}</option>
+                        <option value="style">{lang === "es" ? "Estilo" : "Style"}</option><option value="pose">{lang === "es" ? "Pose" : "Pose"}</option></select>}
+                      <button className="btn sm icon ghost" aria-label={lang === "es" ? "Quitar referencia" : "Remove reference"} onClick={() => {
+                        setPrompt((value) => value.replace(/<image(\d+)>/g, (tag, number: string) => Number(number) === i + 1 ? "" : Number(number) > i + 1 ? `<image${Number(number) - 1}>` : tag));
+                        setRefs(refs.filter((x) => x.id !== r.id));
+                      }}><X size={12} /></button>
                     </span>
                   ))}
                 </span>
-                {refs.length < maxRefs && <button className="btn sm" onClick={() => setPicking(true)}><Upload size={14} /></button>}
+                {refs.length < maxRefs && <button className="btn sm" onClick={() => setPicking(true)} aria-label={lang === "es" ? "Elegir referencia de la biblioteca" : "Choose reference from library"}><ImagePlus size={14} /></button>}
               </div>
+              {refs.length < maxRefs && <label className="btn sm upload-label" style={{ alignSelf: "start" }}><Upload size={14} />{lang === "es" ? "Subir referencia" : "Upload reference"}<input hidden type="file" accept="image/*" onChange={async (e) => {
+                const file = e.target.files?.[0]; e.target.value = "";
+                if (!file) return;
+                try { addRef(await api.upload(pid, file)); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); }
+              }} /></label>}
               {autoRefs.length > 0 && (
                 <div className="row wrap small" style={{ gap: 6, marginTop: 6 }}>
                   <span className="muted">{t("autoRefs")}</span>
                   {autoRefs.map((r) => (
                     <span key={r.asset_id} className="ref-chip" title={t("elementRefNote")}>
-                      <img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 6 }} />
+                      <button className="reference-mini" onClick={() => app.openAsset(r.asset_id)} aria-label={lang === "es" ? "Ampliar referencia" : "Enlarge reference"}><img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt={r.name} /></button>
                       <span className="mono small">{`<image${r.index}>`}</span> {r.name}
                     </span>
                   ))}
@@ -481,7 +531,8 @@ export function GenerateView() {
             </div>
             <span className="hint">{t("advancedHint")}</span>
           </details>
-          <button className="btn primary lg" onClick={queue} disabled={busy || !prompt.trim()}>
+          {referencesOverflow && <p role="alert" className="hint warn-text">{lang === "es" ? `Este motor admite ${maxRefs} referencias. Cambia de motor o quita referencias para continuar.` : `This engine supports ${maxRefs} references. Change engine or remove references to continue.`}</p>}
+          <button className="btn primary lg" onClick={queue} disabled={busy || !prompt.trim() || referencesOverflow}>
             {busy ? <Loader2 size={17} className="spin" /> : <Wand2 size={17} />} {t("queue")} <span className="kbd" style={{ color: "#fff", borderColor: "#fff6" }}>Ctrl+Enter</span>
           </button>
         </aside>

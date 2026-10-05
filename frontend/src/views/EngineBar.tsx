@@ -21,12 +21,16 @@ export function EngineBar({ sel, setSel, model, setModel, resolved, customs, eng
   const [svc, setSvc] = useState<ServicesStatus | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [statusError, setStatusError] = useState("");
 
   const refresh = async () => {
+    setChecking(true); setStatusError("");
     try {
       const [m, s] = await Promise.all([api.memory(), api.services()]);
       setMem(m); setSvc(s);
-    } catch { /* the bar is informative; errors show on actions */ }
+    } catch (err) { setStatusError((err as Error).message); }
+    finally { setChecking(false); }
   };
   useEffect(() => {
     refresh();
@@ -95,8 +99,8 @@ export function EngineBar({ sel, setSel, model, setModel, resolved, customs, eng
         )}
         <div className="grow" />
         <div className="row" style={{ gap: 6 }}>
-          <span className={`dot ${main?.state === "running" ? "ok" : main?.state === "starting" ? "warn" : "bad"}`} />
-          <span className="small" title={main?.busy ? t("svcBusyHint") : undefined}>ComfyUI {main?.state === "running" ? (comfyGpu != null ? `· GPU ${comfyGpu}` : "") + (main.busy ? ` · ${t("svcBusy")}` : "")
+          <span className={`dot ${!svc || statusError ? "warn" : main?.state === "running" ? "ok" : main?.state === "starting" ? "warn" : "bad"}`} />
+          <span className="small" role="status" title={main?.busy ? t("svcBusyHint") : undefined}>ComfyUI {statusError ? t("engineStatusUnavailable") : !svc ? (checking ? t("loading") : t("engineStatusUnavailable")) : main?.state === "running" ? (comfyGpu != null ? `· GPU ${comfyGpu}` : "") + (main.busy ? ` · ${t("svcBusy")}` : "")
             : main?.state === "starting" ? t("svcStarting") : t("comfyOff")}</span>
           {main && main.startable && (
             <button className="btn sm primary" disabled={busy !== null} onClick={() => startComfy("auto")}>
@@ -109,6 +113,7 @@ export function EngineBar({ sel, setSel, model, setModel, resolved, customs, eng
           <button className={`btn sm${open ? " primary" : ""}`} onClick={() => setOpen(!open)}><MemoryStick size={13} /> {t("gpuMemory")}</button>
         </div>
       </div>
+      {statusError && <div className="row wrap" role="alert"><span className="small">{statusError}</span><button className="btn sm" disabled={checking} onClick={refresh}>{t("recheck")}</button></div>}
 
       {target && need != null && (
         <div className={`small ${fit === "ok" ? "muted" : "err-text"}`}>

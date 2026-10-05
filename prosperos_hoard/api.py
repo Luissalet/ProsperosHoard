@@ -429,6 +429,17 @@ class ComposeSongBody(BaseModel):
     wait_s: float = 0
 
 
+class OutpaintBody(BaseModel):
+    asset_id: str
+    width: int = Field(..., ge=64, le=4096, multiple_of=8)
+    height: int = Field(..., ge=64, le=4096, multiple_of=8)
+    anchor_x: float = Field(0.5, ge=0, le=1, allow_inf_nan=False)
+    anchor_y: float = Field(0.5, ge=0, le=1, allow_inf_nan=False)
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    seed: Optional[int] = None
+    wait_s: float = Field(0, ge=0, le=60)
+
+
 class EditImageBody(BaseModel):
     asset_id: str
     operation: str
@@ -446,6 +457,7 @@ class EditImageBody(BaseModel):
 
 class AnimateBody(BaseModel):
     asset_id: str
+    project_id: Optional[str] = None  # save in the active project when reusing another project's reference
     # "auto": with a driving video, Wan Animate 2 (the motion of that video);
     # else Wan 2.2 14B (real motion and camera moves) when installed, else
     # the 5B; "wan14b" | "wan" (5B) | "animate" | "svd" force one
@@ -593,6 +605,11 @@ class StockSearchBody(BaseModel):
 class StockKeysBody(BaseModel):
     pexels: Optional[str] = None
     pixabay: Optional[str] = None
+
+
+class ProductionSegmentsBody(BaseModel):
+    text: Optional[str] = None
+    segments: Optional[list[dict[str, Any]]] = None
 
 
 class ProductionLyricsBody(BaseModel):
@@ -962,10 +979,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.template == "auto_clip":
             # a production's clip: the best video model installed (motion
             # transfer when the call brings a driving video)
+            if body.driving_asset_id and not engine.animate2_installed(object_info or {}):
+                raise engine.EngineError("animate_missing", "motion transfer needs Wan Animate 2; install it or disconnect the motion guide")
             body = body.model_copy(update={"template": engine.clip_template(object_info or {}, bool(body.driving_asset_id))})
             if body.template != "wan_animate2":
+                params = {k: v for k, v in (body.template_params or {}).items() if k in ("seconds", "length", "lightning")}
+                if body.template == "wan22_ti2v" and "seconds" in params:
+                    params["length"] = int(round(float(params.pop("seconds")) * 24)) + 1
                 body = body.model_copy(update={"driving_asset_id": None, "driving_start_s": None,
-                                               "template_params": None})
+                                               "template_params": params or None})
         if body.template == "auto_sing":
             # lip sync: InfiniteTalk for long lines when installed, else S2V
             body = body.model_copy(update={"template": engine.sing_template(object_info or {}, float(body.audio_seconds or 0),
@@ -1166,6 +1188,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_animate(body: AnimateBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)
+        project_id = body.project_id or asset["project_id"]
+        store.get_project(project_id)
         if asset["kind"] != "image":
             raise engine.EngineError("not_an_image", f"asset {body.asset_id} is {asset['kind']}; animate needs an image")
         if body.engine not in ("auto", "wan", "wan14b", "animate", "svd"):
@@ -1184,7 +1208,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if not prompt.lower().startswith("character appearance"):
                 prompt = ("Character appearance description: the character in the reference image, same design and colours. "
                           f"Background description: {prompt or 'the same place as the reference image'}.")
-            res = op_generate(asset["project_id"], GenerateImageBody(
+            res = op_generate(project_id, GenerateImageBody(
                 prompt=prompt, template="wan_animate2", reference_asset_id=asset["id"], seed=body.seed, count=1,
                 driving_asset_id=body.driving_asset_id, driving_start_s=body.driving_start_s,
                 template_params={"pose_prompt": body.pose_prompt or "a person dancing",
@@ -1193,17 +1217,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 wait_s=body.wait_s))
             return {"job": res["job"], "engine": "animate"}
         if body.engine == "wan14b" or (body.engine == "auto" and info and engine.wan14b_installed(info)):
-            res = op_generate(asset["project_id"], GenerateImageBody(
+            res = op_generate(project_id, GenerateImageBody(
                 prompt=(body.prompt or "natural motion, the camera slowly orbits around the subject").strip(),
                 template="wan22_i2v_14b", reference_asset_id=asset["id"], seed=body.seed, count=1,
                 template_params={"seconds": body.seconds} if body.seconds else None, wait_s=body.wait_s))
             return {"job": res["job"], "engine": "wan14b"}
         if body.engine == "wan" or (body.engine == "auto" and _wan_installed()):
-            res = op_generate(asset["project_id"], GenerateImageBody(
+            res = op_generate(project_id, GenerateImageBody(
                 prompt=(body.prompt or "subtle natural motion, gentle camera push-in").strip(), template="wan22_ti2v",
-                reference_asset_id=asset["id"], seed=body.seed, count=1, wait_s=body.wait_s))
+                reference_asset_id=asset["id"], seed=body.seed, count=1,
+                template_params={"length": int(round(body.seconds * 24)) + 1} if body.seconds else None,
+                wait_s=body.wait_s))
             return {"job": res["job"], "engine": "wan"}
-        job = queue.enqueue("animate", "gpu", body.model_dump(exclude={"wait_s", "engine", "prompt"}), project_id=asset["project_id"])
+        job = queue.enqueue("animate", "gpu", body.model_dump(exclude={"wait_s", "engine", "prompt", "project_id"}), project_id=project_id)
         return {"job": wait(job, body.wait_s), "engine": "svd"}
 
     def op_render(body: RenderBody) -> dict[str, Any]:
@@ -1965,6 +1991,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/projects/{project_id}/generate")
     def ui_generate(project_id: str, body: GenerateImageBody):
         return op_generate(project_id, body)
+
+    def op_outpaint(body: OutpaintBody):
+        from .outpaint import prepare
+        prepared = prepare(store, body.asset_id, body.width, body.height, body.anchor_x, body.anchor_y)
+        result = op_edit(EditImageBody(asset_id=prepared['canvas']['id'], operation='inpaint', prompt=body.prompt,
+                                      mask_asset_id=prepared['mask']['id'], strength=1.0, seed=body.seed, wait_s=body.wait_s))
+        return {**prepared, **result}
+
+    @app.post("/api/agent/studio_outpaint")
+    def agent_outpaint(body: OutpaintBody):
+        def run():
+            result=op_outpaint(body)
+            result['job']=job_result(result['job'])
+            return result
+        return agent('studio_outpaint',body.asset_id,run)
+
+    @app.post("/api/assets/{asset_id}/outpaint")
+    def ui_outpaint(asset_id: str, body: OutpaintBody):
+        return op_outpaint(body.model_copy(update={'asset_id':asset_id}))
 
     @app.post("/api/agent/studio_edit_image")
     def agent_edit_image(body: EditImageBody):
@@ -3575,6 +3620,18 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         state = productions_mod.load_fresh(store.data_dir, slug)
         timing = None if productions_mod.is_legacy(state) else productions_mod.shot_timing(store.data_dir, store, state)
         return {**state, "view": productions_mod.compact_view(state), "timing": timing}
+
+    @app.put("/api/productions/{slug}/segments")
+    def production_segments(slug: str, body: ProductionSegmentsBody):
+        return productions_mod.set_script_segments(store.data_dir, slug, text=body.text, segments=body.segments)
+
+    @app.post("/api/agent/studio_production_segments")
+    def agent_production_segments(production: str, body: ProductionSegmentsBody):
+        def run():
+            result = productions_mod.set_script_segments(store.data_dir, production, text=body.text, segments=body.segments)
+            return {"production": result["slug"], "count": len(result["segments"]),
+                    "timed": result["timed"], "retimed": result["retimed"]}
+        return agent("studio_production_segments", production, run)
 
     @app.put("/api/productions/{slug}/lyrics")
     def production_lyrics(slug: str, body: ProductionLyricsBody):

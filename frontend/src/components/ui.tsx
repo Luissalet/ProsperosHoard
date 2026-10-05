@@ -122,29 +122,49 @@ export function Progress({ value, waiting }: { value: number; waiting?: boolean 
 
 // open modals, newest last: Escape closes only the one on top
 const modalStack: symbol[] = [];
+let dialogLayer = 110;
+
+/** One keyboard owner for nested previews and editors; restore the opener's focus. */
+export function useDialog(ref: { current: HTMLElement | null }, onClose: () => void) {
+  const [me] = useState(() => Symbol("dialog"));
+  const [layer] = useState(() => ++dialogLayer);
+  const [previous] = useState(() => document.activeElement as HTMLElement | null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    modalStack.push(me);
+    const root = ref.current;
+    root?.focus();
+    const key = (event: KeyboardEvent) => {
+      if (modalStack.at(-1) !== me) return;
+      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close.current(); }
+      if (event.key !== "Tab" || !ref.current) return;
+      const controls = [...ref.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')]
+        .filter((element) => element.getClientRects().length > 0);
+      const first = controls[0], last = controls.at(-1);
+      if (!first) { event.preventDefault(); ref.current.focus(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", key, true);
+    return () => {
+      const index = modalStack.indexOf(me);
+      if (index >= 0) modalStack.splice(index, 1);
+      document.removeEventListener("keydown", key, true);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [me, ref]);
+  return { isTop: () => modalStack.at(-1) === me, layer };
+}
 
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
 }) {
-  const [me] = useState(() => Symbol("modal"));
-  useEffect(() => {
-    modalStack.push(me);
-    return () => { const i = modalStack.indexOf(me); if (i >= 0) modalStack.splice(i, 1); };
-  }, [me]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // one Escape closes one modal (the top one is unmounted before the next listener runs)
-      if (e.key !== "Escape" || (e as KeyboardEvent & { modalDone?: boolean }).modalDone) return;
-      if (modalStack[modalStack.length - 1] !== me) return;
-      (e as KeyboardEvent & { modalDone?: boolean }).modalDone = true;
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, me]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const { layer } = useDialog(dialogRef, onClose);
   return (
-    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" style={wide ? { width: "min(980px, 100%)" } : undefined} role="dialog" aria-label={title}>
+    <div className="modal-back" style={{ zIndex: layer }} onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); onClose(); } }}>
+      <div ref={dialogRef} tabIndex={-1} className="modal" style={wide ? { width: "min(980px, 100%)" } : undefined} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="btn ghost icon" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="close"><X size={17} /></button>
@@ -208,49 +228,59 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
   projectId: string; kind?: string; onPick: (a: Asset) => void; onClose: () => void; title?: string; allProjects?: boolean;
 }) {
   const { t, lang } = useT();
+  const app = useApp();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<"project" | "all">("project");
   const [items, setItems] = useState<(Asset & { project_name?: string })[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [focus, setFocus] = useState<(Asset & { project_name?: string }) | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const request = useRef(0);
+  const grid = useRef<HTMLDivElement>(null);
   const dq = useDebounced(query, 220);
   const load = useCallback(async (offset: number) => {
-    setLoading(true);
+    const id = ++request.current;
+    setLoading(true); setLoadError("");
+    if (!offset) { setFocus(null); setItems([]); setNext(null); }
     try {
       const params = { kind, query: dq || undefined, limit: 60, offset };
       const res = scope === "all" ? await api.allAssets(params) : await api.assets(projectId, params);
+      if (request.current !== id) return;
       // an empty project opens on every project's library instead
       if (!offset && !dq && scope === "project" && allProjects && !res.items.length) { setScope("all"); return; }
       setItems((prev) => (offset ? [...prev, ...res.items] : res.items));
       setNext(res.has_more ? res.next_offset : null);
       if (!offset) setFocus((f) => (f && res.items.some((a) => a.id === f.id) ? f : res.items[0] || null));
-    } catch { if (!offset) setItems([]); }
-    finally { setLoading(false); }
+    } catch (e) { if (request.current === id) setLoadError((e as Error).message); }
+    finally { if (request.current === id) setLoading(false); }
   }, [projectId, kind, dq, scope, allProjects]);
-  useEffect(() => { load(0); }, [load]);
-  const move = (step: number) => {
+  useEffect(() => { load(0); return () => { request.current++; }; }, [load]);
+  const selectionReady = !!focus && !loading && query === dq && !loadError && items.some((a) => a.id === focus.id);
+  const columns = () => grid.current ? getComputedStyle(grid.current).gridTemplateColumns.split(" ").length : 1;
+  const move = (step: number, focusTile = false) => {
     if (!items.length) return;
     const i = Math.max(0, items.findIndex((a) => a.id === focus?.id));
-    setFocus(items[Math.min(items.length - 1, Math.max(0, i + step))]);
+    const nextIndex = Math.min(items.length - 1, Math.max(0, i + step));
+    setFocus(items[nextIndex]);
+    if (focusTile) (grid.current?.children[nextIndex] as HTMLElement | undefined)?.focus();
   };
   return (
     <Modal title={title || t("pickImage")} onClose={onClose} wide footer={(
       <>
         <span className="hint grow">{t("pickerHint")}</span>
         <button className="btn" onClick={onClose}>{t("cancel")}</button>
-        <button className="btn primary" disabled={!focus} onClick={() => focus && onPick(focus)}>{t("pickerUse")}</button>
+        <button className="btn primary" disabled={!selectionReady} onClick={() => selectionReady && focus && onPick(focus)}>{t("pickerUse")}</button>
       </>
     )}>
       <div className="picker2">
         <div className="picker2-list">
           <div className="row" style={{ gap: 6, marginBottom: 10 }}>
-            <input className="grow" placeholder={t("search")} value={query} autoFocus
+            <input className="grow" aria-label={t("search")} placeholder={t("search")} value={query} autoFocus
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); move(e.key === "ArrowDown" ? 4 : 1); }
-                if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); move(e.key === "ArrowUp" ? -4 : -1); }
-                if (e.key === "Enter" && focus) onPick(focus);
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); move((e.key === "ArrowDown" ? 1 : -1) * columns()); }
+                if (e.key === "Enter" && selectionReady && focus) onPick(focus);
               }} />
             {allProjects && (
               <div className="seg">
@@ -259,17 +289,25 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
               </div>
             )}
           </div>
-          <div className="picker-grid picker2-grid">
+          <div className="picker-grid picker2-grid" ref={grid}>
             {items.map((a) => (
               <button key={a.id} className={focus?.id === a.id ? "on" : ""} title={assetName(a.name, lang) || a.id}
-                onClick={() => setFocus(a)} onDoubleClick={() => onPick(a)}>
+                aria-pressed={focus?.id === a.id} onFocus={() => setFocus(a)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !loading && query === dq && !loadError) { e.preventDefault(); onPick(a); return; }
+                  const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" ? columns() : e.key === "ArrowUp" ? -columns() : 0;
+                  if (step) { e.preventDefault(); move(step, true); }
+                }}
+                onClick={() => setFocus(a)} onDoubleClick={() => { if (!loading && query === dq && !loadError) onPick(a); }}>
                 {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" loading="lazy" /> : <div className="media-icon"><KindIcon kind={a.kind} /></div>}
                 <span className="picker2-name ellipsis">{assetName(a.name, lang) || a.id}</span>
                 {scope === "all" && a.project_name && <span className="picker2-proj ellipsis">{a.project_name}</span>}
               </button>
             ))}
           </div>
-          {!loading && items.length === 0 && <p className="small muted">{t("pickerEmpty")}</p>}
+          {loading && <p className="small muted" role="status">{t("loading")}</p>}
+          {loadError && <div role="alert"><p>{loadError}</p><button className="btn" onClick={() => load(0)}>{t("recheck")}</button></div>}
+          {!loading && !loadError && items.length === 0 && <p className="small muted">{t("pickerEmpty")}</p>}
           {next != null && <button className="btn sm ghost" style={{ marginTop: 8 }} disabled={loading} onClick={() => load(next)}>{t("pickerMore")}</button>}
         </div>
         <div className="picker2-preview">
@@ -281,7 +319,7 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
                     <div className="media-icon" style={{ height: 120 }}><KindIcon kind="audio" size={40} /></div>
                     <audio key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay style={{ width: "100%" }} />
                   </div>
-                ) : <img src={focus.kind === "image" ? `/api/assets/${focus.id}/file` : thumbUrl(focus)} alt="" />}
+                ) : <button className="reference-preview" onClick={() => app.openAsset(focus.id)} aria-label={lang === "es" ? "Ampliar referencia" : "Enlarge reference"}><img src={focus.kind === "image" ? `/api/assets/${focus.id}/file` : thumbUrl(focus)} alt={focus.name || ""} /></button>}
               <strong className="ellipsis" style={{ maxWidth: "100%" }}>{assetName(focus.name, lang) || focus.id}</strong>
               <span className="small muted">
                 {[focus.project_name, focus.width && focus.height ? `${focus.width}×${focus.height}` : "",
@@ -289,7 +327,7 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
                   focus.created_at?.slice(0, 10)].filter(Boolean).join(" · ")}
               </span>
               {focus.tags?.length > 0 && <span className="small muted ellipsis">{focus.tags.join(", ")}</span>}
-              <button className="btn primary" onClick={() => onPick(focus)}>{t("pickerUse")}</button>
+              <button className="btn primary" disabled={!selectionReady} onClick={() => selectionReady && onPick(focus)}>{t("pickerUse")}</button>
             </>
           ) : <span className="small muted">{t("pickerNothing")}</span>}
         </div>
