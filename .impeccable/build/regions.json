@@ -1,0 +1,299 @@
+{
+  "regions": [
+    {
+      "id": "brand",
+      "kind": "text",
+      "box": {
+        "x": 0.05078125,
+        "w": 0.1171875,
+        "y": 0.0166015625,
+        "h": 0.0302734375
+      },
+      "note": "Prospero's Hoard title"
+    },
+    {
+      "id": "project",
+      "kind": "control",
+      "box": {
+        "y": 0.01,
+        "w": 0.261,
+        "h": 0.045,
+        "x": 0.181
+      },
+      "note": "project selector with test data flag"
+    },
+    {
+      "id": "navigation",
+      "kind": "chrome",
+      "box": {
+        "x": 0.4661458333333333,
+        "w": 0.232421875,
+        "y": 0.013671875,
+        "h": 0.0458984375
+      },
+      "note": "Crear Biblioteca Producciones navigation"
+    },
+    {
+      "id": "jobs",
+      "kind": "control",
+      "box": {
+        "x": 0.7962239583333334,
+        "w": 0.18359375,
+        "y": 0.015625,
+        "h": 0.0341796875
+      },
+      "note": "active jobs and user controls"
+    },
+    {
+      "id": "rail",
+      "kind": "chrome",
+      "box": {
+        "x": 0.001953125,
+        "w": 0.06315104166666667,
+        "y": 0.0732421875,
+        "h": 0.873046875
+      },
+      "note": "creative tool navigation rail",
+      "container": true
+    },
+    {
+      "id": "heading",
+      "kind": "text",
+      "box": {
+        "x": 0.07942708333333333,
+        "w": 0.119140625,
+        "y": 0.083984375,
+        "h": 0.0263671875
+      },
+      "note": "Crear un clip"
+    },
+    {
+      "id": "modes",
+      "kind": "control",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21940104166666666,
+        "y": 0.1279296875,
+        "h": 0.0390625
+      },
+      "note": "Imagen Video Audio tabs"
+    },
+    {
+      "id": "reference-label",
+      "kind": "text",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.11653645833333333,
+        "y": 0.1875,
+        "h": 0.01953125
+      },
+      "note": "Imagen de partida"
+    },
+    {
+      "id": "start-image",
+      "kind": "image",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21875,
+        "y": 0.20703125,
+        "h": 0.177734375
+      },
+      "note": "synthetic dancer reference",
+      "bleed": true
+    },
+    {
+      "id": "motion-label",
+      "kind": "text",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.13736979166666666,
+        "y": 0.408203125,
+        "h": 0.0185546875
+      },
+      "note": "Movimiento del sujeto"
+    },
+    {
+      "id": "motion-prompt",
+      "kind": "control",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21875,
+        "y": 0.4306640625,
+        "h": 0.12109375
+      },
+      "note": "subject action text field"
+    },
+    {
+      "id": "camera-label",
+      "kind": "text",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.13346354166666666,
+        "y": 0.5751953125,
+        "h": 0.0185546875
+      },
+      "note": "Movimiento de c\u00c3\u00a1mara"
+    },
+    {
+      "id": "camera",
+      "kind": "control",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21875,
+        "y": 0.599609375,
+        "h": 0.0361328125
+      },
+      "note": "camera dropdown"
+    },
+    {
+      "id": "motion",
+      "kind": "control",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21875,
+        "y": 0.650390625,
+        "h": 0.04296875
+      },
+      "note": "motion strength mockup; replace with supported action presets"
+    },
+    {
+      "id": "settings",
+      "kind": "control",
+      "box": {
+        "x": 0.07877604166666667,
+        "w": 0.21875,
+        "y": 0.72265625,
+        "h": 0.060546875
+      },
+      "note": "duration aspect quality options"
+    },
+    {
+      "id": "generate",
+      "kind": "control",
+      "box": {
+        "y": 0.798,
+        "w": 0.22,
+        "h": 0.06,
+        "x": 0.078
+      },
+      "note": "Generar clip"
+    },
+    {
+      "id": "preview-tools",
+      "kind": "control",
+      "box": {
+        "x": 0.3196614583333333,
+        "w": 0.6569010416666666,
+        "y": 0.0810546875,
+        "h": 0.0263671875
+      },
+      "note": "take label compare download"
+    },
+    {
+      "id": "preview",
+      "kind": "image",
+      "box": {
+        "x": 0.3196614583333333,
+        "w": 0.6634114583333334,
+        "y": 0.1162109375,
+        "h": 0.5029296875
+      },
+      "note": "dynamic generated clip preview; real project media supplies content",
+      "bleed": true
+    },
+    {
+      "id": "take-1",
+      "kind": "image",
+      "box": {
+        "x": 0.32421875,
+        "y": 0.6396484375,
+        "w": 0.1953125,
+        "h": 0.142578125
+      },
+      "note": "dynamic first take; photo interior excludes selection border and caption controls",
+      "bleed": true
+    },
+    {
+      "id": "take-2",
+      "kind": "image",
+      "box": {
+        "x": 0.5338541666666666,
+        "y": 0.6376953125,
+        "w": 0.224609375,
+        "h": 0.14453125
+      },
+      "note": "dynamic selected take; photo interior excludes selection border and caption controls",
+      "bleed": true
+    },
+    {
+      "id": "take-3",
+      "kind": "image",
+      "box": {
+        "x": 0.7727864583333333,
+        "y": 0.6396484375,
+        "w": 0.20768229166666666,
+        "h": 0.142578125
+      },
+      "note": "dynamic third take; photo interior excludes selection border and caption controls",
+      "bleed": true
+    },
+    {
+      "id": "references",
+      "kind": "control",
+      "box": {
+        "x": 0.3203125,
+        "w": 0.4251302083333333,
+        "y": 0.830078125,
+        "h": 0.09375
+      },
+      "note": "reference strip controls and runtime slots",
+      "codeDrawn": true
+    },
+    {
+      "id": "status",
+      "kind": "chrome",
+      "box": {
+        "y": 0.948,
+        "w": 0.97,
+        "h": 0.041,
+        "x": 0.01
+      },
+      "note": "ready and real job state strip"
+    },
+    {
+      "id": "logo",
+      "kind": "chrome",
+      "box": {
+        "y": 0.015,
+        "w": 0.02,
+        "h": 0.032,
+        "x": 0.015
+      },
+      "note": "Existing product icon; invented mockup mark is a comp defect",
+      "bleed": true,
+      "codeDrawn": true
+    },
+    {
+      "id": "brand-subtitle",
+      "kind": "text",
+      "box": {
+        "y": 0.037,
+        "w": 0.12,
+        "h": 0.014,
+        "x": 0.051
+      },
+      "note": "AI media studio"
+    },
+    {
+      "id": "camera-caption",
+      "kind": "text",
+      "box": {
+        "y": 0.656,
+        "w": 0.192,
+        "h": 0.041,
+        "x": 0.083
+      },
+      "note": "motion settings caption"
+    }
+  ]
+}

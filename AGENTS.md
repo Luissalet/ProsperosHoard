@@ -53,6 +53,17 @@ Reglas para agentes de código que trabajen en este repositorio.
 
 ## Para el asistente que dirige el estudio (MCP)
 
+- **Guion o letra opcionales por tomas**: `studio_production_segments` importa
+  texto o guarda la lista completa con enlaces y tiempos. No inicia generación.
+  No confundirlo con `studio_production_script` de los shorts narrados. Mantén
+  vacíos los tiempos no dados, conserva los finales SRT/VTT y no retimes tomas
+  aprobadas. Para una animación de una referencia de otro proyecto,
+  `studio_animate(project_id=...)` guarda el resultado en el proyecto elegido.
+- **Fuente de vídeo demasiado corta**: `source_fit="stretch"` permite solo
+  un ajuste limitado; `"error"` exige cobertura; `"hold"` es una congelación
+  explícita. Una fuente sincronizada con audio exige `"error"`. No uses una
+  congelación para esconder un clip incompleto.
+
 Qué hacer cuando el usuario pide, con sus palabras:
 
 - **«ComfyUI no está» / «no encuentra el backend» / "start ComfyUI"**:
@@ -90,7 +101,8 @@ Qué hacer cuando el usuario pide, con sus palabras:
   enlace de descarga.
 - **«Móntame un espacio / un lienzo» / «hazlo con nodos» / «conecta las
   fichas al plano»**: `studio_spaces(action="create", template=...)`
-  (`reference_film` para personaje+criatura+lugar → fotograma → clip,
+  (`character_outfit_motion` para persona+vestuario → imagen → clip con guía
+  opcional; `reference_film` para personaje+criatura+lugar → fotograma → clip,
   `singing_shot` para lip sync) o en blanco y `action="edit"` con `ops`
   (`add_node`, `connect`...). Ejecuta con `action="run", mode="all"` y
   sigue el job; lee `state` con `action="get"` y enséñale las salidas con

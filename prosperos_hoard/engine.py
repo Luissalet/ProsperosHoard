@@ -3095,6 +3095,8 @@ def render_timeline_job(store: Store, backend: Backend, job: dict[str, Any], pro
     thumb = _video_thumbnail(out_path, store.path_for_thumb(out_id))
     recipe = {"operation": "render", "timeline_id": timeline_id, "quality": quality, "timeline_updated_at": tl["updated_at"],
               "elapsed_s": round(time.monotonic() - started, 2), "created_at": now_iso()}
+    if result.get("source_adjustments"):
+        recipe["source_adjustments"] = result["source_adjustments"]
     asset = store.create_asset(
         project_id=tl["project_id"], kind="video", file_path=_rel(store, out_path),
         mime="video/mp4", width=result["width"], height=result["height"], duration_s=result["duration_s"],

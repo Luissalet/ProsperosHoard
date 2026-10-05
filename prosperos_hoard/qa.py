@@ -65,6 +65,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "exposure_jump": 30.0,      # mean-luminance change between consecutive frames (0-255)
     "still_motion_max": 10.0,   # frame-difference energy above which a "still" shot moves too much
     "move_motion_min": 0.4,     # frame-difference energy below which a "move" shot is frozen
+    "freeze_max_s": 0.6,       # contiguous near-identical interval, even when average motion looks good
     "headroom_min": 0.02,       # share of the height above the subject on a photocard photo
     "lyric_coverage": 0.85,     # share of written lines an aligned LRC must contain
     "duration_tolerance": 0.06, # relative duration difference allowed against the plan
@@ -167,16 +168,28 @@ def _ffmpeg() -> str:
     return exe
 
 
-def video_gray_frames(path: Path, width: int = 160, height: int = 90, max_frames: int = 400) -> np.ndarray:
-    """Every frame of a clip, tiny and grey: (n, height, width) float32."""
+def video_gray_frames(path: Path, width: int = 160, height: int = 90, max_frames: int = 18000) -> np.ndarray:
+    """Every frame of a bounded clip, tiny and grey; never silently truncate QA."""
     cmd = [_ffmpeg(), "-nostdin", "-v", "error", "-i", str(path), "-vf", f"scale={width}:{height},format=gray",
-           "-frames:v", str(max_frames), "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+           "-frames:v", str(max_frames + 1), "-f", "rawvideo", "-pix_fmt", "gray", "-"]
     proc = procutil.run(cmd, timeout=180)
     if proc.returncode != 0:
         raise QAError("decode_failed", f"could not read {path.name}: {proc.stderr.decode('utf-8', 'replace')[:300]}")
     data = np.frombuffer(proc.stdout, dtype=np.uint8)
     n = data.size // (width * height)
-    return data[: n * width * height].reshape(n, height, width).astype(np.float32)
+    if n > max_frames:
+        raise QAError("clip_too_long", f"clip exceeds the {max_frames}-frame QA limit; split it before checking motion")
+    return data[: n * width * height].reshape(n, height, width)
+
+
+def _motion_differences(frames: np.ndarray) -> np.ndarray:
+    # Convert bounded chunks before subtraction: uint8 would wrap, while a full
+    # float32 copy and diff can exceed a gigabyte on a long production render.
+    chunks = []
+    for start in range(0, len(frames) - 1, 128):
+        block = frames[start:start + 129].astype(np.float32)
+        chunks.append(np.abs(np.diff(block, axis=0)).mean(axis=(1, 2)))
+    return np.concatenate(chunks) if chunks else np.empty(0)
 
 
 def video_frame(path: Path, at_s: float) -> Optional[Image.Image]:
@@ -195,10 +208,29 @@ def clip_motion(frames: np.ndarray) -> dict[str, Any]:
         return {"frames": int(len(frames)), "max_jump": 0.0, "jump_at": None, "energy": 0.0}
     means = frames.reshape(len(frames), -1).mean(axis=1)
     jumps = np.abs(np.diff(means))
-    energy = float(np.abs(np.diff(frames, axis=0)).mean())
+    energy = float(_motion_differences(frames).mean())
     i = int(jumps.argmax())
     return {"frames": int(len(frames)), "max_jump": round(float(jumps[i]), 2), "jump_at": i + 1,
             "energy": round(energy, 3), "mean_luma": round(float(means.mean()), 1)}
+
+
+def frozen_intervals(frames: np.ndarray, fps: float, min_s: float = 0.6,
+                     difference: float = 0.15) -> list[dict[str, float]]:
+    """Find sustained holds, including a frozen tail after otherwise moving footage."""
+    if len(frames) < 2 or fps <= 0:
+        return []
+    differences = _motion_differences(frames)
+    result, start = [], None
+    for i, still in enumerate([*list(differences <= difference), False]):
+        if still and start is None:
+            start = i
+        elif not still and start is not None:
+            duration = (i - start) / fps
+            if duration >= min_s:
+                result.append({"start_s": round(start / fps, 3), "end_s": round(i / fps, 3),
+                               "duration_s": round(duration, 3)})
+            start = None
+    return result
 
 
 _NORM = re.compile(r"[^\w\s]", re.UNICODE)
@@ -393,6 +425,13 @@ class QA:
         duration = asset.get("duration_s") or audio_mod.probe_duration_s(path)
         if duration:
             item["checks"]["duration_s"] = round(float(duration), 2)
+            measured_fps = len(frames) / float(duration)
+            freezes = frozen_intervals(frames, measured_fps, th["freeze_max_s"])
+            item["checks"]["frozen_intervals"] = freezes
+            if wanted == "move" and freezes:
+                freeze = max(freezes, key=lambda value: value["duration_s"])
+                _fail(item, "frozen_interval", f"frozen for {freeze['duration_s']:.2f}s "
+                      f"at {freeze['start_s']:.2f}–{freeze['end_s']:.2f}s")
         middle = video_frame(path, (duration or 2.0) / 2)
         if middle is not None:
             bands = edge_bands(middle, delta=th["band_delta"], share=th["band_rows"])
@@ -601,7 +640,7 @@ def fix_for(stage: str, codes: list[str], shot: dict[str, Any], attempt: int) ->
             fix["clip_negative"] = prod.STILL_NEGATIVE + ", camera shake, fast motion"
             if "stays perfectly still" not in str(shot.get("motion_prompt") or ""):
                 fix["motion_prompt"] = f"{shot.get('motion_prompt') or 'subtle motion'}; the figure stays perfectly still"
-        if "still_when_moving" in codes:
+        if "still_when_moving" in codes or "frozen_interval" in codes:
             fix["clip_negative"] = None
             fix["motion_prompt"] = f"{shot.get('motion_prompt') or 'motion'}, clearly visible motion"
     elif stage == "photocards":

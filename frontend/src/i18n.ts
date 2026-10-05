@@ -3,6 +3,11 @@ import { createContext, useContext } from "react";
 // Every visible string lives here. `es` must define every key of `en`
 // (the type checker enforces it). Spanish from Spain.
 const en = {
+  engineStatusUnavailable: "status unavailable",
+  enlarge: "Enlarge preview",
+  tableScroll: "Scrollable table",
+  clearFilters: "Clear filters",
+  libraryNoMatches: "No media match these filters.",
   appName: "Prospero's Hoard",
   demoBadge: "Demo backend",
   demoHint: "Images come from a procedural demo backend, not a model.",
@@ -1264,6 +1269,8 @@ const en = {
   spUntitled: "Untitled space",
   spAgentHint: "Assistants can build and run spaces too (studio_spaces tool).",
   spTplBlank: "Blank canvas",
+  spTplIdentity: "Person, outfit and movement",
+  spTplIdentityHint: "Combine identity and clothing, then animate with an optional motion guide.",
   spTplBlankHint: "Start empty and add nodes.",
   spTplFilm: "Reference film",
   spTplFilmHint: "Character, creature and place sheets wired into a frame and a clip.",
@@ -1420,6 +1427,11 @@ const en = {
 export type MessageKey = keyof typeof en;
 
 const es: Record<MessageKey, string> = {
+  engineStatusUnavailable: "estado no disponible",
+  enlarge: "Ampliar imagen",
+  tableScroll: "Tabla desplazable",
+  clearFilters: "Limpiar filtros",
+  libraryNoMatches: "Ningún recurso coincide con estos filtros.",
   appName: "Prospero's Hoard",
   demoBadge: "Backend de demostración",
   demoHint: "Las imágenes salen de un backend procedural de demostración, no de un modelo.",
@@ -2664,6 +2676,8 @@ const es: Record<MessageKey, string> = {
   spUntitled: "Espacio sin título",
   spAgentHint: "Los asistentes también pueden montar y ejecutar espacios (herramienta studio_spaces).",
   spTplBlank: "Lienzo en blanco",
+  spTplIdentity: "Persona, vestuario y movimiento",
+  spTplIdentityHint: "Combina identidad y ropa; anima con una guía de movimiento opcional.",
   spTplBlankHint: "Empieza vacío y añade nodos.",
   spTplFilm: "Película con referencias",
   spTplFilmHint: "Fichas de personaje, criatura y lugar conectadas a un fotograma y un clip.",

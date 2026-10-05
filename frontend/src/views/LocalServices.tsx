@@ -114,7 +114,7 @@ export function LocalServices({ initial, onChange }: { initial?: ServicesStatus;
         )}
       </h2>
       <div className="muted small">{t("servicesLead")}</div>
-      <table className="list">
+      <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
         <tbody>
           {svc.items.map((i) => (
             <tr key={i.id}>
@@ -157,7 +157,7 @@ export function LocalServices({ initial, onChange }: { initial?: ServicesStatus;
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       <label className="row small" style={{ gap: 8 }}>
         <input type="checkbox" checked={svc.autostart_comfy} disabled={svc.demo} onChange={(e) => setAutostart(e.target.checked)} />

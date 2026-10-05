@@ -58,7 +58,7 @@ export function BackendsView() {
           {s.demo && <div className="demo-banner"><Zap size={14} /> {t("demoHint")}</div>}
           <LocalServices initial={s.services} onChange={status.reload} />
           <div className="card" style={{ padding: 6 }}>
-            <table className="list">
+            <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
               <thead><tr><th>{t("capability")}</th><th>{t("state")}</th><th>{t("provider")}</th><th>{t("model")}</th><th style={{ width: "44%" }}>{t("reason")}</th></tr></thead>
               <tbody>
                 {Object.values(s.hoard_link).map((r) => (
@@ -71,7 +71,7 @@ export function BackendsView() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
 
           <div className="grid-2" style={{ alignItems: "start" }}>

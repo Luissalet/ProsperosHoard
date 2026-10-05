@@ -1,0 +1,1328 @@
+{
+  "tool": "comp-spec",
+  "version": 1,
+  "createdAt": "2026-10-05T02:22:00.660Z",
+  "comp": ".impeccable/mocks/studio-1.png",
+  "warnings": [
+    "region rail: \"container\": true set in the regions file (the region-size refusal is overridden: one undivided element)",
+    "region start-image: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)",
+    "region preview: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)",
+    "region take-1: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)",
+    "region take-2: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)",
+    "region take-3: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)",
+    "region references: \"codeDrawn\": true set in the regions file (the painted-material refusal is overridden: code draws this region)",
+    "region logo: \"codeDrawn\": true set in the regions file (the painted-material refusal is overridden: code draws this region)",
+    "region logo: \"bleed\": true set in the regions file (the clipped-artwork refusal is overridden: the page crops it there)"
+  ],
+  "uncoveredInkCells": [
+    "A0",
+    "B6"
+  ],
+  "compSize": {
+    "width": 1536,
+    "height": 1024
+  },
+  "aspect": 1.5,
+  "orientation": "landscape",
+  "palette": [
+    {
+      "hex": "#19191c",
+      "coverage": 0.6256
+    },
+    {
+      "hex": "#837567",
+      "coverage": 0.2104
+    },
+    {
+      "hex": "#e8e0da",
+      "coverage": 0.0579
+    },
+    {
+      "hex": "#4c4546",
+      "coverage": 0.0565
+    },
+    {
+      "hex": "#50351d",
+      "coverage": 0.0497
+    }
+  ],
+  "bands": [
+    {
+      "y": 0.0353,
+      "strength": 0.28
+    },
+    {
+      "y": 0.1176,
+      "strength": 1
+    },
+    {
+      "y": 0.2118,
+      "strength": 0.2526
+    },
+    {
+      "y": 0.3882,
+      "strength": 0.2373
+    },
+    {
+      "y": 0.5059,
+      "strength": 0.2469
+    },
+    {
+      "y": 0.5529,
+      "strength": 0.2009
+    },
+    {
+      "y": 0.5882,
+      "strength": 0.2176
+    },
+    {
+      "y": 0.6118,
+      "strength": 0.2029
+    },
+    {
+      "y": 0.6353,
+      "strength": 0.3683
+    },
+    {
+      "y": 0.7765,
+      "strength": 0.3462
+    },
+    {
+      "y": 0.8118,
+      "strength": 0.2585
+    },
+    {
+      "y": 0.8471,
+      "strength": 0.3106
+    }
+  ],
+  "regions": [
+    {
+      "id": "brand",
+      "kind": "text",
+      "note": "Prospero's Hoard title",
+      "grid": null,
+      "box": {
+        "x": 0.0508,
+        "y": 0.0166,
+        "w": 0.1172,
+        "h": 0.0303
+      },
+      "px": {
+        "x": 78,
+        "y": 17,
+        "w": 180,
+        "h": 31
+      },
+      "aspect": 5.8065,
+      "palette": [
+        {
+          "hex": "#161719",
+          "coverage": 0.7607
+        },
+        {
+          "hex": "#f0f0f1",
+          "coverage": 0.0777
+        },
+        {
+          "hex": "#353639",
+          "coverage": 0.0655
+        },
+        {
+          "hex": "#9ea1a6",
+          "coverage": 0.0549
+        },
+        {
+          "hex": "#626567",
+          "coverage": 0.0412
+        }
+      ],
+      "detail": {
+        "energy": 55.6697
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "project",
+      "kind": "control",
+      "note": "project selector with test data flag",
+      "grid": null,
+      "box": {
+        "x": 0.181,
+        "y": 0.01,
+        "w": 0.261,
+        "h": 0.045
+      },
+      "px": {
+        "x": 278,
+        "y": 10,
+        "w": 401,
+        "h": 46
+      },
+      "aspect": 8.7174,
+      "palette": [
+        {
+          "hex": "#222323",
+          "coverage": 0.9287
+        },
+        {
+          "hex": "#383846",
+          "coverage": 0.0361
+        },
+        {
+          "hex": "#65656a",
+          "coverage": 0.0147
+        },
+        {
+          "hex": "#c4c9cf",
+          "coverage": 0.0105
+        },
+        {
+          "hex": "#9c9ca6",
+          "coverage": 0.01
+        }
+      ],
+      "detail": {
+        "energy": 25.0542
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "navigation",
+      "kind": "chrome",
+      "note": "Crear Biblioteca Producciones navigation",
+      "grid": null,
+      "box": {
+        "x": 0.4661,
+        "y": 0.0137,
+        "w": 0.2324,
+        "h": 0.0459
+      },
+      "px": {
+        "x": 716,
+        "y": 14,
+        "w": 357,
+        "h": 47
+      },
+      "aspect": 7.5957,
+      "palette": [
+        {
+          "hex": "#181818",
+          "coverage": 0.9343
+        },
+        {
+          "hex": "#93969e",
+          "coverage": 0.0318
+        },
+        {
+          "hex": "#9c6c43",
+          "coverage": 0.0159
+        },
+        {
+          "hex": "#56595d",
+          "coverage": 0.0106
+        },
+        {
+          "hex": "#e3a665",
+          "coverage": 0.0074
+        }
+      ],
+      "detail": {
+        "energy": 18.2755
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "jobs",
+      "kind": "control",
+      "note": "active jobs and user controls",
+      "grid": null,
+      "box": {
+        "x": 0.7962,
+        "y": 0.0156,
+        "w": 0.1836,
+        "h": 0.0342
+      },
+      "px": {
+        "x": 1223,
+        "y": 16,
+        "w": 282,
+        "h": 35
+      },
+      "aspect": 8.0571,
+      "palette": [
+        {
+          "hex": "#181818",
+          "coverage": 0.8667
+        },
+        {
+          "hex": "#383946",
+          "coverage": 0.1091
+        },
+        {
+          "hex": "#74797d",
+          "coverage": 0.0143
+        },
+        {
+          "hex": "#a4a6ae",
+          "coverage": 0.0072
+        },
+        {
+          "hex": "#c3c3d3",
+          "coverage": 0.0027
+        }
+      ],
+      "detail": {
+        "energy": 17.5075
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "rail",
+      "kind": "chrome",
+      "note": "creative tool navigation rail",
+      "grid": null,
+      "container": true,
+      "box": {
+        "x": 0.002,
+        "y": 0.0732,
+        "w": 0.0632,
+        "h": 0.873
+      },
+      "px": {
+        "x": 3,
+        "y": 75,
+        "w": 97,
+        "h": 894
+      },
+      "aspect": 0.1085,
+      "palette": [
+        {
+          "hex": "#181919",
+          "coverage": 0.9789
+        },
+        {
+          "hex": "#919499",
+          "coverage": 0.0094
+        },
+        {
+          "hex": "#353639",
+          "coverage": 0.0049
+        },
+        {
+          "hex": "#5e6269",
+          "coverage": 0.0038
+        },
+        {
+          "hex": "#babcc0",
+          "coverage": 0.003
+        }
+      ],
+      "detail": {
+        "energy": 3.6045
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "heading",
+      "kind": "text",
+      "note": "Crear un clip",
+      "grid": null,
+      "box": {
+        "x": 0.0794,
+        "y": 0.084,
+        "w": 0.1191,
+        "h": 0.0264
+      },
+      "px": {
+        "x": 122,
+        "y": 86,
+        "w": 183,
+        "h": 27
+      },
+      "aspect": 6.7778,
+      "palette": [
+        {
+          "hex": "#171819",
+          "coverage": 0.8167
+        },
+        {
+          "hex": "#f5f4f5",
+          "coverage": 0.0648
+        },
+        {
+          "hex": "#7f7f82",
+          "coverage": 0.0463
+        },
+        {
+          "hex": "#c1c4c5",
+          "coverage": 0.0407
+        },
+        {
+          "hex": "#2e3133",
+          "coverage": 0.0315
+        }
+      ],
+      "detail": {
+        "energy": 38.4896
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "modes",
+      "kind": "control",
+      "note": "Imagen Video Audio tabs",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.1279,
+        "w": 0.2194,
+        "h": 0.0391
+      },
+      "px": {
+        "x": 121,
+        "y": 131,
+        "w": 337,
+        "h": 40
+      },
+      "aspect": 8.425,
+      "palette": [
+        {
+          "hex": "#1f1f25",
+          "coverage": 0.952
+        },
+        {
+          "hex": "#e9aa68",
+          "coverage": 0.023
+        },
+        {
+          "hex": "#523f32",
+          "coverage": 0.0096
+        },
+        {
+          "hex": "#8e919d",
+          "coverage": 0.009
+        },
+        {
+          "hex": "#b2b8bb",
+          "coverage": 0.0064
+        }
+      ],
+      "detail": {
+        "energy": 15.5072
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "reference-label",
+      "kind": "text",
+      "note": "Imagen de partida",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.1875,
+        "w": 0.1165,
+        "h": 0.0195
+      },
+      "px": {
+        "x": 121,
+        "y": 192,
+        "w": 179,
+        "h": 20
+      },
+      "aspect": 8.95,
+      "palette": [
+        {
+          "hex": "#17191c",
+          "coverage": 0.8115
+        },
+        {
+          "hex": "#caced1",
+          "coverage": 0.1122
+        },
+        {
+          "hex": "#313338",
+          "coverage": 0.0286
+        },
+        {
+          "hex": "#75777c",
+          "coverage": 0.0263
+        },
+        {
+          "hex": "#a4a4ad",
+          "coverage": 0.0215
+        }
+      ],
+      "detail": {
+        "energy": 35.3555
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "start-image",
+      "kind": "image",
+      "note": "synthetic dancer reference",
+      "grid": null,
+      "bleed": true,
+      "box": {
+        "x": 0.0788,
+        "y": 0.207,
+        "w": 0.2188,
+        "h": 0.1777
+      },
+      "px": {
+        "x": 121,
+        "y": 212,
+        "w": 336,
+        "h": 182
+      },
+      "aspect": 1.8462,
+      "palette": [
+        {
+          "hex": "#a3907f",
+          "coverage": 0.5431
+        },
+        {
+          "hex": "#222223",
+          "coverage": 0.1695
+        },
+        {
+          "hex": "#dacfc6",
+          "coverage": 0.1367
+        },
+        {
+          "hex": "#6d6153",
+          "coverage": 0.1012
+        },
+        {
+          "hex": "#4c321c",
+          "coverage": 0.0495
+        }
+      ],
+      "detail": {
+        "energy": 22.7269
+      },
+      "medium": "raster",
+      "plate": "assets\\plates\\start-image.png",
+      "text": null
+    },
+    {
+      "id": "motion-label",
+      "kind": "text",
+      "note": "Movimiento del sujeto",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.4082,
+        "w": 0.1374,
+        "h": 0.0186
+      },
+      "px": {
+        "x": 121,
+        "y": 418,
+        "w": 211,
+        "h": 19
+      },
+      "aspect": 11.1053,
+      "palette": [
+        {
+          "hex": "#16171c",
+          "coverage": 0.8986
+        },
+        {
+          "hex": "#dfe3e5",
+          "coverage": 0.0487
+        },
+        {
+          "hex": "#3a3d3d",
+          "coverage": 0.0183
+        },
+        {
+          "hex": "#a3a3af",
+          "coverage": 0.0183
+        },
+        {
+          "hex": "#5c5e66",
+          "coverage": 0.0162
+        }
+      ],
+      "detail": {
+        "energy": 44.3245
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "motion-prompt",
+      "kind": "control",
+      "note": "subject action text field",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.4307,
+        "w": 0.2188,
+        "h": 0.1211
+      },
+      "px": {
+        "x": 121,
+        "y": 441,
+        "w": 336,
+        "h": 124
+      },
+      "aspect": 2.7097,
+      "palette": [
+        {
+          "hex": "#181828",
+          "coverage": 0.6165
+        },
+        {
+          "hex": "#1d2626",
+          "coverage": 0.268
+        },
+        {
+          "hex": "#abb0b5",
+          "coverage": 0.0626
+        },
+        {
+          "hex": "#73777d",
+          "coverage": 0.0307
+        },
+        {
+          "hex": "#494c53",
+          "coverage": 0.0222
+        }
+      ],
+      "detail": {
+        "energy": 28.6125
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "camera-label",
+      "kind": "text",
+      "note": "Movimiento de cÃ¡mara",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.5752,
+        "w": 0.1335,
+        "h": 0.0186
+      },
+      "px": {
+        "x": 121,
+        "y": 589,
+        "w": 205,
+        "h": 19
+      },
+      "aspect": 10.7895,
+      "palette": [
+        {
+          "hex": "#18191d",
+          "coverage": 0.8654
+        },
+        {
+          "hex": "#414349",
+          "coverage": 0.0497
+        },
+        {
+          "hex": "#d1d7dc",
+          "coverage": 0.0497
+        },
+        {
+          "hex": "#828687",
+          "coverage": 0.0352
+        }
+      ],
+      "detail": {
+        "energy": 43.5102
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "camera",
+      "kind": "control",
+      "note": "camera dropdown",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.5996,
+        "w": 0.2188,
+        "h": 0.0361
+      },
+      "px": {
+        "x": 121,
+        "y": 614,
+        "w": 336,
+        "h": 37
+      },
+      "aspect": 9.0811,
+      "palette": [
+        {
+          "hex": "#181828",
+          "coverage": 0.5142
+        },
+        {
+          "hex": "#1a2727",
+          "coverage": 0.391
+        },
+        {
+          "hex": "#c9ccd0",
+          "coverage": 0.0498
+        },
+        {
+          "hex": "#909194",
+          "coverage": 0.027
+        },
+        {
+          "hex": "#5f6269",
+          "coverage": 0.018
+        }
+      ],
+      "detail": {
+        "energy": 25.8475
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "motion",
+      "kind": "control",
+      "note": "motion strength mockup; replace with supported action presets",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.6504,
+        "w": 0.2188,
+        "h": 0.043
+      },
+      "px": {
+        "x": 121,
+        "y": 666,
+        "w": 336,
+        "h": 44
+      },
+      "aspect": 7.6364,
+      "palette": [
+        {
+          "hex": "#17181a",
+          "coverage": 0.8391
+        },
+        {
+          "hex": "#e3a35c",
+          "coverage": 0.0678
+        },
+        {
+          "hex": "#383a47",
+          "coverage": 0.0612
+        },
+        {
+          "hex": "#c6c9cd",
+          "coverage": 0.0168
+        },
+        {
+          "hex": "#92969b",
+          "coverage": 0.015
+        }
+      ],
+      "detail": {
+        "energy": 29.0503
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "settings",
+      "kind": "control",
+      "note": "duration aspect quality options",
+      "grid": null,
+      "box": {
+        "x": 0.0788,
+        "y": 0.7227,
+        "w": 0.2188,
+        "h": 0.0605
+      },
+      "px": {
+        "x": 121,
+        "y": 740,
+        "w": 336,
+        "h": 62
+      },
+      "aspect": 5.4194,
+      "palette": [
+        {
+          "hex": "#1a2124",
+          "coverage": 0.9474
+        },
+        {
+          "hex": "#5c5d62",
+          "coverage": 0.0188
+        },
+        {
+          "hex": "#e2e4e5",
+          "coverage": 0.0141
+        },
+        {
+          "hex": "#bcbcc1",
+          "coverage": 0.0107
+        },
+        {
+          "hex": "#84898f",
+          "coverage": 0.009
+        }
+      ],
+      "detail": {
+        "energy": 24.9044
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "generate",
+      "kind": "control",
+      "note": "Generar clip",
+      "grid": null,
+      "box": {
+        "x": 0.078,
+        "y": 0.798,
+        "w": 0.22,
+        "h": 0.06
+      },
+      "px": {
+        "x": 120,
+        "y": 817,
+        "w": 338,
+        "h": 61
+      },
+      "aspect": 5.541,
+      "palette": [
+        {
+          "hex": "#daa05a",
+          "coverage": 0.6449
+        },
+        {
+          "hex": "#18181f",
+          "coverage": 0.2952
+        },
+        {
+          "hex": "#997848",
+          "coverage": 0.0514
+        },
+        {
+          "hex": "#2d281a",
+          "coverage": 0.0064
+        },
+        {
+          "hex": "#5e4838",
+          "coverage": 0.0021
+        }
+      ],
+      "detail": {
+        "energy": 21.8464
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "preview-tools",
+      "kind": "control",
+      "note": "take label compare download",
+      "grid": null,
+      "box": {
+        "x": 0.3197,
+        "y": 0.0811,
+        "w": 0.6569,
+        "h": 0.0264
+      },
+      "px": {
+        "x": 491,
+        "y": 83,
+        "w": 1009,
+        "h": 27
+      },
+      "aspect": 37.3704,
+      "palette": [
+        {
+          "hex": "#1a1a1c",
+          "coverage": 0.9168
+        },
+        {
+          "hex": "#38372b",
+          "coverage": 0.0527
+        },
+        {
+          "hex": "#e5e6e8",
+          "coverage": 0.0139
+        },
+        {
+          "hex": "#898a8c",
+          "coverage": 0.0118
+        },
+        {
+          "hex": "#5f6161",
+          "coverage": 0.0047
+        }
+      ],
+      "detail": {
+        "energy": 15.8096
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "preview",
+      "kind": "image",
+      "note": "dynamic generated clip preview; real project media supplies content",
+      "grid": null,
+      "bleed": true,
+      "box": {
+        "x": 0.3197,
+        "y": 0.1162,
+        "w": 0.6634,
+        "h": 0.5029
+      },
+      "px": {
+        "x": 491,
+        "y": 119,
+        "w": 1019,
+        "h": 515
+      },
+      "aspect": 1.9786,
+      "palette": [
+        {
+          "hex": "#7a6e61",
+          "coverage": 0.4416
+        },
+        {
+          "hex": "#e7ddd6",
+          "coverage": 0.1629
+        },
+        {
+          "hex": "#49443e",
+          "coverage": 0.1357
+        },
+        {
+          "hex": "#201e1d",
+          "coverage": 0.1321
+        },
+        {
+          "hex": "#b3a69a",
+          "coverage": 0.1277
+        }
+      ],
+      "detail": {
+        "energy": 26.0086
+      },
+      "medium": "raster",
+      "plate": "assets\\plates\\preview.png",
+      "text": null
+    },
+    {
+      "id": "take-1",
+      "kind": "image",
+      "note": "dynamic first take; photo interior excludes selection border and caption controls",
+      "grid": null,
+      "bleed": true,
+      "box": {
+        "x": 0.3242,
+        "y": 0.6396,
+        "w": 0.1953,
+        "h": 0.1426
+      },
+      "px": {
+        "x": 498,
+        "y": 655,
+        "w": 300,
+        "h": 146
+      },
+      "aspect": 2.0548,
+      "palette": [
+        {
+          "hex": "#80715f",
+          "coverage": 0.4853
+        },
+        {
+          "hex": "#1c1c1d",
+          "coverage": 0.1945
+        },
+        {
+          "hex": "#d9ccbe",
+          "coverage": 0.1447
+        },
+        {
+          "hex": "#ad9f92",
+          "coverage": 0.0901
+        },
+        {
+          "hex": "#432b18",
+          "coverage": 0.0853
+        }
+      ],
+      "detail": {
+        "energy": 22.1734
+      },
+      "medium": "raster",
+      "plate": "assets\\plates\\take-1.png",
+      "text": null
+    },
+    {
+      "id": "take-2",
+      "kind": "image",
+      "note": "dynamic selected take; photo interior excludes selection border and caption controls",
+      "grid": null,
+      "bleed": true,
+      "box": {
+        "x": 0.5339,
+        "y": 0.6377,
+        "w": 0.2246,
+        "h": 0.1445
+      },
+      "px": {
+        "x": 820,
+        "y": 653,
+        "w": 345,
+        "h": 148
+      },
+      "aspect": 2.3311,
+      "palette": [
+        {
+          "hex": "#817465",
+          "coverage": 0.3562
+        },
+        {
+          "hex": "#1b1b1d",
+          "coverage": 0.2159
+        },
+        {
+          "hex": "#534c44",
+          "coverage": 0.1641
+        },
+        {
+          "hex": "#b8aa9b",
+          "coverage": 0.1326
+        },
+        {
+          "hex": "#52351d",
+          "coverage": 0.1312
+        }
+      ],
+      "detail": {
+        "energy": 26.7696
+      },
+      "medium": "raster",
+      "plate": "assets\\plates\\take-2.png",
+      "text": null
+    },
+    {
+      "id": "take-3",
+      "kind": "image",
+      "note": "dynamic third take; photo interior excludes selection border and caption controls",
+      "grid": null,
+      "bleed": true,
+      "box": {
+        "x": 0.7728,
+        "y": 0.6396,
+        "w": 0.2077,
+        "h": 0.1426
+      },
+      "px": {
+        "x": 1187,
+        "y": 655,
+        "w": 319,
+        "h": 146
+      },
+      "aspect": 2.1849,
+      "palette": [
+        {
+          "hex": "#7c6a54",
+          "coverage": 0.3585
+        },
+        {
+          "hex": "#a69788",
+          "coverage": 0.2871
+        },
+        {
+          "hex": "#4e311a",
+          "coverage": 0.1649
+        },
+        {
+          "hex": "#1c1a1b",
+          "coverage": 0.1635
+        },
+        {
+          "hex": "#e9dfd6",
+          "coverage": 0.026
+        }
+      ],
+      "detail": {
+        "energy": 16.6997
+      },
+      "medium": "raster",
+      "plate": "assets\\plates\\take-3.png",
+      "text": null
+    },
+    {
+      "id": "references",
+      "kind": "control",
+      "note": "reference strip controls and runtime slots",
+      "grid": null,
+      "codeDrawn": true,
+      "box": {
+        "x": 0.3203,
+        "y": 0.8301,
+        "w": 0.4251,
+        "h": 0.0938
+      },
+      "px": {
+        "x": 492,
+        "y": 850,
+        "w": 653,
+        "h": 96
+      },
+      "aspect": 6.8021,
+      "palette": [
+        {
+          "hex": "#18181a",
+          "coverage": 0.5364
+        },
+        {
+          "hex": "#504e42",
+          "coverage": 0.1701
+        },
+        {
+          "hex": "#343133",
+          "coverage": 0.1142
+        },
+        {
+          "hex": "#796c62",
+          "coverage": 0.0987
+        },
+        {
+          "hex": "#3c2d1a",
+          "coverage": 0.0807
+        }
+      ],
+      "detail": {
+        "energy": 30.23
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "status",
+      "kind": "chrome",
+      "note": "ready and real job state strip",
+      "grid": null,
+      "box": {
+        "x": 0.01,
+        "y": 0.948,
+        "w": 0.97,
+        "h": 0.041
+      },
+      "px": {
+        "x": 15,
+        "y": 971,
+        "w": 1490,
+        "h": 42
+      },
+      "aspect": 35.4762,
+      "palette": [
+        {
+          "hex": "#191919",
+          "coverage": 0.9395
+        },
+        {
+          "hex": "#3e4147",
+          "coverage": 0.0392
+        },
+        {
+          "hex": "#757a81",
+          "coverage": 0.0198
+        },
+        {
+          "hex": "#88b888",
+          "coverage": 0.0009
+        },
+        {
+          "hex": "#98a8a8",
+          "coverage": 0.0006
+        }
+      ],
+      "detail": {
+        "energy": 9.9305
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "logo",
+      "kind": "chrome",
+      "note": "Existing product icon; invented mockup mark is a comp defect",
+      "grid": null,
+      "codeDrawn": true,
+      "bleed": true,
+      "box": {
+        "x": 0.015,
+        "y": 0.015,
+        "w": 0.02,
+        "h": 0.032
+      },
+      "px": {
+        "x": 23,
+        "y": 15,
+        "w": 31,
+        "h": 33
+      },
+      "aspect": 0.9394,
+      "palette": [
+        {
+          "hex": "#c48e56",
+          "coverage": 0.4959
+        },
+        {
+          "hex": "#151617",
+          "coverage": 0.3802
+        },
+        {
+          "hex": "#3a3024",
+          "coverage": 0.0661
+        },
+        {
+          "hex": "#a57855",
+          "coverage": 0.0413
+        },
+        {
+          "hex": "#605030",
+          "coverage": 0.0165
+        }
+      ],
+      "detail": {
+        "energy": 6.6701
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "brand-subtitle",
+      "kind": "text",
+      "note": "AI media studio",
+      "grid": null,
+      "box": {
+        "x": 0.051,
+        "y": 0.037,
+        "w": 0.12,
+        "h": 0.014
+      },
+      "px": {
+        "x": 78,
+        "y": 38,
+        "w": 184,
+        "h": 14
+      },
+      "aspect": 13.1429,
+      "palette": [
+        {
+          "hex": "#171819",
+          "coverage": 0.8474
+        },
+        {
+          "hex": "#333537",
+          "coverage": 0.0649
+        },
+        {
+          "hex": "#9c9da5",
+          "coverage": 0.039
+        },
+        {
+          "hex": "#565862",
+          "coverage": 0.0325
+        },
+        {
+          "hex": "#bbc2c2",
+          "coverage": 0.0162
+        }
+      ],
+      "detail": {
+        "energy": 28.0585
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "camera-caption",
+      "kind": "text",
+      "note": "motion settings caption",
+      "grid": null,
+      "box": {
+        "x": 0.083,
+        "y": 0.656,
+        "w": 0.192,
+        "h": 0.041
+      },
+      "px": {
+        "x": 127,
+        "y": 672,
+        "w": 295,
+        "h": 42
+      },
+      "aspect": 7.0238,
+      "palette": [
+        {
+          "hex": "#171819",
+          "coverage": 0.823
+        },
+        {
+          "hex": "#e3a35c",
+          "coverage": 0.0808
+        },
+        {
+          "hex": "#383947",
+          "coverage": 0.0685
+        },
+        {
+          "hex": "#c9cccf",
+          "coverage": 0.0175
+        },
+        {
+          "hex": "#96999d",
+          "coverage": 0.0102
+        }
+      ],
+      "detail": {
+        "energy": 21.7433
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    }
+  ]
+}

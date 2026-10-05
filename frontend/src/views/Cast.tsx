@@ -209,8 +209,10 @@ export function CastView() {
             <article key={c.id} className="char-card">
               <div className="portrait" style={{ background: `linear-gradient(160deg, ${c.palette[0] || "#ff4d8d"}55, ${c.palette[1] || "#120d18"})` }}>
                 {c.canonical_asset_id && (
-                  <img src={thumbUrl({ id: c.canonical_asset_id, thumb_path: "x", kind: "image" })} alt={c.name}
-                    onClick={() => app.openAsset(c.canonical_asset_id!)} style={{ cursor: "zoom-in" }} />
+                  <button className="portrait-preview" onClick={() => app.openAsset(c.canonical_asset_id!)}
+                    aria-label={`${t("enlarge")} · ${c.name}`}>
+                    <img src={thumbUrl({ id: c.canonical_asset_id, thumb_path: "x", kind: "image" })} alt={c.name} />
+                  </button>
                 )}
                 {!c.canonical_asset_id && (
                   <button className="btn sm primary portrait-cta"
@@ -328,7 +330,9 @@ export function CastView() {
               {t("canonical")}
               <div className="drop-slot">
                 {draft.canonical_asset_id
-                  ? <img src={thumbUrl({ id: draft.canonical_asset_id, thumb_path: "x", kind: "image" })} alt="" />
+                  ? <button className="reference-mini" aria-label={t("enlarge")} onClick={() => app.openAsset(draft.canonical_asset_id!)}>
+                      <img src={thumbUrl({ id: draft.canonical_asset_id, thumb_path: "x", kind: "image" })} alt={draft.name} />
+                    </button>
                   : <ImagePlus size={22} />}
                 <button className="btn sm" onClick={() => setPicking(true)}>{t("pickReference")}</button>
                 {draft.canonical_asset_id && <button className="btn sm ghost" onClick={() => setDraft({ ...draft, canonical_asset_id: null })}><X size={14} /></button>}

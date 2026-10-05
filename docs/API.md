@@ -1,5 +1,11 @@
 # HTTP API
 
+Spaces starter templates now include `character_outfit_motion`. Asset/cast
+nodes accept optional `title` and `ref_role`; video node `seconds` controls real
+workflow duration. Conflicting guides and excess image references return clear
+validation errors. The existing `/api/agent/studio_spaces` and MCP tool expose
+the same graph data and operations. See [MCP.md](MCP.md).
+
 Base URL `http://127.0.0.1:8815`. JSON in and out. Errors are always
 `{"error": "<code>", "message": "<what to do>"}` with a 4xx status (404
 `not_found`, 400 for validation, 409 `<capability>_unavailable` when no
@@ -176,6 +182,8 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | POST | `/api/assets/{id}/clip-edit/prompt` | the same body -> the plan without rendering: `{asset_id, task, prompt, enhanced, how ("written"\|"propagation"\|"language"\|"vision"\|"no_model"), how_detail, reference_asset_ids, cast, unknown_mentions, first_frame_asset_id}` (what the model would receive; the lightbox's "See the instruction") |
 | GET / POST | `/api/assets/{id}/stems` | the stems found so far `{stems{vocals, drums, bass, other, instrumental: asset_id}}` / split the song (body of `studio_stems` without `asset_id`; Demucs `htdemucs` in ComfyUI's own Python, installed once into `tools/demucs-lib` in the data folder) -> `{job, stems}`; lip sync (S2V, InfiniteTalk) feeds the vocals to the audio encoder, `kick` beat effects read the drums and the stem sources (`drums`, `bass`, `vocals`, `other`) read their own stem when the stems exist; the split also mixes an `instrumental` asset |
 | POST | `/api/assets/{id}/animate` | same body as `studio_animate` |
+| PUT | `/api/productions/{slug}/segments` | `{text}` imports optional TXT/LRC/SRT/VTT; `{segments}` saves the complete edited list of `{id, text, start_s?, end_s?, shot_key?}`. Returns `{slug, segments, timed, retimed}`. Does not enqueue generation. |
+| POST | `/api/agent/studio_production_segments?production={slug}` | same input; compact `{production, count, timed, retimed}` result |
 | GET | `/api/workflows` | `{builtin: [spec], custom: [spec]}` (built-ins now include `flux_schnell_txt2img`, `flux_kontext_edit`, `wan22_ti2v`, `ace15_song` alongside SDXL/SD1.5/SVD) |
 | POST | `/api/workflows/import` | `{name, workflow}` (UI **or** API format - a UI export with `nodes`/`links`/subgraphs is converted first, against the live `/object_info` or, with ComfyUI off, the copy cached in `data/comfy/object_info.json`) -> proposed spec with `map` (and `converted_from: "ui"`) |
 | POST | `/api/workflows/import-file` | multipart `file` (.json, at most 2 MB) |

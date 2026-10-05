@@ -308,8 +308,11 @@ def build_auto_cut(
             # a lip-synced clip was rendered from this span's own audio: it
             # plays from the second the span is at, or the lips drift
             clip["trim_start_s"] = round(max(0.0, starts[i] - span["start_s"]), 3)
+            clip["synced"] = True
+            clip["source_fit"] = "error"
         elif clip["kind"] == "video":
             clip["trim_start_s"] = _video_trim(asset, duration_s, video_uses, lead_in, rotate)
+            clip["source_fit"] = "stretch"
         if clip["kind"] == "image":
             if ken_burns_variety:
                 choices = [p for p in PAN_DIRECTIONS[:-1] if p != last_pan]
@@ -428,6 +431,15 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                     if kb.get("pan", "none") not in PAN_DIRECTIONS:
                         raise TimelineError(f"visual clip {i}: pan must be one of {', '.join(PAN_DIRECTIONS)}")
                     c["ken_burns"] = {"zoom_start": round(zs, 3), "zoom_end": round(ze, 3), "pan": kb.get("pan", "none")}
+                else:
+                    fit = clip.get("source_fit") or ("error" if clip.get("synced") else "stretch")
+                    if fit not in ("stretch", "hold", "error"):
+                        raise TimelineError(f"visual clip {i}: source_fit is stretch, hold or error")
+                    c["source_fit"] = fit
+                    if clip.get("synced"):
+                        if fit != "error":
+                            raise TimelineError(f"visual clip {i}: synced audio must keep its original speed")
+                        c["synced"] = True
                 clean.append(c)
                 t += duration
             out.append({"type": "visual", "clips": clean})
@@ -481,7 +493,7 @@ def apply_clip_updates(tracks: list[dict[str, Any]], updates: list[dict[str, Any
     tracks = [dict(t, clips=[dict(c) for c in t["clips"]]) for t in tracks]
     visual = next(t for t in tracks if t["type"] == "visual")
     clips = visual["clips"]
-    allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind"}
+    allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind", "source_fit"}
     for upd in updates:
         if not isinstance(upd, dict) or not isinstance(upd.get("index"), int):
             raise TimelineError("each clip update needs an integer 'index'")

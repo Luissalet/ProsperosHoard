@@ -406,6 +406,8 @@ export interface Clip {
   start_s: number;
   duration_s: number;
   trim_start_s?: number;
+  source_fit?: "stretch" | "hold" | "error";
+  synced?: boolean;
   ken_burns?: { zoom_start: number; zoom_end: number; pan: string };
   transition_in?: { type: string; duration_s: number };
 }
@@ -873,6 +875,10 @@ export interface ProductionState {
   timing?: ProductionTiming | null;
 }
 
+export interface ScriptSegment {
+  id: string; text: string; start_s: number | null; end_s: number | null; shot_key: string | null;
+}
+
 export interface QaItem {
   stage: string;
   key: string;
@@ -1097,7 +1103,9 @@ export const api = {
   generate: (pid: string, body: Record<string, unknown>) =>
     request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/api/projects/${pid}/generate`, body),
   edit: (assetId: string, body: Record<string, unknown>) =>
-    request<{ job: Job }>("POST", `/api/assets/${assetId}/edit`, { asset_id: assetId, ...body }),
+      request<{ job: Job }>("POST", `/api/assets/${assetId}/edit`, { asset_id: assetId, ...body }),
+  outpaint: (assetId: string, body: Record<string, unknown>) =>
+      request<{ job: Job }>("POST", `/api/assets/${assetId}/outpaint`, { asset_id: assetId, ...body }),
   animate: (assetId: string, body: Record<string, unknown>) =>
     request<{ job: Job }>("POST", `/api/assets/${assetId}/animate`, { asset_id: assetId, ...body }),
   workflows: () => request<{ builtin: WorkflowSpec[]; custom: WorkflowSpec[] }>("GET", "/api/workflows"),
@@ -1237,7 +1245,9 @@ export const api = {
   continueProduction: (slug: string, take?: number) =>
     request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   setProductionLyrics: (slug: string, lyrics: string, run = false) =>
-    request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+      request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+  setProductionSegments: (slug: string, body: { text?: string; segments?: ScriptSegment[] }) =>
+    request<{ slug: string; segments: ScriptSegment[]; retimed: string[]; timed: number }>("PUT", `/api/productions/${slug}/segments`, body),
   setProductionSong: (slug: string, body: SongChange) =>
     request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(
       "PUT", `/api/productions/${slug}/song`, body),

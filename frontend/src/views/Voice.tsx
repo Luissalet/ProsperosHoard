@@ -482,7 +482,7 @@ function DubTab() {
           {job.state === "failed" && <div className="row"><XCircle size={14} className="err-text" /><span className="small err-text">{jobMessage(job.message, lang)}</span></div>}
           {(outputs.segments?.length || 0) > 0 && (
             <div className="card" style={{ padding: 6 }}>
-              <table className="list">
+              <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
                 <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th /></tr></thead>
                 <tbody>
                   {(outputs.segments || []).map((s) => (
@@ -502,7 +502,7 @@ function DubTab() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
           {job.state === "done" && outputs.final_video && (

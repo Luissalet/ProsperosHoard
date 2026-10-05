@@ -19,6 +19,10 @@ export function LibraryView() {
   const [items, setItems] = useState<Asset[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [focus, setFocus] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reload, setReload] = useState(0);
+  const request = useRef(0);
   const [pathOpen, setPathOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [path, setPath] = useState("");
@@ -32,16 +36,30 @@ export function LibraryView() {
   const dq = useDebounced(query, 250);
 
   const params = { query: dq, kind, source, favourite: fav || undefined, min_rating: minRating || undefined, limit: 60 };
+  const hasFilters = !!query || !!kind || !!source || fav || minRating > 0;
+  const clearFilters = () => { setQuery(""); setKind(""); setSource(""); setFav(false); setMinRating(0); setPicked(null); };
   useEffect(() => {
-    api.assets(pid, params).then((r) => { setItems(r.items); setNext(r.next_offset); setFocus(0); }).catch((e) => app.toast(e.message, "bad"));
+    const id = ++request.current;
+    setLoading(true); setLoadError(""); setNext(null); setPicked(null);
+    api.assets(pid, params).then((r) => {
+      if (request.current !== id) return;
+      setItems(r.items); setNext(r.next_offset); setFocus(0);
+    }).catch((e) => { if (request.current === id) setLoadError(e.message); })
+      .finally(() => { if (request.current === id) setLoading(false); });
+    return () => { if (request.current === id) request.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pid, dq, kind, source, fav, minRating, app.dataVersion]);
+  }, [pid, dq, kind, source, fav, minRating, app.dataVersion, reload]);
 
   const more = async () => {
-    if (next === null) return;
-    const r = await api.assets(pid, { ...params, offset: next });
-    setItems((xs) => [...xs, ...r.items]);
-    setNext(r.next_offset);
+    if (next === null || loading || query !== dq) return;
+    const id = request.current;
+    setLoading(true); setLoadError("");
+    try {
+      const r = await api.assets(pid, { ...params, offset: next });
+      if (request.current !== id) return;
+      setItems((xs) => [...xs, ...r.items]); setNext(r.next_offset);
+    } catch (e) { if (request.current === id) setLoadError((e as Error).message); }
+    finally { if (request.current === id) setLoading(false); }
   };
 
   useEffect(() => {
@@ -114,13 +132,13 @@ export function LibraryView() {
       <div className="filters">
         <div className="search">
           <Search size={16} />
-          <input id="library-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search")} />
+          <input id="library-search" aria-label={t("search")} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search")} />
         </div>
-        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+        <select aria-label={t("kindAll")} value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">{t("kindAll")}</option>
           {["image", "video", "audio", "lyrics", "font"].map((k) => <option key={k} value={k}>{kindName(k, lang)}</option>)}
         </select>
-        <select value={source} onChange={(e) => setSource(e.target.value)}>
+        <select aria-label={t("sourceAll")} value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">{t("sourceAll")}</option>
           {["generated", "rendered", "import", "derived"].map((k) => <option key={k} value={k}>{sourceName(k, lang)}</option>)}
         </select>
@@ -129,9 +147,12 @@ export function LibraryView() {
           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{"★".repeat(n)}</option>)}
         </select>
         <label className="check"><input type="checkbox" checked={fav} onChange={(e) => setFav(e.target.checked)} /> {t("favouritesOnly")}</label>
+        {hasFilters && <button className="btn sm" onClick={clearFilters}>{t("clearFilters")}</button>}
         <span className="muted small" style={{ marginLeft: "auto" }}>{items.length}{next !== null ? "+" : ""}</span>
       </div>
       {del.bar}
+      {!showTrash && loading && <p className="muted" role="status">{t("loading")}</p>}
+      {!showTrash && loadError && <div className="row wrap" role="alert"><span>{loadError}</span><button className="btn" onClick={() => setReload((n) => n + 1)}>{t("recheck")}</button></div>}
       {showTrash ? (
         <div className="stack">
           <div className="row">
@@ -161,7 +182,7 @@ export function LibraryView() {
             </div>
           )}
         </div>
-      ) : items.length === 0 ? <Empty icon={<Images size={34} />} text={t("noAssets")} /> : (
+      ) : loading || loadError ? null : items.length === 0 ? <Empty icon={<Images size={34} />} text={t(hasFilters ? "libraryNoMatches" : "noAssets")} /> : (
         <>
           <div className="masonry">
             {items.map((a, i) => (
@@ -170,7 +191,7 @@ export function LibraryView() {
                   else app.openAsset(a.id, items.map((x) => x.id)); }} />
             ))}
           </div>
-          {next !== null && <div style={{ textAlign: "center", marginTop: 16 }}><button className="btn" onClick={more}>{t("loadMore")}</button></div>}
+          {next !== null && <div style={{ textAlign: "center", marginTop: 16 }}><button className="btn" disabled={loading || query !== dq} onClick={more}>{t("loadMore")}</button></div>}
         </>
       )}
       {linkOpen && (

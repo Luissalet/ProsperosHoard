@@ -1,0 +1,5 @@
+{
+  "prompt": "Reconstruct photographic content from take-2 crop, preserving composition and removing UI",
+  "provenance": "Native image generation from .impeccable/build/crops/take-2.png, synthetic QA, no local video benchmark",
+  "source": "C:/Users/luism/.codex/generated_images/01a108e3-d8ec-7b82-bcca-68b34edab0a1/exec-64da85c9-b301-4a11-bed3-27982526fee7.png"
+}

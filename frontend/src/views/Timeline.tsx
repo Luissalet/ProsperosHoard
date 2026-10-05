@@ -230,9 +230,10 @@ export function TimelineView() {
 function ClipEditor({ index, clip, asset, onApply, onDelete }: {
   index: number; clip: Clip; asset?: Asset; onApply: (f: Record<string, unknown>) => void; onDelete: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [duration, setDuration] = useState(clip.duration_s);
+  const [sourceFit, setSourceFit] = useState(clip.source_fit || (clip.synced ? "error" : "stretch"));
   const [transition, setTransition] = useState(clip.transition_in?.type || "cut");
   const [tDur, setTDur] = useState(clip.transition_in?.duration_s || 0.3);
   const [zs, setZs] = useState(clip.ken_burns?.zoom_start ?? 1);
@@ -245,6 +246,15 @@ function ClipEditor({ index, clip, asset, onApply, onDelete }: {
         onClick={() => app.openAsset(asset.id)} />}
       <label className="field">{t("duration")} <span className="mono">{duration.toFixed(2)} s</span>
         <input type="range" min={0.5} max={8} step={0.05} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></label>
+      {clip.kind === "video" && <label className="field">{lang === "es" ? "Si falta metraje para cubrir la toma" : "If footage is shorter than the shot"}
+        <select value={sourceFit} disabled={clip.synced} onChange={(e) => setSourceFit(e.target.value as typeof sourceFit)}>
+          <option value="stretch">{lang === "es" ? "Ralentizar suavemente (hasta 1,54×)" : "Slow down slightly (up to 1.54×)"}</option>
+          <option value="error">{lang === "es" ? "Pedir un clip más largo" : "Require a longer clip"}</option>
+          <option value="hold">{lang === "es" ? "Congelar el último fotograma a propósito" : "Intentionally hold the last frame"}</option>
+        </select>
+        {clip.synced && <span className="hint">{lang === "es" ? "El habla sincronizada conserva su velocidad." : "Synced speech keeps its original speed."}</span>}
+        {!!asset?.duration_s && asset.duration_s - (clip.trim_start_s || 0) < duration && <span className="hint">{lang === "es" ? "Metraje disponible" : "Available footage"}: {Math.max(0, asset.duration_s - (clip.trim_start_s || 0)).toFixed(2)} s · {lang === "es" ? "Duración de la toma" : "Shot duration"}: {duration.toFixed(2)} s</span>}
+      </label>}
       <div className="grid-2">
         <label className="field">{t("transition")}
           <select value={transition} onChange={(e) => setTransition(e.target.value)}>{TRANSITIONS.map((x) => <option key={x} value={x}>{t(`trans_${x}` as MessageKey)}</option>)}</select></label>
@@ -261,6 +271,7 @@ function ClipEditor({ index, clip, asset, onApply, onDelete }: {
       <div className="row">
         <button className="btn primary" onClick={() => onApply({
           duration_s: Math.round(duration * 1000) / 1000,
+          ...(clip.kind === "video" ? { source_fit: sourceFit } : {}),
           transition_in: { type: transition, duration_s: transition === "cut" ? 0 : tDur },
           ...(clip.kind === "image" ? { ken_burns: { zoom_start: zs, zoom_end: ze, pan } } : {}),
         })}>{t("save")}</button>

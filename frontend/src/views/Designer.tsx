@@ -122,7 +122,9 @@ export function DesignerView() {
               {f.type === "image" ? (
                 <div className="drop-slot" onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => { const id = e.dataTransfer.getData("text/prospero-asset"); if (id) setField(f.name, id); }}>
-                  {fields[f.name] ? <img src={thumbUrl({ id: fields[f.name], thumb_path: "x", kind: "image" })} alt="" /> : <ImagePlus size={20} />}
+                  {fields[f.name] ? <button className="reference-mini" aria-label={`${t("enlarge")} · ${fieldName(f.name, lang)}`} onClick={() => app.openAsset(fields[f.name])}>
+                    <img src={thumbUrl({ id: fields[f.name], thumb_path: "x", kind: "image" })} alt={fieldName(f.name, lang)} />
+                  </button> : <ImagePlus size={20} />}
                   <button className="btn sm" onClick={() => setPicking(f.name)}>{t("pickImage")}</button>
                   {fields[f.name] && <button className="btn sm icon ghost" onClick={() => setField(f.name, "")}><X size={14} /></button>}
                 </div>

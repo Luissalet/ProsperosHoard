@@ -1,0 +1,972 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-05T11:37:13.002282+00:00",
+  "title": "Design System: Prospero's Hoard",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Original Prospero Magenta",
+        "tonalRamp": [
+          "oklch(15% 0.1948 343.68)",
+          "oklch(26% 0.1948 343.68)",
+          "oklch(38% 0.1948 343.68)",
+          "oklch(49% 0.1948 343.68)",
+          "oklch(61% 0.1948 343.68)",
+          "oklch(72% 0.1948 343.68)",
+          "oklch(84% 0.1948 343.68)",
+          "oklch(95% 0.1948 343.68)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Primary Hover",
+        "tonalRamp": [
+          "oklch(15% 0.1548 341.80)",
+          "oklch(26% 0.1548 341.80)",
+          "oklch(38% 0.1548 341.80)",
+          "oklch(49% 0.1548 341.80)",
+          "oklch(61% 0.1548 341.80)",
+          "oklch(72% 0.1548 341.80)",
+          "oklch(84% 0.1548 341.80)",
+          "oklch(95% 0.1548 341.80)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "primary-ink": {
+        "role": "primary",
+        "displayName": "Primary Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0161 340.77)",
+          "oklch(26% 0.0161 340.77)",
+          "oklch(38% 0.0161 340.77)",
+          "oklch(49% 0.0161 340.77)",
+          "oklch(61% 0.0161 340.77)",
+          "oklch(72% 0.0161 340.77)",
+          "oklch(84% 0.0161 340.77)",
+          "oklch(95% 0.0161 340.77)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "Primary Soft",
+        "tonalRamp": [
+          "oklch(15% 0.1948 343.68)",
+          "oklch(26% 0.1948 343.68)",
+          "oklch(38% 0.1948 343.68)",
+          "oklch(49% 0.1948 343.68)",
+          "oklch(61% 0.1948 343.68)",
+          "oklch(72% 0.1948 343.68)",
+          "oklch(84% 0.1948 343.68)",
+          "oklch(95% 0.1948 343.68)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0184 338.98)",
+          "oklch(26% 0.0184 338.98)",
+          "oklch(38% 0.0184 338.98)",
+          "oklch(49% 0.0184 338.98)",
+          "oklch(61% 0.0184 338.98)",
+          "oklch(72% 0.0184 338.98)",
+          "oklch(84% 0.0184 338.98)",
+          "oklch(95% 0.0184 338.98)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "bg-2": {
+        "role": "neutral",
+        "displayName": "Bg 2",
+        "tonalRamp": [
+          "oklch(15% 0.0165 340.97)",
+          "oklch(26% 0.0165 340.97)",
+          "oklch(38% 0.0165 340.97)",
+          "oklch(49% 0.0165 340.97)",
+          "oklch(61% 0.0165 340.97)",
+          "oklch(72% 0.0165 340.97)",
+          "oklch(84% 0.0165 340.97)",
+          "oklch(95% 0.0165 340.97)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "tonalRamp": [
+          "oklch(15% 0.0225 336.38)",
+          "oklch(26% 0.0225 336.38)",
+          "oklch(38% 0.0225 336.38)",
+          "oklch(49% 0.0225 336.38)",
+          "oklch(61% 0.0225 336.38)",
+          "oklch(72% 0.0225 336.38)",
+          "oklch(84% 0.0225 336.38)",
+          "oklch(95% 0.0225 336.38)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Surface 2",
+        "tonalRamp": [
+          "oklch(15% 0.0239 341.33)",
+          "oklch(26% 0.0239 341.33)",
+          "oklch(38% 0.0239 341.33)",
+          "oklch(49% 0.0239 341.33)",
+          "oklch(61% 0.0239 341.33)",
+          "oklch(72% 0.0239 341.33)",
+          "oklch(84% 0.0239 341.33)",
+          "oklch(95% 0.0239 341.33)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "surface-3": {
+        "role": "neutral",
+        "displayName": "Surface 3",
+        "tonalRamp": [
+          "oklch(15% 0.0278 339.00)",
+          "oklch(26% 0.0278 339.00)",
+          "oklch(38% 0.0278 339.00)",
+          "oklch(49% 0.0278 339.00)",
+          "oklch(61% 0.0278 339.00)",
+          "oklch(72% 0.0278 339.00)",
+          "oklch(84% 0.0278 339.00)",
+          "oklch(95% 0.0278 339.00)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "tonalRamp": [
+          "oklch(15% 0.0280 340.77)",
+          "oklch(26% 0.0280 340.77)",
+          "oklch(38% 0.0280 340.77)",
+          "oklch(49% 0.0280 340.77)",
+          "oklch(61% 0.0280 340.77)",
+          "oklch(72% 0.0280 340.77)",
+          "oklch(84% 0.0280 340.77)",
+          "oklch(95% 0.0280 340.77)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Border Strong",
+        "tonalRamp": [
+          "oklch(15% 0.0358 340.10)",
+          "oklch(26% 0.0358 340.10)",
+          "oklch(38% 0.0358 340.10)",
+          "oklch(49% 0.0358 340.10)",
+          "oklch(61% 0.0358 340.10)",
+          "oklch(72% 0.0358 340.10)",
+          "oklch(84% 0.0358 340.10)",
+          "oklch(95% 0.0358 340.10)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "tonalRamp": [
+          "oklch(15% 0.0151 338.93)",
+          "oklch(26% 0.0151 338.93)",
+          "oklch(38% 0.0151 338.93)",
+          "oklch(49% 0.0151 338.93)",
+          "oklch(61% 0.0151 338.93)",
+          "oklch(72% 0.0151 338.93)",
+          "oklch(84% 0.0151 338.93)",
+          "oklch(95% 0.0151 338.93)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Text 2",
+        "tonalRamp": [
+          "oklch(15% 0.0140 340.64)",
+          "oklch(26% 0.0140 340.64)",
+          "oklch(38% 0.0140 340.64)",
+          "oklch(49% 0.0140 340.64)",
+          "oklch(61% 0.0140 340.64)",
+          "oklch(72% 0.0140 340.64)",
+          "oklch(84% 0.0140 340.64)",
+          "oklch(95% 0.0140 340.64)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0162 339.07)",
+          "oklch(26% 0.0162 339.07)",
+          "oklch(38% 0.0162 339.07)",
+          "oklch(49% 0.0162 339.07)",
+          "oklch(61% 0.0162 339.07)",
+          "oklch(72% 0.0162 339.07)",
+          "oklch(84% 0.0162 339.07)",
+          "oklch(95% 0.0162 339.07)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-primary": {
+        "role": "primary",
+        "displayName": "Original Prospero Pink",
+        "tonalRamp": [
+          "oklch(15% 0.2086 5.46)",
+          "oklch(26% 0.2086 5.46)",
+          "oklch(38% 0.2086 5.46)",
+          "oklch(49% 0.2086 5.46)",
+          "oklch(61% 0.2086 5.46)",
+          "oklch(72% 0.2086 5.46)",
+          "oklch(84% 0.2086 5.46)",
+          "oklch(95% 0.2086 5.46)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-primary-hover": {
+        "role": "primary",
+        "displayName": "Light Primary Hover",
+        "tonalRamp": [
+          "oklch(15% 0.1874 4.88)",
+          "oklch(26% 0.1874 4.88)",
+          "oklch(38% 0.1874 4.88)",
+          "oklch(49% 0.1874 4.88)",
+          "oklch(61% 0.1874 4.88)",
+          "oklch(72% 0.1874 4.88)",
+          "oklch(84% 0.1874 4.88)",
+          "oklch(95% 0.1874 4.88)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-primary-ink": {
+        "role": "primary",
+        "displayName": "Light Primary Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-primary-soft": {
+        "role": "primary",
+        "displayName": "Light Primary Soft",
+        "tonalRamp": [
+          "oklch(15% 0.2086 5.46)",
+          "oklch(26% 0.2086 5.46)",
+          "oklch(38% 0.2086 5.46)",
+          "oklch(49% 0.2086 5.46)",
+          "oklch(61% 0.2086 5.46)",
+          "oklch(72% 0.2086 5.46)",
+          "oklch(84% 0.2086 5.46)",
+          "oklch(95% 0.2086 5.46)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-bg": {
+        "role": "neutral",
+        "displayName": "Light Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0090 314.78)",
+          "oklch(26% 0.0090 314.78)",
+          "oklch(38% 0.0090 314.78)",
+          "oklch(49% 0.0090 314.78)",
+          "oklch(61% 0.0090 314.78)",
+          "oklch(72% 0.0090 314.78)",
+          "oklch(84% 0.0090 314.78)",
+          "oklch(95% 0.0090 314.78)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-bg-2": {
+        "role": "neutral",
+        "displayName": "Light Bg 2",
+        "tonalRamp": [
+          "oklch(15% 0.0148 312.24)",
+          "oklch(26% 0.0148 312.24)",
+          "oklch(38% 0.0148 312.24)",
+          "oklch(49% 0.0148 312.24)",
+          "oklch(61% 0.0148 312.24)",
+          "oklch(72% 0.0148 312.24)",
+          "oklch(84% 0.0148 312.24)",
+          "oklch(95% 0.0148 312.24)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-surface": {
+        "role": "neutral",
+        "displayName": "Light Surface",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-surface-2": {
+        "role": "neutral",
+        "displayName": "Light Surface 2",
+        "tonalRamp": [
+          "oklch(15% 0.0102 311.18)",
+          "oklch(26% 0.0102 311.18)",
+          "oklch(38% 0.0102 311.18)",
+          "oklch(49% 0.0102 311.18)",
+          "oklch(61% 0.0102 311.18)",
+          "oklch(72% 0.0102 311.18)",
+          "oklch(84% 0.0102 311.18)",
+          "oklch(95% 0.0102 311.18)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-surface-3": {
+        "role": "neutral",
+        "displayName": "Light Surface 3",
+        "tonalRamp": [
+          "oklch(15% 0.0193 312.80)",
+          "oklch(26% 0.0193 312.80)",
+          "oklch(38% 0.0193 312.80)",
+          "oklch(49% 0.0193 312.80)",
+          "oklch(61% 0.0193 312.80)",
+          "oklch(72% 0.0193 312.80)",
+          "oklch(84% 0.0193 312.80)",
+          "oklch(95% 0.0193 312.80)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "Light Border",
+        "tonalRamp": [
+          "oklch(15% 0.0253 311.69)",
+          "oklch(26% 0.0253 311.69)",
+          "oklch(38% 0.0253 311.69)",
+          "oklch(49% 0.0253 311.69)",
+          "oklch(61% 0.0253 311.69)",
+          "oklch(72% 0.0253 311.69)",
+          "oklch(84% 0.0253 311.69)",
+          "oklch(95% 0.0253 311.69)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-border-strong": {
+        "role": "neutral",
+        "displayName": "Light Border Strong",
+        "tonalRamp": [
+          "oklch(15% 0.0376 310.42)",
+          "oklch(26% 0.0376 310.42)",
+          "oklch(38% 0.0376 310.42)",
+          "oklch(49% 0.0376 310.42)",
+          "oklch(61% 0.0376 310.42)",
+          "oklch(72% 0.0376 310.42)",
+          "oklch(84% 0.0376 310.42)",
+          "oklch(95% 0.0376 310.42)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-text": {
+        "role": "neutral",
+        "displayName": "Light Text",
+        "tonalRamp": [
+          "oklch(15% 0.0295 310.04)",
+          "oklch(26% 0.0295 310.04)",
+          "oklch(38% 0.0295 310.04)",
+          "oklch(49% 0.0295 310.04)",
+          "oklch(61% 0.0295 310.04)",
+          "oklch(72% 0.0295 310.04)",
+          "oklch(84% 0.0295 310.04)",
+          "oklch(95% 0.0295 310.04)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-text-2": {
+        "role": "neutral",
+        "displayName": "Light Text 2",
+        "tonalRamp": [
+          "oklch(15% 0.0392 307.34)",
+          "oklch(26% 0.0392 307.34)",
+          "oklch(38% 0.0392 307.34)",
+          "oklch(49% 0.0392 307.34)",
+          "oklch(61% 0.0392 307.34)",
+          "oklch(72% 0.0392 307.34)",
+          "oklch(84% 0.0392 307.34)",
+          "oklch(95% 0.0392 307.34)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-muted": {
+        "role": "neutral",
+        "displayName": "Light Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0402 307.57)",
+          "oklch(26% 0.0402 307.57)",
+          "oklch(38% 0.0402 307.57)",
+          "oklch(49% 0.0402 307.57)",
+          "oklch(61% 0.0402 307.57)",
+          "oklch(72% 0.0402 307.57)",
+          "oklch(84% 0.0402 307.57)",
+          "oklch(95% 0.0402 307.57)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "ok": {
+        "role": "semantic",
+        "displayName": "Ok",
+        "tonalRamp": [
+          "oklch(15% 0.1265 156.30)",
+          "oklch(26% 0.1265 156.30)",
+          "oklch(38% 0.1265 156.30)",
+          "oklch(49% 0.1265 156.30)",
+          "oklch(61% 0.1265 156.30)",
+          "oklch(72% 0.1265 156.30)",
+          "oklch(84% 0.1265 156.30)",
+          "oklch(95% 0.1265 156.30)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "warn": {
+        "role": "semantic",
+        "displayName": "Warn",
+        "tonalRamp": [
+          "oklch(15% 0.1304 83.43)",
+          "oklch(26% 0.1304 83.43)",
+          "oklch(38% 0.1304 83.43)",
+          "oklch(49% 0.1304 83.43)",
+          "oklch(61% 0.1304 83.43)",
+          "oklch(72% 0.1304 83.43)",
+          "oklch(84% 0.1304 83.43)",
+          "oklch(95% 0.1304 83.43)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "bad": {
+        "role": "semantic",
+        "displayName": "Bad",
+        "tonalRamp": [
+          "oklch(15% 0.1288 27.87)",
+          "oklch(26% 0.1288 27.87)",
+          "oklch(38% 0.1288 27.87)",
+          "oklch(49% 0.1288 27.87)",
+          "oklch(61% 0.1288 27.87)",
+          "oklch(72% 0.1288 27.87)",
+          "oklch(84% 0.1288 27.87)",
+          "oklch(95% 0.1288 27.87)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "info": {
+        "role": "semantic",
+        "displayName": "Info",
+        "tonalRamp": [
+          "oklch(15% 0.0863 255.38)",
+          "oklch(26% 0.0863 255.38)",
+          "oklch(38% 0.0863 255.38)",
+          "oklch(49% 0.0863 255.38)",
+          "oklch(61% 0.0863 255.38)",
+          "oklch(72% 0.0863 255.38)",
+          "oklch(84% 0.0863 255.38)",
+          "oklch(95% 0.0863 255.38)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "gold-soft": {
+        "role": "semantic",
+        "displayName": "Gold Soft",
+        "tonalRamp": [
+          "oklch(15% 0.1304 83.43)",
+          "oklch(26% 0.1304 83.43)",
+          "oklch(38% 0.1304 83.43)",
+          "oklch(49% 0.1304 83.43)",
+          "oklch(61% 0.1304 83.43)",
+          "oklch(72% 0.1304 83.43)",
+          "oklch(84% 0.1304 83.43)",
+          "oklch(95% 0.1304 83.43)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-ok": {
+        "role": "semantic",
+        "displayName": "Light Ok",
+        "tonalRamp": [
+          "oklch(15% 0.1307 158.36)",
+          "oklch(26% 0.1307 158.36)",
+          "oklch(38% 0.1307 158.36)",
+          "oklch(49% 0.1307 158.36)",
+          "oklch(61% 0.1307 158.36)",
+          "oklch(72% 0.1307 158.36)",
+          "oklch(84% 0.1307 158.36)",
+          "oklch(95% 0.1307 158.36)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-warn": {
+        "role": "semantic",
+        "displayName": "Light Warn",
+        "tonalRamp": [
+          "oklch(15% 0.1176 75.11)",
+          "oklch(26% 0.1176 75.11)",
+          "oklch(38% 0.1176 75.11)",
+          "oklch(49% 0.1176 75.11)",
+          "oklch(61% 0.1176 75.11)",
+          "oklch(72% 0.1176 75.11)",
+          "oklch(84% 0.1176 75.11)",
+          "oklch(95% 0.1176 75.11)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-bad": {
+        "role": "semantic",
+        "displayName": "Light Bad",
+        "tonalRamp": [
+          "oklch(15% 0.1828 24.37)",
+          "oklch(26% 0.1828 24.37)",
+          "oklch(38% 0.1828 24.37)",
+          "oklch(49% 0.1828 24.37)",
+          "oklch(61% 0.1828 24.37)",
+          "oklch(72% 0.1828 24.37)",
+          "oklch(84% 0.1828 24.37)",
+          "oklch(95% 0.1828 24.37)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-info": {
+        "role": "semantic",
+        "displayName": "Light Info",
+        "tonalRamp": [
+          "oklch(15% 0.1814 263.74)",
+          "oklch(26% 0.1814 263.74)",
+          "oklch(38% 0.1814 263.74)",
+          "oklch(49% 0.1814 263.74)",
+          "oklch(61% 0.1814 263.74)",
+          "oklch(72% 0.1814 263.74)",
+          "oklch(84% 0.1814 263.74)",
+          "oklch(95% 0.1814 263.74)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "light-gold-soft": {
+        "role": "semantic",
+        "displayName": "Light Gold Soft",
+        "tonalRamp": [
+          "oklch(15% 0.1176 75.11)",
+          "oklch(26% 0.1176 75.11)",
+          "oklch(38% 0.1176 75.11)",
+          "oklch(49% 0.1176 75.11)",
+          "oklch(61% 0.1176 75.11)",
+          "oklch(72% 0.1176 75.11)",
+          "oklch(84% 0.1176 75.11)",
+          "oklch(95% 0.1176 75.11)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "port-image": {
+        "role": "semantic",
+        "displayName": "Port Image",
+        "tonalRamp": [
+          "oklch(15% 0.1464 301.24)",
+          "oklch(26% 0.1464 301.24)",
+          "oklch(38% 0.1464 301.24)",
+          "oklch(49% 0.1464 301.24)",
+          "oklch(61% 0.1464 301.24)",
+          "oklch(72% 0.1464 301.24)",
+          "oklch(84% 0.1464 301.24)",
+          "oklch(95% 0.1464 301.24)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "port-audio": {
+        "role": "semantic",
+        "displayName": "Port Audio",
+        "tonalRamp": [
+          "oklch(15% 0.1376 64.65)",
+          "oklch(26% 0.1376 64.65)",
+          "oklch(38% 0.1376 64.65)",
+          "oklch(49% 0.1376 64.65)",
+          "oklch(61% 0.1376 64.65)",
+          "oklch(72% 0.1376 64.65)",
+          "oklch(84% 0.1376 64.65)",
+          "oklch(95% 0.1376 64.65)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "port-any": {
+        "role": "semantic",
+        "displayName": "Port Any",
+        "tonalRamp": [
+          "oklch(15% 0.0253 299.15)",
+          "oklch(26% 0.0253 299.15)",
+          "oklch(38% 0.0253 299.15)",
+          "oklch(49% 0.0253 299.15)",
+          "oklch(61% 0.0253 299.15)",
+          "oklch(72% 0.0253 299.15)",
+          "oklch(84% 0.0253 299.15)",
+          "oklch(95% 0.0253 299.15)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      },
+      "monitor-black": {
+        "role": "neutral",
+        "displayName": "Monitor Black",
+        "tonalRamp": [
+          "oklch(15% 0.0029 246.26)",
+          "oklch(26% 0.0029 246.26)",
+          "oklch(38% 0.0029 246.26)",
+          "oklch(49% 0.0029 246.26)",
+          "oklch(61% 0.0029 246.26)",
+          "oklch(72% 0.0029 246.26)",
+          "oklch(84% 0.0029 246.26)",
+          "oklch(95% 0.0029 246.26)"
+        ],
+        "tonalRampSource": "Synthesized OKLCH display metadata, not implementation tokens; source alpha stays in frontmatter."
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Actual inherited page-head H1 cascade; family depends on installed fonts, not a verified Cinzel webfont."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Observed working-interface type role."
+      },
+      "composer-title": {
+        "displayName": "Composer Title",
+        "purpose": "Observed working-interface type role."
+      },
+      "section-title": {
+        "displayName": "Section Title",
+        "purpose": "Observed working-interface type role."
+      },
+      "card-title": {
+        "displayName": "Card Title",
+        "purpose": "Observed working-interface type role."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Observed working-interface type role."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Observed working-interface type role."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Observed working-interface type role."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Observed working-interface type role."
+      }
+    },
+    "shadows": [
+      {
+        "name": "popover-dark",
+        "value": "0 16px 46px #0006",
+        "purpose": "Menus and popovers in dark mode."
+      },
+      {
+        "name": "popover-light",
+        "value": "0 16px 46px #3c1e501a",
+        "purpose": "Source-defined light-mode menus and popovers."
+      }
+    ],
+    "motion": [
+      {
+        "name": "button-state",
+        "value": "background .12s, border-color .12s, transform .05s",
+        "purpose": "Shared buttons."
+      },
+      {
+        "name": "tools-reveal",
+        "value": "180ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Tools clip-path reveal; disabled for prefers-reduced-motion."
+      },
+      {
+        "name": "spaces-focus",
+        "value": "250ms",
+        "purpose": "Existing surface-specific viewport focus transition."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "shell-compact",
+        "value": "1200px"
+      },
+      {
+        "name": "shell-narrow",
+        "value": "900px"
+      },
+      {
+        "name": "shell-mobile",
+        "value": "700px"
+      },
+      {
+        "name": "spaces-stack",
+        "value": "1050px"
+      },
+      {
+        "name": "spaces-mobile",
+        "value": "640px"
+      },
+      {
+        "name": "spaces-width-focus",
+        "value": "600px"
+      },
+      {
+        "name": "header-wrap",
+        "value": "1360px"
+      },
+      {
+        "name": "header-host-details",
+        "value": "1100px"
+      },
+      {
+        "name": "picker-stack",
+        "value": "760px"
+      }
+    ],
+    "focus": {
+      "global": "2px solid var(--accent), 3px offset",
+      "field": "accent border + 0 0 0 3px var(--accent-soft)",
+      "selectedNode": "accent border + 2px outline, 3px offset",
+      "tableRegion": "Global 2px accent outline with -2px offset; named region and tabIndex=0."
+    },
+    "provenance": {
+      "sourceOrder": [
+        "styles.css imports hoard-theme.css original Prospero palette selected by html data-hoard-app",
+        "studio.css maps dark roles and declares final light palette"
+      ],
+      "bundledFonts": [
+        "Space Grotesk Variable",
+        "JetBrains Mono Variable"
+      ],
+      "legacySerif": "frontend/src/styles.css .page-head h1 has greater specificity than studio.css h1",
+      "capturesOpened": [
+        ".impeccable/review/desktop.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/spaces-list-desktop.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/spaces-mobile.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/brand-monitor-desktop-light.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/brand-monitor-mobile-dark.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/deep-reference-mobile-after.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/deep-storyboard-track-mobile-after.png",
+        "D:/LocalAI/qa/prospero-redesign-20261005/deep-engine-loading-after.png"
+      ]
+    },
+    "reviewScope": {
+      "studio": "F1–F4 resolved; scoped ship only. Formal plates open and later gates pending.",
+      "spaces": "Mobile-focus F1 resolved; scoped ship only. No QUALITY BAR card supplied.",
+      "exactCompApproved": false,
+      "wholeProductApproved": false,
+      "lightMode": "Palette, closed telemetry and media-fit captures inspected; no comprehensive light-theme approval.",
+      "brandMonitor": "Root/reviewer report UI corrections complete; refreshed docs resolve stale brand guidance. Formal comp gates stay open.",
+      "deepCorrective": "Corrective scope passed with no unresolved material UI findings in the reviewed sample; FORM seed binding resolved. Formal disposition remains fix due to inherited open reproduction/type limits. Documenter inspected sources and two mobile captures; other user tests and 746 passed/3 skipped are parent-reported.",
+      "deepReviewSource": "D:/LocalAI/qa/prospero-redesign-20261005/deep-review.md",
+      "asynchronousUserChecks": "Parent reports isolated-proxy slow-to-fast out-of-order library responses cannot replace current results, and 503 error/re-check recovery returns 15 tiles with 0 alerts. These prove the tested interleavings only; independent picker checks remain underway.",
+      "engineStatusCorrection": "EngineBar/i18n source and initial-loading capture inspected. Parent reports delayed/503/retry/recovered manual checks, new frontend build and repository screenshot checks. Full 746-pass/3-skip suite was before this final status-label patch. Specific reviewer continuation pending; formal disposition fix and inherited open gates unchanged."
+    },
+    "surfaceEvidence": {
+      "studio": {
+        "brief": ".impeccable/direction.md",
+        "desktopComposer": "340px; 300px at <=900px",
+        "monitor": "height clamp(260px, calc(100dvh - 550px), 515px); contained media; mobile 260px",
+        "mobile": "<=700px take desk first, direct Compose a take action to existing composer",
+        "imageMonitor": "Absolute inset-0 full-bounds image with contain, max-width/height 100% and overflow-hidden stage; comparison clamp(220px,45dvh,420px).",
+        "generationFields": "minmax(0,1fr), zero field minimum width, inputs width/max-width 100%; optional negative prompt stays within panel.",
+        "headerTelemetry": "Closed summary retains all reported GPU VRAM percentages/bars plus aggregate GB. Only host/compute details hide <=1100px; full-width row <=700px.",
+        "formSeed": "Existing 26f04583 now explicitly bound in FORM in direction.md; no reroll and no global layout inference."
+      },
+      "spaces": {
+        "brief": ".impeccable/surfaces/spaces.md",
+        "mode": "Existing graph editor preserved; fifteen node types",
+        "focus": "At canvas width <=600px, zoom=max(1,min(1.15,(width-32)/nodeWidth)); minimum 16px origin inset and vertical panning. Desktop fits selected node with maxZoom=1.",
+        "strategyAuthority": "Keep mode and page strategy in the existing brief; this metadata records implementation only."
+      },
+      "sharedCorrections": {
+        "containment": "Cards/fields min-width:0; controls min-width:0,max-width:100%; grid2/grid3 minmax(0,1fr), single-column <=700px.",
+        "mobileControls": "Page-head actions/selectors full width, segmented controls wrap min-height40px; content tabs wrap min-height44px.",
+        "picker": "Stacks <=760px; <=700px two-column grid max-height38dvh, preview media max-height180px, full-row search and wrapped footer. Requests ignore stale generations and disable stale Use.",
+        "library": "Accessible filter names, explicit loading/error/retry, stale-response guard and filtered-empty Clear filters action.",
+        "keyboardMedia": "Cast canonical/edit and Designer thumbnails use native buttons opening shared viewer.",
+        "localOverflow": "Six named focusable table regions retain horizontal overflow. SongTrack keeps 600px internal editing width inside shrinkable main panel; auxiliary 250px region stacks <=1100px.",
+        "progress": "Default progress and production fill are solid var(--accent); semantic warning/failure/waiting remain.",
+        "compactLabels": "Waveform labels require measured fit; full legend retained. Rail labels do not wrap and have 2px horizontal padding.",
+        "exports": "Production export and canvas-download action rows wrap.",
+        "engineStatus": "Initial unanswered request uses Loading/Cargando, not Off; request failure uses status unavailable/estado no disponible with error alert and Re-check. Retry disabled while checking. A completed response retains existing running/down/starting labels and actions; subsequent refresh shows last known service state unless error overrides it."
+      }
+    },
+    "notCanonized": [
+      "Legacy uppercase panel/nav labels are not promoted into new kicker/eyebrow patterns.",
+      "The inherited serif heading stack is recorded accurately; no unverified Cinzel loading claim.",
+      "User-positioned graph overlaps and small overview text are not typography or spacing prescriptions.",
+      "Open comp gates and absent QUALITY BAR evidence are not converted into a quality claim.",
+      "Superseded copper branding is not a palette option; orange semantic data and project media are not brand highlights.",
+      "The internal 600px SongTrack width is local editing geometry, not a global minimum screen width; hidden waveform text retains its full legend.",
+      "Inherited serif page headings remain a formal TYPE discrepancy; the recorded source stack is not approval of that difference from the selected comp.",
+      "An unanswered or failed backend status request is not evidence that the backend is off."
+    ],
+    "brandIdentity": {
+      "instruction": "Original dragon-and-wand icon and magenta/pink highlights pinned by user; prior delegated copper palette superseded.",
+      "assetSha256": {
+        "frontend/public/favicon-192.png": "FDFC226936811049621A27D8A2F06A83AD3A7EB6230729BE1A3263F0D6B3D104",
+        "frontend/public/favicon.ico": "C140BA79725351CD84D58EAE96E3D90F2DFA47393D4FB63CB042D6DE38D20B76"
+      },
+      "darkSource": "hoard-theme.css html[data-hoard-app=\"prospero\"]",
+      "lightSource": "studio.css :root[data-theme=\"light\"]"
+    },
+    "scopeEvidence": {
+      "spacesEditing": {
+        "report": "docs/PROSPERO_SPACES_CONTINUITY_QA_2026-10-05.md",
+        "receipt": "D:\\LocalAI\\qa\\prospero-redesign-20261005\\flow-validation.json",
+        "independentReview": "not performed for this extension",
+        "formalGates": "inherited open; no new closure"
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shared working action and its actual interaction states.",
+      "html": "<button class=\"ds-btn-primary\">Generate clip</button>",
+      "css": ".ds-btn-primary{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;background:var(--accent,#e65db6);color:var(--accent-ink,#1b1318);border-color:var(--accent,#e65db6);font-weight:600;}.ds-btn-primary:hover{background:var(--accent-2,#eb80c6);border-color:var(--accent-2,#eb80c6);}.ds-btn-primary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Shared working action and its actual interaction states.",
+      "html": "<button class=\"ds-btn-secondary\">Choose</button>",
+      "css": ".ds-btn-secondary{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-btn-secondary:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664);}.ds-btn-secondary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-secondary:active{transform:translateY(1px)}.ds-btn-secondary:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Shared working action and its actual interaction states.",
+      "html": "<button class=\"ds-btn-ghost\">Enlarge</button>",
+      "css": ".ds-btn-ghost{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;border-color:transparent;color:var(--text-2,#beb4ba);}.ds-btn-ghost:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8);}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-ghost:active{transform:translateY(1px)}.ds-btn-ghost:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Surface field with the source border/ring focus treatment.",
+      "html": "<label class=\"ds-field\">What does the subject do?<input class=\"ds-input\" type=\"text\" value=\"The dancer turns toward the camera\"></label>",
+      "css": ".ds-field{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:flex;flex-direction:column;gap:5px;color:var(--text-2,#beb4ba);font-size:12.5px}.ds-input{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border-strong,#6c5664);border-radius:9px;padding:7px 10px;min-width:0;max-width:100%;font-size:14px;line-height:1.45;outline:none}.ds-input:focus{border-color:var(--accent,#e65db6);box-shadow:0 0 0 3px var(--accent-soft,rgba(230, 93, 182, 0.14))}"
+    },
+    {
+      "name": "Selected Rail Item",
+      "kind": "nav",
+      "refersTo": "rail-item-selected",
+      "description": "Compact navigation with icon, readable label and selected magenta wash.",
+      "html": "<button class=\"ds-rail\" aria-current=\"page\"><svg width=\"21\" height=\"21\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"15\" y=\"15\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M6 9v9h9\"/></svg><span>Spaces</span></button>",
+      "css": ".ds-rail{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;width:72px;min-height:65px;padding:8px 2px;border:0;border-radius:6px;background:var(--accent-soft,rgba(230, 93, 182, 0.14));color:var(--accent,#e65db6);cursor:pointer}.ds-rail span{font-size:10px;white-space:nowrap;overflow-wrap:normal}.ds-rail:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8)}.ds-rail:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Informational status tag; not a clickable control.",
+      "html": "<span class=\"ds-pill\">Selected</span>",
+      "css": ".ds-pill{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:550;background:var(--surface-3,#392a34);color:var(--text-2,#beb4ba);white-space:nowrap}"
+    },
+    {
+      "name": "Working Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat shared panel with compact title and a real action.",
+      "html": "<section class=\"ds-card\"><h2>Project takes</h2><p>Inspect a take before using it.</p><button class=\"ds-card-action\">View in monitor</button></section>",
+      "css": ".ds-card{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border,#44343e);border-radius:var(--radius,12px);padding:18px;min-width:0;box-shadow:none}.ds-card h2{font-size:15px;font-weight:600;letter-spacing:-.005em;margin:0 0 12px}.ds-card p{font-size:14px;line-height:1.45;color:var(--text-2,#beb4ba)}.ds-card-action{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-card-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-card-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-card-action:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Selected Graph Node",
+      "kind": "custom",
+      "refersTo": "node-selected",
+      "description": "Flat selected node material with named header, typed port and generation action.",
+      "html": "<section class=\"ds-node\"><header><strong>Perform the movement</strong><span>Done</span></header><div class=\"ds-port\"><i></i>start</div><div class=\"ds-node-body\"><p>The person dances energetically.</p><button class=\"ds-node-action\">Generate</button></div></section>",
+      "css": ".ds-node{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);width:300px;background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--accent,#e65db6);border-radius:12px;box-shadow:none;outline:2px solid var(--accent,#e65db6);outline-offset:3px;font-size:12.5px}.ds-node header{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border,#44343e)}.ds-node strong{font-size:14px;font-weight:600}.ds-node header span{font-size:10.5px;color:var(--ok,#5bbf86)}.ds-port{display:flex;gap:4px;align-items:center;min-height:25px;padding:1px 12px;font-size:11px;color:#b48cf0}.ds-port i{width:8px;height:8px;border-radius:50%;background:#b48cf0}.ds-node-body{padding:12px}.ds-node-body p{font-size:13px;line-height:1.5}.ds-node-action{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;color:var(--accent,#e65db6)}.ds-node-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-node-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-node-action:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Header VRAM Summary",
+      "kind": "custom",
+      "refersTo": "vitals-summary",
+      "description": "Closed summary with per-card bars and aggregate GB; sample readings illustrate a capture, not live telemetry.",
+      "html": "<button class=\"ds-vitals\" aria-expanded=\"false\" aria-label=\"GPU memory details\"><span class=\"ds-gpus\"><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G0 <strong>10%</strong></span><span class=\"ds-tank\"><span style=\"width:10%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G1 <strong>46%</strong></span><span class=\"ds-tank\"><span style=\"width:46%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G2 <strong>0%</strong></span><span class=\"ds-tank\"><span style=\"width:0%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G3 <strong>0%</strong></span><span class=\"ds-tank\"><span style=\"width:0%\"></span></span></span></span><span class=\"ds-total\">8.6<span>/60 GB</span></span></button>",
+      "css": ".ds-vitals{display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--border,#44343e);border-radius:6px;background:var(--surface-2,#31242c);color:var(--text,#ece1e8);font-family:var(--font,\"Space Grotesk Variable\",sans-serif);font-size:11px;cursor:pointer}.ds-vitals:hover{border-color:var(--border-strong,#6c5664)}.ds-vitals:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-gpus{display:flex;gap:7px}.ds-gpu{display:flex;flex-direction:column;gap:3px;min-width:46px}.ds-gpu-label{display:flex;justify-content:space-between;gap:4px;font:10px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-tank{display:block;width:100%;height:5px;border-radius:3px;background:color-mix(in srgb,var(--muted,#a69ba2) 25%,transparent);overflow:hidden}.ds-tank>span{display:block;height:100%;background:var(--ok,#5bbf86)}.ds-total{font:12px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-total>span{color:var(--muted,#a69ba2)}"
+    },
+    {
+      "name": "Scrollable Working Table",
+      "kind": "custom",
+      "refersTo": "table-scroll",
+      "description": "Named keyboard-focusable region keeps wide working tables within the available panel.",
+      "html": "<div class=\"ds-table-scroll\" role=\"region\" aria-label=\"Scrollable jobs table\" tabindex=\"0\"><table class=\"ds-table\"><thead><tr><th>Job</th><th>State</th><th>Backend</th><th>Action</th></tr></thead><tbody><tr><td>Reference image generation</td><td>Done</td><td>Local ComfyUI</td><td><button class=\"ds-table-action\">Open result</button></td></tr></tbody></table></div>",
+      "css": ".ds-table-scroll{width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;color:var(--text,#ece1e8);font-family:var(--font,\"Space Grotesk Variable\",sans-serif)}.ds-table-scroll:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:-2px}.ds-table{width:100%;border-collapse:collapse;font-size:13px}.ds-table th{text-align:left;color:var(--muted,#a69ba2);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;padding:8px 10px;border-bottom:1px solid var(--border,#44343e)}.ds-table td{padding:10px;border-bottom:1px solid var(--border,#44343e);vertical-align:top;overflow-wrap:anywhere}.ds-table tr:hover td{background:var(--surface-2,#31242c)}.ds-table-action{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border,#44343e);border-radius:6px;background:transparent;color:var(--text,#ece1e8);font:500 13px var(--font,\"Space Grotesk Variable\",sans-serif);cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s}.ds-table-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-table-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-table-action:active{transform:translateY(1px)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Shot Review Bench",
+    "overview": "The Shot Review Bench places real images, clips and references on a quiet dark-plum ground. Pale pink-white text and magenta controls establish a practical, concentrated workspace. The original dragon-and-wand icon and magenta/pink brand family are explicitly pinned by the user; media come from project assets.\n\nThe built system combines flat tonal panels, thin dividers and compact controls. Space Grotesk carries the working interface and JetBrains Mono carries machine values. Legacy serif page headings still survive in the cascade; this record preserves that fact instead of describing an entirely sans interface. Light mode uses pale lilac surfaces and the original pink action.",
+    "keyCharacteristics": [
+      "Real project media occupy the inspection surfaces.",
+      "Magenta identifies actions and selection; status and typed data retain their separate colors.",
+      "Flat panels and thin dividers organize dense working controls.",
+      "Compact sans working type coexists with inherited serif page headings."
+    ],
+    "rules": [
+      {
+        "name": "The Functional Accent Rule",
+        "body": "Use magenta for actionable or selected controls; retain distinct status and typed-port colors where they encode meaning.",
+        "section": "colors"
+      },
+      {
+        "name": "The Local Overflow Rule",
+        "body": "Keep wide tables and editing tracks inside their own focusable or scrollable regions; let the surrounding panel shrink and let controls wrap without losing actions.",
+        "section": "layout"
+      },
+      {
+        "name": "The Tonal Panel Rule",
+        "body": "Cards and nodes rest flat. Menus and popovers may use the theme shadow; selected nodes use an outline rather than a lifted shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "Recoverable Editing",
+        "body": "Make unsaved, saving, failed and conflicting edits explicit. Save before dependent actions, retain per-tab drafts and graph undo, preserve native text undo, and never silently replace a local graph. Place new nodes in free measured space and keep user placements.",
+        "section": "interaction"
+      }
+    ],
+    "dos": [
+      "Do use the current theme variables for shared surfaces, text, borders, actions and focus.",
+      "Do preserve a separate enlargement action and a visible selected state when inspecting media.",
+      "Do retain readable labels, optional advanced disclosure and keyboard focus restoration.",
+      "Do preserve full media frames in inspection views with object-fit: contain and bounded intrinsic sizes.",
+      "Do contain table and editing-track overflow locally while wrapping surrounding actions.",
+      "Do distinguish loading, failed requests and filtered-empty results before enabling a selection.",
+      "Do distinguish an unanswered engine check and unavailable status from a completed backend-down response."
+    ],
+    "donts": [
+      "Don't use orange/copper for brand actions, focus or selection.",
+      "Don't replace or recolor the original dragon-and-wand icon.",
+      "Don't replace real project media with fictional branding or decorative QA images.",
+      "Don't turn the Studio column widths, Spaces starter graph or surface-specific focus behavior into a mandatory layout for every route.",
+      "Don't remove tools, node types or advanced operations to make a screen look simpler.",
+      "Don't describe review verdicts as exact-comp approval or whole-product certification.",
+      "Don't treat stale picker responses or a filtered-empty library as valid completed selection."
+    ]
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "tool": "build-phase",
+  "version": 2,
+  "startedAt": "2026-10-05T01:14:11.889Z",
+  "comp": ".impeccable\\mocks\\studio-1.png",
+  "direction": "26f04583",
+  "breakpoint": "1536x1024",
+  "artifact": null,
+  "phase": "plates",
+  "phases": {
+    "comps": {
+      "status": "closed",
+      "openedAt": "2026-10-05T01:14:11.887Z",
+      "closedAt": "2026-10-05T01:24:52.642Z",
+      "attempts": 2,
+      "notes": [],
+      "gate": {
+        "ok": true,
+        "reasons": [],
+        "summary": "3 comps, 1 approved",
+        "approved": ".impeccable\\mocks\\studio-1.png",
+        "at": "2026-10-05T01:24:52.641Z"
+      },
+      "forced": null
+    },
+    "spec": {
+      "status": "closed",
+      "openedAt": "2026-10-05T01:24:52.693Z",
+      "closedAt": "2026-10-05T01:30:10.211Z",
+      "attempts": 3,
+      "notes": [],
+      "gate": {
+        "ok": true,
+        "reasons": [],
+        "summary": "26 regions, 6 plates, 7 text regions measured",
+        "at": "2026-10-05T01:30:10.210Z"
+      },
+      "forced": null
+    },
+    "plates": {
+      "status": "open",
+      "openedAt": "2026-10-05T01:30:10.211Z",
+      "closedAt": null,
+      "attempts": 4,
+      "notes": [],
+      "gate": {
+        "ok": false,
+        "reasons": [
+          "plate assets\\plates\\take-3.png: scores 38% against the comp region take-3 (structure 44%, color 54%, detail 32%); regenerate with the crop as --ref and the comp-spec plate prompt"
+        ],
+        "summary": "5/5 plates",
+        "at": "2026-10-05T02:22:01.427Z"
+      },
+      "forced": null
+    },
+    "hero": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "sections": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "motion": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "responsive": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "review": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    }
+  },
+  "finish": null,
+  "plates": {
+    "start-image": {
+      "status": "ok",
+      "score": 0.6991,
+      "size": "1672x941"
+    },
+    "preview": {
+      "status": "ok",
+      "score": 0.6232,
+      "size": "1672x941"
+    },
+    "take-1": {
+      "status": "ok",
+      "score": 0.6067,
+      "size": "1672x941"
+    },
+    "take-2": {
+      "status": "ok",
+      "score": 0.6459,
+      "size": "1774x887"
+    },
+    "take-3": {
+      "status": "ok",
+      "score": 0.3778,
+      "size": "1672x941"
+    }
+  }
+}

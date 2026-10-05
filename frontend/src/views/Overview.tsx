@@ -7,7 +7,7 @@ import { ProductionCard } from "./Productions";
 import { VideoModal } from "./VideoModal";
 
 export function OverviewView() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;
   const project = useAsync(() => api.project(pid), [pid, app.dataVersion]);
@@ -67,14 +67,16 @@ export function OverviewView() {
               onPick={async (a) => { setPickCover(false); await api.updateProject(pid, { cover_asset_id: a.id }); project.reload(); app.bump(); }} />}
           </div>
           <div className="card">
-            <h2>{t("overviewNext")}</h2>
-            <ul className="steps">
+            <h2>{lang === "es" ? "¿Qué quieres crear?" : "What would you like to create?"}</h2>
+            <p className="hint">{lang === "es" ? "Empieza con una idea o una referencia. El reparto y el guion son opcionales." : "Start with an idea or a reference. Cast and scripts are optional."}</p>
+            <button className="btn primary" onClick={() => app.go("generate")}>{lang === "es" ? "Crear imagen o vídeo" : "Create an image or video"}</button>
+            <details style={{ marginTop: 16 }}><summary>{lang === "es" ? "Preparar una producción completa" : "Prepare a full production"}</summary><ul className="steps">
               {steps.map(([key, done, section]) => (
                 <li key={key} className={done ? "done" : ""} onClick={() => app.go(section)} style={{ cursor: "pointer" }}>
                   {done ? <CheckCircle2 size={17} /> : <Circle size={17} />} {t(key)}
                 </li>
               ))}
-            </ul>
+            </ul></details>
           </div>
         </div>
         <div className="stack">

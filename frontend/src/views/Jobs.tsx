@@ -35,7 +35,7 @@ export function JobsView({ projects }: { projects: Project[] }) {
       </div>
       {jobs.length === 0 ? <Empty icon={<ListChecks size={34} />} text={t("noJobs")} /> : (
         <div className="card" style={{ padding: 6 }}>
-          <table className="list">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
             <thead><tr><th>{t("tool")}</th><th>{t("state")}</th><th style={{ width: "32%" }}>{t("message")}</th><th>{t("project")}</th><th>{t("when")}</th><th /></tr></thead>
             <tbody>
               {jobs.map((j) => {
@@ -77,7 +77,7 @@ export function JobsView({ projects }: { projects: Project[] }) {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </>

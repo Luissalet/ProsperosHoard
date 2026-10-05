@@ -30,6 +30,9 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from prosperos_hoard import procutil
+from prosperos_hoard.hoard_link.proc import kill_tree
 OUT_DIR = REPO / "docs" / "media"
 MAX_BYTES = 400 * 1024
 
@@ -64,7 +67,7 @@ def main() -> int:
     base = f"http://127.0.0.1:{port}"
     data = Path(tempfile.mkdtemp(prefix="prospero-shots-"))
     log = (data / "app.log").open("w", encoding="utf-8")
-    proc = subprocess.Popen([str(python), "-m", "prosperos_hoard", "--demo", "--no-browser", "--port", str(port), "--data-dir", str(data / "data")],
+    proc = procutil.popen([str(python), "-m", "prosperos_hoard", "--demo", "--no-browser", "--port", str(port), "--data-dir", str(data / "data")],
                             cwd=REPO, stdout=log, stderr=subprocess.STDOUT)
     try:
         for _ in range(240):
@@ -85,6 +88,7 @@ def main() -> int:
 
             # 1. Generate: @mentions expanded into the exact final prompt
             page.goto(f"{base}/#/p/{pid}/generate")
+            page.get_by_role("button", name="Image", exact=True).click()
             page.wait_for_selector(".results-grid .tile")
             page.fill("textarea", "@Iris Volt and @Mika Frost backstage before the show, confetti in the air")
             page.locator("label.field:has-text('Style') select").select_option(label="Film still 35mm")
@@ -119,11 +123,7 @@ def main() -> int:
         for name in ("01-generate.png", "02-timeline.png", "03-photocards.png", "04-audio.png"):
             _optimise(OUT_DIR / name)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        kill_tree(proc)
         log.close()
     print(f"Screenshots written to {OUT_DIR}")
     return 0

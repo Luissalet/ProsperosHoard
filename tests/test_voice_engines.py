@@ -36,7 +36,7 @@ def test_capabilities_to_dict():
 def test_default_registries_contents():
     tts = ve.default_tts_engines()
     stt = ve.default_stt_engines()
-    assert {e.id for e in tts} == {"piper", "xtts", "f5-tts", "kokoro", "chatterbox", "comfy-tts"}
+    assert {e.id for e in tts} == {"piper", "xtts", "f5-tts", "kokoro", "chatterbox", "comfy-tts", "yovoice"}
     assert {e.id for e in stt} == {"faster-whisper", "whisper"}
 
 

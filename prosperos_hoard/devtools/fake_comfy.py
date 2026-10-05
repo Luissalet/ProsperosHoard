@@ -624,9 +624,9 @@ class FakeComfyServer:
         length = int(latent.get("inputs", {}).get("length", 121))
         create_video = _first(workflow, "CreateVideo") or {}
         fps = int(create_video.get("inputs", {}).get("fps", 24))
-        # a handful of frames is enough for a fixture; sample evenly across
-        # the clip's declared length so motion still reads as a real clip
-        n_frames = max(2, min(24, length // max(1, fps // 6 or 1)))
+        # The importer encodes every WebP frame at the recipe's fps. Fewer
+        # fixture frames would silently create a short clip and a held tail.
+        n_frames = max(2, min(481, length))
         frames = render_fake_frames(seed, prompt_text or "night street scene", max(64, width), max(64, height), n_frames, reference)
         filename = f"{prompt_id}.webp"
         path = self.output_dir / filename

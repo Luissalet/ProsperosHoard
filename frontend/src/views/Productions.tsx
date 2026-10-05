@@ -14,6 +14,7 @@ import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
 import { StoryboardCard, liveRun } from "./Storyboard";
 import { SongTrackCard } from "./SongTrack";
+import { ScriptDesk } from "./ScriptDesk";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -138,7 +139,7 @@ export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onS
   );
 }
 
-type Tab = "storyboard" | "preview" | "qa" | "history";
+type Tab = "storyboard" | "script" | "preview" | "qa" | "history";
 const STAGE_TAB: Record<string, Tab> = {
   character: "storyboard", song: "storyboard", frames: "storyboard", lyrics: "storyboard", animatic: "preview", clips: "preview",
   photocards: "preview", album: "preview", timeline: "preview", report: "history",
@@ -399,7 +400,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const current = tab || autoTab;
   const tabs: [Tab, string][] = [
     ["storyboard", t("tabStoryboard")], ["preview", `${t("tabPreview")}${outputs ? ` · ${outputs}` : ""}`],
-    ["qa", t("tabQa")], ["history", t("tabHistory")],
+    ["script", lang === "es" ? "Texto y tomas" : "Text and shots"], ["qa", t("tabQa")], ["history", t("tabHistory")],
   ];
 
   return (
@@ -437,6 +438,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
               {!legacy && <SongTrackCard state={data} onChanged={changed} />}
             </>
           )}
+          {current === "script" && !legacy && <ScriptDesk state={data} onChanged={changed} onStoryboard={() => setTab("storyboard")} />}
           {current === "preview" && (
             <>
               {Object.keys(renders).length > 0 && (
@@ -451,7 +453,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                           <div className="video-frame" style={{ width: aspect === "16:9" ? 480 : 260 }}>
                             <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
                           </div>
-                          <div className="row" style={{ gap: 6 }}>
+                          <div className="row wrap" style={{ gap: 6 }}>
                             <a className="btn sm ghost" href={fileUrl(id)} download><Download size={13} /> {t("download")}</a>
                             {timelineIds[aspect]?.timeline_id && (
                               <a className="btn sm ghost" href={api.timelineExportUrl(timelineIds[aspect].timeline_id!, "zip", `${data.name || slug} ${aspect.replace(":", "x")}`)} download title={t("exportEditorsHint")}>
@@ -477,7 +479,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                       </div>
                     )}
                   </div>
-                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                  <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
                     <button className="btn sm" disabled={canvasBusy} onClick={makeCanvas} title={t("canvasHint")}>
                       {canvasBusy ? <Loader2 size={13} className="spin" /> : <Repeat size={13} />} {canvasId ? t("canvasRemake") : t("canvasMake")}
                     </button>
@@ -506,8 +508,8 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                 </div>
               )}
               {!legacy && (
-                <div className="card">
-                  <h2><Sparkles size={16} /> {t("lookTitle")}</h2>
+                <details className="card">
+                  <summary><Sparkles size={16} /> {t("lookTitle")}</summary>
                   <LookPanel value={(data.spec.timeline || {}).finishing} note={t("lookNoteProduction")}
                     onApply={async (f) => {
                       try {
@@ -517,7 +519,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                         changed();
                       } catch (e) { app.toast((e as Error).message, "bad"); }
                     }} />
-                </div>
+                </details>
               )}
               <AnimaticCard state={data} onChanged={changed} />
               {outputs === 0 && !(view.stages?.frames === "done") && <p className="muted small">{t("previewEmpty")}</p>}
