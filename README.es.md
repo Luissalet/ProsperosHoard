@@ -634,9 +634,13 @@ la página comprueba lo que la pararía - ComfyUI apagado (con un botón para
 arrancarlo), sin modelo de música para una canción por componer, sin
 ffmpeg, ninguna GPU con memoria libre suficiente - y lo dice claro. Un
 montaje terminado se descarga para **Premiere Pro o DaVinci Resolve** (FCP7
-XML + EDL CMX 3600, la letra como marcadores, los medios referenciados
-donde están en este ordenador) desde la pestaña Ver de la producción o
+XML + EDL CMX 3600, con subtítulos temporizados SRT/VTT y metadatos de palabras/karaoke
+en JSON cuando existen; los medios se referencian donde están en este ordenador) desde la pestaña Ver de la producción o
 desde Montaje (`studio_export_timeline`).
+
+Importa el SRT o VTT aparte como pista de subtítulos: los marcadores XML y comentarios
+EDL son etiquetas. Se conservan el texto y los tiempos del montaje; fuente, posición
+y animación no se transfieren. La exportación recorta los finales al montaje sin modificar la línea de tiempo guardada.
 
 La pantalla **Audio** también compone canciones (estilo, letra, BPM,
 duración, tonalidad, tomas) e importa archivos de audio; un personaje sin
