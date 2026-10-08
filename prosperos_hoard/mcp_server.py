@@ -1327,6 +1327,22 @@ def studio_reframe(asset_id: str, aspect: str = "9:16", framing: str = "fill", f
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_interpolate(asset_id: str, fps: float = 48, wait_s: float = 0) -> dict[str, Any]:
+    """Smooth an existing clip to a higher frame rate without regenerating it / interpolar fotogramas.
+
+    Local CPU motion-compensated FFmpeg interpolation, not FILM or an AI video render. fps defaults
+    to 48; choose a finite rate 1-120 above the source. Keeps size, pacing and the first audio track
+    (re-encoded to AAC). Produces a new asset with lineage; original unchanged. Can create motion
+    artefacts on difficult scenes; scene cuts use frame duplication. Returns a cancellable CPU job.
+    Repeating the call creates another take. Poll studio_job or pass wait_s.
+
+    Keywords: interpolate, smooth motion, frame rate, fps, 48fps, 60fps, interpolar, suavizar movimiento,
+    fotogramas, mas fluido, aumentar fps
+    """
+    return _call("POST", "/api/agent/studio_interpolate", json={"asset_id": asset_id, "fps": fps, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_canvas(production: str, seconds: float = 8.0, start_s: Optional[float] = None, lyrics: bool = False) -> dict[str, Any]:
     """Make a Spotify Canvas: a seamless silent 9:16 loop (3-8 s, 720x1280) of the music video's chorus / bucle.
 
