@@ -99,7 +99,84 @@ BUILTIN_STYLE_PRESETS = [
         negative="cluttered, busy background, watermark, text",
         defaults=dict(checkpoint="sd_xl_base_1.0.safetensors", width=1024, height=1024, steps=30, cfg=6.5, sampler="dpmpp_2m", scheduler="karras"),
     ),
+    # Style cards of the motion graphics (motion_graphics.py): the image prompt as for any preset, plus how
+    # the titles, lyrics and credits of the same look are drawn and moved. Our own recipes, rated by eye on
+    # its renders (0-3 stars).
+    dict(
+        name="Neón nocturno",
+        prompt_prefix="neon-lit night street, magenta and cyan light, wet asphalt reflections,",
+        prompt_suffix=", glowing signs, deep shadows, cinematic",
+        negative="daylight, flat lighting, watermark, text",
+        defaults=dict(checkpoint="sd_xl_base_1.0.safetensors", width=1024, height=1024, steps=30, cfg=6.5, sampler="dpmpp_2m", scheduler="karras"),
+        technique="Letras crema con halo de neón magenta sobre un fondo casi negro. Entran con el parpadeo de un tubo que "
+                  "se asienta; la palabra que se canta se enciende en magenta y el cian queda para los reflejos.",
+        palette=["#07060f", "#f6f2ff", "#ff2e93", "#27e0ff", "#6b6a8c"],
+        motion=dict(easing="out_expo", stagger_s=0.06, pop=0.8),
+        signature_transition="flicker",
+        quality=3,
+        pitfalls="El halo se come los trazos finos: el cuerpo del texto no baja del 5 % de la altura. Sobre metraje claro pierde "
+                 "el efecto; como rótulo encima del vídeo, solo con metraje oscuro.",
+        typography=dict(fonts=dict(display="space-grotesk", body="inter"), weight=dict(display=700, body=500), case="upper",
+                        tracking=0.02, align="center", background=dict(kind="gradient", grain=0.15),
+                        fx=dict(glow=0.9, shadow="soft", rule=True)),
+    ),
+    dict(
+        name="Papel recortado",
+        prompt_prefix="layered cut-paper craft, handmade paper collage, soft shadows between the layers,",
+        prompt_suffix=", tactile paper texture, flat colours",
+        negative="photorealistic, 3d render, glossy, watermark, text",
+        defaults=dict(checkpoint="sd_xl_base_1.0.safetensors", width=1024, height=1024, steps=30, cfg=6.5, sampler="dpmpp_2m", scheduler="karras"),
+        technique="Letras de papel recortado con sombra dura y un ligero giro distinto en cada palabra. Todo se mueve a 12 "
+                  "fotogramas por segundo, como en stop-motion, y las palabras suben deslizándose con un pequeño rebote.",
+        palette=["#f1e6cf", "#1f1a16", "#e4572e", "#2e86ab", "#8c7a6b"],
+        motion=dict(easing="out_back", stagger_s=0.09, stepped_fps=12, pop=0.6),
+        signature_transition="slide_up",
+        quality=3,
+        pitfalls="La sombra dura necesita fondo claro: sobre negro desaparece. Con el giro alto las palabras largas se tocan; "
+                 "bájalo a 1,5 grados si hay líneas de cuatro palabras.",
+        typography=dict(fonts=dict(display="bebas-neue", body="caveat"), weight=dict(display=400, body=700), case="upper",
+                        tracking=0.02, align="center", background=dict(kind="paper", grain=0.25),
+                        fx=dict(glow=0.0, shadow="hard", shadow_px=0.007, jitter_deg=2.5, rule=False)),
+    ),
+    dict(
+        name="VHS terror",
+        prompt_prefix="found-footage VHS horror still, tracking glitches, crushed blacks, sickly green and red colour cast,",
+        prompt_suffix=", analog noise, dread atmosphere",
+        negative="clean digital image, bright, watermark, text",
+        defaults=dict(checkpoint="sd_xl_base_1.0.safetensors", width=1024, height=1024, steps=30, cfg=6.5, sampler="dpmpp_2m", scheduler="karras"),
+        technique="Cinta VHS gastada: líneas de barrido, una barra de seguimiento que sube, grano fuerte y el color "
+                  "desdoblado en rojo y verde. La entrada es un glitch a trozos; la letra es seca y en mayúsculas.",
+        palette=["#060807", "#e9e6da", "#c1121f", "#3fd0a0", "#6a6e66"],
+        motion=dict(easing="in_out_cubic", stagger_s=0.05, pop=0.3),
+        signature_transition="glitch",
+        quality=2,
+        pitfalls="Las líneas de barrido y el desdoblado restan legibilidad: en vertical la letra no baja del 5 % de la altura y "
+                 "no se combina con el estilo de subtítulos «horror». El grano fuerte multiplica el tamaño del vídeo final.",
+        typography=dict(fonts=dict(display="bebas-neue", body="special-elite"), weight=dict(display=400, body=400), case="upper",
+                        tracking=0.04, align="center", background=dict(kind="scanlines", grain=0.7),
+                        fx=dict(glow=0.15, shadow="soft", rgb_split=0.6, scanlines=0.6, rule=False)),
+    ),
+    dict(
+        name="Tipografía suiza",
+        prompt_prefix="international typographic style poster, strict grid, flat colour blocks, bold grotesque type,",
+        prompt_suffix=", asymmetric layout, generous white space",
+        negative="ornament, gradient, drop shadow, watermark",
+        defaults=dict(checkpoint="sd_xl_base_1.0.safetensors", width=1024, height=1024, steps=30, cfg=6.5, sampler="dpmpp_2m", scheduler="karras"),
+        technique="Grotesca negra alineada a la izquierda sobre una rejilla, un único acento rojo y una regla. El movimiento es "
+                  "seco, con la curva cubic-bezier(0,7; 0; 0,2; 1), y los textos entran como una cortinilla.",
+        palette=["#f4f3ee", "#111111", "#e30613", "#111111", "#8a8a85"],
+        motion=dict(bezier=[0.7, 0.0, 0.2, 1.0], stagger_s=0.05, pop=0.0),
+        signature_transition="wipe",
+        quality=3,
+        pitfalls="Sin sombra ni halo no se lee sobre metraje: úsalo como tarjeta a pantalla completa. Alineado a la izquierda, un "
+                 "título muy corto deja el cuadro descompensado en horizontal.",
+        typography=dict(fonts=dict(display="space-grotesk", body="inter"), weight=dict(display=700, body=500), case="none",
+                        tracking=-0.01, align="left", background=dict(kind="grid", grain=0.0),
+                        fx=dict(glow=0.0, shadow="none", rule=True)),
+    ),
 ]
+
+_CARD_FIELDS = ("technique", "palette", "motion", "signature_transition", "quality", "pitfalls", "typography")
 
 
 class Store:
@@ -127,23 +204,27 @@ class Store:
         databases created by an older version (a built-in preset is not
         user-editable, so overwriting it loses nothing)."""
         for preset in BUILTIN_STYLE_PRESETS:
+            card = (dumps(preset.get("palette") or []), dumps(preset.get("motion") or {}), preset.get("signature_transition"),
+                    int(preset.get("quality") or 0), preset.get("pitfalls"), dumps(preset.get("typography") or {}), preset.get("technique"))
             exists = self.conn.execute(
                 "SELECT id FROM style_presets WHERE name=? AND is_builtin=1", (preset["name"],)
             ).fetchone()
             if exists:
                 self.conn.execute(
-                    "UPDATE style_presets SET prompt_prefix=?, prompt_suffix=?, negative=?, defaults_json=? WHERE id=?",
-                    (preset["prompt_prefix"], preset["prompt_suffix"], preset["negative"], dumps(preset["defaults"]), exists["id"]),
+                    "UPDATE style_presets SET prompt_prefix=?, prompt_suffix=?, negative=?, defaults_json=?, palette_json=?, "
+                    "motion_json=?, signature_transition=?, quality=?, pitfalls=?, typography_json=?, technique=? WHERE id=?",
+                    (preset["prompt_prefix"], preset["prompt_suffix"], preset["negative"], dumps(preset["defaults"]), *card, exists["id"]),
                 )
                 continue
             self.conn.execute(
                 """INSERT INTO style_presets
                    (id, project_id, name, prompt_prefix, prompt_suffix, negative,
-                    defaults_json, notes, is_builtin, created_at)
-                   VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                    defaults_json, notes, is_builtin, created_at, palette_json, motion_json, signature_transition,
+                    quality, pitfalls, typography_json, technique)
+                   VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     new_id("sp"), preset["name"], preset["prompt_prefix"], preset["prompt_suffix"],
-                    preset["negative"], dumps(preset["defaults"]), preset.get("notes", ""), now_iso(),
+                    preset["negative"], dumps(preset["defaults"]), preset.get("notes", ""), now_iso(), *card,
                 ),
             )
         self.conn.commit()
@@ -825,25 +906,88 @@ class Store:
         return [self.get_group(r["id"]) for r in rows]
 
     # -------------------------------------------------------- style presets
+    @staticmethod
+    def _preset_view(row: Any) -> dict[str, Any]:
+        d = row_to_dict(row)
+        d["defaults"] = loads(d.pop("defaults_json"), {})
+        d["palette"] = loads(d.pop("palette_json", None), [])
+        d["motion"] = loads(d.pop("motion_json", None), {})
+        d["typography"] = loads(d.pop("typography_json", None), {})
+        d["quality"] = int(d.get("quality") or 0)
+        return d
+
     def list_style_presets(self, project_id: str | None = None) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT * FROM style_presets WHERE is_builtin=1 OR project_id=? ORDER BY is_builtin DESC, created_at ASC",
+            "SELECT * FROM style_presets WHERE is_builtin=1 OR project_id=? OR (project_id IS NULL AND is_builtin=0) "
+            "ORDER BY is_builtin DESC, created_at ASC",
             (project_id,),
         ).fetchall()
-        out = []
-        for r in rows:
-            d = row_to_dict(r)
-            d["defaults"] = loads(d.pop("defaults_json"), {})
-            out.append(d)
-        return out
+        return [self._preset_view(r) for r in rows]
 
     def get_style_preset(self, preset_id: str) -> dict[str, Any]:
         row = self.conn.execute("SELECT * FROM style_presets WHERE id=?", (preset_id,)).fetchone()
         if not row:
             raise NotFound("style_preset", preset_id)
-        d = row_to_dict(row)
-        d["defaults"] = loads(d.pop("defaults_json"), {})
-        return d
+        return self._preset_view(row)
+
+    def create_style_preset(self, name: str, *, project_id: str | None = None, prompt_prefix: str = "", prompt_suffix: str = "",
+                            negative: str = "", defaults: dict[str, Any] | None = None, notes: str = "", **card: Any) -> dict[str, Any]:
+        """A custom style card. `card` takes the graphic fields (technique, palette, motion, signature_transition,
+        quality, pitfalls, typography), already validated by `motion_graphics.clean_card_fields`."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("a style card needs a non-empty name")
+        name = name.strip()[:80]
+        taken = self.conn.execute("SELECT 1 FROM style_presets WHERE lower(name)=lower(?) AND (is_builtin=1 OR project_id IS ?)",
+                                  (name, project_id)).fetchone()
+        if taken:
+            raise ValueError(f"there is already a style card named '{name}'")
+        if project_id:
+            self.get_project(project_id)
+        preset_id = new_id("sp")
+        self.conn.execute(
+            """INSERT INTO style_presets (id, project_id, name, prompt_prefix, prompt_suffix, negative, defaults_json, notes,
+               is_builtin, created_at, technique, palette_json, motion_json, signature_transition, quality, pitfalls, typography_json)
+               VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)""",
+            (preset_id, project_id, name, prompt_prefix, prompt_suffix, negative, dumps(defaults or {}), notes, now_iso(),
+             card.get("technique"), dumps(card.get("palette") or []), dumps(card.get("motion") or {}), card.get("signature_transition"),
+             int(card.get("quality") or 0), card.get("pitfalls"), dumps(card.get("typography") or {})),
+        )
+        self.conn.commit()
+        return self.get_style_preset(preset_id)
+
+    def update_style_preset(self, preset_id: str, **fields: Any) -> dict[str, Any]:
+        """Change a custom style card (a built-in one is read-only: duplicate it first)."""
+        current = self.get_style_preset(preset_id)
+        if current["is_builtin"]:
+            raise ValueError("a built-in style card cannot be edited: create your own from it (studio_style_cards action 'create' with from_card)")
+        columns = {"name": "name", "prompt_prefix": "prompt_prefix", "prompt_suffix": "prompt_suffix", "negative": "negative", "notes": "notes",
+                   "technique": "technique", "signature_transition": "signature_transition", "quality": "quality", "pitfalls": "pitfalls"}
+        json_columns = {"palette": "palette_json", "motion": "motion_json", "typography": "typography_json", "defaults": "defaults_json"}
+        sets, values = [], []
+        for key, value in fields.items():
+            if key in columns:
+                if key == "name":
+                    value = str(value or "").strip()[:80]
+                    if not value:
+                        raise ValueError("a style card needs a non-empty name")
+                sets.append(f"{columns[key]}=?")
+                values.append(value)
+            elif key in json_columns:
+                sets.append(f"{json_columns[key]}=?")
+                values.append(dumps(value if value is not None else ([] if key == "palette" else {})))
+            else:
+                raise ValueError(f"unknown style card field '{key}'")
+        if sets:
+            self.conn.execute(f"UPDATE style_presets SET {', '.join(sets)} WHERE id=?", (*values, preset_id))
+            self.conn.commit()
+        return self.get_style_preset(preset_id)
+
+    def delete_style_preset(self, preset_id: str) -> None:
+        current = self.get_style_preset(preset_id)
+        if current["is_builtin"]:
+            raise ValueError("a built-in style card cannot be deleted")
+        self.conn.execute("DELETE FROM style_presets WHERE id=?", (preset_id,))
+        self.conn.commit()
 
     # -------------------------------------------------------------- boards
     # -------------------------------------------------------------- spaces
