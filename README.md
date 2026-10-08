@@ -624,9 +624,13 @@ clips, GPU hours) before anything starts. Before a run, the page checks what
 would stop it - ComfyUI down (with a Start button), no music model for a
 song still to compose, no ffmpeg, no GPU with enough free memory - and says
 so in plain words. A finished cut downloads for **Premiere Pro or DaVinci
-Resolve** (FCP7 XML + CMX 3600 EDL, the lyrics as markers, the media
-referenced where they live on this computer), from the production's Preview
+Resolve** (FCP7 XML + CMX 3600 EDL, with timed captions as SRT/VTT and word/karaoke
+metadata as JSON when present; the media are referenced where they live on this computer), from the production's Preview
 tab or the Timeline screen (`studio_export_timeline`).
+
+Import the SRT or VTT separately as a subtitle track: XML markers and EDL comments
+are labels. Caption text and timeline timing transfer; font, placement and animation
+do not. The export clips caption ends to the cut without changing the stored timeline.
 
 The **Audio** screen composes songs too (style, lyrics, BPM, length, key,
 takes) and imports audio files; a character without a reference image gets

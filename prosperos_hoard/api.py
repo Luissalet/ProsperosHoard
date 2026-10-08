@@ -2611,14 +2611,18 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         base = re.sub(r"[^\w-]+", "_", name).strip("_")[:60] or "cut"
         if format == "xml":
             return Response(exporters.to_xmeml(tl, _export_lookup, name), media_type="application/xml",
-                            headers={"Content-Disposition": f'attachment; filename="{base}.xml"'})
+                            headers={"Content-Disposition": exporters.download_disposition(f'{base}.xml')})
         if format == "edl":
             return Response(exporters.to_edl(tl, _export_lookup, name), media_type="text/plain; charset=utf-8",
-                            headers={"Content-Disposition": f'attachment; filename="{base}.edl"'})
+                            headers={"Content-Disposition": exporters.download_disposition(f'{base}.edl')})
+        if format in ("srt", "vtt"):
+            return Response(exporters.to_subtitles(tl, format),
+                            media_type="text/vtt" if format == "vtt" else "application/x-subrip",
+                            headers={"Content-Disposition": exporters.download_disposition(f'{base}.{format}')})
         if format != "zip":
-            raise engine.EngineError("bad_format", "format must be zip, xml or edl")
+            raise engine.EngineError("bad_format", "format must be zip, xml, edl, srt or vtt")
         return Response(exporters.package(tl, _export_lookup, name), media_type="application/zip",
-                        headers={"Content-Disposition": f'attachment; filename="{base}_for_editors.zip"'})
+                        headers={"Content-Disposition": exporters.download_disposition(f'{base}_for_editors.zip')})
 
     @app.post("/api/agent/studio_export_timeline")
     def agent_export_timeline(body: ExportTimelineBody):
@@ -2629,7 +2633,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             return {"timeline_id": tid, "clips": len(visual["clips"]), "fps": tl.get("fps"),
                     "download": f"/api/timelines/{tid}/export?format=zip",
                     "xml": f"/api/timelines/{tid}/export?format=xml", "edl": f"/api/timelines/{tid}/export?format=edl",
-                    "note": "the media are referenced where they live on this computer; open the XML in Premiere or Resolve"}
+                    "srt": f"/api/timelines/{tid}/export?format=srt", "vtt": f"/api/timelines/{tid}/export?format=vtt",
+                    "captions": len(exporters.caption_cues(tl)),
+                    "note": "Open the XML in Premiere or Resolve and import SRT/VTT separately for timed captions; media stay on this computer. Caption styling is not transferred."}
         return agent("studio_export_timeline", body.production or body.timeline_id or "", run)
 
     @app.patch("/api/timelines/{timeline_id}")

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import io
+import copy
+import json
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -83,3 +85,53 @@ def test_export_route_zip_and_production_settings(client):
     pre = c.get(f"/api/productions/{state['slug']}/preflight").json()
     assert isinstance(pre["ok"], bool) and isinstance(pre["items"], list)
     assert c.post("/api/agent/studio_export_timeline", json={"production": state["slug"]}).status_code == 400
+
+
+def test_caption_sidecars_keep_timeline_times_words_and_source(tmp_path):
+    from prosperos_hoard.hoard_link.media import subs
+    timeline = _timeline()
+    timeline['tracks'][1]['clips'] = [
+        {'text': 'Fuera', 'start_s': 5, 'end_s': 6},
+        {'text': 'Última & <letra>', 'start_s': 3.5, 'end_s': 5, 'karaoke': True,
+         'words': [{'text': 'Última', 'start_s': 3.5, 'end_s': 4.2}, {'text': 'fuera', 'start_s': 4.2, 'end_s': 5}]},
+        {'text': 'Primera', 'start_s': .5, 'end_s': 2}
+    ]
+    before = copy.deepcopy(timeline)
+    data = exporters.package(timeline, _lookup(tmp_path), 'Con letra')
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        srt = z.read('Con_letra.srt').decode('utf-8')
+        vtt = z.read('Con_letra.vtt').decode('utf-8')
+        cues = json.loads(z.read('Con_letra.captions.json'))
+        assert '00:00:00,500 --> 00:00:02,000' in srt
+        assert '00:00:03,500 --> 00:00:04,000' in srt
+        assert 'Fuera' not in srt and 'Última & <letra>' in srt
+        assert 'Última &amp; &lt;letra&gt;' in vtt
+        parsed = subs.parse_srt(srt)
+        assert [(c.start_s, c.end_s) for c in parsed] == [(.5, 2), (3.5, 4)]
+        assert cues['time_base'] == 'timeline_seconds'
+        assert cues['cues'][1]['karaoke'] is True
+        assert cues['cues'][1]['words'] == [{'text': 'Última', 'start_s': 3.5, 'end_s': 4}]
+        assert 'import the SRT or VTT separately' in z.read('README.txt').decode()
+    assert timeline == before
+
+
+def test_caption_downloads_and_agent_links_share_the_same_cut(client):
+    c, app, _ = client
+    store = app.state.store
+    pid = store.create_project('Caption export')['id']
+    asset = _asset(store, pid)
+    timeline = store.create_timeline(pid, 'Subtítulos', '16:9', 24, tracks=[
+        {'type': 'visual', 'clips': [{'asset_id': asset, 'kind': 'image', 'start_s': 0, 'duration_s': 2}]},
+        {'type': 'lyrics', 'clips': [{'text': 'Hola', 'start_s': .25, 'end_s': 1.75}]}])
+    before = store.get_timeline(timeline['id'])
+    result = c.post('/api/agent/studio_export_timeline', json={'timeline_id': timeline['id']}).json()
+    assert result['captions'] == 1
+    srt = c.get(result['srt']); vtt = c.get(result['vtt'])
+    assert srt.status_code == vtt.status_code == 200
+    assert '00:00:00,250 --> 00:00:01,750' in srt.text
+    assert vtt.text.startswith('WEBVTT') and '00:00:00.250 --> 00:00:01.750' in vtt.text
+    bundle = c.get(result['download'])
+    with zipfile.ZipFile(io.BytesIO(bundle.content)) as z:
+        assert next(z.read(n).decode('utf-8') for n in z.namelist() if n.endswith('.srt')) == srt.text
+        assert next(z.read(n).decode('utf-8') for n in z.namelist() if n.endswith('.vtt')) == vtt.text
+    assert store.get_timeline(timeline['id']) == before

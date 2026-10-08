@@ -1435,13 +1435,15 @@ def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str]
 @tool(_ro(readOnlyHint=True))
 def studio_export_timeline(production: Optional[str] = None, aspect: Optional[str] = None,
                            timeline_id: Optional[str] = None) -> dict[str, Any]:
-    """Export a cut for Premiere Pro or DaVinci Resolve: FCP7 XML + EDL with the lyrics as markers / exportar.
+    """Export a cut for Premiere Pro or DaVinci Resolve: XML/EDL plus timed SRT/VTT captions / exportar.
 
     Give production (and aspect, e.g. "16:9") or a timeline_id. Returns the download links (a zip with
-    the XML, the EDL and a README; or each file alone). The XML points at the media where they live on
+    XML/EDL, caption SRT/VTT and word-timing JSON when present, plus a README; or each format alone).
+    Import SRT/VTT separately as a subtitle track; caption styling/animation is not transferred.
+    The XML points at the media where they live on
     this computer, so the editor opens the same clips and stills - nothing is copied.
 
-    Keywords: export, premiere, davinci, resolve, final cut, xml, edl, editor, exportar montaje, editar en premiere
+    Keywords: export, premiere, davinci, resolve, final cut, xml, edl, srt, vtt, captions, subtítulos, exportar montaje, editar en premiere
     """
     return _call("POST", "/api/agent/studio_export_timeline",
                  json={"production": production, "aspect": aspect, "timeline_id": timeline_id})

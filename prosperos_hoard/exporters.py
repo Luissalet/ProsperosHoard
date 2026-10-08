@@ -6,17 +6,20 @@ find each asset; nothing here touches the database or ffmpeg.
 The media are referenced where they already live (absolute file URLs on
 this machine), so the editor opens the same files the studio rendered -
 nothing is copied. The sung lines become sequence markers in the XML and
-comments in the EDL."""
+comments in the EDL. Timed captions accompany the cut as SRT, VTT and JSON."""
 
 from __future__ import annotations
 
 import html
 import io
+import json
 import re
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import quote
+
+from .hoard_link.media import subs
 
 Lookup = Callable[[str], Optional[dict[str, Any]]]  # asset id -> {"path", "name", "kind", "duration_s", "width", "height"}
 
@@ -151,16 +154,59 @@ def to_edl(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = None)
     return "\n".join(lines).rstrip() + "\n"
 
 
+def caption_cues(timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    """Captions in timeline time, clipped to the exported cut, without retiming the stored data."""
+    fps = int(timeline.get('fps') or 24)
+    duration = sum(_frames(c['duration_s'], fps) for c in _clips(timeline, 'visual')) / fps
+    cues = []
+    for line in _clips(timeline, 'lyrics'):
+        start = max(0.0, float(line['start_s']))
+        end = min(duration, float(line['end_s']))
+        if end <= start or not str(line.get('text') or '').strip():
+            continue
+        cue = {**line, 'start_s': start, 'end_s': end}
+        if 'words' in line:
+            cue['words'] = [{**w, 'start_s': max(start, float(w['start_s'])),
+                            'end_s': min(end, float(w['end_s']))}
+                           for w in line['words'] if float(w['end_s']) > start and float(w['start_s']) < end]
+        cues.append(cue)
+    return sorted(cues, key=lambda c: c['start_s'])
+
+
+def to_subtitles(timeline: dict[str, Any], format: str) -> str:
+    cues = caption_cues(timeline)
+    if format == 'srt':
+        return subs.to_srt(cues)
+    if format == 'vtt':
+        return subs.to_vtt(cues)
+    raise ValueError('Subtitle format must be srt or vtt.')
+
+
+def download_disposition(filename: str) -> str:
+    # HTTP header bytes remain ASCII; RFC 5987 carries the actual Unicode name.
+    fallback = re.sub(r'[^A-Za-z0-9_.-]', '_', filename)
+    return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}'
+
+
 def package(timeline: dict[str, Any], lookup: Lookup, name: str) -> bytes:
-    """A small zip: the XML, the EDL and a note on how to open them."""
+    """The cut, timed caption sidecars and instructions; media stay in place."""
     base = re.sub(r"[^\w-]+", "_", name).strip("_")[:60] or "cut"
     paths = sorted({str(info["path"]) for c in _clips(timeline, "visual") if (info := lookup(c["asset_id"]))})
     note = (f"{name}\n\nOpen {base}.xml in Premiere Pro (File > Import) or DaVinci Resolve (File > Import > Timeline).\n"
             f"{base}.edl is the same cut as a CMX 3600 EDL. The media are referenced where Prospero's Hoard keeps them,\n"
-            "on this computer; if you move the files, relink them in the editor.\n\nMedia used:\n" + "\n".join(paths) + "\n")
+            "on this computer; if you move the files, relink them in the editor.\n"
+            "If captions are present, import the SRT or VTT separately as a subtitle track. XML markers/EDL comments\n"
+            "are labels, not subtitle overlays. The captions JSON also preserves word timings and karaoke metadata.\n"
+            "SRT/VTT preserve text and timing, not the rendered font, placement or animation.\n\nMedia used:\n" + "\n".join(paths) + "\n")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{base}.xml", to_xmeml(timeline, lookup, name))
         z.writestr(f"{base}.edl", to_edl(timeline, lookup, name))
+        cues = caption_cues(timeline)
+        if cues:
+            z.writestr(f"{base}.srt", subs.to_srt(cues))
+            z.writestr(f"{base}.vtt", subs.to_vtt(cues))
+            z.writestr(f"{base}.captions.json", json.dumps({'schema_version': 1, 'time_base': 'timeline_seconds',
+                                                         'cues': cues}, ensure_ascii=False, indent=2))
         z.writestr("README.txt", note)
     return buf.getvalue()
