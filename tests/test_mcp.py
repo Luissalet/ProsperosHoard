@@ -94,6 +94,10 @@ async def test_mcp_protocol_end_to_end(running_app):
                 assert "Keywords:" in (t.description or ""), t.name
                 assert t.annotations is not None and (t.annotations.destructiveHint is False or t.name == "studio_trash")
             assert by_name["studio_show"].annotations.readOnlyHint is True
+            smooth = by_name["studio_interpolate"]
+            assert smooth.annotations.readOnlyHint is False
+            assert smooth.annotations.idempotentHint is False
+            assert {"asset_id", "fps", "wait_s"} <= set(smooth.inputSchema["properties"])
             for name in ("studio_productions", "studio_production", "studio_recipes_list", "studio_recipe_get", "studio_qa_report"):
                 assert by_name[name].annotations.readOnlyHint is True, name
             for t in tools.tools:

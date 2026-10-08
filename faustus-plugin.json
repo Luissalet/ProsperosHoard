@@ -6,6 +6,7 @@
   "capabilities": [
     "image generation",
     "video editing",
+    "local frame interpolation",
     "graphic design",
     "audio analysis",
     "text-to-speech",

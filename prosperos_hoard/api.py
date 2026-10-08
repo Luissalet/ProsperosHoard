@@ -29,6 +29,7 @@ from . import audio as audio_mod
 from . import charkit
 from . import charpack
 from . import clip_edit as clip_edit_mod
+from . import interpolate as interpolate_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, jobevents
@@ -661,6 +662,12 @@ class ReframeBody(BaseModel):
     wait_s: float = 0
 
 
+class InterpolateBody(BaseModel):
+    asset_id: str
+    fps: float = 48
+    wait_s: float = 0
+
+
 class RetakeBody(BaseModel):
     asset_id: str
     start_s: float                              # the stretch to redo, in the clip's own seconds
@@ -894,6 +901,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
     queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
     queue.register("reframe", lambda job, p: engine.reframe_job(store, job, p))
+    queue.register("interpolate", lambda job, p: interpolate_mod.run(store, job, p))
     queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
     queue.register("clip_edit", lambda job, p: engine.clip_edit_job(store, backend, job, p))
 
@@ -3721,6 +3729,22 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_reframe")
     def agent_reframe(body: ReframeBody):
         return agent("studio_reframe", body.asset_id, lambda: op_reframe(body))
+
+    def op_interpolate(body: InterpolateBody) -> dict[str, Any]:
+        clip = store.get_asset(body.asset_id)
+        interpolate_mod.source_plan(store, clip, body.fps)
+        job = queue.enqueue("interpolate", "cpu", body.model_dump(exclude={"wait_s"}), project_id=clip["project_id"])
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/assets/{asset_id}/interpolate")
+    def asset_interpolate(asset_id: str, body: InterpolateBody):
+        return op_interpolate(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/studio_interpolate")
+    def agent_interpolate(body: InterpolateBody):
+        return agent("studio_interpolate", body.asset_id, lambda: op_interpolate(body))
 
     def op_retake(body: RetakeBody) -> dict[str, Any]:
         clip = store.get_asset(body.asset_id)
