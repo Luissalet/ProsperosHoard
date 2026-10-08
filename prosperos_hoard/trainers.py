@@ -568,7 +568,9 @@ def find_output(output_dir: Path, name: str) -> Optional[Path]:
 
 
 def _kill_process_tree(proc: Any) -> None:
-    hlproc.kill_tree(proc, grace_s=0)
+    # Keep the shared runner's forced fallback through this owned process
+    # handle when Windows' tree-stop command cannot terminate the trainer.
+    hlproc.kill_tree(proc, grace_s=0.1)
 
 
 def run_training(trainer: dict[str, Any], plan: dict[str, Any], *, dataset_dir: Path, output_dir: Path,
