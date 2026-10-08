@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -28,6 +28,14 @@ _ADDED_COLUMNS = [
     ("projects", "deleted_at", "TEXT"),  # in the trash since (v9); NULL = live
     ("characters", "element", "TEXT NOT NULL DEFAULT 'character'"),  # character | location | prop (v10)
     ("characters", "deleted_at", "TEXT"),  # deleted (recoverable) since (v10); NULL = live
+    # style cards for motion graphics (v12): how a look is drawn and moved, not only prompted
+    ("style_presets", "technique", "TEXT"),
+    ("style_presets", "palette_json", "TEXT NOT NULL DEFAULT '[]'"),  # #hex: background, ink, accent, accent 2, muted
+    ("style_presets", "motion_json", "TEXT NOT NULL DEFAULT '{}'"),  # {easing, bezier, stagger_s, stepped_fps, pop}
+    ("style_presets", "signature_transition", "TEXT"),
+    ("style_presets", "quality", "INTEGER NOT NULL DEFAULT 0"),  # 0-3 stars
+    ("style_presets", "pitfalls", "TEXT"),
+    ("style_presets", "typography_json", "TEXT NOT NULL DEFAULT '{}'"),  # {fonts, weight, case, tracking, align, background, fx}
 ]
 
 _SCHEMA = """
@@ -110,7 +118,14 @@ CREATE TABLE IF NOT EXISTS style_presets (
     defaults_json TEXT NOT NULL DEFAULT '{}',
     notes TEXT,
     is_builtin INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    technique TEXT,
+    palette_json TEXT NOT NULL DEFAULT '[]',
+    motion_json TEXT NOT NULL DEFAULT '{}',
+    signature_transition TEXT,
+    quality INTEGER NOT NULL DEFAULT 0,
+    pitfalls TEXT,
+    typography_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS boards (
