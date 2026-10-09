@@ -38,7 +38,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
-from . import engine
+from . import engine, graphic_shots
 from .ids import new_id
 from .jobs import JobCancelled
 from .store import NotFound, Store
@@ -389,7 +389,9 @@ def _set_span(shot: dict[str, Any], span: Optional[tuple[float, float]]) -> None
 
 
 def _check_spans(spec: dict[str, Any]) -> None:
-    placed = sorted(((shot_span(s), s["key"]) for s in spec.get("shots") or [] if shot_span(s)), key=lambda x: x[0][0])
+    # an overlay (a lower third, a graphic over the cut) sits on top of whatever plays: it may share a stretch
+    placed = sorted(((shot_span(s), s["key"]) for s in spec.get("shots") or []
+                     if shot_span(s) and not graphic_shots.is_overlay(s)), key=lambda x: x[0][0])
     for (a, ka), (b, kb) in zip(placed, placed[1:]):
         if b[0] < a[1] - 1e-6:
             raise ProductionError("bad_changes", f"shot {kb} ({b[0]:.1f}-{b[1]:.1f} s) overlaps shot {ka} "
@@ -502,6 +504,27 @@ def cast_for_shot(spec: dict[str, Any], shot: dict[str, Any]) -> list[dict[str, 
     return [cast[(start + i) % len(cast)] for i in range(per)]
 
 
+def _normalise_graphic_shot(shot: dict[str, Any], i: int) -> None:
+    """A shot drawn by code (`kind: "graphic"`): its graphic validated, nothing to generate (no variants, clip, lead,
+    references or cast), and a span - the stretch of the song it covers - which decides its duration. Any other
+    shot loses a stray `graphic`."""
+    if shot.get("kind") != "graphic":
+        shot.pop("kind", None)
+        shot.pop("graphic", None)
+        return
+    try:
+        shot["graphic"] = graphic_shots.clean_shot_graphic(shot.get("graphic"), shot["key"])
+    except graphic_shots.GraphicShotError as exc:
+        raise ProductionError("bad_spec", f"spec.shots[{i}]: {exc.message}") from None
+    if not shot_span(shot):
+        raise ProductionError("bad_spec", f"spec.shots[{i}] is a graphic and needs start_s and end_s (the stretch of the song it covers)")
+    if not str(shot.get("prompt") or "").strip():
+        shot["prompt"] = graphic_shots.default_prompt(shot["graphic"])
+    shot.update(lead=False, variants=1, best=0, clips=[], motion="still", crowd=False)
+    for field in ("continue_from", "sing", "refs", "cast", "motion_ref", "negative", "reuse_asset_ids", "reuse_clips", "locked_clip"):
+        shot.pop(field, None)
+
+
 def normalise_spec(spec: Any) -> dict[str, Any]:
     """Validate a production spec and fill defaults. Raises ProductionError
     with the offending field."""
@@ -558,7 +581,7 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
         raise ProductionError("bad_spec", "spec.shots must be a list of at most 80 shots")
     seen: set[str] = set()
     for i, shot in enumerate(shots):
-        if not isinstance(shot, dict) or not str(shot.get("prompt") or "").strip():
+        if not isinstance(shot, dict) or not (str(shot.get("prompt") or "").strip() or shot.get("kind") == "graphic"):
             raise ProductionError("bad_spec", f"spec.shots[{i}] needs a prompt")
         key = str(shot.get("key") or shot.get("n") or i + 1)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,24}", key) or re.fullmatch(r".+v\d+", key):
@@ -625,6 +648,13 @@ def normalise_spec(spec: Any) -> dict[str, Any]:
                 raise ProductionError("bad_spec", exc.message) from None
         else:
             _set_span(shot, None)
+        _normalise_graphic_shot(shot, i)
+    try:
+        spec["graphics"] = graphic_shots.clean_production_look(spec.get("graphics"))
+    except graphic_shots.GraphicShotError as exc:
+        raise ProductionError("bad_spec", exc.message) from None
+    if not spec["graphics"]:
+        spec.pop("graphics")
     try:
         _check_spans(spec)
     except ProductionError as exc:
@@ -1277,9 +1307,11 @@ class Run:
         pid = self.project_id
         items = self.items("frames")
         pending = self.pending("frames")
+        if graphic_shots.ensure_posters(self.store, self.state):
+            self.save()  # the graphic shots are drawn here, no job: a poster still each (overlays have nothing to draw)
         for shot in self.spec.get("shots") or []:
             key = shot["key"]
-            if key in items or key in pending:
+            if key in items or key in pending or graphic_shots.is_graphic(shot):
                 continue
             reuse = [a for a in (shot.get("reuse_asset_ids") or []) if _asset_ok(self.store, a)]
             if reuse:
@@ -1315,6 +1347,12 @@ class Run:
         return others[variant - 1] if len(others) >= variant else entry.get("best")
 
     def stage_lyrics(self) -> None:
+        self._stage_lyrics()
+        if any(graphic_shots.is_graphic(s) and s["graphic"]["grammar"] == "kinetic_lyrics" for s in self.spec.get("shots") or []):
+            # the posters of kinetic lyrics show the sung words: draw them again now that they are timed
+            graphic_shots.ensure_posters(self.store, self.state, refresh=True)
+
+    def _stage_lyrics(self) -> None:
         song = self.spec.get("song") or {}
         song_id = self.state["done"]["song"]["song_asset_id"]
         if song.get("lrc_asset_id") and _asset_ok(self.store, song["lrc_asset_id"]):
@@ -1628,6 +1666,9 @@ class Run:
             info = timelines.get(aspect)
             if info is None:
                 options = self.cut_options(prefer)
+                drawn = graphic_shots.cut_graphics(self.store, self.state)
+                if drawn:
+                    options["graphic_shots"] = drawn
                 free, free_pools = apply_pins(options, pool, pools, self.pinned(prefer))
                 if free_pools:
                     options["section_pools"] = free_pools
@@ -1869,6 +1910,41 @@ def promote_clips(data_dir: Path, slug: str, keys: Optional[list[str]] = None) -
         return {"slug": slug, "promoted": drafts, "chained": chain, "status": state["status"]}
 
 
+def _change_graphic(shot: dict[str, Any], change: dict[str, Any], key: str) -> None:
+    """`kind` ("graphic" or "image") and `graphic` of a shot change. A graphic given for a graphic shot is
+    laid over the one it has (its `data` and `look` merged field by field, unless the grammar changes: then
+    it is a new graphic); an image shot becomes a graphic with a `graphic` and a span, and a graphic becomes
+    an image shot again (its prompt is generated)."""
+    kind = change.get("kind")
+    if kind is not None and kind not in ("graphic", "image"):
+        raise ProductionError("bad_changes", f"shot {key}: kind is 'graphic' (drawn by code) or 'image' (generated)")
+    new = change.get("graphic")
+    if new is not None and not isinstance(new, dict):
+        raise ProductionError("bad_changes", f"shot {key}: graphic is an object {{grammar, data, ...}}")
+    if kind == "image":
+        shot.pop("kind", None)
+        shot.pop("graphic", None)
+        return
+    old = shot.get("graphic") if shot.get("kind") == "graphic" else None
+    if new is None and old is None:
+        raise ProductionError("bad_changes", f"shot {key}: a graphic shot needs its graphic {{grammar, data, ...}}")
+    if new is not None and old is not None and new.get("grammar", old["grammar"]) == old["grammar"]:
+        merged = {**old, **new}
+        if "data" in new:
+            merged["data"] = {**(old.get("data") or {}), **(new["data"] or {})}
+        if "look" in new:
+            merged["look"] = {**(old.get("look") or {}), **(new["look"] or {})}
+        new = merged
+    shot["kind"] = "graphic"
+    shot["graphic"] = new if new is not None else old
+    try:
+        _normalise_graphic_shot(shot, 0)
+    except ProductionError as exc:
+        raise ProductionError("bad_changes", exc.message) from None
+    if change.get("prompt") is None and shot.get("prompt", "").startswith(("Kinetic lyrics", "Title card", "Lower third", "Outro card")):
+        shot["prompt"] = graphic_shots.default_prompt(shot["graphic"])  # the name follows the text it shows
+
+
 def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
     """"Change shots": per shot key, pick another variant as the best still
     (`best`: a variant index or one of its asset ids), turn its clip on or
@@ -1878,7 +1954,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
     run rebuilds exactly that. Returns what changed."""
     if not isinstance(changes, list) or not changes or len(changes) > 80:
         raise ProductionError("bad_changes", "changes must be a list of 1-80 {key, best|clip|prompt|motion_prompt|motion|"
-                                             "seed|regenerate|lead|section|span|refs|crowd|cast|negative|after|delete} or {insert: {...}}")
+                                             "seed|regenerate|lead|section|span|refs|crowd|cast|negative|after|delete|kind|graphic} or {insert: {...}}")
     with lock_for(slug):
         state = load_state(data_dir, slug)
         if is_legacy(state):
@@ -1908,8 +1984,9 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 raise ProductionError("bad_changes", f"each change must be an object, got {change!r}")
             if change.get("insert") is not None:
                 new = change["insert"]
-                if not isinstance(new, dict) or not str(new.get("prompt") or "").strip():
-                    raise ProductionError("bad_changes", "insert needs a prompt")
+                drawn = isinstance(new, dict) and new.get("kind") == "graphic"
+                if not isinstance(new, dict) or not (str(new.get("prompt") or "").strip() or drawn):
+                    raise ProductionError("bad_changes", "insert needs a prompt (or kind 'graphic' with its graphic and span)")
                 if len(order) >= 80:
                     raise ProductionError("bad_changes", "a production holds at most 80 shots")
                 number = max([int(k) for k in shots if k.isdigit()] or [0]) + 1
@@ -1917,7 +1994,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                 at = position_after(new.get("after", change.get("after")))
                 near = order[at - 1] if at > 0 else (order[0] if order else {})
                 section = str(new.get("section") or near.get("section") or "").lower()
-                shot = {"key": key, "prompt": str(new["prompt"]).strip()[:2000], "lead": bool(new.get("lead", True)),
+                shot = {"key": key, "prompt": str(new.get("prompt") or "").strip()[:2000], "lead": bool(new.get("lead", True)),
                         "motion": "still" if new.get("motion") == "still" else "move",
                         "motion_prompt": str(new.get("motion_prompt") or "Continuous visible subject movement throughout the shot.")[:2000],
                         "seed": 3000 + 10 * number, "clip_seed": 5000 + number,
@@ -1932,6 +2009,12 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                                            "prompt": str(new["motion_ref"].get("prompt") or "")[:300]}}
                            if isinstance(new.get("motion_ref"), dict) and new["motion_ref"].get("asset_id") else {})}
                 _set_span(shot, _parse_span(new.get("span"), key))
+                if drawn:
+                    shot.update(kind="graphic", graphic=new.get("graphic"))
+                    try:
+                        _normalise_graphic_shot(shot, len(order))
+                    except ProductionError as exc:
+                        raise ProductionError("bad_changes", exc.message) from None
                 if near.get("width") and near.get("height"):
                     shot["width"], shot["height"] = near["width"], near["height"]
                 else:
@@ -2008,6 +2091,11 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
                         shot["clips"] = [0]
                 else:
                     shot.pop("sing", None)
+                for ck in [k for k in clips if split_key(k)[0] == key]:
+                    clips.pop(ck, None)
+            if change.get("kind") is not None or change.get("graphic") is not None:
+                _change_graphic(shot, change, key)
+                frames.pop(key, None)  # its poster (or its generated still) is drawn again
                 for ck in [k for k in clips if split_key(k)[0] == key]:
                     clips.pop(ck, None)
             if change.get("lead") is not None and bool(change["lead"]) != bool(shot.get("lead")):

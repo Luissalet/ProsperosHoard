@@ -381,6 +381,82 @@ def lyrics_clips_from_lines(lines: list[dict[str, Any]], song_duration_s: float,
     return clips
 
 
+# ------------------------------------------------------------ graphic shots
+
+def _lines_in_window(lyrics_lines: list[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
+    """The sung lines that start inside [start, end), as {text, start_s, end_s} in the window's own time
+    (a line ends where the next begins, at the window's end, or after 8 s, like the caption clips)."""
+    ordered = sorted((ln for ln in lyrics_lines if str(ln.get("text", "")).strip()), key=lambda ln: ln["time_s"])
+    out = []
+    for i, line in enumerate(ordered):
+        t = float(line["time_s"])
+        if not start - _SECTION_EPS_S <= t < end - 0.05:
+            continue
+        nxt = float(ordered[i + 1]["time_s"]) if i + 1 < len(ordered) else end
+        last = min(end, nxt, t + 8.0)
+        first = max(0.0, t - start)
+        if last - start - first < 0.2:
+            continue
+        out.append({"text": str(line["text"]).strip()[:300], "start_s": round(first, 3), "end_s": round(last - start, 3)})
+    return out
+
+
+def prepare_graphic(graphic: dict[str, Any], start: float, end: float, lyrics_lines: Optional[list[dict[str, Any]]],
+                    beat_times: Optional[list[float]]) -> dict[str, Any]:
+    """A shot's graphic made ready for the stretch [start, end] of the song: its duration, and for kinetic lyrics
+    without lines of their own the sung lines of the stretch (and, with `snap_to_beats`, the beats inside it)."""
+    spec = json_copy(graphic)
+    spec["duration"] = round(end - start, 4)
+    spec["window_start_s"] = round(start, 4)
+    data = spec.setdefault("data", {})
+    if spec.get("grammar") == "kinetic_lyrics":
+        if not data.get("lines") and data.get("from_song", True):
+            data["lines"] = _lines_in_window(lyrics_lines or [], start, end)
+        if data.get("snap_to_beats"):
+            data["beats"] = [round(b - start, 3) for b in (beat_times or []) if start - 0.2 <= b <= end + 0.2]
+    return spec
+
+
+def inject_graphics(tracks: list[dict[str, Any]], graphic_shots: list[dict[str, Any]], lyrics_lines: Optional[list[dict[str, Any]]],
+                    beat_times: Optional[list[float]], song_duration_s: float) -> list[dict[str, Any]]:
+    """Put the code-drawn shots of a production into a cut.
+
+    `graphic_shots`: [{"poster": asset id | None, "start_s", "end_s", "graphic": spec}] - the stretch of the
+    song each one covers and its (look already resolved) spec. A clip-mode graphic turns the visual clips
+    that played its poster still into graphic clips (so the cut points the auto-cut gave the stretch stay);
+    an overlay goes on the "graphics" track. A kinetic-lyrics graphic without lines of its own takes the sung
+    lines of its stretch, and with `snap_to_beats` the beats inside it."""
+    tracks = [dict(t, clips=[dict(c) for c in t["clips"]]) for t in tracks]
+    visual = next(t for t in tracks if t["type"] == "visual")
+    overlays: list[dict[str, Any]] = []
+    for shot in graphic_shots or []:
+        start = max(0.0, float(shot["start_s"]))
+        end = min(float(song_duration_s), float(shot["end_s"]))
+        if end - start < MIN_CLIP_S:
+            continue
+        spec = prepare_graphic(shot["graphic"], start, end, lyrics_lines, beat_times)
+        if spec.get("mode") == "overlay":
+            overlays.append({"start_s": round(start, 3), "end_s": round(end, 3), "graphic": spec})
+            continue
+        for clip in visual["clips"]:
+            if shot.get("poster") and clip.get("asset_id") == shot["poster"]:
+                offset = max(0.0, float(clip["start_s"]) - start)
+                for stale in ("ken_burns", "trim_start_s", "source_fit", "synced"):
+                    clip.pop(stale, None)
+                clip.update(kind="graphic", graphic=spec, graphic_offset_s=round(offset, 4), trim_start_s=0.0)
+    if overlays:
+        tracks = [t for t in tracks if t["type"] != "graphics"] + [{"type": "graphics", "clips": overlays}]
+    return tracks
+
+
+def json_copy(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: json_copy(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_copy(v) for v in value]
+    return value
+
+
 # ------------------------------------------------------------ validation
 
 def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[str, Any]]]) -> list[dict[str, Any]]:

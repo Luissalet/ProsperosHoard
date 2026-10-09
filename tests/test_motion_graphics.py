@@ -288,3 +288,11 @@ def test_odd_frame_sizes_are_refused():
         pytest.skip("ffmpeg not installed")
     with pytest.raises(mg.GraphicError, match="even"):
         mg.render_video(mg.normalise_graphic(title()), Path("/tmp/never.mp4"), width=271, height=480, fps=24)
+
+
+def test_a_characters_palette_becomes_a_look():
+    look = mg.look_from_palette(["#112233", "#ffeeaa", "#ff3300", "#00aa55"])["palette"]
+    assert look[0] == "#112233" and look[1] == "#ffeeaa" and look[2] == "#ff3300" and look[3] == "#00aa55"
+    two = mg.look_from_palette(["#F28C28", "#1B1D22"])["palette"]
+    assert two[0] == "#1b1d22" and two[2] == "#f28c28"  # an orange is an accent, not ink: the default ink stays
+    assert mg.look_from_palette(["#fff"]) == {} and mg.look_from_palette(None) == {} and mg.look_from_palette(["nope", "x"]) == {}

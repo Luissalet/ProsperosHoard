@@ -2959,6 +2959,7 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
                 sections.insert(0, {"label": "Intro", "kind": "intro", "energy": "low", "start_s": 0.0,
                                     "end_s": sections[0]["start_s"]})
     options.pop("sections", None)
+    graphic_shots = options.pop("graphic_shots", None)
     if options.get("section_pools") is not None:
         raw_pools = options["section_pools"]
         if not isinstance(raw_pools, dict) or len(raw_pools) > 40:
@@ -2992,6 +2993,12 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     fps = int((options or {}).get("fps", 30))
     if fps not in (24, 25, 30):
         raise EngineError("bad_fps", "fps must be 24, 25 or 30")
+    if graphic_shots:
+        try:
+            built["tracks"] = timeline_mod.inject_graphics(built["tracks"], graphic_shots, lyrics_lines, analysis["beat_times"],
+                                                           analysis["duration_s"])
+        except (timeline_mod.TimelineError, KeyError, TypeError, ValueError) as exc:
+            raise EngineError("bad_graphic", f"the graphic shots did not fit the cut: {exc}") from None
     return {"tracks": built["tracks"], "fps": fps, "sections": sections, "duration_s": analysis["duration_s"],
             "song_name": re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac|opus)$", "", song.get("name") or song["id"], flags=re.I)}
 

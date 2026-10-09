@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import engine
+from . import engine, graphic_shots
 from . import productions as prod
 from . import timeline as timeline_mod
 from . import video as video_mod
@@ -100,6 +100,9 @@ def build(store: Store, state: dict[str, Any]) -> dict[str, Any]:
                                        prod.pinned_spans(state.get("spec") or {}, assets_for))
     if free_pools:
         options["section_pools"] = free_pools
+    drawn = graphic_shots.cut_graphics(store, state)
+    if drawn:
+        options["graphic_shots"] = drawn
     lyrics_id = (done.get("lyrics") or {}).get("lyrics_asset_id")
     cut = engine.auto_cut(store, _project_id(state), song_id, pool, None, lyrics_id, options)
     visual = next(t for t in cut["tracks"] if t["type"] == "visual")
@@ -109,7 +112,8 @@ def build(store: Store, state: dict[str, Any]) -> dict[str, Any]:
         if i > 0:
             clip["transition_in"] = {"type": "crossfade", "duration_s": round(min(CROSSFADE_S, clip["duration_s"] / 3,
                                                                                   visual["clips"][i - 1]["duration_s"] / 3), 3)}
-        clip.setdefault("ken_burns", {"zoom_start": 1.0, "zoom_end": 1.08, "pan": "none"})
+        if clip["kind"] != "graphic":
+            clip.setdefault("ken_burns", {"zoom_start": 1.0, "zoom_end": 1.08, "pan": "none"})
     return {"tracks": cut["tracks"], "fps": cut["fps"], "sections": cut["sections"], "duration_s": cut["duration_s"],
             "owner": owner, "song_asset_id": song_id}
 

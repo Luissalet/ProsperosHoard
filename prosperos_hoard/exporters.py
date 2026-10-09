@@ -93,7 +93,7 @@ def to_xmeml(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = Non
 
     start = 0
     for i, clip in enumerate(visual, 1):
-        info = lookup(clip["asset_id"])
+        info = lookup(clip.get("asset_id") or "")
         length = _frames(clip["duration_s"], fps)
         if not info or length <= 0:
             start += max(0, length)
@@ -130,7 +130,7 @@ def to_edl(timeline: dict[str, Any], lookup: Lookup, name: Optional[str] = None)
     rec = 0
     n = 0
     for clip in _clips(timeline, "visual"):
-        info = lookup(clip["asset_id"])
+        info = lookup(clip.get("asset_id") or "")
         length = _frames(clip["duration_s"], fps)
         if not info or length <= 0:
             rec += max(0, length)
@@ -191,7 +191,7 @@ def download_disposition(filename: str) -> str:
 def package(timeline: dict[str, Any], lookup: Lookup, name: str) -> bytes:
     """The cut, timed caption sidecars and instructions; media stay in place."""
     base = re.sub(r"[^\w-]+", "_", name).strip("_")[:60] or "cut"
-    paths = sorted({str(info["path"]) for c in _clips(timeline, "visual") if (info := lookup(c["asset_id"]))})
+    paths = sorted({str(info["path"]) for c in _clips(timeline, "visual") if (info := lookup(c.get("asset_id") or ""))})
     note = (f"{name}\n\nOpen {base}.xml in Premiere Pro (File > Import) or DaVinci Resolve (File > Import > Timeline).\n"
             f"{base}.edl is the same cut as a CMX 3600 EDL. The media are referenced where Prospero's Hoard keeps them,\n"
             "on this computer; if you move the files, relink them in the editor.\n"
