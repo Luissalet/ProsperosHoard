@@ -335,6 +335,13 @@ Prospero se une a las demás apps Hoard con el contrato común de la familia (el
   `readOnlyHint`, las mismas descripciones que el adaptador MCP) y `POST /api/agent/call {name, arguments}` ejecuta una con el token de
   la familia (`data/mcp-token`); ejecuta la misma función que la ruta de esa herramienta. Ambas van antes de las rutas comodín.
   `/api/health` trae un bloque `hoard_link`. `faustus-plugin.json` lo declara.
+- **Agentes responsables** (HoardLink 0.8.2). Toda llamada que cambia algo por `POST /api/agent/call` debe decir **por qué** (`reason`,
+  de 3 a 300 caracteres, en el cuerpo o entre los argumentos; si falta, `400 reason_required` y no se ejecuta nada), se apunta en
+  `data/agent_journal.jsonl` con el agente (`X-Agent-Id`) y la sesión (`X-Agent-Session`) que la hicieron (con los secretos
+  enmascarados), y se puede deshacer una sesión entera: `POST /api/agent/undo {session, dry_run: true}` enseña qué pasaría y
+  `{session, confirm: true, reason}` lo hace. Solo se tocan las escrituras de esa sesión, y lo que otra sesión o tú cambiasteis después
+  se deja como está y se informa como conflicto. La interfaz web y las rutas por herramienta son la vía de la persona y no piden
+  motivo. Detalles, qué herramientas se pueden deshacer y los perfiles de token: [docs/MCP.md](docs/MCP.md#accountable-agents).
 - **Eventos de trabajo.** Renders, canciones, clips y producciones enteras envían `prospero.job.queued|started|progress|done|failed|
   cancelled` con `job_id`, `title`, `kind` (`render`, `song`, `clip`, `production`), `progress`, `gpu`, `url`; el progreso se limita a un
   evento cada 5 s. Una producción que se detiene para ti termina su trabajo como `done` con `status: "awaiting_review"` y `awaiting`
