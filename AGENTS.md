@@ -10,7 +10,7 @@ Reglas para agentes de código que trabajen en este repositorio.
    sin FastAPI; `PROSPERO_GPU_LEASE=0` apaga la reserva de GPU). `engine.py`, `store.py`, `db.py`,
    `comfy_driver.py`, `design.py`, `audio.py`, `video.py`, `timeline.py`,
    `voices.py`, `backend.py`, `shorts.py`, `stock.py`, `soundtrack.py`, `motion_graphics.py` y
-   `graphic_shots.py` son
+   `graphic_shots.py` y `agent_undo.py` son
    lógica pura y se prueban sin servidor (lo externo de un short pasa por el
    `Studio`; en los tests, `app.state.short_hooks`).
 2. **`mcp_server.py` es un script independiente**: solo stdlib, `httpx` y
@@ -26,6 +26,19 @@ Reglas para agentes de código que trabajen en este repositorio.
    herramienta MCP** con el mismo nombre; las respuestas de agente son
    compactas (ids primero, sin rutas de archivo ni listas enormes) y los
    docstrings llevan una línea `Keywords:` en inglés y español.
+   **Agentes responsables (HoardLink 0.8.2)**: `POST /api/agent/call` exige un
+   `reason` (3-300 caracteres) a toda herramienta que no sea `readOnlyHint`,
+   apunta cada escritura en `data/agent_journal.jsonl` (agente, sesión, motivo)
+   y permite deshacer una sesión entera (`POST /api/agent/undo`). Las rutas
+   por herramienta y la interfaz web son la vía de la persona y quedan
+   exentas. Una herramienta de escritura nueva: (a) si se puede revertir con lo
+   que Prospero ya guarda (papelera, borrado blando, instantánea previa), da
+   `capture`/`track`/`undo` en `agent_undo.HOOKS` y una prueba en
+   `tests/test_agent_accountability.py`; (b) si lanza un render o un trabajo de
+   GPU, no lleva manejador (se informa como `no_handler`); (c) si solo crea
+   objetos nuevos o edita borradores y nunca borra ni publica, añádela a
+   `agent_undo.DRAFT_SAFE` (perfil `drafts`). Las rutas `journal`, `undo` y
+   `tokens` del router común no son herramientas (`family_api.SHARED`).
 5. **Los archivos se sirven por id**, nunca por una ruta del cliente. Las
    importaciones por ruta pasan por `engine.resolve_import_path`.
 6. **Escrituras atómicas con `util.write_text_atomic`** (o
@@ -53,6 +66,21 @@ Reglas para agentes de código que trabajen en este repositorio.
    ni datos personales.
 
 ## Para el asistente que dirige el estudio (MCP)
+
+- **Motivo y sesión**: toda herramienta que cambia algo lleva `reason` (una
+  frase, 3-300 caracteres: por qué lo haces). Sin él la app contesta
+  `reason_required` y la llamada no hace nada. El adaptador MCP usa la ruta
+  común cuando encuentra el token de la app (`PROSPERO_TOKEN`,
+  `PROSPERO_TOKEN_FILE` o `data/mcp-token` de esta copia); sin token sigue
+  usando las rutas por herramienta, sin motivo ni diario. Quien lanza el servidor MCP pone
+  `HOARD_AGENT_ID` y `HOARD_AGENT_SESSION` para que Prospero sepa qué agente y
+  qué sesión hizo cada cambio. **«Deshaz lo que has hecho»**: `POST
+  /api/agent/undo {session, dry_run: true}` para verlo y luego
+  `{session, confirm: true, reason}` (token principal o perfil `all`); solo
+  toca lo de esa sesión, deja como conflicto lo que cambió otra sesión o la
+  persona después, y lista como `not_undoable` lo que lanzó renders. Los
+  tokens por agente (`read_only`, `drafts`, `all`) se crean con `python -m
+  hoard_link.tokens mint --app-data-dir data --agent <id> --profile drafts`.
 
 - **Guion o letra opcionales por tomas**: `studio_production_segments` importa
   texto o guarda la lista completa con enlaces y tiempos. No inicia generación.

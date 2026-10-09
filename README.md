@@ -329,6 +329,13 @@ Prospero joins the other Hoard apps through the shared family contract (the vend
   descriptions as the MCP adapter) and `POST /api/agent/call {name, arguments}` runs one with the family bearer token
   (`data/mcp-token`); it runs the very function the per-tool route runs. Both are placed before the catch-all routes. `/api/health`
   has a `hoard_link` block. `faustus-plugin.json` declares it.
+- **Accountable agents** (HoardLink 0.8.2). Every call that changes something through `POST /api/agent/call` must say **why**
+  (`reason`, 3-300 characters, in the body or among the arguments; otherwise `400 reason_required` and nothing runs), is written to
+  `data/agent_journal.jsonl` with the agent (`X-Agent-Id`) and session (`X-Agent-Session`) that made it (secrets masked), and a whole
+  session can be taken back: `POST /api/agent/undo {session, dry_run: true}` shows what would happen, `{session, confirm: true, reason}`
+  does it. Only that session's writes are touched, and a write another session or you changed afterwards is left alone and reported as
+  a conflict. The web interface and the per-tool routes are the person's way in and need no reason. Details, the list of tools that can
+  be undone and the token profiles: [docs/MCP.md](docs/MCP.md#accountable-agents).
 - **Job events.** Renders, songs, clips and whole productions send `prospero.job.queued|started|progress|done|failed|cancelled` with
   `job_id`, `title`, `kind` (`render`, `song`, `clip`, `production`), `progress`, `gpu`, `url`; progress is throttled to one event every
   5 s. A production that stops for you finishes its job as `done` with `status: "awaiting_review"` and `awaiting` (`take`, `animatic`,
