@@ -9,6 +9,7 @@ installed by default).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -216,6 +217,29 @@ class Backend:
         self._pool_lock = threading.Lock()
         self._min_card_cache: dict[str, int] = {}
         self._card_totals: Optional[tuple[float, dict[Optional[str], Optional[int]]]] = None
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Stop Hoard Link's background event loop thread (`hoard-link-sync`) and everything bound to it: the pooled ComfyUI
+        clients and the loop's default executor. Safe to call twice; a later `run_async` starts a fresh loop. Call it once the
+        job queue is stopped, so no worker is mid-call on that loop."""
+        link = self.link
+        with self._pool_lock:
+            pooled, self._pool_clients = list(self._pool_clients.values()), {}
+        loop = link.sync._loop
+        if loop is not None and loop.is_running():
+            async def drain(_link: Any) -> None:
+                for _owner, client in pooled:
+                    try:
+                        await client.aclose()
+                    except Exception:  # noqa: BLE001 - closing is best effort
+                        pass
+                await asyncio.get_running_loop().shutdown_default_executor()  # the to_thread() workers ("asyncio_N")
+
+            try:
+                link.sync._run(drain)
+            except Exception:  # noqa: BLE001 - a loop that is already going away needs nothing more
+                pass
+        link.sync.close(timeout)
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:

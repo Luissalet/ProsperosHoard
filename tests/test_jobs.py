@@ -1,7 +1,8 @@
+import threading
 import time
 
 from prosperos_hoard import jobs as jobs_mod
-from prosperos_hoard.jobs import JobQueue, WaitingForResources
+from prosperos_hoard.jobs import JobInterrupted, JobQueue, Progress, WaitingForResources
 
 
 def test_gpu_job_waits_then_succeeds(store, monkeypatch):
@@ -169,3 +170,42 @@ def test_queue_order_survives_restart_and_nothing_runs_twice(store):
     finally:
         queue.stop()
     assert seen == [0, 1, 2]
+
+
+def test_stopping_the_queue_lets_a_long_handler_go_and_leaves_its_job_to_the_next_boot(store):
+    """A handler that waits on sub-jobs (a production) must not outlive the queue: its next progress call raises
+    JobInterrupted, the worker thread ends, and the job is requeued on the next start like after a crash."""
+    started = threading.Event()
+
+    def handler(job, progress):
+        started.set()
+        while True:
+            progress(0.5, "waiting")
+            time.sleep(0.02)
+
+    queue = JobQueue(store)
+    queue.register("long_job", handler)
+    queue.start()
+    job = queue.enqueue("long_job", "cpu", {})
+    assert started.wait(5.0)
+    queue.stop()
+    assert not [t for t in threading.enumerate() if t.name.startswith("job-worker-")]
+    after = store.get_job(job["id"])
+    assert after["state"] == "running" and "interrupted by shutdown" in after["message"]
+    assert store.requeue_running_jobs() == 1 and store.get_job(job["id"])["state"] == "queued"
+
+
+def test_a_handlers_own_except_exception_cannot_swallow_the_shutdown(store):
+    stopping = threading.Event()
+    progress = Progress(store, store.create_job("x", "cpu", {})["id"], stopping=stopping)
+    progress(0.1)
+    stopping.set()
+    try:
+        try:
+            progress.check_cancel()
+        except Exception:  # noqa: BLE001 - what a handler's cleanup code might do
+            raise AssertionError("JobInterrupted must not be an Exception")
+    except JobInterrupted:
+        pass
+    else:
+        raise AssertionError("expected JobInterrupted")

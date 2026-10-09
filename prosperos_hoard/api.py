@@ -5,7 +5,9 @@ and the richer UI endpoints. See `docs/API.md` for every route.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import json
 import logging
 import mimetypes
@@ -986,12 +988,24 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # production/QA handlers are registered below, next to the operations
     # they queue sub-jobs through; the workers start at the end of create_app
 
-    app = FastAPI(title="Prospero's Hoard", version=__version__)
+    def shutdown() -> None:
+        """Stop what the app started: the job workers first (nothing may be mid-call on the link's loop), then Hoard Link's
+        background event loop. Idempotent; called when the server shuts down and by whoever built the app without one."""
+        queue.stop()
+        backend.close()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        await asyncio.to_thread(shutdown)  # joins threads: keep it off the event loop
+
+    app = FastAPI(title="Prospero's Hoard", version=__version__, lifespan=lifespan)
     # strict_ports keeps the old rule: a Host that names a port must be this app's; PROSPERO_ALLOWED_HOSTS adds LAN / tailnet names.
     install_guard(app, port_getter=lambda: port, allowed_env="PROSPERO_ALLOWED_HOSTS", strict_ports=True)
     app.state.store = store
     app.state.backend = backend
     app.state.queue = queue
+    app.state.shutdown = shutdown
 
     async def _any_error(request: Request, exc: Exception):
         status, payload = error_payload(exc)

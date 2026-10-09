@@ -94,7 +94,7 @@ def main() -> None:
     try:
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
     finally:
-        app.state.queue.stop()
+        app.state.shutdown()
 
 
 if __name__ == "__main__":
