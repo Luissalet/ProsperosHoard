@@ -316,3 +316,59 @@ def render_shot(store: Store, state: dict[str, Any], key: str, what: str = "vide
     return render_asset(store, state["project_id"], spec, what=what, width=width, height=height, fps=fps,
                         name=default_prompt(shot["graphic"]), recipe_extra={"production": state.get("slug"), "shot": shot["key"]},
                         progress=progress, should_cancel=should_cancel)
+
+
+# ---------------------------------------------------- previews and jobs
+
+def preview_state(store: Store, production: Optional[str], project: Optional[str]) -> dict[str, Any]:
+    """The state a preview or a standalone render resolves its look from: a production's (lead palette, default
+    look), or a bare project's."""
+    from . import productions as prod
+
+    if production:
+        state = prod.load_state(store.data_dir, production)
+        if prod.is_legacy(state):
+            raise GraphicShotError("legacy_production", "a scripted production has no graphic shots")
+        return state
+    if project:
+        store.get_project(project)
+    return {"project_id": project, "spec": {}, "done": {}}
+
+
+def graphic_for(store: Store, state: dict[str, Any], graphic: Any, start_s: Optional[float], end_s: Optional[float],
+                duration_s: Optional[float] = None) -> dict[str, Any]:
+    """An unsaved graphic (the editor's, or an inline one) as the cut would draw it on its stretch: validated, with its
+    look resolved and, for kinetic lyrics without lines, the sung lines of the stretch."""
+    clean = clean_shot_graphic(graphic)
+    if start_s is None or end_s is None:
+        start_s, end_s = 0.0, float(duration_s or 4.0)
+    if float(end_s) - float(start_s) < 0.5:
+        raise GraphicShotError("bad_graphic", "a graphic lasts at least 0.5 s (end_s after start_s)")
+    shot = {"key": "preview", "kind": "graphic", "graphic": clean, "start_s": float(start_s), "end_s": float(end_s)}
+    return shot_spec_for_span(store, state, shot)
+
+
+def render_job(store: Store, job: dict[str, Any], progress: Any) -> dict[str, Any]:
+    """The `graphic_render` job: one graphic shot (or an inline graphic) as a video, a still or an alpha video."""
+    p = job["params"]
+    cancelled = getattr(progress, "cancelled", None)
+
+    def report(frac: float) -> None:
+        progress(frac, "drawing the graphic")
+
+    try:
+        state = preview_state(store, p.get("production"), p.get("project_id"))
+        if p.get("production"):
+            asset = render_shot(store, state, p["shot"], p.get("what", "video"), p.get("aspect"), int(p.get("fps") or 30), report, cancelled)
+        else:
+            spec = graphic_for(store, state, p["graphic"], None, None, p.get("duration_s"))
+            width, height = frame_size(state, p.get("aspect"))
+            if p.get("what") == "alpha":
+                spec["mode"] = "overlay"
+            asset = render_asset(store, p["project_id"], spec, what=p.get("what", "video"), width=width, height=height,
+                                 fps=int(p.get("fps") or 30), progress=report, should_cancel=cancelled)
+    except mg.GraphicCancelled:
+        raise JobCancelled("cancelled") from None
+    except mg.GraphicError as exc:
+        raise engine.EngineError(exc.code, exc.message) from None
+    return {"asset_id": asset["id"], "asset_ids": [asset["id"]], "duration_s": asset.get("duration_s")}

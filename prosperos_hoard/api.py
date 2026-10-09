@@ -32,7 +32,8 @@ from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
 from . import comfy_driver, engine, procutil
 from . import dubbing as dubbing_mod
-from . import exporters, family_api, gpu_lease, jobevents
+from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
+from . import motion_graphics as mg
 from . import productions as productions_mod
 from . import cinema
 from . import spaces as spaces_mod
@@ -74,6 +75,8 @@ MAX_UPLOAD_IMAGE = engine.MAX_IMAGE_BYTES
 
 def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
     if isinstance(exc, spaces_mod.SpaceError):
+        return 400, {"error": exc.code, "message": exc.message}
+    if isinstance(exc, mg.GraphicError):
         return 400, {"error": exc.code, "message": exc.message}
     if isinstance(exc, ValueError) and str(exc).startswith("stale:"):
         return 409, {"error": "stale", "message": str(exc)}
@@ -651,6 +654,69 @@ class ProductionShotsBody(BaseModel):
     run: bool = True
 
 
+class GraphicShotBody(BaseModel):
+    """A shot drawn by code: set a new one (no `key`) or change one (its `graphic` fields are laid over the old ones)."""
+    production: str
+    key: Optional[str] = None                   # an existing shot; a new one is inserted when missing
+    after: Optional[str] = None                 # where a new shot goes ("start" = first); default: at the end
+    grammar: Optional[str] = None               # kinetic_lyrics | title_card | lower_third | outro_card
+    data: Optional[dict[str, Any]] = None       # the grammar's texts: title/subtitle/kicker, name/caption, lines/layout..., credits
+    mode: Optional[str] = None                  # clip (a shot of the cut) | overlay (over the cut; a lower third always)
+    start_s: Optional[float] = None             # the stretch of the song it covers
+    end_s: Optional[float] = None
+    style: Optional[str] = None                 # a style card (name or id) for the palette, motion and typography
+    look: Optional[dict[str, Any]] = None       # palette, fonts, case, tracking, align, motion, transition, background, fx
+    cues: Optional[list[dict[str, Any]]] = None
+    safe: Optional[dict[str, float]] = None
+    seed: Optional[int] = None
+    suppress_captions: Optional[bool] = None
+    section: Optional[str] = None
+    run: bool = True
+
+
+class GraphicRenderBody(BaseModel):
+    production: Optional[str] = None            # with `shot`: render that shot of the production
+    shot: Optional[str] = None
+    project: Optional[str] = None               # without a production: the project the asset goes to
+    graphic: Optional[dict[str, Any]] = None    # ...and the inline graphic ({grammar, data, ...}); needs duration_s
+    duration_s: Optional[float] = None
+    what: str = "video"                         # video (H.264) | still (PNG at its best moment) | alpha (video with transparency)
+    aspect: Optional[str] = None                # 9:16 | 16:9 | 1:1; default the production's first
+    fps: int = 30
+    wait_s: float = 0.0
+
+
+class GraphicPreviewBody(BaseModel):
+    production: Optional[str] = None
+    project: Optional[str] = None
+    graphic: dict[str, Any]
+    start_s: Optional[float] = None
+    end_s: Optional[float] = None
+    duration_s: Optional[float] = None
+    aspect: Optional[str] = None
+    at_s: Optional[float] = None                # spec time of the frame; default the moment it reads best
+    max_side: int = 960
+
+
+class StyleCardBody(BaseModel):
+    action: str = "list"                        # list | get | create | update | delete
+    id: Optional[str] = None                    # a card's id or name (get, update, delete)
+    project: Optional[str] = None               # create: the project the card belongs to (default all)
+    name: Optional[str] = None
+    from_card: Optional[str] = None             # create: start from this card (a built-in one is read-only)
+    prompt_prefix: Optional[str] = None
+    prompt_suffix: Optional[str] = None
+    negative: Optional[str] = None
+    notes: Optional[str] = None
+    technique: Optional[str] = None
+    palette: Optional[list[str]] = None
+    motion: Optional[dict[str, Any]] = None
+    signature_transition: Optional[str] = None
+    quality: Optional[int] = None
+    pitfalls: Optional[str] = None
+    typography: Optional[dict[str, Any]] = None
+
+
 class ReframeBody(BaseModel):
     asset_id: str
     aspect: str = "9:16"                        # 9:16, 16:9, 1:1, 4:5, 2:3, 3:2, 21:9
@@ -904,6 +970,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("interpolate", lambda job, p: interpolate_mod.run(store, job, p))
     queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
     queue.register("clip_edit", lambda job, p: engine.clip_edit_job(store, backend, job, p))
+    queue.register("graphic_render", lambda job, p: graphic_shots.render_job(store, job, p))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -4185,6 +4252,193 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_shots")
     def agent_production_shots(production: str, body: ProductionShotsBody):
         return agent("studio_production_shots", production, lambda: op_production_shots(production, body))
+
+    # ------------------------------------------------------ graphic shots
+    def _shot_of(slug: str, key: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        state = productions_mod.load_state(store.data_dir, slug)
+        if productions_mod.is_legacy(state):
+            raise engine.EngineError("legacy_production", "a scripted production has no graphic shots; run it from a recipe")
+        shot = next((x for x in (state.get("spec") or {}).get("shots") or [] if x["key"] == str(key)), None)
+        if shot is None:
+            raise engine.EngineError("unknown_shot", f"the production has no shot '{key}'")
+        return state, shot
+
+    def _graphic_shot_view(slug: str, key: str) -> dict[str, Any]:
+        _, shot = _shot_of(slug, key)
+        span = productions_mod.shot_span(shot)
+        return {"key": shot["key"], "kind": shot.get("kind") or "image", "prompt": shot.get("prompt"),
+                **({"graphic": shot["graphic"]} if shot.get("kind") == "graphic" else {}),
+                **({"span": {"start_s": span[0], "end_s": span[1]}} if span else {})}
+
+    def op_graphic_shot(body: GraphicShotBody) -> dict[str, Any]:
+        slug = body.production
+        state = productions_mod.load_state(store.data_dir, slug)
+        graphic = {k: v for k, v in {"grammar": body.grammar, "mode": body.mode, "data": body.data, "style": body.style,
+                                     "look": body.look, "cues": body.cues, "safe": body.safe, "seed": body.seed,
+                                     "suppress_captions": body.suppress_captions}.items() if v is not None}
+        existing = next((x for x in (state.get("spec") or {}).get("shots") or [] if x["key"] == str(body.key)), None) if body.key else None
+        if body.key and existing is None:
+            raise engine.EngineError("unknown_shot", f"the production has no shot '{body.key}' (leave key out to add a new graphic shot)")
+        span = None
+        if body.start_s is not None or body.end_s is not None:
+            old = productions_mod.shot_span(existing) if existing else None
+            start = body.start_s if body.start_s is not None else (old[0] if old else None)
+            end = body.end_s if body.end_s is not None else (old[1] if old else None)
+            if start is None or end is None:
+                raise engine.EngineError("graphic_needs_span", "give start_s and end_s: the stretch of the song the graphic covers")
+            span = {"start_s": start, "end_s": end}
+        if existing:
+            change: dict[str, Any] = {"key": existing["key"]}
+            if existing.get("kind") != "graphic":
+                change["kind"] = "graphic"
+            if graphic or change.get("kind"):
+                change["graphic"] = graphic
+            if span:
+                change["span"] = span
+        else:
+            if not span:
+                raise engine.EngineError("graphic_needs_span", "a new graphic shot needs start_s and end_s: the stretch of the song it covers")
+            shots = (state.get("spec") or {}).get("shots") or []
+            after = body.after if body.after is not None else (shots[-1]["key"] if shots else "start")
+            change = {"insert": {"kind": "graphic", "graphic": graphic, "span": span, "after": after}}
+        if body.section is not None:
+            (change["insert"] if "insert" in change else change)["section"] = body.section
+        result = op_production_shots(slug, ProductionShotsBody(changes=[change], run=body.run))
+        key = body.key or (result.get("changed") or [None])[0]
+        return {"shot": _graphic_shot_view(slug, key) if key else None, **result}
+
+    def op_graphic_render(body: GraphicRenderBody) -> dict[str, Any]:
+        if body.what not in graphic_shots.STILLS:
+            raise engine.EngineError("bad_render", f"what is one of {', '.join(graphic_shots.STILLS)}")
+        if body.aspect is not None and body.aspect not in timeline_mod.ASPECTS:
+            raise engine.EngineError("bad_aspect", f"aspect must be one of {', '.join(timeline_mod.ASPECTS)}")
+        if not 12 <= int(body.fps) <= 60:
+            raise engine.EngineError("bad_fps", "fps must be between 12 and 60")
+        if body.production:
+            if not body.shot:
+                raise engine.EngineError("bad_render", "name the shot to render (shot), or leave production out and give project + graphic")
+            state, shot = _shot_of(body.production, body.shot)
+            if not graphic_shots.is_graphic(shot):
+                raise engine.EngineError("not_a_graphic", f"shot {body.shot} is generated, not a graphic (set it with studio_graphic_shot)")
+            if not productions_mod.shot_span(shot):
+                raise engine.EngineError("graphic_needs_span", f"shot {body.shot} has no span")
+            project_id = state.get("project_id")
+            if not project_id:
+                raise engine.EngineError("no_project", "the production has no project yet (it makes one when it first runs)")
+            params: dict[str, Any] = {"production": body.production, "shot": str(body.shot), "project_id": project_id}
+        elif body.graphic is not None and body.project:
+            store.get_project(body.project)
+            if not body.duration_s:
+                raise engine.EngineError("bad_render", "an inline graphic needs duration_s (seconds)")
+            graphic_shots.clean_shot_graphic(body.graphic)
+            project_id = body.project
+            params = {"graphic": body.graphic, "duration_s": body.duration_s, "project_id": project_id}
+        else:
+            raise engine.EngineError("bad_render", "render a production's shot (production + shot) or an inline graphic (project + graphic + duration_s)")
+        params.update(what=body.what, aspect=body.aspect, fps=int(body.fps))
+        job = queue.enqueue("graphic_render", "cpu", params, project_id=project_id)
+        return {"job": wait(job, body.wait_s)}
+
+    def op_graphic_preview(body: GraphicPreviewBody) -> bytes:
+        state = graphic_shots.preview_state(store, body.production, body.project)
+        spec = graphic_shots.graphic_for(store, state, body.graphic, body.start_s, body.end_s, body.duration_s)
+        width, height = graphic_shots.frame_size(state, body.aspect)
+        scale = min(1.0, max(240, min(1920, int(body.max_side))) / max(width, height))
+        width, height = max(64, int(width * scale) // 2 * 2), max(64, int(height * scale) // 2 * 2)
+        return graphic_shots.preview_png(spec, width, height, at_s=body.at_s)
+
+    @app.post("/api/graphics/preview")
+    def graphics_preview(body: GraphicPreviewBody):
+        return Response(op_graphic_preview(body), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/graphics/options")
+    def graphics_options():
+        return {"grammars": list(mg.GRAMMARS), "modes": list(mg.MODES), "default_mode": dict(mg.DEFAULT_MODE),
+                "transitions": list(mg.TRANSITIONS), "easings": list(mg.EASINGS), "layouts": list(mg.LAYOUTS),
+                "backgrounds": list(mg.BACKGROUNDS), "shadows": list(mg.SHADOWS), "cases": list(mg.CASES), "aligns": list(mg.ALIGNS),
+                "cue_kinds": list(mg.CUE_KINDS), "fonts": sorted(mg.design._FONT_FILES), "palette_roles": list(mg.PALETTE_ROLES),
+                "default_look": mg.DEFAULT_LOOK, "aspects": list(timeline_mod.ASPECTS)}
+
+    @app.post("/api/productions/{slug}/graphic")
+    def production_graphic(slug: str, body: GraphicShotBody):
+        body.production = slug
+        return op_graphic_shot(body)
+
+    @app.post("/api/productions/{slug}/graphic-render")
+    def production_graphic_render(slug: str, body: GraphicRenderBody):
+        body.production = slug
+        return op_graphic_render(body)
+
+    @app.post("/api/agent/studio_graphic_shot")
+    def agent_graphic_shot(body: GraphicShotBody):
+        return agent("studio_graphic_shot", f"{body.production}:{body.key or 'new'}", lambda: op_graphic_shot(body))
+
+    @app.post("/api/agent/studio_graphic_render")
+    def agent_graphic_render(body: GraphicRenderBody):
+        return agent("studio_graphic_render", f"{body.production or body.project}:{body.shot or ''}:{body.what}",
+                     lambda: {"job": job_result(op_graphic_render(body)["job"])})
+
+    # ----------------------------------------------------------- style cards
+    def _card_ref(ref: Optional[str], project: Optional[str] = None) -> dict[str, Any]:
+        if not ref:
+            raise engine.EngineError("card_required", "give the card's id or name")
+        card = graphic_shots.style_card(store, project, ref)
+        if card is None:
+            raise NotFound("style_card", str(ref))
+        return card
+
+    def op_style_cards(body: StyleCardBody) -> dict[str, Any]:
+        if body.action == "list":
+            return {"items": [engine.style_card_view(c, brief=True) for c in store.list_style_presets(body.project)]}
+        if body.action == "get":
+            return engine.style_card_view(_card_ref(body.id, body.project))
+        if body.action == "delete":
+            card = _card_ref(body.id, body.project)
+            store.delete_style_preset(card["id"])
+            return {"deleted": card["id"], "name": card["name"]}
+        fields = {k: v for k, v in {"technique": body.technique, "palette": body.palette, "motion": body.motion,
+                                    "signature_transition": body.signature_transition, "quality": body.quality,
+                                    "pitfalls": body.pitfalls, "typography": body.typography}.items() if v is not None}
+        card_fields = mg.clean_card_fields(fields)
+        text = {k: v for k, v in {"prompt_prefix": body.prompt_prefix, "prompt_suffix": body.prompt_suffix, "negative": body.negative,
+                                  "notes": body.notes}.items() if v is not None}
+        if body.action == "create":
+            base: dict[str, Any] = {}
+            if body.from_card:
+                src = _card_ref(body.from_card, body.project)
+                base = {k: src[k] for k in ("technique", "palette", "motion", "signature_transition", "quality", "pitfalls", "typography")
+                        if src.get(k) not in (None, "", [], {})}
+                base.update({k: src.get(k) or "" for k in ("prompt_prefix", "prompt_suffix", "negative")})
+                base["defaults"] = src.get("defaults") or {}
+            if not body.name:
+                raise engine.EngineError("name_required", "a style card needs a name")
+            created = store.create_style_preset(body.name, project_id=body.project, **{**base, **text, **card_fields})
+            return engine.style_card_view(created)
+        if body.action == "update":
+            card = _card_ref(body.id, body.project)
+            patch = {**text, **card_fields}
+            if body.name is not None:
+                patch["name"] = body.name
+            return engine.style_card_view(store.update_style_preset(card["id"], **patch))
+        raise engine.EngineError("bad_action", "action is list, get, create, update or delete")
+
+    @app.post("/api/style-presets")
+    def style_card_create(body: StyleCardBody):
+        body.action = "create"
+        return op_style_cards(body)
+
+    @app.patch("/api/style-presets/{card_id}")
+    def style_card_update(card_id: str, body: StyleCardBody):
+        body.action, body.id = "update", card_id
+        return op_style_cards(body)
+
+    @app.delete("/api/style-presets/{card_id}")
+    def style_card_delete(card_id: str):
+        return op_style_cards(StyleCardBody(action="delete", id=card_id))
+
+    @app.post("/api/agent/studio_style_cards")
+    def agent_style_cards(body: StyleCardBody):
+        return agent("studio_style_cards", f"{body.action}:{body.id or body.name or ''}"[:80], lambda: op_style_cards(body))
 
     # ------------------------------------------------------ narrated shorts
     def op_short_create(body: ShortCreateBody) -> dict[str, Any]:

@@ -1105,7 +1105,8 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     {"continue_from": "2"} makes its clip start on the last frame of shot 2's clip and end on its own
     still (one continuous take; null cuts again); {"locked": true} approves the shot: it can't change
     and studio_production_regenerate keeps it ({"locked": false} to edit it again); {"take": "<asset_id>"} puts
-    an earlier take back (studio_production_takes lists them). Only
+    an earlier take back (studio_production_takes lists them); {"kind": "graphic", "graphic": {...}} turns it into a
+    shot drawn by code and {"kind": "image"} back (studio_graphic_shot is the friendlier way). Only
     what depends on a changed shot is redone; run=true queues the production (it rebuilds the
     animatic and pauses again when animatic is on). The production must not be running.
 
@@ -1115,6 +1116,91 @@ def studio_production_shots(production: str, changes: list[dict[str, Any]], run:
     """
     return _call("POST", "/api/agent/studio_production_shots", params={"production": production},
                 json={"changes": changes, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_graphic_shot(production: str, key: Optional[str] = None, grammar: Optional[str] = None,
+                        data: Optional[dict[str, Any]] = None, start_s: Optional[float] = None, end_s: Optional[float] = None,
+                        mode: Optional[str] = None, style: Optional[str] = None, look: Optional[dict[str, Any]] = None,
+                        cues: Optional[list[dict[str, Any]]] = None, safe: Optional[dict[str, float]] = None,
+                        seed: Optional[int] = None, suppress_captions: Optional[bool] = None, after: Optional[str] = None,
+                        section: Optional[str] = None, run: bool = True) -> dict[str, Any]:
+    """Add or change a shot drawn by code: title card, kinetic lyrics, lower third, credits / rotulo, cartela.
+
+    No key adds a new shot; a key changes that shot (only the fields you give; data and look are merged
+    into what it has, a new grammar replaces the graphic). It is drawn in code - no GPU, no ComfyUI, the
+    same pixels every time - and covers the stretch start_s..end_s of the song (studio_production_timing
+    shows where the lyrics fall), so its duration is frame exact. grammar: "title_card" (data: title,
+    subtitle, kicker), "kinetic_lyrics" (data: lines [{text, start_s, end_s, words?}] in seconds from
+    start_s, or leave it out to take the sung lines of that stretch; layout "line"|"word", snap_to_beats,
+    upcoming), "lower_third" (data: name, caption; always an overlay), "outro_card" (data: title,
+    subtitle, credits [{role, name}] or lines). mode "clip" is a shot of the cut (the default), "overlay"
+    is drawn over whatever plays. style names a style card (studio_style_cards: palette, motion, typography,
+    signature transition); look overrides it field by field (palette [background, ink, accent, accent2,
+    muted], fonts, case, tracking, align, motion{easing, bezier, stagger_s, stepped_fps}, transition fade|
+    slide_up|wipe|scale_pop|glitch|flicker|mask_reveal, background, fx). Without a style the production's
+    default (spec.graphics) and the lead's palette decide. cues [{at, kind: hit|flash}] punch on a beat.
+    Burned-in lyric captions step aside under kinetic lyrics. The production must not be running; run=true
+    queues it (the poster stills, the animatic and the cut are redone). Check the result with
+    studio_qa_run(stage="graphics") and look at it with studio_graphic_render(what="still").
+
+    Keywords: title card, kinetic typography, animated lyrics, lyric video, lower third, end credits, text overlay,
+    graphic shot, rotulo, cartela, titulo, letra animada, tipografia cinetica, creditos, texto en pantalla
+    """
+    return _call("POST", "/api/agent/studio_graphic_shot", json={
+        "production": production, "key": key, "grammar": grammar, "data": data, "start_s": start_s, "end_s": end_s, "mode": mode,
+        "style": style, "look": look, "cues": cues, "safe": safe, "seed": seed, "suppress_captions": suppress_captions,
+        "after": after, "section": section, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_graphic_render(production: Optional[str] = None, shot: Optional[str] = None, what: str = "video",
+                          project: Optional[str] = None, graphic: Optional[dict[str, Any]] = None,
+                          duration_s: Optional[float] = None, aspect: Optional[str] = None, fps: int = 30,
+                          wait_s: float = 0) -> dict[str, Any]:
+    """Render a graphic shot to a video, a still or a video with transparency / renderizar un rotulo.
+
+    Either a shot of a production (production + shot: its span gives the duration) or an inline graphic
+    (project + graphic {grammar, data, ...} + duration_s, e.g. a title for another video). what: "video"
+    (H.264 mp4), "still" (a PNG at the moment it reads best: look at it with studio_show before
+    committing to the cut) or "alpha" (QuickTime with transparency, to lay over a cut in a video editor).
+    aspect 9:16, 16:9 or 1:1 (default the production's first). CPU job: it returns the job; wait_s
+    waits for it, else poll studio_job, whose finished result holds the asset id.
+
+    Keywords: render title, render graphic, preview title card, export lower third, alpha overlay, transparent video,
+    renderizar rotulo, vista previa del titulo, exportar rotulo, video con transparencia, letra animada
+    """
+    return _call("POST", "/api/agent/studio_graphic_render", json={
+        "production": production, "shot": shot, "what": what, "project": project, "graphic": graphic, "duration_s": duration_s,
+        "aspect": aspect, "fps": fps, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_style_cards(action: str = "list", id: Optional[str] = None, name: Optional[str] = None, from_card: Optional[str] = None,
+                       project: Optional[str] = None, technique: Optional[str] = None, palette: Optional[list[str]] = None,
+                       motion: Optional[dict[str, Any]] = None, signature_transition: Optional[str] = None,
+                       quality: Optional[int] = None, pitfalls: Optional[str] = None, typography: Optional[dict[str, Any]] = None,
+                       prompt_prefix: Optional[str] = None, prompt_suffix: Optional[str] = None, negative: Optional[str] = None,
+                       notes: Optional[str] = None) -> dict[str, Any]:
+    """List, read and make style cards: image prompt plus how titles are drawn and moved / fichas de estilo.
+
+    action "list" (id, name, palette, signature transition, quality stars, technique), "get" (id or name: every field),
+    "create" (name; from_card copies a card, a built-in one is read-only so copy it first), "update", "delete" (custom
+    cards only). A card holds technique (how it is drawn, in words), palette (#hex: background, ink, accent, accent 2,
+    muted), motion {easing, bezier [x1,y1,x2,y2], stagger_s, stepped_fps, pop}, signature_transition (fade, slide_up,
+    wipe, scale_pop, glitch, flicker, mask_reveal), quality 0-3 (how well it turns out), pitfalls (what to avoid), typography
+    {fonts, weight, case, tracking, align, background, fx} and the usual prompt_prefix / prompt_suffix / negative for
+    generated stills. Built in: "Neón nocturno", "Papel recortado", "VHS terror", "Tipografía suiza". Use one in a
+    graphic shot (studio_graphic_shot style=...) or for the whole production (spec.graphics.style).
+
+    Keywords: style card, style preset, palette, typography, motion style, signature transition, look, ficha de estilo,
+    estilo, paleta, tipografia, estilo visual, transicion
+    """
+    return _call("POST", "/api/agent/studio_style_cards", json={
+        "action": action, "id": id, "name": name, "from_card": from_card, "project": project, "technique": technique,
+        "palette": palette, "motion": motion, "signature_transition": signature_transition, "quality": quality,
+        "pitfalls": pitfalls, "typography": typography, "prompt_prefix": prompt_prefix, "prompt_suffix": prompt_suffix,
+        "negative": negative, "notes": notes})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

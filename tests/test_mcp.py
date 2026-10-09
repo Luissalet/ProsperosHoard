@@ -82,7 +82,7 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "voice_engines", "voice_create", "voice_list", "voice_speak", "voice_transcribe",
                         "voice_audiobook", "voice_dub", "voice_resynthesize_segment", "voice_job",
                         "studio_productions", "studio_production", "studio_production_create", "studio_production_continue",
-                        "studio_production_shots", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
+                        "studio_production_shots", "studio_graphic_shot", "studio_graphic_render", "studio_style_cards", "studio_recipe_export", "studio_recipes_list", "studio_recipe_get",
                         "studio_recipe_run", "studio_qa_run", "studio_qa_report", "studio_animatic",
                         "studio_short_create", "studio_production_script", "studio_stock_search",
                         "studio_services", "studio_service_start", "studio_service_stop", "studio_gpu_memory",
@@ -101,7 +101,7 @@ async def test_mcp_protocol_end_to_end(running_app):
             for name in ("studio_productions", "studio_production", "studio_recipes_list", "studio_recipe_get", "studio_qa_report"):
                 assert by_name[name].annotations.readOnlyHint is True, name
             for t in tools.tools:
-                if t.name.startswith(("studio_production", "studio_recipe", "studio_qa", "studio_animatic", "studio_service")):
+                if t.name.startswith(("studio_production", "studio_recipe", "studio_qa", "studio_animatic", "studio_service", "studio_graphic", "studio_style")):
                     assert len((t.description or "").splitlines()[0]) <= 110, t.name
             assert by_name["studio_generate_image"].annotations.readOnlyHint is False
             assert by_name["studio_voice"].annotations.openWorldHint is True  # first use downloads a voice
@@ -118,6 +118,14 @@ async def test_mcp_protocol_end_to_end(running_app):
             assert json.loads(result.content[0].text) == {"items": []}
             result = await session.call_tool("studio_production", {"production": "nope"})
             assert result.isError and "not_found" in result.content[0].text
+            # graphic shots and style cards: the tools reach their routes
+            result = await session.call_tool("studio_style_cards", {})
+            cards = json.loads(result.content[0].text)["items"]
+            assert {"Neón nocturno", "Papel recortado", "VHS terror", "Tipografía suiza"} <= {c["name"] for c in cards}
+            result = await session.call_tool("studio_graphic_shot", {"production": "nope", "grammar": "title_card", "start_s": 0, "end_s": 2})
+            assert result.isError and "not_found" in result.content[0].text
+            result = await session.call_tool("studio_graphic_render", {})
+            assert result.isError and "bad_render" in result.content[0].text
 
             result = await session.call_tool("studio_create_project", {"name": "MCP Test"})
             project_id = json.loads(result.content[0].text)["id"]
