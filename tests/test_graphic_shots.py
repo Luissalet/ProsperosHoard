@@ -185,3 +185,66 @@ def test_a_production_with_graphic_shots_runs_end_to_end(client):
     assert [(g["start_s"], g["end_s"], g["graphic"]["grammar"]) for g in graphics] == [(3.0, 5.0, "lower_third")]
     final = store.get_asset(state["done"]["timeline"]["timelines"]["9:16"]["renders"]["preview"])
     assert final["kind"] == "video" and abs(final["duration_s"] - 8.0) < 0.3
+
+
+# ------------------------------------------------------------------------ QA
+
+def _qa_state(store, project, shots, lrc=None):
+    from prosperos_hoard import engine
+
+    spec = prod.normalise_spec(graphic_spec())
+    spec["shots"] = shots
+    done = {}
+    if lrc:
+        done["lyrics"] = {"lyrics_asset_id": engine.create_lyrics(store, project["id"], lrc)["id"]}
+    return {"project_id": project["id"], "slug": "t", "spec": spec, "done": done}
+
+
+def _shots(*keys):
+    """The graphic shots of `graphic_spec()` (all of them, or those with these keys)."""
+    spec = prod.normalise_spec(graphic_spec())
+    return [s for s in spec["shots"] if s.get("kind") == "graphic" and (not keys or s["key"] in keys)]
+
+
+def test_qa_passes_well_set_graphics(store, project):
+    from prosperos_hoard import qa
+
+    state = _qa_state(store, project, _shots(),
+                      lrc="[00:00.00]uno\n[00:03.00]dos tres\n[00:05.50]cuatro\n")
+    items = qa.QA(store, state).check_graphics()
+    assert {i["key"] for i in items} == {"3", "4", "5"}
+    assert [i for i in items if i["verdict"] == "fail"] == [], [i["reasons"] for i in items]
+    assert all(i["checks"]["determinism"]["deterministic"] for i in items)
+
+
+def test_qa_flags_text_outside_the_safe_area_and_a_lower_third_in_the_caption_band(store, project):
+    from prosperos_hoard import qa
+
+    shots = _shots("3", "5")
+    shots[0]["graphic"]["safe"] = {"top": 0.4, "bottom": 0.4, "side": 0.4}
+    shots[1]["graphic"]["safe"] = {"bottom": 0.02}
+    state = _qa_state(store, project, shots, lrc="[00:00.00]uno\n[00:03.00]dos tres\n[00:05.50]cuatro\n")
+    by_key = {i["key"]: i for i in qa.QA(store, state).check_graphics()}
+    assert by_key["3"]["verdict"] == "fail" and set(by_key["3"]["codes"]) & {"outside_safe", "text_clipped", "text_truncated"}
+    assert by_key["5"]["verdict"] == "fail" and "text_in_subtitle_band" in by_key["5"]["codes"]
+    # without lyrics there are no burned-in captions to keep clear of
+    quiet = _qa_state(store, project, [shots[1]])
+    assert "text_in_subtitle_band" not in qa.QA(store, quiet).check_graphics()[0]["codes"]
+
+
+def test_qa_flags_kinetic_lyrics_without_lines_an_unknown_style_and_a_flaky_render(store, project, monkeypatch):
+    from prosperos_hoard import motion_graphics, qa
+
+    kinetic = _shots("4")
+    kinetic[0]["graphic"]["style"] = "No existe"
+    state = _qa_state(store, project, kinetic)
+    item = qa.QA(store, state).check_graphics()[0]
+    assert {"no_lines", "unknown_style"} <= set(item["codes"])
+    monkeypatch.setattr(motion_graphics, "determinism_check", lambda *a, **k: {"deterministic": False, "frames": []})
+    assert "not_deterministic" in qa.QA(store, _qa_state(store, project, _shots("3"))).check_graphics()[0]["codes"]
+
+
+def test_the_graphics_stage_is_part_of_qa_and_leaves_generated_checks_alone():
+    from prosperos_hoard import qa
+
+    assert "graphics" in qa.CHECKED_STAGES and "graphics" not in qa.RETRYABLE_STAGES
