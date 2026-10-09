@@ -57,7 +57,7 @@ def standalone(data_dir: Path, tmp_path: Path):
         assert r.status_code == 200, r.text
         yield c, app, port
         c.post("/api/backend/services/stop", json={"id": "comfyui"})
-    app.state.queue.stop()
+    app.state.shutdown()
 
 
 def test_services_list_main_pool_and_ollama(data_dir):

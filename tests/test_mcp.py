@@ -51,9 +51,9 @@ def running_app(tmp_path):
     url = f"http://127.0.0.1:{port}"
     yield url, app
 
-    app.state.queue.stop()
     server.should_exit = True
     thread.join(timeout=5)
+    app.state.shutdown()  # idempotent: the server's own lifespan already ran it
     fake.stop()
 
 

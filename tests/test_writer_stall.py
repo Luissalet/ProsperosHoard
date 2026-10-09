@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,28 @@ import pytest
 from prosperos_hoard import mv_planner
 
 
+class _StallServer(ThreadingHTTPServer):
+    """A model server whose handlers can all be told to stop. A handler that is still sleeping or streaming when its client
+    has given up would otherwise outlive the test and print a BrokenPipe traceback to stderr from a daemon thread -
+    during interpreter shutdown that aborts the whole run on Windows."""
+
+    daemon_threads = False  # server_close() joins every handler thread
+    block_on_close = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stopping = threading.Event()
+
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], OSError):  # a client that gave up is the point of these tests: say nothing
+            super().handle_error(request, client_address)
+
+    def finish(self) -> None:
+        self.stopping.set()  # wake the handlers (they wait on it instead of sleeping), then drop the listener and join them
+        self.shutdown()
+        self.server_close()
+
+
 def _server(behaviour):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -20,11 +43,14 @@ def _server(behaviour):
 
         def do_POST(self):
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
-            behaviour(self)
+            try:
+                behaviour(self)
+            except OSError:  # the client hung up (BrokenPipe / ConnectionAborted)
+                pass
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    srv.daemon_threads = True
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    srv = _StallServer(("127.0.0.1", 0), Handler)
+    Handler.stopping = srv.stopping
+    threading.Thread(target=srv.serve_forever, name="test-stall-server", daemon=True).start()
     return srv
 
 
@@ -41,7 +67,8 @@ def _sse(handler, pieces, pause=0.0):
     for p in pieces:
         handler.wfile.write(f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}\n\n".encode())
         handler.wfile.flush()
-        time.sleep(pause)
+        if handler.stopping.wait(pause):
+            return
     handler.wfile.write(b"data: [DONE]\n\n")
 
 
@@ -51,7 +78,7 @@ def test_streamed_reply_is_joined():
         chat = mv_planner.writer_chat(_backend(srv.server_port))
         assert chat([{"role": "user", "content": "x"}], 50, 0.2) == '{"title": "Disco"}'
     finally:
-        srv.shutdown()
+        srv.finish()
 
 
 def test_ollama_stream_is_joined():
@@ -65,11 +92,11 @@ def test_ollama_stream_is_joined():
         chat = mv_planner.writer_chat(_backend(srv.server_port, api="ollama"))
         assert chat([{"role": "user", "content": "x"}], 50, 0.2) == "hola mundo"
     finally:
-        srv.shutdown()
+        srv.finish()
 
 
 def test_a_model_that_never_starts_answering_is_reported_not_waited_on():
-    srv = _server(lambda h: time.sleep(9))  # prompt processing stuck: not a byte
+    srv = _server(lambda h: h.stopping.wait(9))  # prompt processing stuck: not a byte
     try:
         chat = mv_planner.writer_chat(_backend(srv.server_port), first_token_s=0.5, stall_s=0.5,
                                       busy=lambda: "ComfyUI :8189 is rendering on GPU 1.")
@@ -80,7 +107,7 @@ def test_a_model_that_never_starts_answering_is_reported_not_waited_on():
         assert err.value.code == "llm_stalled" and "did not start answering" in err.value.message
         assert "ComfyUI :8189 is rendering on GPU 1." in err.value.message
     finally:
-        srv.shutdown()
+        srv.finish()
 
 
 def test_keepalives_without_text_do_not_count_as_progress():
@@ -90,4 +117,4 @@ def test_keepalives_without_text_do_not_count_as_progress():
         with pytest.raises(mv_planner.WriterStalled):
             chat([{"role": "user", "content": "x"}], 50, 0.2)
     finally:
-        srv.shutdown()
+        srv.finish()
