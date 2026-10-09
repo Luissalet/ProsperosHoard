@@ -9,7 +9,8 @@ Reglas para agentes de código que trabajen en este repositorio.
    `family_tools.py`, `family_settings.py`, `jobevents.py` y `gpu_lease.py`,
    sin FastAPI; `PROSPERO_GPU_LEASE=0` apaga la reserva de GPU). `engine.py`, `store.py`, `db.py`,
    `comfy_driver.py`, `design.py`, `audio.py`, `video.py`, `timeline.py`,
-   `voices.py`, `backend.py`, `shorts.py`, `stock.py` y `soundtrack.py` son
+   `voices.py`, `backend.py`, `shorts.py`, `stock.py`, `soundtrack.py`, `motion_graphics.py` y
+   `graphic_shots.py` son
    lógica pura y se prueban sin servidor (lo externo de un short pasa por el
    `Studio`; en los tests, `app.state.short_hooks`).
 2. **`mcp_server.py` es un script independiente**: solo stdlib, `httpx` y
@@ -119,6 +120,19 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `audio`). Para varias ideas a la vez: un `assistant` con
   `as_list=true` o una `list` en el `prompt` de una imagen hace un render
   por elemento. «Para» → `studio_spaces(action="stop")`.
+- **«Ponle un título» / «cartela» / «letra animada» / «rótulo con el nombre»
+  / «créditos al final»**: no se genera, se dibuja con código (sin GPU).
+  `studio_graphic_shot(production, grammar=..., data=..., start_s=, end_s=)`:
+  `title_card` (title, subtitle, kicker), `kinetic_lyrics` (sin `data`, toma
+  los versos con tiempos de ese tramo), `lower_third` (name, caption; siempre
+  superpuesto) y `outro_card` (title, credits). El aspecto sale de
+  `style="Neón nocturno"` (ficha de `studio_style_cards`), de `look` o de la
+  paleta del protagonista. Antes de dar por bueno el corte, mira
+  `studio_graphic_render(what="still")` con `studio_show`;
+  `studio_qa_run(stage="graphics")` comprueba cajas recortadas, fuera del área
+  segura o sobre los subtítulos, sin OCR. Límites: un gráfico necesita un
+  tramo de la canción, la letra animada necesita letra con tiempos o `data.lines`,
+  y en el XML/EDL de edición un clip gráfico sale como su imagen fija.
 - **«Pásalo a Premiere / DaVinci»**: `studio_export_timeline(production,
   aspect)` y dale el enlace de descarga.
 - **«Cambia la canción» / «usa esta canción» / "swap the song"**:

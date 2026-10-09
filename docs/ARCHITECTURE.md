@@ -19,6 +19,11 @@ prosperos_hoard/
                    filling the slot to start a new production
   animatic.py      the animatic: the final cut's cut points from the stills only,
                    Ken Burns + crossfades, 720p renders per aspect, plan.json
+  motion_graphics.py  code-rendered graphics: grammars (kinetic_lyrics, title_card, lower_third,
+                   outro_card), look/motion resolution, exact text boxes, Pillow frames
+                   piped to ffmpeg (H.264 clips, alpha overlays); deterministic, no GPU
+  graphic_shots.py glue between productions and the renderer: look resolution (shot > card >
+                   production > lead), poster stills, lines from the lyrics, QA input
   qa.py            the QA director: model-free checks (numpy/Pillow/ffmpeg), vision
                    scores through Hoard Link, the retry policy with targeted fixes
   shorts.py        narrated shorts: a production kind of its own (script by the LLM or
@@ -226,6 +231,47 @@ says `"no vision model"`; a failing vision call is a skipped check, never a
 failed production. A scripted production is checked read-only
 (`productions.state_from_legacy`), its scorecard saved in its own
 `state.json`.
+
+## Graphic shots
+
+A shot with `kind: "graphic"` is drawn by `motion_graphics.Renderer` (Pillow,
+numpy, FreeType BASIC layout, one seeded `random.Random` per render) instead of
+generated, so the same spec gives the same pixels. Spec time is seconds from the
+window start; the duration is the shot's span, frame exact (`frame_count`).
+The spec is `{grammar, mode, duration, seed, style, look, data, cues, safe}`.
+The look resolves in this order: the shot's `look`, the shot's style card, the
+production default (`spec.graphics` `{style, look}`), the lead's palette
+(`look_from_palette`), the defaults.
+
+- **Clip mode** (title card, kinetic lyrics, outro card): the shot goes through
+  the normal machinery with a poster still as its picture (`asset_id`), so
+  auto-cut, pinned spans and the animatic need no special case; then
+  `timeline.inject_graphics` (called from `engine.auto_cut` with
+  `options["graphic_shots"]`) turns those clips into `kind: "graphic"` clips with
+  the spec and a `graphic_offset_s` (how far into the window the cut starts).
+  `video._render_graphic_clip` draws them at the timeline's size and fps so the
+  concat copy stays compatible.
+- **Overlay mode** (lower third by default): the graphic goes to a `graphics`
+  timeline track; `video._render_overlay_track` renders the whole track as ONE
+  alpha video (qtrle, PNG-in-MOV as a fallback) laid over the cut in the mux
+  (finishing, then overlay, then the ASS captions). Captions under a graphic that
+  suppresses them (kinetic lyrics by default) are dropped
+  (`video.drop_covered_captions`).
+- **Style cards** are `style_presets` rows (schema v12 adds `technique`,
+  `palette_json`, `motion_json`, `signature_transition`, `quality`, `pitfalls`,
+  `typography_json`); the four built-in music-video cards are re-seeded on
+  every start and read-only; custom cards are plain CRUD in `Store`.
+- **QA** (`qa.py`, stage `graphics`, not retryable because nothing is
+  regenerated) measures the exact text boxes of each frame the renderer would
+  draw: `text_clipped`, `outside_safe`, `text_in_subtitle_band`,
+  `text_truncated`, `no_lines`, `unknown_style`, `not_deterministic` (a second
+  render hashed against the first), `bad_graphic`. No OCR.
+- A render is a CPU job (`graphic_render`) with progress; `studio_graphic_render`
+  / `POST /api/productions/{slug}/graphic-render` returns the asset.
+
+Known limits: no complex-script shaping; a graphic clip is exported to NLE XML/EDL
+as its poster still; the finishing's beat effects do not apply to graphic clips;
+the alpha overlay is a working file.
 
 ## Narrated shorts
 
