@@ -57,7 +57,7 @@ def test_guard_also_covers_websockets_and_lan_names_from_the_environment(client,
         with TestClient(other, base_url="http://evil.example:8816") as bad:
             assert bad.get("/api/health").status_code == 403
     finally:
-        other.state.queue.stop()
+        other.state.shutdown()
 
 
 def test_guard_rejects_cross_origin_and_cross_site_writes(client):
@@ -397,6 +397,7 @@ def test_import_ui_format_workflow_converts_and_caches_object_info(client, data_
     assert cache.is_file() and "SaveVideo" in json.loads(cache.read_text(encoding="utf-8"))
     # ComfyUI gone: the cached node list still converts the next UI export
     (data_dir / "backend.json").write_text(json.dumps({"comfy": {"url": "http://127.0.0.1:9"}}), encoding="utf-8")
+    app.state.backend.close()  # re-initialising in place would orphan the old link's event-loop thread
     app.state.backend.__init__(data_dir)
     from prosperos_hoard import engine as engine_mod
 
