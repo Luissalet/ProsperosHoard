@@ -379,6 +379,49 @@ export interface StylePreset {
   negative: string;
   defaults: Record<string, string | number>;
   is_builtin: number;
+  // how the style draws titles and lyrics (motion graphics)
+  technique?: string | null;
+  palette?: string[];            // #hex: background, ink, accent, accent 2, muted
+  motion?: GraphicMotion;
+  signature_transition?: string | null;
+  quality?: number;              // 0-3 stars
+  pitfalls?: string | null;
+  typography?: GraphicTypography;
+  project_id?: string | null;
+}
+
+export interface GraphicMotion { easing?: string; bezier?: number[] | null; stagger_s?: number; stepped_fps?: number; pop?: number }
+export interface GraphicTypography {
+  fonts?: { display?: string; body?: string };
+  weight?: { display?: number; body?: number };
+  case?: string; tracking?: number; align?: string;
+  background?: { kind?: string; grain?: number };
+  fx?: { glow?: number; shadow?: string; shadow_px?: number; rgb_split?: number; jitter_deg?: number; scanlines?: number; rule?: boolean };
+}
+export interface GraphicLook extends GraphicTypography { palette?: string[]; motion?: GraphicMotion; transition?: string }
+export interface GraphicSpec {
+  grammar: "kinetic_lyrics" | "title_card" | "lower_third" | "outro_card";
+  mode?: "clip" | "overlay";
+  style?: string;
+  look?: GraphicLook;
+  data?: Record<string, unknown>;
+  cues?: { at: number; kind: string }[];
+  safe?: { top?: number; bottom?: number; side?: number };
+  seed?: number;
+  suppress_captions?: boolean;
+}
+export interface GraphicOptions {
+  grammars: string[]; modes: string[]; default_mode: Record<string, string>; transitions: string[]; easings: string[]; layouts: string[];
+  backgrounds: string[]; shadows: string[]; cases: string[]; aligns: string[]; cue_kinds: string[]; fonts: string[]; palette_roles: string[];
+  default_look: GraphicLook & { palette: string[] }; aspects: string[];
+}
+export interface StyleCardInput {
+  name?: string; from_card?: string; technique?: string; palette?: string[]; motion?: GraphicMotion; signature_transition?: string | null;
+  quality?: number; pitfalls?: string; typography?: GraphicTypography; prompt_prefix?: string; prompt_suffix?: string; negative?: string;
+}
+export interface StyleCard {
+  id: string; name: string; builtin: boolean; quality: number; palette: string[]; signature_transition: string | null; motion: GraphicMotion;
+  technique: string; pitfalls: string; typography: GraphicTypography; prompt_prefix: string; prompt_suffix: string; negative: string;
 }
 
 export type JobState = "queued" | "waiting_gpu" | "running" | "done" | "failed" | "cancelled";
@@ -780,6 +823,8 @@ export interface ProductionShot {
   cast?: string[];   // exactly these cast members (by name)
   start_s?: number;  // placed on exactly this stretch of the song
   end_s?: number;
+  kind?: "graphic";  // drawn by code (titles, lyrics, lower thirds) instead of generated
+  graphic?: GraphicSpec;
   locked?: boolean;  // approved: kept when the rest is regenerated
   continue_from?: string; // its clip starts on the last frame of this shot's clip
 }
@@ -1299,6 +1344,18 @@ export const api = {
     request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/regenerate`, { stage, keys, run }),
   promoteClips: (slug: string, keys?: string[], run = true) =>
     request<{ promoted: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/promote`, { keys, run }),
+  graphicOptions: () => request<GraphicOptions>("GET", "/api/graphics/options"),
+  graphicPreview: (body: { production?: string; project?: string; graphic: GraphicSpec; start_s?: number; end_s?: number; duration_s?: number;
+                           aspect?: string; at_s?: number; max_side?: number }, signal?: AbortSignal) =>
+    request<Blob>("POST", "/api/graphics/preview", body, signal),
+  setGraphicShot: (slug: string, body: Record<string, unknown>) =>
+    request<{ shot: { key: string }; changed: string[]; production: ProductionView; job?: Job }>("POST", `/api/productions/${slug}/graphic`, { production: slug, ...body }),
+  renderGraphic: (slug: string, shot: string, what: "video" | "still" | "alpha", aspect?: string) =>
+    request<{ job: Job }>("POST", `/api/productions/${slug}/graphic-render`, { production: slug, shot, what, aspect }),
+  styleCards: (project?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project })}`),
+  createStyleCard: (body: StyleCardInput & { project?: string }) => request<StyleCard>("POST", "/api/style-presets", { action: "create", ...body }),
+  updateStyleCard: (id: string, body: StyleCardInput) => request<StyleCard>("PATCH", `/api/style-presets/${id}`, { action: "update", ...body }),
+  deleteStyleCard: (id: string) => request<{ deleted: string }>("DELETE", `/api/style-presets/${id}`),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
     request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),

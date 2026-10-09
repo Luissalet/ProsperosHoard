@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from "react";
-import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check } from "lucide-react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check, Type } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
 import { useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
+import { GraphicShotEditor } from "./GraphicShot";
 
 // the song sections a shot can illustrate (what the planner writes)
 export const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
@@ -148,9 +149,10 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
               <button className="tile sb-tile" title={shot.prompt} onClick={() => setEditing({ shot })}>
                 {best ? <img src={`/api/assets/${best}/thumb`} alt="" loading="lazy" />
-                  : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : <Clapperboard size={22} />}</div>}
+                  : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : shot.kind === "graphic" ? <Type size={22} /> : <Clapperboard size={22} />}</div>}
                 <div className="tile-badges">
                   <span className="pill badge-dark">{shot.key}</span>
+                  {shot.kind === "graphic" && <span className="pill badge-dark" title={t("gfxKindGraphic")}><Type size={10} /> {shot.graphic?.mode === "overlay" ? t("gfxModeOverlay") : t("gfxKindGraphic")}</span>}
                   {shot.lead && <span className="pill badge-dark">{t("leadBadge")}</span>}
                   {hasClip && <span className="pill badge-dark" title={t("clipBadge")}><Film size={10} /></span>}
                   {shot.sing && <span className="pill badge-dark" title={t("sbSing")}><Mic size={10} /></span>}
@@ -250,11 +252,29 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
   );
 }
 
-export function ShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection }: {
+type EditorProps = {
   state: ProductionState; shot?: ProductionShot; after?: string | null; running: boolean;
   onPause: () => void; onClose: () => void; onSaved: () => void;
   initialSpan?: { start: number; end: number }; initialSection?: string;
-}) {
+};
+
+/** A shot is either generated (image, then clip) or drawn by code (a graphic);
+ * a new shot picks which, an existing one keeps its kind. */
+export function ShotEditor(props: EditorProps) {
+  const { t } = useT();
+  const [kind, setKind] = useState<"image" | "graphic">(props.shot?.kind === "graphic" ? "graphic" : "image");
+  const switcher = !props.shot ? (
+    <div className="seg gfx-seg" role="group" aria-label={t("gfxKindLabel")}>
+      <button type="button" className={kind === "image" ? "on" : ""} onClick={() => setKind("image")}><Images size={13} /> {t("gfxKindImage")}</button>
+      <button type="button" className={kind === "graphic" ? "on" : ""} onClick={() => setKind("graphic")}><Type size={13} /> {t("gfxKindGraphic")}</button>
+    </div>
+  ) : null;
+  return kind === "graphic"
+    ? <GraphicShotEditor {...props} kindSwitch={switcher} />
+    : <ImageShotEditor {...props} kindSwitch={switcher} />;
+}
+
+function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection, kindSwitch }: EditorProps & { kindSwitch?: ReactNode }) {
   const { t } = useT();
   const app = useApp();
   const isNew = !shot;
@@ -413,6 +433,7 @@ export function ShotEditor({ state, shot, after, running, onPause, onClose, onSa
         <button className="btn primary" disabled={busy} onClick={() => save(true)}>{busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("sbSaveRun")}</button>
       </>
     )}>
+      {kindSwitch}
       {!isNew && (
         <label className={`check sb-approve${locked ? " on" : ""}`} title={t("sbLockHint")}>
           <input type="checkbox" checked={locked} disabled={running || busy} onChange={(e) => setLocked(e.target.checked)} />

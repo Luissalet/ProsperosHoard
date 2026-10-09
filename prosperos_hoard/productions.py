@@ -1933,7 +1933,8 @@ def _change_graphic(shot: dict[str, Any], change: dict[str, Any], key: str) -> N
         if "data" in new:
             merged["data"] = {**(old.get("data") or {}), **(new["data"] or {})}
         if "look" in new:
-            merged["look"] = {**(old.get("look") or {}), **(new["look"] or {})}
+            # an empty look clears the overrides; a partial one is laid over the old
+            merged["look"] = {**(old.get("look") or {}), **new["look"]} if new["look"] else {}
         new = merged
     shot["kind"] = "graphic"
     shot["graphic"] = new if new is not None else old
