@@ -285,6 +285,39 @@ def look_from_card(card: Optional[dict[str, Any]]) -> dict[str, Any]:
         return {}  # a hand-edited card never breaks a render: fall back to what is valid
 
 
+def _luma(rgb: tuple[int, int, int]) -> float:
+    return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255.0
+
+
+def _saturation(rgb: tuple[int, int, int]) -> float:
+    hi, lo = max(rgb), min(rgb)
+    return 0.0 if hi == 0 else (hi - lo) / hi
+
+
+def look_from_palette(colours: Any) -> dict[str, Any]:
+    """A partial look from a character's palette (a list of #hex colours): the darkest colour is the
+    background, the lightest the ink, the two most saturated of the rest are the accents. Fewer than
+    two usable colours gives {} (the defaults stay)."""
+    rgb: list[tuple[int, int, int]] = []
+    for c in colours if isinstance(colours, (list, tuple)) else []:
+        try:
+            rgb.append(parse_hex(c))
+        except GraphicError:
+            continue
+    rgb = list(dict.fromkeys(rgb))
+    if len(rgb) < 2:
+        return {}
+    by_luma = sorted(rgb, key=_luma)
+    bg = by_luma[0]
+    # the ink is the lightest colour when it is light enough to read on the background; else the default ink
+    ink = by_luma[-1] if _luma(by_luma[-1]) >= 0.7 and by_luma[-1] != bg else parse_hex(DEFAULT_LOOK["palette"][1])
+    rest = sorted((c for c in rgb if c not in (bg, ink)), key=lambda c: (-_saturation(c), _luma(c)))
+    accent = rest[0] if rest else parse_hex(DEFAULT_LOOK["palette"][2])
+    accent2 = rest[1] if len(rest) > 1 else accent
+    muted = _mix(bg, ink, 0.45)
+    return {"palette": ["#%02x%02x%02x" % c for c in (bg, ink, accent, accent2, muted)]}
+
+
 def clean_card_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """Validate the graphic fields of a style card (technique, palette, motion, signature_transition,
     quality, pitfalls, typography); returns only the keys given, cleaned."""
