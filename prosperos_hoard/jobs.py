@@ -13,6 +13,12 @@ job dict and a `progress(fraction, message=None)` callback and return an
   to make room; the lane stays on this job so the queue order is kept.
 - `JobCancelled`: raised for it by `progress()` (and by `check_cancel()`)
   once the user or the agent asked to cancel.
+- `JobInterrupted`: raised by `progress()` (and `check_cancel()`) once the
+  queue is stopping, so a long handler (a production waiting for its
+  sub-jobs, a render polling ComfyUI) lets go of its worker thread instead of
+  outliving the queue. It is a `BaseException`, so a handler's own
+  `except Exception` cannot swallow it; the job keeps the state it had and
+  is requeued on the next boot, like after a crash.
 
 Orchestrator jobs (`ORCHESTRATOR_TYPES`: a whole production, a QA pass)
 are stored on the cpu lane but run on a third, dedicated worker: they only
@@ -57,20 +63,27 @@ class JobCancelled(Exception):
     pass
 
 
+class JobInterrupted(BaseException):
+    """The queue is shutting down; the job is left as it is and restarts on the next boot."""
+
+
 class Progress:
     """The `progress` callback handed to handlers. Calling it records the
     fraction/message and raises `JobCancelled` if a cancel was requested;
     `progress.cancelled()` lets long loops (ffmpeg, ComfyUI polling) check
     without writing."""
 
-    def __init__(self, store: Store, job_id: str, on_progress: Optional[Callable[[str, float, Optional[str]], None]] = None):
+    def __init__(self, store: Store, job_id: str, on_progress: Optional[Callable[[str, float, Optional[str]], None]] = None,
+                 stopping: Optional[threading.Event] = None):
         self.store = store
         self.job_id = job_id
+        self.stopping = stopping  # set when the queue stops: the next progress()/check_cancel() raises JobInterrupted
         self.on_progress = on_progress  # the family job events (throttled there; a failing hook never reaches the job)
 
     def __call__(self, fraction: float, message: Optional[str] = None) -> None:
         if self.store.is_cancel_requested(self.job_id):
             raise JobCancelled("cancelled")
+        self.check_stopping()
         fraction = max(0.0, min(1.0, float(fraction)))
         self.store.update_job(self.job_id, progress=fraction, message=message)
         if self.on_progress is not None:
@@ -85,6 +98,11 @@ class Progress:
     def check_cancel(self) -> None:
         if self.cancelled():
             raise JobCancelled("cancelled")
+        self.check_stopping()
+
+    def check_stopping(self) -> None:
+        if self.stopping is not None and self.stopping.is_set():
+            raise JobInterrupted("the job queue is stopping")
 
     def record_comfy_submission(self, receipt: dict[str, Any]) -> None:
         if self.store.get_job(self.job_id)["type"] in ("generate_image", "edit_image"):
@@ -237,7 +255,8 @@ class JobQueue:
             self.store.update_job(job_id, state="failed", message=f"no handler registered for job type '{job['type']}'",
                                    finished_at=now_iso())
             return
-        progress = Progress(self.store, job_id, (lambda *a: self._event("progress", *a)) if self.events is not None else None)
+        progress = Progress(self.store, job_id, (lambda *a: self._event("progress", *a)) if self.events is not None else None,
+                            stopping=self._stop)
         self.store.update_job(job_id, state="running", started_at=now_iso(), message="starting")
         self._event("started", self.store.get_job(job_id))
         first_wait: Optional[float] = None
@@ -264,6 +283,9 @@ class JobQueue:
             except JobCancelled:
                 self.store.update_job(job_id, state="cancelled", message="cancelled", finished_at=now_iso())
                 return
+            except JobInterrupted:
+                self.store.update_job(job_id, message="interrupted by shutdown; it restarts on the next start")
+                return  # state unchanged: requeue_running_jobs() decides on the next boot what is safe to restart
             except NotFound as exc:
                 self.store.update_job(job_id, state="failed", message=str(exc), finished_at=now_iso())
                 return

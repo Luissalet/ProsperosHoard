@@ -370,6 +370,14 @@ injectable; the tests use `httpx.MockTransport`.
   interrupt, ffmpeg is killed).
 - Hoard Link's sync facade owns a private event-loop thread; ComfyUI calls run
   there through `Backend.run_async()`.
+- Shutdown: `app.state.shutdown()` stops the job workers (`JobQueue.stop()`), then
+  `Backend.close()` closes the pooled ComfyUI clients and stops the link's loop
+  thread. The server's lifespan runs it when uvicorn (or a `TestClient` context)
+  exits, `python -m prosperos_hoard` calls it in `finally`, and it is idempotent.
+  A daemon thread left alive at interpreter exit that logs or prints can abort the
+  process on Windows (`_enter_buffered_busy`), so the tests check that no app
+  thread survives (`tests/test_shutdown.py`) and `tests/conftest.py` stops every
+  queue and backend a test built and warns about threads still alive at the end.
 - On start-up, jobs left `running` or `waiting_gpu` by a crash go back to
   `queued` (restart recovery, tested).
 - No `multiprocessing` anywhere; uvicorn runs the app object in-process with no
