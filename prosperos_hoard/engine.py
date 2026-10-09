@@ -3003,6 +3003,21 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
             "song_name": re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac|opus)$", "", song.get("name") or song["id"], flags=re.I)}
 
 
+def style_card_view(card: dict[str, Any], brief: bool = False) -> dict[str, Any]:
+    """A style card for the API: the image prompt parts and the graphic fields (palette, motion, signature
+    transition, typography, quality, technique, pitfalls). `brief` leaves out the long texts."""
+    out = {"id": card["id"], "name": card["name"], "builtin": bool(card.get("is_builtin")), "quality": int(card.get("quality") or 0),
+           "palette": card.get("palette") or [], "signature_transition": card.get("signature_transition"),
+           "motion": card.get("motion") or {}, "project_id": card.get("project_id")}
+    if not brief:
+        out.update(technique=card.get("technique") or "", pitfalls=card.get("pitfalls") or "", typography=card.get("typography") or {},
+                   prompt_prefix=card.get("prompt_prefix") or "", prompt_suffix=card.get("prompt_suffix") or "",
+                   negative=card.get("negative") or "", notes=card.get("notes") or "", defaults=card.get("defaults") or {})
+    else:
+        out["technique"] = (card.get("technique") or "")[:160]
+    return out
+
+
 def update_timeline(store: Store, timeline_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     tl = store.get_timeline(timeline_id)
     if not isinstance(patch, dict) or not patch:
