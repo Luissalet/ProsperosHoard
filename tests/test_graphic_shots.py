@@ -96,6 +96,18 @@ def test_shots_can_be_made_graphic_changed_and_inserted(data_dir):
     assert shot["graphic"]["look"]["transition"] == "wipe"
     st["status"] = "awaiting_review"
     prod.save_state(data_dir, st)
+    # a partial look is laid over the old one; an empty look clears the overrides
+    prod.update_shots(data_dir, slug, [{"key": new["key"], "graphic": {"look": {"motion": {"easing": "out_cubic"}}}}])
+    look = next(s for s in prod.load_state(data_dir, slug)["spec"]["shots"] if s["key"] == new["key"])["graphic"]["look"]
+    assert look["transition"] == "wipe" and look["motion"]["easing"] == "out_cubic"
+    st = prod.load_state(data_dir, slug)
+    st["status"] = "awaiting_review"
+    prod.save_state(data_dir, st)
+    prod.update_shots(data_dir, slug, [{"key": new["key"], "graphic": {"look": {}}}])
+    assert not next(s for s in prod.load_state(data_dir, slug)["spec"]["shots"] if s["key"] == new["key"])["graphic"].get("look")
+    st = prod.load_state(data_dir, slug)
+    st["status"] = "awaiting_review"
+    prod.save_state(data_dir, st)
     # a generated shot becomes a graphic only with its graphic and a span
     with pytest.raises(prod.ProductionError, match="needs its graphic"):
         prod.update_shots(data_dir, slug, [{"key": "2", "kind": "graphic"}])
