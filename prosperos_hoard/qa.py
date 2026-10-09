@@ -15,6 +15,8 @@ when asked to, regenerates the ones that fail.
 - head cropping on photocard photos: the subject (colour distance from the
   side-border background plus edges - a saliency proxy, no face detector)
   reaching the top edge;
+- the **graphic shots** (code-drawn titles, kinetic lyrics, lower thirds): the exact text boxes against the frame,
+  the safe area and the burned-in caption band (no OCR), and that two renders of the same frames are identical;
 - lyric coverage of an aligned/imported LRC (share of the written lines it
   contains) and durations against the plan (song, clips, renders).
 
@@ -41,7 +43,6 @@ import difflib
 import io
 import json
 import re
-import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -49,6 +50,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from . import audio as audio_mod
+from . import graphic_shots, motion_graphics
 from . import procutil
 from . import productions as prod
 from .backend import ffmpeg_path
@@ -72,7 +74,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "model_min": 6.0,           # lowest acceptable vision score (0-10)
 }
 RETRYABLE_STAGES = ("frames", "clips", "photocards")
-CHECKED_STAGES = ("character", "song", "frames", "lyrics", "animatic", "clips", "photocards", "timeline")
+CHECKED_STAGES = ("character", "song", "frames", "lyrics", "graphics", "animatic", "clips", "photocards", "timeline")
 MAX_MODEL_ITEMS = 80
 
 
@@ -490,8 +492,8 @@ class QA:
                                           lead_in_frame=True, reference=None))
         elif stage == "frames":
             for key, entry in ((done.get("frames") or {}).get("items") or {}).items():
-                if not wanted(key) or not entry.get("best"):
-                    continue
+                if not wanted(key) or not entry.get("best") or entry.get("graphic"):
+                    continue  # a graphic's poster is checked by the graphics stage, not as a generated picture
                 shot = self.shot(key)
                 items.append(self.check_still("frames", key, entry["best"], shot_prompt=shot.get("prompt", ""),
                                               lead_in_frame=bool(shot.get("lead")),
@@ -508,6 +510,8 @@ class QA:
                 look = looks[int(key) - 1] if key.isdigit() and 0 < int(key) <= len(looks) else {}
                 items.append(self.check_still("photocards", key, asset_id, shot_prompt=look.get("prompt", ""),
                                               lead_in_frame=True, reference=canonical, photocard=look.get("framing") is not False))
+        elif stage == "graphics":
+            items += self.check_graphics(wanted)
         elif stage == "song":
             items += self.check_song()
         elif stage == "lyrics":
@@ -521,6 +525,59 @@ class QA:
             for aspect, info in ((done.get("timeline") or {}).get("timelines") or {}).items():
                 for quality, asset_id in (info.get("renders") or {}).items():
                     items.append(self.check_render("timeline", f"{aspect} {quality}", asset_id, song_s))
+        return items
+
+    def check_graphics(self, wanted: Callable[[str], bool] = lambda k: True) -> list[dict[str, Any]]:
+        """Each code-drawn shot: its text inside the frame and the safe area, clear of the caption band while
+        captions are on screen, and drawn the same twice. Boxes are exact (the renderer knows where it puts
+        every word), so there is no OCR and no model."""
+        from . import timeline as timeline_mod
+
+        items = []
+        lines = graphic_shots._lyrics_lines(self.store, self.state)
+        finishing = ((self.spec.get("timeline") or {}).get("finishing")) or {}
+        lyric_style = finishing.get("lyric_style", "default")
+        aspects = (self.spec.get("timeline") or {}).get("aspects") or ["9:16"]
+        unknown = set(graphic_shots.unknown_styles(self.store, self.state))
+        for shot in graphic_shots.graphic_shots(self.state):
+            key = shot["key"]
+            if not wanted(key):
+                continue
+            item = _item("graphics", key, ((self.state.get("done") or {}).get("frames") or {}).get("items", {}).get(key, {}).get("best"))
+            try:
+                graphic = graphic_shots.shot_spec_for_span(self.store, self.state, shot, lines)
+            except (graphic_shots.GraphicShotError, motion_graphics.GraphicError) as exc:
+                item.update(verdict="fail", reasons=[str(exc)], codes=["bad_graphic"])
+                items.append(item)
+                continue
+            span = prod.shot_span(shot)
+            captions = [(c["start_s"], c["end_s"]) for c in timeline_mod._lines_in_window(lines, span[0], span[1])] if span else []
+            problems = []
+            for aspect in aspects:
+                width, height = graphic_shots.frame_size(self.state, aspect)
+                band = motion_graphics.subtitle_band_top(width, height, lyric_style) if lines else None
+                for p in motion_graphics.check_geometry(graphic, width, height, band_top=band, captions=captions):
+                    problems.append({**p, "aspect": aspect})
+            item["checks"]["geometry"] = problems[:12]
+            seen = set()
+            for p in problems:
+                if p["code"] not in seen:
+                    seen.add(p["code"])
+                    _fail(item, p["code"], f"{p['aspect']} {p['detail']}: «{p['text']}»")
+            width, height = graphic_shots.frame_size(self.state)
+            det = motion_graphics.determinism_check(graphic, width // 2 // 2 * 2, height // 2 // 2 * 2)
+            item["checks"]["determinism"] = det
+            if not det["deterministic"]:
+                _fail(item, "not_deterministic", "two renders of the same frames differ")
+            if graphic["grammar"] == "kinetic_lyrics" and not (graphic.get("data") or {}).get("lines"):
+                _fail(item, "no_lines", "no sung line falls inside its span (time the lyrics, or write data.lines)")
+            if shot["graphic"].get("style") and shot["graphic"]["style"] in unknown:
+                _fail(item, "unknown_style", f"style card '{shot['graphic']['style']}' does not exist")
+            items.append(_finish(item))
+        if (self.spec.get("graphics") or {}).get("style") in unknown and items:
+            items[0]["codes"].append("unknown_style")
+            items[0]["reasons"].append(f"the production's style card '{self.spec['graphics']['style']}' does not exist")
+            items[0]["verdict"] = "fail"
         return items
 
     def song_duration(self) -> Optional[float]:
@@ -783,8 +840,9 @@ def inline_hook(run: "prod.Run", stage: str, vision: Optional[VisionFn], vision_
     if stage not in CHECKED_STAGES or run.state.get("kind") == "short":
         return
     qa = QA(run.store, run.state, vision, vision_name)
-    card = run_stage_with_policy(run, stage, qa, dry_run=False)
-    record(run.state, card)
+    for checked in (stage, "graphics") if stage == "lyrics" else (stage,):  # the graphics need the timed lyrics
+        card = run_stage_with_policy(run, checked, qa, dry_run=False)
+        record(run.state, card)
     run.save()
 
 
@@ -814,7 +872,7 @@ def run_qa(store: Store, studio: prod.Studio, slug: str, stage: str = "all", dry
     cards = []
     changed = False
     for i, st in enumerate(stages):
-        if prod.stage_status(run.state, st) == "pending" and st not in ("frames", "clips", "photocards"):
+        if prod.stage_status(run.state, st) == "pending" and st not in ("frames", "clips", "photocards", "graphics"):
             continue
         progress(i / max(1, len(stages)), f"checking {st}")
         before = json.dumps((run.state["done"].get(st) or {}).get("items") or {}, sort_keys=True)
