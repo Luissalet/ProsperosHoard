@@ -16,6 +16,13 @@ from prosperos_hoard.devtools.fake_comfy import FakeComfyServer
 from prosperos_hoard.jobs import JobQueue
 from prosperos_hoard.store import Store
 
+try:  # progress bars of model libraries start a monitor thread that outlives the run; the tests do not need it
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:  # pragma: no cover - optional dependency
+    pass
+
 # Background workers a test can leave running: the job queue's workers, Hoard Link's event-loop thread, the lane/lease
 # helpers of the vendored package. A daemon thread that is still alive when the interpreter finalizes and writes to stderr
 # (a log line, a traceback) can abort the whole run on Windows with "_enter_buffered_busy: could not acquire lock".
