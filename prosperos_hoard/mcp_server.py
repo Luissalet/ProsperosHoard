@@ -12,18 +12,22 @@ python prosperos_hoard/mcp_server.py`.
 """
 
 import base64
+import contextvars
 import functools
+import inspect
 import json
 import logging
 import os
 import sys
-from typing import Any, Optional
+from pathlib import Path
+from typing import Annotated, Any, Optional
 from urllib.parse import urlsplit
 
 import httpx
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 APP_NAME = "Prospero's Hoard"
 DEFAULT_URL = "http://127.0.0.1:8815"
@@ -62,6 +66,74 @@ UNAVAILABLE = (
 )
 
 
+# ---- accountable agents (HoardLink 0.8.2) -------------------------------------------------------------------------
+# A write tool goes through the app's shared `POST /api/agent/call` when this adapter has the app's token: the app then
+# asks for a `reason`, journals the call with the agent and session that made it, and can undo a whole session. Reads, and
+# every call when no token is found, use the per-tool routes as before.
+_WRITE: contextvars.ContextVar[Optional[dict[str, Any]]] = contextvars.ContextVar("prospero_write", default=None)
+_REPO = Path(__file__).resolve().parent.parent
+_token_state = {"explicit": False, "refused": False}
+
+
+def _read_token_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _token() -> str:
+    """PROSPERO_TOKEN, else the file PROSPERO_TOKEN_FILE, else <data dir>/mcp-token (PROSPERO_DATA_DIR or <repo>/data).
+    Re-read on every call: the app may have created or replaced it since. '' when there is none."""
+    given = (os.environ.get("PROSPERO_TOKEN") or "").strip()
+    if given:
+        _token_state["explicit"] = True
+        return given
+    explicit = os.environ.get("PROSPERO_TOKEN_FILE")
+    _token_state["explicit"] = bool(explicit)
+    path = Path(explicit) if explicit else Path(os.environ.get("PROSPERO_DATA_DIR") or _REPO / "data") / "mcp-token"
+    return _read_token_file(path.expanduser())
+
+
+def _agent_headers() -> dict[str, str]:
+    """X-Agent-Id / X-Agent-Session from HOARD_AGENT_ID / HOARD_AGENT_SESSION (set by whoever launches this server)."""
+    out: dict[str, str] = {}
+    for name, header, limit in (("HOARD_AGENT_ID", "X-Agent-Id", 80), ("HOARD_AGENT_SESSION", "X-Agent-Session", 120)):
+        value = "".join(c for c in str(os.environ.get(name) or "") if " " <= c <= "~").strip()[:limit]
+        if value:
+            out[header] = value
+    return out
+
+
+def _error_text(resp: httpx.Response) -> str:
+    try:
+        body = resp.json()
+        if "code" in body:                                   # the shared contract: {"error": message, "code": code, "hint"?}
+            return f"{body['code']}: {body.get('error', '')} {body.get('hint', '')}".strip()[:600]
+        code = body.get("error", f"http_{resp.status_code}")
+        message = body.get("message") or resp.text[:300]
+    except (ValueError, AttributeError):
+        code, message = f"http_{resp.status_code}", resp.text[:300]
+    return f"{code}: {message}"
+
+
+def _send(method: str, path: str, kwargs: dict[str, Any]) -> httpx.Response:
+    """The request, through the shared call route when this is a write of an agent that has the app's token."""
+    write = _WRITE.get()
+    if write is not None and method == "POST" and path.startswith("/api/agent/") and not _token_state["refused"]:
+        token = _token()
+        if token:
+            arguments = {**(kwargs.get("params") or {}), **(kwargs.get("json") or {})}
+            body: dict[str, Any] = {"name": path[len("/api/agent/"):], "arguments": {k: v for k, v in arguments.items() if v is not None}}
+            if write.get("reason"):
+                body["reason"] = write["reason"]
+            resp = _client.request("POST", "/api/agent/call", json=body, headers={"Authorization": f"Bearer {token}", **_agent_headers()})
+            if resp.status_code != 401 or _token_state["explicit"]:
+                return resp
+            _token_state["refused"] = True               # a token found by looking in the default folder is another install's: stop using it
+    return _client.request(method, path, **kwargs)
+
+
 def _call(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     # httpx renders a None query param as an empty string rather than
     # omitting it, which then fails FastAPI's type validation (e.g. a
@@ -70,7 +142,7 @@ def _call(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     if "params" in kwargs and kwargs["params"] is not None:
         kwargs["params"] = {k: v for k, v in kwargs["params"].items() if v is not None}
     try:
-        resp = _client.request(method, path, **kwargs)
+        resp = _send(method, path, kwargs)
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise ToolError(UNAVAILABLE) from exc
     except httpx.TimeoutException as exc:
@@ -79,13 +151,7 @@ def _call(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         raise ToolError(f"prosperos-hoard_error: {type(exc).__name__}: {exc}") from exc
     if resp.status_code >= 400:
-        try:
-            body = resp.json()
-            code = body.get("error", f"http_{resp.status_code}")
-            message = body.get("message") or resp.text[:300]
-        except ValueError:
-            code, message = f"http_{resp.status_code}", resp.text[:300]
-        raise ToolError(f"{code}: {message}")
+        raise ToolError(_error_text(resp))
     return resp.json()
 
 
@@ -126,11 +192,29 @@ def _compact(value: Any) -> Any:
     return value
 
 
+REASON_FIELD = Annotated[Optional[str], Field(description=(
+    "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: "
+    "it is kept in the history so the person can review and undo what you did."))]
+
+
 def tool(annotations: ToolAnnotations):
     def deco(fn):
+        write = not annotations.readOnlyHint
+
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return _compact(fn(*args, **kwargs))
+            if not write:
+                return _compact(fn(*args, **kwargs))
+            reason = kwargs.pop("reason", None)
+            marker = _WRITE.set({"reason": (reason or "").strip()})
+            try:
+                return _compact(fn(*args, **kwargs))
+            finally:
+                _WRITE.reset(marker)
+        if write:             # every tool that changes something takes a reason (the schema the model sees)
+            sig = inspect.signature(fn)
+            wrapper.__signature__ = sig.replace(parameters=[*sig.parameters.values(), inspect.Parameter(
+                "reason", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=REASON_FIELD)])
         return mcp.tool(annotations=annotations)(wrapper)
     return deco
 

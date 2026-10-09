@@ -90,7 +90,12 @@
       "YOVOICE_URL",
       "YOVOICE_API_TOKEN",
       "YOVOICE_TOKEN_FILE",
-      "YOVOICE_MODEL"
+      "YOVOICE_MODEL",
+      "PROSPERO_TOKEN",
+      "PROSPERO_TOKEN_FILE",
+      "PROSPERO_DATA_DIR",
+      "HOARD_AGENT_ID",
+      "HOARD_AGENT_SESSION"
     ]
   },
   "provides": {
