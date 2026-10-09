@@ -338,3 +338,72 @@ def test_mcp_bridge_ignores_proxy_variables_and_waits_no_longer_than_the_family_
     from prosperos_hoard.hoard_link import waiting
 
     assert api.MAX_WAIT_S == waiting.MAX_WAIT_S == 150.0
+
+
+# ------------------------------------------------------------ accountable agents through the adapter
+
+def _journal(url, token):
+    import httpx
+    return httpx.get(f"{url}/api/agent/journal", headers={"Authorization": f"Bearer {token}"}, trust_env=False).json()["entries"]
+
+
+@pytest.mark.asyncio
+async def test_the_adapter_sends_writes_with_a_reason_when_it_has_the_apps_token(running_app):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    url, app = running_app
+    token_file = app.state.store.data_dir / "mcp-token"
+    token = token_file.read_text(encoding="utf-8").strip()
+    params = StdioServerParameters(
+        command=sys.executable, args=[str(REPO_ROOT / "prosperos_hoard" / "mcp_server.py")],
+        env={**os.environ, "PROSPERO_URL": url, "PROSPERO_TOKEN_FILE": str(token_file),
+             "HOARD_AGENT_ID": "codex-test", "HOARD_AGENT_SESSION": "run-1"},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = {t.name: t for t in (await session.list_tools()).tools}
+            assert "reason" in tools["studio_create_project"].inputSchema["properties"]      # a write takes a reason
+            assert "reason" not in tools["studio_projects"].inputSchema["properties"]        # a read does not
+            assert "reason" in tools["studio_cast"].inputSchema["properties"]
+
+            refused = await session.call_tool("studio_create_project", {"name": "No reason"})
+            assert refused.isError and "reason_required" in refused.content[0].text
+            made = await session.call_tool("studio_create_project", {"name": "Accountable", "reason": "The person asked for a project"})
+            assert not made.isError and json.loads(made.content[0].text)["name"] == "Accountable"
+            listed = await session.call_tool("studio_projects", {})
+            assert not listed.isError and json.loads(listed.content[0].text)["items"][0]["name"] == "Accountable"
+            failed = await session.call_tool("studio_cast", {"project": "ghost", "action": "create", "name": "Nobody",
+                                                             "reason": "Try a cast member in a missing project"})
+            assert failed.isError and "not_found" in failed.content[0].text
+
+    entries = _journal(url, token)
+    mine = [e for e in entries if e["tool"] == "studio_create_project"]
+    assert len(mine) == 1 and mine[0]["agent"] == "codex-test" and mine[0]["session"] == "run-1"
+    assert mine[0]["reason"] == "The person asked for a project" and mine[0]["undoable"] is True
+    assert [e["ok"] for e in entries if e["tool"] == "studio_cast"] == [False]
+
+
+@pytest.mark.asyncio
+async def test_the_adapter_without_a_matching_token_keeps_using_the_per_tool_routes(running_app, tmp_path):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    url, app = running_app
+    other = tmp_path / "another-install"
+    other.mkdir()
+    (other / "mcp-token").write_text("t" * 40, encoding="utf-8")               # another install's token, found in the default folder
+    params = StdioServerParameters(
+        command=sys.executable, args=[str(REPO_ROOT / "prosperos_hoard" / "mcp_server.py")],
+        env={**os.environ, "PROSPERO_URL": url, "PROSPERO_DATA_DIR": str(other)},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            made = await session.call_tool("studio_create_project", {"name": "Legacy path"})
+            assert not made.isError and json.loads(made.content[0].text)["name"] == "Legacy path"
+            again = await session.call_tool("studio_create_project", {"name": "Legacy path two"})
+            assert not again.isError
+    token = (app.state.store.data_dir / "mcp-token").read_text(encoding="utf-8").strip()
+    assert _journal(url, token) == []                                          # nothing reached the agent journal
