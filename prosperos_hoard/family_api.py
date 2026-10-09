@@ -1,12 +1,19 @@
-"""Prospero's side of the Hoard family on HTTP: the shared agent contract, the four tools other apps call, and the settings route.
+"""Prospero's side of the Hoard family on HTTP: the shared agent contract (with accountable agents), the four tools other apps call, and the settings route.
 
 `family.install_fastapi` builds `GET /api/agent/tools` and `POST /api/agent/call` from an app's POST routes by calling each endpoint
 with its body model alone. Prospero's per-tool routes mix query parameters (`project`, `production`, `job_id`...) with bodies and
 include GET tools, so that builder cannot serve them. This module keeps the same contract (same paths, the bearer token in
 `<data>/mcp-token`, the same answers) and dispatches in-process: each tool's schema is its query parameters plus its body model, the
 description is the docstring of the matching tool in `mcp_server.py`, and a call runs the very endpoint the per-tool route runs.
-The per-tool routes `/api/agent/<tool>` are untouched and keep answering; the two shared routes are moved to the front of the
-router so the catch-all routes (`/api/{rest}`, the single-page app) never swallow them.
+The per-tool routes `/api/agent/<tool>` are untouched and keep answering (they are the person's way in, with no reason and no
+journal); the shared routes are moved to the front of the router so the catch-all routes (`/api/{rest}`, the single-page app) never
+swallow them.
+
+The shared routes are `hoard_link.agentkit.make_agent_router` (HoardLink 0.8.2, "accountable agents"): `GET /api/agent/tools`,
+`POST /api/agent/call` (a write needs a `reason`, is journalled with its agent and session in `data/agent_journal.jsonl`),
+`GET /api/agent/journal`, `POST /api/agent/undo` and the per-agent token routes. The undo, capture and track hooks of each tool,
+and which tools are draft-safe, are in `agent_undo.py`; this module builds a `Tool` from every route of the catalogue and attaches
+them.
 
 Routes added: `POST /api/agent/production_export_lumiere`, `cast_import_character`, `production_from_storyboard`, `voice_tts`
 (the logic is in `family_tools`) and `GET|PUT /api/family/settings` (`family_settings`).
@@ -16,24 +23,23 @@ from __future__ import annotations
 
 import ast
 import inspect
-import secrets
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from . import engine, exporters, family_tools
+from . import agent_undo, engine, exporters, family_tools
 from .family_settings import FamilySettings, SettingsError
 from .hoard_link import family
+from .hoard_link.agentkit import AppError, Tool, make_agent_router
 from .store import Store
 
 PREFIX = "/api/agent/"
-SHARED = (PREFIX + "tools", PREFIX + "call")
+#: the routes of the shared router (catalogue, call, journal, undo, tokens): they are not tools
+SHARED = tuple(PREFIX + name for name in ("tools", "call", "journal", "undo", "tokens"))
 
 
 @dataclass
@@ -193,9 +199,21 @@ def catalogue(app: FastAPI, source: Path) -> dict[str, Any]:
     tools = []
     for name, route in sorted(_tool_routes(app).items()):
         doc = texts.get(name) or (inspect.getdoc(route.endpoint) or "").strip() or name.replace("_", " ")
-        tools.append({"name": name, "description": doc, "inputSchema": _schema(route),
-                      "annotations": {"readOnlyHint": name in read_only or (name not in texts and "GET" in route.methods)}})
+        annotations = {"readOnlyHint": name in read_only or (name not in texts and "GET" in route.methods)}
+        if name in agent_undo.DRAFT_SAFE:
+            annotations["draftSafeHint"] = True          # creates or edits drafts, never deletes or publishes (the `drafts` token profile)
+        tools.append({"name": name, "description": doc, "inputSchema": _schema(route), "annotations": annotations})
     return {"instructions": instructions, "tools": tools, "contract": "shared", "app": "prospero"}
+
+
+def accountable_tools(entries: list[dict[str, Any]]) -> list[Tool]:
+    """The catalogue as `Tool` objects carrying the undo hooks of `agent_undo` (the router needs the hooks, `run` is never used:
+    `call_tool` dispatches to the per-tool routes)."""
+    def never(_ctx: Any, _args: Any) -> Any:
+        raise RuntimeError("Prospero dispatches tool calls to its per-tool routes")
+
+    return [Tool(e["name"], e["description"], e["inputSchema"], e["annotations"], never, **agent_undo.HOOKS.get(e["name"], {}))
+            for e in entries]
 
 
 class UnknownTool(LookupError):
@@ -291,45 +309,31 @@ def install(app: FastAPI, ctx: Context, app_id: str = "prospero") -> None:
         except SettingsError as exc:
             raise engine.EngineError("bad_setting", str(exc)) from None
 
-    # ----- the shared contract
-    async def tools_route(_request: Request) -> Any:
-        return catalogue(app, ctx.mcp_source)
+    # ----- the shared contract: the catalogue, the call, and (HoardLink 0.8.2) the accountable-agent routes. Every write through
+    # /api/agent/call needs a `reason`, is journalled with the agent and session that made it, and a whole session can be undone
+    # (POST /api/agent/undo). The web interface calls the operations directly, so it is exempt by construction.
+    tools = accountable_tools(catalogue(app, ctx.mcp_source)["tools"])
 
-    async def call_route(request: Request) -> Any:
-        header = request.headers.get("authorization", "")
-        given = header[7:].strip() if header.lower().startswith("bearer ") else ""
-        expected = token()
-        if not given or not expected or not secrets.compare_digest(given, expected):
-            return JSONResponse({"ok": False, "error": "Invalid MCP token."}, status_code=401)
+    async def call_fn(name: str, arguments: dict[str, Any]) -> Any:
         try:
-            payload = await request.json()
-        except Exception:  # noqa: BLE001
-            payload = {}
-        payload = payload if isinstance(payload, dict) else {}
-        name = str(payload.get("name") or payload.get("tool") or "")
-        args = payload.get("arguments") or payload.get("args") or {}
-        caller = str(payload.get("caller") or "")
-        if not isinstance(args, dict):
-            return JSONResponse({"ok": False, "error": "arguments must be an object"}, status_code=400)
-        t0 = time.monotonic()
-        try:
-            result = await call_tool(app, ctx, name, args)
+            return await call_tool(app, ctx, name, arguments)
         except UnknownTool:
-            return JSONResponse({"ok": False, "error": f"unknown tool: {name}", "tools": sorted(_tool_routes(app))}, status_code=404)
+            raise AppError("unknown_tool", f"unknown tool: {name}", status=404, details={"ok": False, "tools": sorted(_tool_routes(app))}) from None
+        except AppError:
+            raise
         except ValidationError as exc:
             msg = "; ".join(f"{'.'.join(str(p) for p in e['loc']) or 'input'}: {e['msg']}" for e in exc.errors()[:5])
-            family.record_call(name, False, int((time.monotonic() - t0) * 1000), caller=caller, error=msg)
-            return JSONResponse({"ok": False, "error": msg, "code": "invalid_arguments"}, status_code=400)
+            raise AppError("invalid_arguments", msg, status=400, details={"ok": False}) from None
         except Exception as exc:  # noqa: BLE001 - the same mapping the per-tool routes use
-            status, payload_err = ctx.error_payload(exc)
-            family.record_call(name, False, int((time.monotonic() - t0) * 1000), caller=caller, error=payload_err["message"])
-            return JSONResponse({"ok": False, "error": payload_err["message"], "code": payload_err["error"]}, status_code=status)
-        family.record_call(name, True, int((time.monotonic() - t0) * 1000), caller=caller)
-        return result
+            status, payload = ctx.error_payload(exc)
+            raise AppError(payload["error"], payload["message"], status=status, details={"ok": False}) from None
 
-    app.add_api_route(SHARED[0], tools_route, methods=["GET"], include_in_schema=False)
-    app.add_api_route(SHARED[1], call_route, methods=["POST"], include_in_schema=False)
+    before = len(app.router.routes)
+    app.include_router(make_agent_router(
+        tools_fn=lambda: catalogue(app, ctx.mcp_source)["tools"], call_fn=call_fn, token_fn=token,
+        instructions=lambda: catalogue(app, ctx.mcp_source)["instructions"], app_name="prospero",
+        reasons=True, data_dir=data_dir, tools=tools, ctx_fn=lambda: ctx))
     routes = app.router.routes
-    ours = routes[-2:]
-    del routes[-2:]
+    ours = routes[before:]
+    del routes[before:]
     routes[0:0] = ours

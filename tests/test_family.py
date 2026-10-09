@@ -46,9 +46,10 @@ def test_the_catalogue_lists_every_per_tool_route_with_query_and_body_arguments(
     c, app, _ = client
     body = c.get("/api/agent/tools").json()
     tools = {t["name"]: t for t in body["tools"]}
-    assert body["contract"] == "shared" and body["app"] == "prospero" and "media studio" in body["instructions"]
+    assert body["app"] == "prospero" and "media studio" in body["instructions"] and body["reasons_required"] is True
+    shared = ("tools", "call", "journal", "undo", "tokens")           # the router of the shared contract, not tools
     routes = {r.path[len("/api/agent/"):] for r in app.router.routes if getattr(r, "path", "").startswith("/api/agent/")
-              and "/" not in r.path[len("/api/agent/"):] and r.path not in ("/api/agent/tools", "/api/agent/call")}
+              and "/" not in r.path[len("/api/agent/"):] and r.path[len("/api/agent/"):] not in shared}
     assert routes <= set(tools) and len(tools) > 60                      # GET tools and query-parameter tools are in, not only the POST ones
     cast = tools["studio_cast"]["inputSchema"]
     assert "project" in cast["required"] and {"action", "kind", "id", "name", "fields"} <= set(cast["properties"])
@@ -65,15 +66,15 @@ def test_a_call_needs_the_token_and_runs_the_same_endpoint_as_the_per_tool_route
     assert c.post("/api/agent/call", json={"name": "studio_projects"}).status_code == 401
     assert c.post("/api/agent/call", json={"name": "studio_projects"}, headers={"Authorization": "Bearer nope"}).status_code == 401
     h = token(app)
-    made = c.post("/api/agent/call", json={"name": "studio_create_project", "arguments": {"name": "Shared", "brief": "b"}}, headers=h)
+    made = c.post("/api/agent/call", json={"name": "studio_create_project", "arguments": {"name": "Shared", "brief": "b"}, "reason": "Test of the shared contract"}, headers=h)
     assert made.status_code == 200 and made.json()["name"] == "Shared"
     pid = made.json()["id"]
     listed = c.post("/api/agent/call", json={"name": "studio_projects", "arguments": {"query": "Shared", "limit": "5"}}, headers=h)
     assert listed.status_code == 200 and [p["id"] for p in listed.json()["items"]] == [pid]
     assert c.get("/api/agent/studio_projects", params={"query": "Shared"}).json() == c.post(
-        "/api/agent/call", json={"tool": "studio_projects", "args": {"query": "Shared"}}, headers=h).json()
+        "/api/agent/call", json={"name": "studio_projects", "arguments": {"query": "Shared"}}, headers=h).json()
     cast = c.post("/api/agent/call", json={"name": "studio_cast", "arguments": {"project": pid, "action": "create", "name": "Ana",
-                                                                                 "fields": {"prompt": "a tall woman"}}}, headers=h)
+                                                                                 "fields": {"prompt": "a tall woman"}}, "reason": "Test of the shared contract"}, headers=h)
     assert cast.status_code == 200 and cast.json()["name"] == "Ana"
     assert c.post("/api/agent/studio_cast", params={"project": pid}, json={"action": "list"}).status_code == 200   # the per-tool route still works
     count = app.state.store.list_agent_calls(20)
@@ -85,15 +86,15 @@ def test_a_call_that_is_wrong_says_what_is_wrong(client):
     h = token(app)
     unknown = c.post("/api/agent/call", json={"name": "nope"}, headers=h)
     assert unknown.status_code == 404 and "studio_status" in unknown.json()["tools"]
-    missing = c.post("/api/agent/call", json={"name": "studio_cast", "arguments": {"action": "list"}}, headers=h)
+    missing = c.post("/api/agent/call", json={"name": "studio_cast", "arguments": {"action": "list"}, "reason": "Test of the shared contract"}, headers=h)
     assert missing.status_code == 400 and missing.json()["code"] == "missing_argument" and "project" in missing.json()["error"]
-    typo = c.post("/api/agent/call", json={"name": "studio_create_project", "arguments": {"name": "x", "bref": "b"}}, headers=h)
+    typo = c.post("/api/agent/call", json={"name": "studio_create_project", "arguments": {"name": "x", "bref": "b"}, "reason": "Test of the shared contract"}, headers=h)
     assert typo.status_code == 400 and typo.json()["code"] == "unknown_argument" and "brief" in typo.json()["error"]
     bad = c.post("/api/agent/call", json={"name": "studio_projects", "arguments": {"limit": "many"}}, headers=h)
     assert bad.status_code == 400 and bad.json()["code"] == "invalid_arguments"
     gone = c.post("/api/agent/call", json={"name": "studio_job", "arguments": {"job_id": "nope"}}, headers=h)
     assert gone.status_code == 404 and gone.json()["code"] == "not_found"
-    assert c.post("/api/agent/call", json={"name": "studio_status", "arguments": "x"}, headers=h).status_code == 400
+    assert c.post("/api/agent/call", json={"name": "studio_status", "arguments": "x"}, headers=h).status_code == 422      # the body is validated first
 
 
 def test_the_shared_routes_win_over_the_catch_all_routes(client):
@@ -504,7 +505,7 @@ def test_the_cut_is_exported_and_handed_to_lumiere(client, monkeypatch):
                 "result": {"ok": True, "project_id": "prj_1", "url": "http://127.0.0.1:5198/#/p/prj_1", "clips": 2, "skipped": []}}
 
     monkeypatch.setattr(family, "call", fake_call)
-    r = c.post("/api/agent/call", json={"name": "production_export_lumiere", "arguments": {"production": state["slug"], "aspect": "16:9"}},
+    r = c.post("/api/agent/call", json={"name": "production_export_lumiere", "arguments": {"production": state["slug"], "aspect": "16:9"}, "reason": "Test of the shared contract"},
                headers=token(app))
     assert r.status_code == 200, r.text
     body = r.json()
@@ -557,7 +558,7 @@ def test_a_character_arrives_with_its_images_and_the_same_one_twice_is_the_same(
     assert clash.status_code == 400 and clash.json()["error"] == "name_taken"
     elsewhere = c.post("/api/agent/cast_import_character", json={"name": "Bea", "images": [str(allowed.parent / "outside.png")]})
     assert elsewhere.status_code in (400, 403, 404)
-    plain = c.post("/api/agent/call", json={"name": "cast_import_character", "arguments": {"name": "Cy", "look": "a boy"}}, headers=token(app))
+    plain = c.post("/api/agent/call", json={"name": "cast_import_character", "arguments": {"name": "Cy", "look": "a boy"}, "reason": "Test of the shared contract"}, headers=token(app))
     assert plain.status_code == 200 and plain.json()["images"] == 0
     assert c.post("/api/agent/cast_import_character", json={"name": "  "}).status_code == 400
 
@@ -583,7 +584,7 @@ def test_a_storyboard_becomes_a_draft_that_is_not_queued(client):
     assert shots[0]["reuse_asset_ids"] == [still] and all(s["lead"] is False for s in shots) and state["spec"]["source_ref"] == "hoard://writer/storyboard/s1"
     assert state["status"] == "queued" and state.get("job_id") is None and store.list_jobs("active")["items"] == []
     with_song = c.post("/api/agent/call", json={"name": "production_from_storyboard", "arguments": {
-        "title": "Quiet", "shots": [{"text": "one"}], "song_asset_id": _asset(store, pid, kind="audio")}}, headers=token(app))
+        "title": "Quiet", "shots": [{"text": "one"}], "song_asset_id": _asset(store, pid, kind="audio")}, "reason": "Test of the shared contract"}, headers=token(app))
     assert with_song.status_code == 200 and "continue" in with_song.json()["next"] and "song" not in with_song.json()["next"].split("continue")[0]
     assert prod.load_state(store.data_dir, with_song.json()["production"])["spec"]["song"]["asset_id"]
 
@@ -628,7 +629,7 @@ def test_voice_tts_returns_the_path_of_a_wav(client, monkeypatch):
     with wave.open(str(path)) as w:
         assert w.getframerate() == 16000 and w.getnframes() > 0
     assert FakeTTS.spoken[-1] == ("Hola mundo", None, "es")
-    named = c.post("/api/agent/call", json={"name": "voice_tts", "arguments": {"text": "x", "voice": "en_US-amy-medium"}}, headers=token(app))
+    named = c.post("/api/agent/call", json={"name": "voice_tts", "arguments": {"text": "x", "voice": "en_US-amy-medium"}, "reason": "Test of the shared contract"}, headers=token(app))
     assert named.status_code == 200 and FakeTTS.spoken[-1][1] == "en_US-amy-medium"
     assert c.post("/api/agent/voice_tts", json={"text": " "}).json()["error"] == "empty_text"
     monkeypatch.setattr("prosperos_hoard.api.ve.default_tts_engines", lambda **kw: [])
