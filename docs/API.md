@@ -70,6 +70,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_recipe_get` | `?recipe=<name>` -> summary, `cast`, `placeholders`, song, world, `shot_list`, timeline, settings, warnings |
 | POST | `/api/agent/studio_recipe_run` | `{recipe, cast:{lead: <character id, "lib_..." library id, {library: "lib_...", version?}, or {name, look, negative?, palette?, bio?}>}, name?, options:{reuse?, title?, project?, settings?, engine?}}` -> `{production, job, notes}` |
 | POST | `/api/agent/studio_animatic` | `{production, aspects?, wait_s=0}` -> `{job, animatic?: {renders{aspect: asset_id}, plan{cuts_total, clips_planned, gpu_minutes, cpu_minutes_renders, unused_shots, duration_s}}}` |
+| POST | `/api/agent/studio_graphic_shot` | `{production, key?, after?, grammar?, data?, mode?, start_s?, end_s?, style?, look?, cues?, safe?, seed?, suppress_captions?, section?, run=true}` -> `{shot, changed, production, job?}`; no `key` adds a shot, a key changes it (`data` and `look` are merged, a new grammar replaces the graphic; `look: {}` clears the overrides) |
+| POST | `/api/agent/studio_graphic_render` | `{production?, shot?, project?, graphic?, duration_s?, what="video"\|"still"\|"alpha", aspect?, fps=30, wait_s=0}` -> `{job, asset_id?}` (a CPU `graphic_render` job; `still` is a PNG) |
+| POST | `/api/agent/studio_style_cards` | `{action="list"\|"get"\|"create"\|"update"\|"delete", id?, name?, from_card?, technique?, palette?, motion?, signature_transition?, quality?, pitfalls?, typography?, prompt_prefix?, prompt_suffix?, negative?, notes?}` -> a card or `{items}`; built-in cards are read-only (400) |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
 | POST | `/api/agent/studio_short_create` | `{topic?, script?, name?, options{language, duration_s, tone, seed, engine, voice, visuals, music, captions, timeline}, settings?{script_review}, count=1, project?}` -> `{production, job}` (or `{items:[...]}` for count > 1) |
@@ -272,6 +275,12 @@ Full pipeline details, engines and install commands: [VOICE.md](VOICE.md).
 | POST | `/api/recipes/{name}/run` | `{cast, name?, options}` -> `{production, job, notes}` |
 | POST | `/api/productions/{slug}/animatic` | `{aspects?}` -> `{job}` (an `animatic` job on the cpu lane) |
 | GET | `/api/productions/{slug}/animatic` | `plan.json`: `{cuts[{index, start_s, duration_s, shot, still, section}], shots[{key, lead, still, screen_time_s, cuts, will_be_clip, clip_keys, clips_to_render}], unused_shots, clips_planned, gpu_minutes, minutes_per, renders}` |
+| GET | `/api/graphics/options` | grammars, modes, transitions, easings, layouts, backgrounds, shadows, cases, aligns, fonts, palette roles, default look, aspects |
+| POST | `/api/graphics/preview` | `{production?, project?, graphic, start_s?, end_s?, duration_s?, aspect?, at_s?, max_side=960}` -> a PNG of the unsaved graphic (no store writes) |
+| POST | `/api/productions/{slug}/graphic` | the `studio_graphic_shot` body without `production` |
+| POST | `/api/productions/{slug}/graphic-render` | `{shot, what, aspect?}` -> `{job}` |
+| GET / POST | `/api/style-presets` | list (built-in and custom) / create a custom card |
+| PATCH / DELETE | `/api/style-presets/{id}` | change / delete a custom card |
 | POST | `/api/productions/{slug}/qa` | `{stage, dry_run, keys?}` -> `{job, scorecard?}` |
 | POST | `/api/shorts` | the same body as `studio_short_create` |
 | PUT | `/api/productions/{slug}/script` | `{script?, run}`: read (no script) or replace a short's script |

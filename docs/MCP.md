@@ -142,6 +142,9 @@ Faustus reads the same information from `faustus-plugin.json`
 | `studio_recipe_run` | no | `recipe, cast={"lead": <character id or {name, look, negative?, palette?, bio?}>}, name=None, options={reuse, title, project, settings, engine}` | `{production, job, notes}` |
 
 | `studio_animatic` | no | `production, aspects=None, wait_s=0` | `{job, animatic?{renders, plan}}` - the stills cut like the final at 720p, with `plan.json` |
+| `studio_graphic_shot` | no | `production, key=None, grammar=None, data=None, start_s=None, end_s=None, mode=None, style=None, look=None, cues=None, safe=None, seed=None, suppress_captions=None, after=None, section=None, run=True` | `{shot, changed, production, job?}` - a title card, kinetic lyrics, lower third or outro card drawn by code over a stretch of the song |
+| `studio_graphic_render` | no | `production=None, shot=None, what="video", project=None, graphic=None, duration_s=None, aspect=None, fps=30, wait_s=0` | `{job, asset_id?}` - mp4, a still PNG or a transparent .mov |
+| `studio_style_cards` | no (list/get read-only) | `action="list", id=None, name=None, from_card=None, technique=None, palette=None, motion=None, signature_transition=None, quality=None, pitfalls=None, typography=None, ...` | a card or `{items}` - built-in cards are read-only, copy one with `from_card` |
 | `studio_qa_run` | no | `production, stage="all", dry_run=True, keys=None, wait_s=120` | `{job, scorecard?, requeued?}` - see [ARCHITECTURE.md](ARCHITECTURE.md#qa-director) for the checks |
 | `studio_qa_report` | yes | `production` | the last scorecard (failures first, one-line `why`) + `retries` |
 | `studio_short_create` | no | `topic=None, script=None, name=None, options=None, settings=None, count=1, project=None` | `{production, job}` (or `{items}` for variants) - a narrated short, see [ARCHITECTURE.md](ARCHITECTURE.md#narrated-shorts) |
@@ -511,6 +514,17 @@ studio_production("night_walk")                    -> status "awaiting_review",
 studio_production_shots("night_walk", [{"key": "7", "best": 2}, {"key": "9", "clip": false}])   # remade, paused again
 studio_production_continue("night_walk")           # renders the clips, then the final cut
 studio_animatic("dont_look_back", aspects=["9:16"])  # on demand, also for a scripted production
+```
+
+### Graphic shots
+
+```text
+studio_style_cards()                                  # Neón nocturno, Papel recortado, VHS terror, Tipografía suiza
+studio_graphic_shot("night_walk", grammar="title_card", start_s=0, end_s=4,
+                    data={"title": "Night Walk", "subtitle": "WISP"}, style="Neón nocturno")
+studio_graphic_shot("night_walk", grammar="kinetic_lyrics", start_s=12.4, end_s=19.8, style="VHS terror")  # the sung lines of that stretch
+studio_graphic_render(production="night_walk", shot="3", what="still")   # then studio_show on the asset
+studio_qa_run("night_walk", stage="graphics")         # clipped text, safe area, caption band, determinism
 ```
 
 ### Narrated shorts
