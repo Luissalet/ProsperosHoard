@@ -419,32 +419,81 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
 
 
 def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass_name: Optional[str],
-                   out_path: Path, preset: str, crf: int, audio_bitrate: str, finishing_vf: str = "") -> list[str]:
+                   out_path: Path, preset: str, crf: int, audio_bitrate: str, finishing_vf: str = "",
+                   overlay_path: Optional[Path] = None, max_duration_s: Optional[float] = None) -> list[str]:
     """`ass_name` is a bare file name inside the ffmpeg working directory
     (`render_timeline` runs this with `cwd=work_dir`): the `ass=` filter
     argument is parsed by ffmpeg's filter-graph syntax, where the drive
     colon of a Windows path and the apostrophe in the install folder name
     are both special. A plain name like `lyrics.ass` needs no escaping.
     `finishing_vf` (from `build_finishing_vf`) runs first, so the grade/
-    grain/vignette/glitch pass sits under the captions, not over them."""
+    grain/vignette/glitch pass sits under the captions, not over them.
+    `overlay_path` is the transparent video of the graphics track (see
+    `motion_graphics.render_overlay_track`): it goes over the finished picture and under
+    the captions, so the grade does not tint it and a caption still reads on top of it;
+    `max_duration_s` then stops the output at the cut's end."""
     cmd = [ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-i", str(video_path)]
+    if overlay_path:
+        cmd += ["-i", str(overlay_path)]
     if audio_path:
         cmd += ["-i", str(audio_path)]
-    vf_parts = [finishing_vf] if finishing_vf else []
+    audio_index = 2 if overlay_path else 1
+    ass_filter = ""
     if ass_name:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", ass_name):
             raise ValueError(f"unsafe subtitle file name for the ass filter: {ass_name!r}")
-        vf_parts.append(f"ass={ass_name}:fontsdir=fonts")
-    if vf_parts:
-        cmd += ["-vf", ",".join(vf_parts)]
-    cmd += ["-map", "0:v"]
+        ass_filter = f"ass={ass_name}:fontsdir=fonts"
+    if overlay_path:
+        # [0:v] -> finishing -> overlay (graphics) -> captions
+        chain = f"[0:v]{finishing_vf}[base];[base][1:v]" if finishing_vf else "[0:v][1:v]"
+        chain += "overlay=format=auto:eof_action=pass"
+        chain += f"[ov];[ov]{ass_filter}[vout]" if ass_filter else "[vout]"
+        cmd += ["-filter_complex", chain, "-map", "[vout]"]
+    else:
+        vf_parts = [finishing_vf] if finishing_vf else []
+        if ass_filter:
+            vf_parts.append(ass_filter)
+        if vf_parts:
+            cmd += ["-vf", ",".join(vf_parts)]
+        cmd += ["-map", "0:v"]
     if audio_path:
-        cmd += ["-map", "1:a", "-shortest"]
+        cmd += ["-map", f"{audio_index}:a", "-shortest"]
+    if overlay_path and max_duration_s:
+        cmd += ["-t", f"{max_duration_s:.3f}"]
     cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
     if audio_path:
         cmd += ["-c:a", "aac", "-b:a", audio_bitrate]
     cmd += ["-progress", "pipe:1", "-nostats", str(out_path)]
     return cmd
+
+
+def graphic_caption_windows(timeline: dict[str, Any]) -> list[tuple[float, float]]:
+    """The stretches [start, end] of the cut where a graphic stands in for the burned-in lyric captions
+    (kinetic lyrics, by default): graphic clips of the visual track and overlays of the graphics track."""
+    from . import motion_graphics as mg
+
+    windows: list[tuple[float, float]] = []
+    at = 0.0
+    for track in timeline.get("tracks") or []:
+        if track.get("type") == "visual":
+            at = 0.0
+            for c in track["clips"]:
+                dur = float(c["duration_s"])
+                if c.get("kind") == "graphic" and mg.captions_suppressed(c.get("graphic") or {}):
+                    windows.append((at, at + dur))
+                at += dur
+        elif track.get("type") == "graphics":
+            for c in track["clips"]:
+                if mg.captions_suppressed(c.get("graphic") or {}):
+                    windows.append((float(c["start_s"]), float(c["end_s"])))
+    return windows
+
+
+def drop_covered_captions(lyric_clips: list[dict[str, Any]], windows: list[tuple[float, float]]) -> list[dict[str, Any]]:
+    """The lyric captions that do not run under one of `windows`: a caption and a kinetic line saying the same
+    words must not be on screen together."""
+    return [c for c in lyric_clips
+            if not any(float(c["start_s"]) < w1 - 0.05 and float(c["end_s"]) > w0 + 0.05 for w0, w1 in windows)]
 
 
 # ---------------------------------------------------------------- ASS ----
@@ -757,6 +806,38 @@ def animated_webp_to_mp4(src: Path, dest: Path, fps: float, work_dir: Path) -> i
         shutil.rmtree(frames_dir, ignore_errors=True)
 
 
+def _render_graphic_clip(clip: dict[str, Any], out_clip: Path, width: int, height: int, fps: int, frames: int,
+                         should_cancel: Optional[Callable[[], bool]], progress: Callable[[float], None]) -> None:
+    """A graphic shot as an H.264 clip of the montage's size, `frames` frames from where this clip begins
+    inside the graphic's own time (a shot the cut split resumes without a jump)."""
+    from . import motion_graphics as mg
+
+    try:
+        mg.render_video(clip["graphic"], out_clip, width=width, height=height, fps=fps, frames=frames,
+                        start_frame=int(round(float(clip.get("graphic_offset_s") or 0.0) * fps)), alpha=False,
+                        progress=progress, should_cancel=should_cancel)
+    except mg.GraphicCancelled:
+        raise RenderCancelled("render cancelled") from None
+    except mg.GraphicError as exc:
+        raise RenderError(f"graphic clip: {exc}") from None
+
+
+def _render_overlay_track(clips: list[dict[str, Any]], out: Path, width: int, height: int, fps: int, total_s: float,
+                          should_cancel: Optional[Callable[[], bool]], progress: Callable[[float], None]) -> Path:
+    from . import motion_graphics as mg
+
+    inside = [dict(c, end_s=min(float(c["end_s"]), total_s)) for c in clips if float(c["start_s"]) < total_s - 0.05]
+    if not inside:
+        raise RenderError("every overlay starts after the end of the cut")
+    try:
+        mg.render_overlay_track(inside, out, width=width, height=height, fps=fps, progress=progress, should_cancel=should_cancel)
+    except mg.GraphicCancelled:
+        raise RenderCancelled("render cancelled") from None
+    except mg.GraphicError as exc:
+        raise RenderError(f"graphics track: {exc}") from None
+    return out
+
+
 def render_timeline(
     timeline: dict[str, Any],
     asset_path_for: Callable[[str], Path],
@@ -841,7 +922,7 @@ def render_timeline(
     for i, clip in enumerate(clips):
         check_cancel()
         out_clip = work_dir / f"clip_{i:03d}.mp4"
-        src = asset_path_for(clip["asset_id"])
+        src = asset_path_for(clip["asset_id"]) if clip["kind"] != "graphic" else None
         frames = clip_frames[i]
         if not all_cuts and i + 1 < len(clips):
             frames += overlap_frames[i + 1] + 1
@@ -849,6 +930,12 @@ def render_timeline(
         extra = build_beat_fx_vf(fx, clip_hits(hits, start_frames[i] / fps, duration), width, height, fps) if hits else ""
         framing = finishing.get("framing") or "fill"
         focus = (float(clip.get("focus_x", 0.5)), float(clip.get("focus_y", 0.5)))
+        if clip["kind"] == "graphic":
+            _render_graphic_clip(clip, out_clip, width, height, fps, frames, should_cancel,
+                                 lambda f, i=i: report(0.05 + 0.55 * (i + f) / len(clips), f"drawing graphic {i + 1}/{len(clips)}"))
+            clip_paths.append(out_clip)
+            report(0.05 + 0.55 * (i + 1) / len(clips), f"rendered clip {i + 1}/{len(clips)}")
+            continue
         if clip["kind"] == "video":
             from .audio import probe_duration_s
             source_s = probe_duration_s(src)
@@ -879,7 +966,11 @@ def render_timeline(
 
     lyrics_track = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), None)
     ass_name = None
-    if lyrics_track and lyrics_track["clips"]:
+    lyric_clips = list(lyrics_track["clips"]) if lyrics_track else []
+    covered = graphic_caption_windows(timeline)
+    if covered:
+        lyric_clips = drop_covered_captions(lyric_clips, covered)
+    if lyric_clips:
         ass_name = "lyrics.ass"
         lyric_style = finishing.get("lyric_style", "default")
         beats: list[float] = []
@@ -889,12 +980,19 @@ def render_timeline(
                 beats = [t for t, _ in audio_mod.beat_hits(audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"])), "beats")]
             except Exception:  # noqa: BLE001 - an unreadable song: the line just doesn't pulse
                 beats = []
-        (work_dir / ass_name).write_text(build_ass(width, height, lyrics_track["clips"], style=lyric_style, beats=beats),
+        (work_dir / ass_name).write_text(build_ass(width, height, lyric_clips, style=lyric_style, beats=beats),
                                          encoding="utf-8")
         fonts_out = work_dir / "fonts"
         fonts_out.mkdir(exist_ok=True)
         for ttf in FONTS_DIR.glob("*/*.ttf"):
             shutil.copyfile(ttf, fonts_out / ttf.name)
+
+    overlay_path = None
+    graphics_track = next((t for t in timeline["tracks"] if t.get("type") == "graphics"), None)
+    if graphics_track and graphics_track["clips"]:
+        check_cancel()
+        overlay_path = _render_overlay_track(graphics_track["clips"], work_dir / "graphics.mov", width, height, fps, total_duration,
+                                             should_cancel, lambda f: report(0.6 + 0.05 * f, "drawing overlays"))
 
     audio_path = asset_path_for(timeline["audio_asset_id"]) if timeline.get("audio_asset_id") else None
 
@@ -914,7 +1012,8 @@ def render_timeline(
 
     run_ffmpeg_with_progress(
         build_mux_cmd(ffmpeg, concatenated, audio_path.resolve() if audio_path else None, ass_name, out_path.resolve(),
-                      preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"], finishing_vf=finishing_vf),
+                      preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"], finishing_vf=finishing_vf,
+                      overlay_path=overlay_path, max_duration_s=total_duration),
         total_duration, ffmpeg_progress, cwd=work_dir, should_cancel=should_cancel,
     )
     report(1.0, "done")

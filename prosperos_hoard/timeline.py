@@ -14,6 +14,16 @@ optionally one "lyrics" track):
     {"type": "lyrics", "clips": [
         {"text": "...", "start_s": 1.2, "end_s": 3.4, "karaoke": true}
     ]}
+    {"type": "graphics", "clips": [
+        {"start_s": 12.0, "end_s": 15.5, "graphic": {"grammar": "lower_third", ...}}
+    ]}
+
+A visual clip may be a code-rendered graphic instead of a picture or a video:
+`{"kind": "graphic", "graphic": {...}, "graphic_offset_s": 0.0, "duration_s": ...}`
+(see `motion_graphics.py`; `asset_id` is then only the poster still the planning stages used, and
+`graphic_offset_s` is how far into the graphic's own time the clip begins, so a shot that the cut
+split in two plays on without a jump). The "graphics" track holds the overlays: each is drawn over
+the cut between `start_s` and `end_s`, in the graphic's own time starting at `start_s`.
 
 `start_s` of visual clips is derived (the running sum of durations) and
 rewritten by `normalise_tracks`, so an edit can never leave gaps.
@@ -27,6 +37,8 @@ from __future__ import annotations
 
 import random
 from typing import Any, Callable, Optional
+
+from . import motion_graphics
 
 MIN_CLIP_S = 0.5
 MAX_CLIP_S = 60.0
@@ -380,8 +392,8 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
     out: list[dict[str, Any]] = []
     seen_types = set()
     for track in tracks:
-        if not isinstance(track, dict) or track.get("type") not in ("visual", "lyrics"):
-            raise TimelineError("each track needs type 'visual' or 'lyrics'")
+        if not isinstance(track, dict) or track.get("type") not in ("visual", "lyrics", "graphics"):
+            raise TimelineError("each track needs type 'visual', 'lyrics' or 'graphics'")
         if track["type"] in seen_types:
             raise TimelineError(f"only one '{track['type']}' track is allowed")
         seen_types.add(track["type"])
@@ -395,6 +407,11 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
             for i, clip in enumerate(clips):
                 if not isinstance(clip, dict):
                     raise TimelineError(f"visual clip {i} must be an object")
+                if clip.get("kind") == "graphic":
+                    entry = _clean_graphic_clip(clip, i, t, asset_lookup)
+                    clean.append(entry)
+                    t += entry["duration_s"]
+                    continue
                 asset = asset_lookup(str(clip.get("asset_id", "")))
                 if asset is None:
                     raise TimelineError(f"visual clip {i}: asset '{clip.get('asset_id')}' does not exist")
@@ -443,6 +460,8 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
                 clean.append(c)
                 t += duration
             out.append({"type": "visual", "clips": clean})
+        elif track["type"] == "graphics":
+            out.append({"type": "graphics", "clips": _clean_graphics_track(clips)})
         else:
             clean = []
             for i, clip in enumerate(clips):
@@ -464,6 +483,65 @@ def normalise_tracks(tracks: Any, asset_lookup: Callable[[str], Optional[dict[st
     if "visual" not in seen_types:
         raise TimelineError("a timeline needs a visual track")
     return out
+
+
+def _clean_graphic_clip(clip: dict[str, Any], i: int, start: float, asset_lookup: Callable[[str], Optional[dict[str, Any]]]) -> dict[str, Any]:
+    """A visual clip drawn by code (`kind: "graphic"`): the spec is validated, the duration comes from
+    the clip (the graphic lasts at least as long as the clip needs), `asset_id` is the optional poster."""
+    try:
+        duration = float(clip.get("duration_s"))
+        offset = float(clip.get("graphic_offset_s") or 0.0)
+    except (TypeError, ValueError):
+        raise TimelineError(f"visual clip {i}: duration_s and graphic_offset_s must be numbers") from None
+    if not MIN_CLIP_S - 1e-6 <= duration <= MAX_CLIP_S:
+        raise TimelineError(f"visual clip {i}: duration_s must be between {MIN_CLIP_S} and {MAX_CLIP_S} seconds")
+    if offset < 0:
+        raise TimelineError(f"visual clip {i}: graphic_offset_s cannot be negative")
+    try:
+        spec = motion_graphics.normalise_graphic(clip.get("graphic"))
+    except motion_graphics.GraphicError as exc:
+        raise TimelineError(f"visual clip {i}: {exc}") from None
+    if spec["mode"] != "clip":
+        raise TimelineError(f"visual clip {i}: an overlay graphic goes on the 'graphics' track, not in the visual track")
+    spec["duration"] = round(max(float(spec.get("duration") or 0.0), offset + duration), 4)
+    transition = clip.get("transition_in") or {"type": "cut", "duration_s": 0.0}
+    if not isinstance(transition, dict) or transition.get("type", "cut") not in TRANSITIONS:
+        raise TimelineError(f"visual clip {i}: transition type must be one of {', '.join(TRANSITIONS)}")
+    t_dur = float(transition.get("duration_s") or 0.0)
+    if transition.get("type", "cut") != "cut" and not 0.05 <= t_dur <= min(2.0, duration / 2 + 1e-6):
+        raise TimelineError(f"visual clip {i}: transition duration must be 0.05-2 s and at most half the clip")
+    out: dict[str, Any] = {"kind": "graphic", "graphic": spec, "graphic_offset_s": round(offset, 4), "start_s": round(start, 3),
+                           "duration_s": round(duration, 3), "trim_start_s": 0.0,
+                           "transition_in": {"type": transition.get("type", "cut"), "duration_s": round(t_dur, 3)}}
+    poster = str(clip.get("asset_id") or "")
+    if poster:
+        asset = asset_lookup(poster)
+        if asset is None or asset["kind"] != "image":
+            raise TimelineError(f"visual clip {i}: the poster '{poster}' is not an image asset")
+        out["asset_id"] = asset["id"]
+    return out
+
+
+def _clean_graphics_track(clips: list[Any]) -> list[dict[str, Any]]:
+    """The overlays: [{start_s, end_s, graphic}] in song order. They may overlap (drawn in order)."""
+    clean = []
+    for i, clip in enumerate(clips):
+        if not isinstance(clip, dict):
+            raise TimelineError(f"graphics clip {i} must be an object")
+        try:
+            start, end = float(clip["start_s"]), float(clip["end_s"])
+        except (KeyError, TypeError, ValueError):
+            raise TimelineError(f"graphics clip {i} needs numeric start_s and end_s") from None
+        if start < 0 or end - start < 0.2:
+            raise TimelineError(f"graphics clip {i}: end_s must be at least 0.2 s after start_s")
+        try:
+            spec = motion_graphics.normalise_graphic(clip.get("graphic"))
+        except motion_graphics.GraphicError as exc:
+            raise TimelineError(f"graphics clip {i}: {exc}") from None
+        spec["mode"] = "overlay"
+        spec["duration"] = round(end - start, 4)
+        clean.append({"start_s": round(start, 3), "end_s": round(end, 3), "graphic": spec})
+    return sorted(clean, key=lambda c: c["start_s"])
 
 
 def _clean_words(words: Any, i: int) -> list[dict[str, Any]]:
@@ -493,7 +571,7 @@ def apply_clip_updates(tracks: list[dict[str, Any]], updates: list[dict[str, Any
     tracks = [dict(t, clips=[dict(c) for c in t["clips"]]) for t in tracks]
     visual = next(t for t in tracks if t["type"] == "visual")
     clips = visual["clips"]
-    allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind", "source_fit"}
+    allowed = {"asset_id", "duration_s", "trim_start_s", "ken_burns", "transition_in", "kind", "source_fit", "graphic", "graphic_offset_s"}
     for upd in updates:
         if not isinstance(upd, dict) or not isinstance(upd.get("index"), int):
             raise TimelineError("each clip update needs an integer 'index'")
@@ -536,7 +614,7 @@ def validate_auto_cut_invariants(tracks: list[dict[str, Any]], beat_times: list[
         if abs(last_end - song_duration_s) > 0.01:
             problems.append(f"timeline ends at {last_end}, song is {song_duration_s}")
     for i in range(1, len(clips)):
-        if clips[i]["asset_id"] == clips[i - 1]["asset_id"]:
+        if clips[i].get("asset_id") and clips[i]["asset_id"] == clips[i - 1].get("asset_id") and clips[i]["kind"] != "graphic":
             problems.append(f"clip {i} immediately repeats asset {clips[i]['asset_id']}")
     return problems
 
@@ -545,13 +623,16 @@ def compact_view(timeline: dict[str, Any], clip_offset: int = 0, clip_limit: int
     """A model-sized view: summary + one page of visual clips (index kept)."""
     visual = next((t for t in timeline["tracks"] if t["type"] == "visual"), {"clips": []})
     lyrics = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), {"clips": []})
+    graphics = next((t for t in timeline["tracks"] if t["type"] == "graphics"), {"clips": []})
     clips = visual["clips"]
     clip_limit = max(1, min(int(clip_limit), 100))
     clip_offset = max(0, int(clip_offset))
     page = []
     for i, c in enumerate(clips[clip_offset:clip_offset + clip_limit], start=clip_offset):
-        item = {"index": i, "asset_id": c["asset_id"], "kind": c["kind"], "start_s": c["start_s"], "duration_s": c["duration_s"],
+        item = {"index": i, "asset_id": c.get("asset_id"), "kind": c["kind"], "start_s": c["start_s"], "duration_s": c["duration_s"],
                 "transition": c.get("transition_in", {}).get("type", "cut")}
+        if c["kind"] == "graphic":
+            item["graphic"] = c["graphic"]["grammar"]
         if c.get("ken_burns"):
             kb = c["ken_burns"]
             item["ken_burns"] = f"{kb['zoom_start']}->{kb['zoom_end']} {kb['pan']}"
@@ -562,7 +643,7 @@ def compact_view(timeline: dict[str, Any], clip_offset: int = 0, clip_limit: int
         "id": timeline["id"], "project_id": timeline["project_id"], "name": timeline["name"], "aspect": timeline["aspect"],
         "fps": timeline["fps"], "width": timeline["width"], "height": timeline["height"],
         "audio_asset_id": timeline.get("audio_asset_id"), "duration_s": round(total, 3),
-        "clips_total": len(clips), "lyrics_lines": len(lyrics["clips"]), "finishing": timeline.get("finishing") or {},
+        "clips_total": len(clips), "lyrics_lines": len(lyrics["clips"]), "overlays": len(graphics["clips"]), "finishing": timeline.get("finishing") or {},
         "clips": page, "has_more": has_more, "next_clip_offset": clip_offset + clip_limit if has_more else None,
         "updated_at": timeline.get("updated_at"),
     }
