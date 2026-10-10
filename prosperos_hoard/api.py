@@ -1410,13 +1410,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                "restore or deleted")
 
     # ---------------------------------------------------------------- health
+    health_counts: dict[str, int] = {"projects": 0, "active_jobs": 0}
+
+    def _health_counts() -> dict[str, int]:
+        return {"projects": len(store.list_projects(limit=50)["items"]),
+                "active_jobs": len(store.list_jobs(state="active", limit=50)["items"])}
+
     @app.get("/api/health")
-    def health():
-        active = store.list_jobs(state="active", limit=50)["items"]
+    async def health():
+        # Answered on the event loop, not from the pool of request threads: when that pool is full
+        # (long imports, renders) or the database is busy, the counts come from the last answer and
+        # "busy" says so, instead of the hub and the watchdog seeing a dead app.
+        busy = False
+        try:
+            health_counts.update(await asyncio.wait_for(asyncio.to_thread(_health_counts), timeout=2.0))
+        except Exception:  # noqa: BLE001  (timeout or a locked database)
+            busy = True
         return {
             "service": "prosperos-hoard", "name": "Prospero's Hoard", "version": __version__, "status": "ok",
-            "demo": demo, "projects": len(store.list_projects(limit=50)["items"]),
-            "active_jobs": len(active), "hoard_link": family.health_block(),
+            "demo": demo, **health_counts, "busy": busy, "hoard_link": family.health_block(),
         }
 
     @app.get("/api/backend")

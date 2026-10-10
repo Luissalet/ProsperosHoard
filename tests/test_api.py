@@ -28,6 +28,26 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["name"] == "Prospero's Hoard"
     assert "active_jobs" in body
+    assert body["busy"] is False
+
+
+def test_health_answers_while_the_database_is_busy(client, monkeypatch):
+    """A slow store (full thread pool, locked database) must not make the app look dead: the
+    health answer comes from the event loop within ~2 s, says busy and keeps the last counts."""
+    import threading
+    import time as _time
+    from prosperos_hoard.store import Store
+    c, _, _ = client
+    first = c.get("/api/health").json()
+    release = threading.Event()
+    real = Store.list_projects
+    monkeypatch.setattr(Store, "list_projects", lambda self, *a, **k: (release.wait(10), real(self, *a, **k))[1])
+    started = _time.perf_counter()
+    body = c.get("/api/health").json()
+    took = _time.perf_counter() - started
+    release.set()
+    assert body["status"] == "ok" and body["busy"] is True and took < 5
+    assert body["projects"] == first["projects"] and body["active_jobs"] == first["active_jobs"]
 
 
 def test_guard_rejects_bad_host(client):
