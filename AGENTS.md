@@ -10,7 +10,7 @@ Reglas para agentes de código que trabajen en este repositorio.
    sin FastAPI; `PROSPERO_GPU_LEASE=0` apaga la reserva de GPU). `engine.py`, `store.py`, `db.py`,
    `comfy_driver.py`, `design.py`, `audio.py`, `video.py`, `timeline.py`,
    `voices.py`, `backend.py`, `shorts.py`, `stock.py`, `soundtrack.py`, `motion_graphics.py`,
-   `graphic_shots.py`, `dub_plan.py` (plan de duración y control de calidad del doblaje) y `agent_undo.py` son
+   `graphic_shots.py`, `dub_plan.py` (plan de duración y control de calidad del doblaje), `video_retime.py` (ralentizar tramos del vídeo del doblaje) y `agent_undo.py` son
    lógica pura y se prueban sin servidor (lo externo de un short pasa por el
    `Studio`; en los tests, `app.state.short_hooks`).
 2. **`mcp_server.py` es un script independiente**: solo stdlib, `httpx` y
