@@ -1234,6 +1234,8 @@ const en = {
   dubPlanTip: "Estimated {est}s of speech for a {slot}s slot (x{factor}).",
   dubShortened: "Shortened from: {text}", dubShortenNoLlm: "Too long, and no model was available to shorten it.",
   dubQcFlagged: "flagged", dubQcSkipped: "skipped", dubQcHeard: "Heard: {text}",
+  dubUntranslated: "not translated", dubUntranslatedTip: "The model returned no translation (twice); the source line was voiced as it was. Edit it and redo the line.",
+  dubSummaryUntranslated: "{n} not translated",
   dubSummary: "{fits} fit, {tight} tight, {impossible} too long, {shortened} shortened, {flagged} flagged",
   // character kit
   kitViewFront: "Front", kitViewThreeQuarter: "Three-quarter", kitViewProfile: "Profile", kitViewBack: "Back",
@@ -2790,6 +2792,8 @@ const es: Record<MessageKey, string> = {
   dubPlanTip: "Se estiman {est} s de habla para un hueco de {slot} s (x{factor}).",
   dubShortened: "Acortada desde: {text}", dubShortenNoLlm: "Demasiado larga y no había modelo disponible para acortarla.",
   dubQcFlagged: "revisar", dubQcSkipped: "omitido", dubQcHeard: "Oído: {text}",
+  dubUntranslated: "sin traducir", dubUntranslatedTip: "El modelo no devolvió traducción (dos veces); se locutó la línea original. Edítala y rehaz la línea.",
+  dubSummaryUntranslated: "{n} sin traducir",
   dubSummary: "{fits} caben, {tight} justas, {impossible} demasiado largas, {shortened} acortadas, {flagged} por revisar",
   // character kit
   kitViewFront: "Frente", kitViewThreeQuarter: "Tres cuartos", kitViewProfile: "Perfil", kitViewBack: "Espalda",

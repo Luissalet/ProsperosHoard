@@ -498,7 +498,10 @@ function DubTab() {
               {outputs.summary && (
                 <div className="small muted" style={{ padding: "2px 6px 6px" }} data-testid="dub-summary">{t("dubSummary", {
                   fits: outputs.summary.fits, tight: outputs.summary.tight, impossible: outputs.summary.impossible,
-                  shortened: outputs.summary.shortened, flagged: outputs.summary.flagged })}</div>
+                  shortened: outputs.summary.shortened, flagged: outputs.summary.flagged })}
+                  {(outputs.summary.untranslated || 0) > 0 && (
+                    <span className="err-text"> · {t("dubSummaryUntranslated", { n: outputs.summary.untranslated || 0 })}</span>
+                  )}</div>
               )}
               <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
                 <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th>{t("dubPlan")}</th><th>{t("dubQc")}</th><th /></tr></thead>
@@ -512,6 +515,10 @@ function DubTab() {
                         {fixIndex === s.index
                           ? <input value={fixText} onChange={(e) => setFixText(e.target.value)} style={{ width: "100%" }} />
                           : s.translated_text}
+                        {s.translation === "untranslated" && (
+                          <span className="pill bad" style={{ marginLeft: 6 }} data-testid="dub-untranslated"
+                                title={t("dubUntranslatedTip")}>{t("dubUntranslated")}</span>
+                        )}
                       </td>
                       <td>
                         {s.plan && (

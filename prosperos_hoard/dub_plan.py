@@ -317,9 +317,12 @@ def qc_segments(pairs: Iterable[tuple[str, Optional[str]]], lang: Optional[str],
 
 def summarize(segments: list[dict[str, Any]]) -> dict[str, int]:
     """Counts for a job: lines per plan class, how many were shortened, how many
-    the quality check flagged or skipped."""
-    summary = {"fits": 0, "tight": 0, "impossible": 0, "shortened": 0, "flagged": 0, "qc_skipped": 0}
+    the quality check flagged or skipped, and how many lines the model never
+    translated (the source line was kept and voiced as it was)."""
+    summary = {"fits": 0, "tight": 0, "impossible": 0, "shortened": 0, "flagged": 0, "qc_skipped": 0, "untranslated": 0}
     for seg in segments:
+        if seg.get("translation") == "untranslated":
+            summary["untranslated"] += 1
         plan = seg.get("plan") or {}
         if plan.get("class") in ("fits", "tight", "impossible"):
             summary[plan["class"]] += 1

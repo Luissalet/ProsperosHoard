@@ -769,6 +769,8 @@ export interface DubSegment {
   end_s: number;
   source_text: string;
   translated_text: string;
+  /** "untranslated": the model never gave a translation and the source line was kept. */
+  translation?: "ok" | "retried" | "untranslated";
   engine_id?: string;
   fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean; borrowed_gap_s?: number };
   plan?: DubPlan;
@@ -807,6 +809,7 @@ export interface DubSummary {
   shortened: number;
   flagged: number;
   qc_skipped: number;
+  untranslated?: number;
   calibrated_cps?: number | null;
 }
 
