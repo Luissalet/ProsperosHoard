@@ -10,7 +10,8 @@ interface Panel extends HTMLElement {
 }
 
 type Props = { projectId: string | null; route: Route; assetId?: string;
-  lang: string; theme: string; onChanged: () => void };
+  lang: string; theme: string; onChanged: () => void; overlayLayer?: number;
+  onOpenChanged?: (open: boolean) => void };
 
 /** Thin host adapter. Faustus owns the panel, conversations, drafts and agent. */
 export default function FaustusCopilot(props: Props) {
@@ -19,6 +20,12 @@ export default function FaustusCopilot(props: Props) {
   const container = useRef<HTMLDivElement>(null);
   const current = useRef(props);
   current.current = props;
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener('prospero:copilot-open', show);
+    return () => window.removeEventListener('prospero:copilot-open', show);
+  }, []);
+  useEffect(() => { props.onOpenChanged?.(open); }, [open,props.onOpenChanged]);
   useEffect(() => {
     if (!open) return;
     let disposed = false;
@@ -82,8 +89,8 @@ export default function FaustusCopilot(props: Props) {
     if (panel) { panel.locale = props.lang; panel.theme = props.theme; }
   }, [props.lang,props.theme]);
   return <>
-    <button type="button" className="btn sm prospero-copilot-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>Faustus</button>
-    {open && <aside className="prospero-copilot" aria-label="Faustus">
+    <button type="button" className="btn sm prospero-copilot-toggle" style={{zIndex:props.overlayLayer}} aria-expanded={open} onClick={() => setOpen(!open)}>Faustus</button>
+    {open && <aside className="prospero-copilot" style={{zIndex:props.overlayLayer}} aria-label="Faustus">
       <header><strong>Faustus · Prospero</strong><button type="button" className="btn sm" onClick={() => setOpen(false)} aria-label={props.lang === 'es' ? 'Cerrar Faustus' : 'Close Faustus'}>×</button></header>
       {error && <p role="alert">{error}</p>}
       <div ref={container} className="prospero-copilot-content" />
