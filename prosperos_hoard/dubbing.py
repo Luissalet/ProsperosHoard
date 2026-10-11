@@ -198,17 +198,46 @@ def build_translation_messages(text: str, target_lang: str, source_lang: Optiona
 _clean_translated_line = dub_plan.clean_line
 
 
+def _same_line(a: str, b: str) -> bool:
+    norm = lambda t: " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in (t or "")).split())
+    return norm(a) == norm(b)
+
+
+def _lang_root(code: Optional[str]) -> str:
+    return (dub_plan.normalize_lang(code) if code else "") or ""
+
+
 def translate_segments(chat_fn: ChatFn, segments: list[dict[str, Any]], target_lang: str,
-                       source_lang: Optional[str] = None, glossary: Optional[dict[str, str]] = None) -> list[str]:
+                       source_lang: Optional[str] = None, glossary: Optional[dict[str, str]] = None,
+                       report: Optional[list[str]] = None) -> list[str]:
     """One LLM call per segment (through Hoard Link's `chat`, injected as
     `chat_fn` so this stays testable with a fake). Raises whatever `chat_fn`
     raises - typically `hoard_link.errors.Unavailable` when no local LLM is
-    reachable, which the job handler surfaces as a clear failure."""
+    reachable, which the job handler surfaces as a clear failure.
+
+    An empty reply or one that just repeats the source line (a reasoning model
+    that spent its budget thinking, or one that ignored the target language) is
+    retried once with a stricter instruction; if it is still not a translation
+    the source line is kept and ``report`` gets ``"untranslated"`` for that
+    segment (``"ok"`` / ``"retried"`` otherwise), so the job can say so instead
+    of voicing the wrong language in silence."""
     out = []
+    differs = _lang_root(target_lang) != _lang_root(source_lang) if source_lang else True
     for seg in segments:
         messages = build_translation_messages(seg["text"], target_lang, source_lang, glossary)
-        translated = chat_fn(messages)
-        out.append(_clean_translated_line(translated or "") or seg["text"])
+        translated = _clean_translated_line(chat_fn(messages) or "")
+        status = "ok"
+        if not translated or (differs and _same_line(translated, seg["text"])):
+            retry = messages + [{"role": "user", "content": (
+                f"That was not a translation. Write this line in {target_lang} now. "
+                f"Reply with the {target_lang} line only:\n{seg['text']}")}]
+            translated = _clean_translated_line(chat_fn(retry) or "")
+            status = "retried"
+            if not translated or (differs and _same_line(translated, seg["text"])):
+                translated, status = "", "untranslated"
+        if report is not None:
+            report.append(status)
+        out.append(translated or seg["text"])
     return out
 
 
@@ -269,13 +298,16 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
     progress(0.2, f"translating {len(segments)} segment(s) to {target_lang}")
 
     def chat_fn(messages: list[dict[str, Any]]) -> str:
-        result = backend.link.sync.chat(messages=messages, max_tokens=200, temperature=0.3)
+        # room for models that reason before answering: 200 tokens could be spent thinking and leave no line
+        result = backend.link.sync.chat(messages=messages, max_tokens=800, temperature=0.3)
         return result.text
 
+    statuses: list[str] = []
     translations = translate_segments(chat_fn, [{"text": s["source_text"]} for s in segments], target_lang,
-                                      detected_source_lang, glossary)
-    for seg, tr in zip(segments, translations):
+                                      detected_source_lang, glossary, report=statuses)
+    for seg, tr, status in zip(segments, translations, statuses or ["ok"] * len(segments)):
         seg["translated_text"] = tr
+        seg["translation"] = status  # ok | retried | untranslated (the source line was kept)
 
     options = {"plan": params.get("plan", True) is not False, "qc": params.get("qc", True) is not False,
                "qc_threshold": params.get("qc_threshold"), "stt_engine_id": stt_engine.id}
@@ -364,7 +396,7 @@ def agent_result(outputs: dict[str, Any]) -> dict[str, Any]:
     plan and quality-check fields, compact (no file paths, no model attempt logs)."""
     rows = []
     for s in outputs.get("segments") or []:
-        row: dict[str, Any] = {k: s[k] for k in ("index", "start_s", "end_s", "source_text", "translated_text") if k in s}
+        row: dict[str, Any] = {k: s[k] for k in ("index", "start_s", "end_s", "source_text", "translated_text", "translation") if k in s}
         plan = s.get("plan")
         if plan:
             row["plan"] = {k: plan[k] for k in ("est_s", "slot_s", "class", "shortened_from", "shorten") if k in plan}

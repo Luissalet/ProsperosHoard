@@ -141,6 +141,13 @@ asset. A text over 2,000,000 characters is rejected up front
    original" hint; with no local model resolved, the job fails clearly
    (`llm_unavailable`) instead of silently skipping translation - this is
    the one stage that needs a language model, and only for this step.
+   A reply that is empty or just repeats the source line (a reasoning model
+   that spent its budget thinking, or one that ignored the target language)
+   is retried once with a stricter instruction; if it still is not a
+   translation the source line is kept and the segment says
+   `translation: "untranslated"` (`"ok"`/`"retried"` otherwise), counted in
+   `outputs.summary.untranslated` and shown in the Dub tab, instead of being
+   voiced in the wrong language without a word.
 4. **Plan** (`plan`, on by default; `dub_plan.py`): each translated line's
    spoken length is estimated from the target language's characters per
    second (`CHARS_PER_SECOND`: es 14.5, en 14.0, fr 14.0, it 14.5, de 13.0,
@@ -184,7 +191,7 @@ asset. A text over 2,000,000 characters is rejected up front
 
 The job's `outputs.segments` (and the manifest) carry `plan` and `qc` per
 segment, and `outputs.summary` counts `fits`, `tight`, `impossible`,
-`shortened`, `flagged` and `qc_skipped`. Through MCP, `voice_job` on a finished
+`shortened`, `flagged`, `qc_skipped` and `untranslated`. Through MCP, `voice_job` on a finished
 dub returns that table under `result` (without file paths); the Dub tab shows
 a timing badge and the error rate per line, highlights flagged lines and shows
 what was heard on hover.

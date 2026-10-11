@@ -240,7 +240,7 @@ def test_summarize_counts():
         {},
     ]
     assert dp.summarize(segs) == {"fits": 1, "tight": 1, "impossible": 2, "shortened": 1, "flagged": 1,
-                                  "qc_skipped": 1}
+                                  "qc_skipped": 1, "untranslated": 0}
 
 
 # ------------------------------------------------------------ job level --
@@ -461,3 +461,41 @@ def test_agent_voice_job_exposes_plan_and_qc_for_a_finished_dub(client):
     assert seg["qc"]["flagged"] is True and seg["qc"]["hyp"] == "q"
     assert body["result"]["summary"]["flagged"] == 1
     assert "work_dir" not in body["result"]
+
+
+# -- translation that never happened (seen live: a reasoning model returned nothing and the source was voiced) -----
+
+def test_translate_retries_an_empty_reply_and_marks_untranslated():
+    from prosperos_hoard.dubbing import translate_segments
+    calls = []
+
+    def chat(messages):
+        calls.append(messages)
+        return ""  # a model that spends its budget thinking
+
+    report = []
+    out = translate_segments(chat, [{"text": "Hola, esto es una prueba."}], "English", "es", report=report)
+    assert out == ["Hola, esto es una prueba."]  # the source line is kept...
+    assert report == ["untranslated"]  # ...but the job knows it
+    assert len(calls) == 2 and "That was not a translation" in calls[1][-1]["content"]
+
+
+def test_translate_retries_an_echo_and_accepts_the_second_answer():
+    from prosperos_hoard.dubbing import translate_segments
+    answers = iter(["Hola, esto es una prueba.", "Hello, this is a test."])
+    report = []
+    out = translate_segments(lambda m: next(answers), [{"text": "Hola, esto es una prueba."}], "en", "es", report=report)
+    assert out == ["Hello, this is a test."] and report == ["retried"]
+
+
+def test_translate_same_language_echo_is_not_untranslated():
+    from prosperos_hoard.dubbing import translate_segments
+    report = []
+    out = translate_segments(lambda m: "Gracias.", [{"text": "Gracias."}], "es", "es", report=report)
+    assert out == ["Gracias."] and report == ["ok"]
+
+
+def test_summary_counts_untranslated_lines():
+    from prosperos_hoard.dub_plan import summarize
+    s = summarize([{"translation": "untranslated"}, {"translation": "ok"}])
+    assert s["untranslated"] == 1
