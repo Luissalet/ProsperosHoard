@@ -58,13 +58,19 @@ def compute_time_fit_factor(source_duration_s: float, target_duration_s: float) 
     return source_duration_s / target_duration_s
 
 
+# A clip shorter than its slot is padded with silence, not stretched: slowing speech down past this point
+# drawls it (a dub at 0.55x was misheard by the quality check as different words). Slight easing only.
+MIN_SLOWDOWN = 0.92
+
+
 def fit_audio_to_duration(src_wav: Path, target_duration_s: float, dest_wav: Path) -> dict[str, Any]:
-    """Speed the clip up/down to approximately `target_duration_s` with
-    `atempo`, then pad with silence or trim to hit it exactly (a translated
-    line rarely lands on the original's duration to the millisecond)."""
+    """Speed the clip up to approximately `target_duration_s` with `atempo`
+    when it is too long; when it is short, ease it at most to `MIN_SLOWDOWN`
+    and pad the rest with silence. Then pad or trim to hit the slot exactly
+    (a translated line rarely lands on the original's duration to the millisecond)."""
     source_duration_s = audio_mod.probe_duration_s(src_wav) or 0.0
     factor = compute_time_fit_factor(source_duration_s, target_duration_s)
-    clamped = max(1.0 / MAX_OVERALL_FACTOR, min(MAX_OVERALL_FACTOR, factor))
+    clamped = max(MIN_SLOWDOWN, min(MAX_OVERALL_FACTOR, factor))
     chain = atempo_chain(clamped)
     filters = ",".join(chain) if chain else "anull"
     dest_wav.parent.mkdir(parents=True, exist_ok=True)

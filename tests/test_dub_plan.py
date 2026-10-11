@@ -499,3 +499,25 @@ def test_summary_counts_untranslated_lines():
     from prosperos_hoard.dub_plan import summarize
     s = summarize([{"translation": "untranslated"}, {"translation": "ok"}])
     assert s["untranslated"] == 1
+
+
+def test_short_clip_is_padded_not_drawled(monkeypatch, tmp_path):
+    from prosperos_hoard import dubbing
+    seen = {}
+
+    def fake_run(cmd, timeout=None):
+        seen["af"] = cmd[cmd.index("-af") + 1]
+        out = tmp_path / "out.wav"
+        out.write_bytes(b"RIFF")
+        return type("P", (), {"returncode": 0, "stderr": b""})()
+
+    monkeypatch.setattr(dubbing.audio_mod, "probe_duration_s", lambda p: 1.5)
+    monkeypatch.setattr(dubbing.procutil, "run", fake_run)
+    monkeypatch.setattr(dubbing, "_ffmpeg", lambda: "ffmpeg")
+    info = dubbing.fit_audio_to_duration(tmp_path / "in.wav", 2.74, tmp_path / "out.wav")
+    assert info["applied_factor"] == dubbing.MIN_SLOWDOWN  # eased a little, the rest is silence
+    assert info["requested_factor"] < 0.6 and info["clamped"] is True
+    assert "apad" in seen["af"] and "atempo=0.92" in seen["af"]
+    # a long clip is still sped up as before
+    monkeypatch.setattr(dubbing.audio_mod, "probe_duration_s", lambda p: 4.0)
+    assert dubbing.fit_audio_to_duration(tmp_path / "in.wav", 2.0, tmp_path / "out.wav")["applied_factor"] == 2.0
