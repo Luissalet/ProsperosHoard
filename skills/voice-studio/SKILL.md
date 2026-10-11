@@ -35,8 +35,14 @@ with it.
 `voice_dub(source_path=..., target_language=..., voice_id=...)` needs a
 local LLM for translation (see `studio_status`'s `llm` capability) - it
 fails clearly, not silently, when none is reachable. It is a job: poll with
-`voice_job`. The finished outputs list every segment (source text,
-translated text, timing); a wrong line does not need a full re-run -
+`voice_job`. The finished job's `result` lists every segment (source text,
+translated text, timing) with a `plan` (estimated speech vs the slot:
+`fits`, `tight` or `impossible`; lines that cannot fit are shortened by the
+model, `shortened_from` keeps the original) and a `qc` (what a transcription
+of the synthetic clip heard, word or character error rate, `flagged` when
+over the threshold), plus a `summary` of counts. Look at the flagged and
+`impossible` lines first. `plan=false` / `qc=false` switch either off. A
+wrong line does not need a full re-run -
 `voice_resynthesize_segment(job_id, index, text=...)` fixes just that one
 and remixes the final video.
 
