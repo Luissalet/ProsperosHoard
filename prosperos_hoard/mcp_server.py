@@ -938,6 +938,28 @@ def voice_speak(text: str, engine_id: Optional[str] = None, voice_id: Optional[s
     return _call("POST", "/api/agent/voice_speak", json=body)
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def voice_retake_words(asset_id: str, first_word: int, last_word: int, text: str, engine_id: Optional[str] = None,
+                       voice_id: Optional[str] = None, voice_ref: Optional[str] = None, language: Optional[str] = None,
+                       project: Optional[str] = None) -> dict[str, Any]:
+    """Redo some words of a voice line without regenerating the rest: words first_word..last_word
+    (inclusive indexes in the line's word timings) are replaced by `text`, synthesized alone and spliced
+    in between the surrounding pauses with short crossfades; the rest of the line keeps its original
+    samples. Timings come from the asset's own recipe (a previous retake) or a fresh transcription
+    (voice_transcribe shows the words and their order). The voice defaults to the one that spoke the line
+    when its recipe records it; otherwise pass engine_id/voice_id/voice_ref. Saves a new audio asset
+    (derived_from the original, which is kept) with the shift of every later word.
+
+    Keywords: retake word, fix a word, redo word, replace word in voice line, rehacer palabra,
+    corregir palabra, cambiar una palabra de la locucion, retoma de voz
+    """
+    voice = {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "language": language}
+    body = {"asset_id": asset_id, "first_word": first_word, "last_word": last_word, "text": text,
+            "language": language, "project": project,
+            "voice": voice if any(v is not None for v in (engine_id, voice_id, voice_ref)) else None}
+    return _call("POST", "/api/agent/voice_retake_words", json=body)
+
+
 @tool(_ro(readOnlyHint=True))
 def voice_transcribe(path: Optional[str] = None, asset_id: Optional[str] = None, language: Optional[str] = None,
                      engine_id: Optional[str] = None) -> dict[str, Any]:
