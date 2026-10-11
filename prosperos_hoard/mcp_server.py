@@ -999,22 +999,31 @@ def voice_dub(
     target_language: str, source_path: Optional[str] = None, video_asset_id: Optional[str] = None,
     source_language: Optional[str] = None, glossary: Optional[dict[str, str]] = None,
     engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
+    plan: bool = True, qc: bool = True, qc_threshold: Optional[float] = None,
     title: Optional[str] = None, project: Optional[str] = None, wait_s: float = 0,
 ) -> dict[str, Any]:
-    """Dub a video into target_language as a background job: extracts its audio, transcribes it with
+    """Dub a video with timing plan and QC / doblar un video con plan de duracion y control de calidad.
+
+    Dubs a video into target_language as a background job: extracts its audio, transcribes it with
     timestamps, translates each line with the local LLM (glossary maps names/terms; fails clearly with no
-    local LLM available - see studio_status's llm capability), synthesizes each line in the chosen voice,
+    local LLM available - see studio_status's llm capability), plans each line's length against its slot
+    (plan=true: lines that cannot fit are shortened by the LLM), synthesizes each line in the chosen voice,
     time-fits it back onto the original line's duration, mixes it under the original track (ducked, or
     replacing vocals when a background separator is installed) and muxes a new video with target-language
     subtitles. Give source_path (an absolute path) or video_asset_id. Every stage's files are kept, so a
     single line can be fixed with voice_resynthesize_segment instead of re-running the whole job.
-    Poll with voice_job; its finished outputs include a per-segment table (source/translated text, timing).
+    Poll with voice_job; its finished outputs include a per-segment table (source/translated text, timing)
+    and, per segment, plan {est_s, slot_s, class fits|tight|impossible, shortened_from, shorten} and qc
+    {wer|cer, hyp, flagged} (qc=true re-transcribes each synthetic clip and flags lines whose error rate is
+    over qc_threshold, default 0.35 words / 0.25 characters for ja, zh, ko, th; status skipped without a
+    transcriber), plus outputs.summary counts (fits, tight, impossible, shortened, flagged).
 
-    Keywords: dub video, translate video, voice dubbing, subtitles, doblar video, traducir video, doblaje, subtitulos
+    Keywords: dub video, translate video, voice dubbing, subtitles, doblar video, traducir video, doblaje, subtitulos,
+    dubbing QC, word error rate, timing plan, control de calidad doblaje
     """
     body = {"target_language": target_language, "source_path": source_path, "video_asset_id": video_asset_id,
             "source_language": source_language, "glossary": glossary, "title": title, "project": project,
-            "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
+            "plan": plan, "qc": qc, "qc_threshold": qc_threshold, "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
     return _call("POST", "/api/agent/voice_dub", json=body)
 
 
@@ -1025,7 +1034,7 @@ def voice_resynthesize_segment(job_id: str, index: int, text: Optional[str] = No
     """Fix one line of a finished voice_dub job without re-running transcription or translation: edit its
     translated text and/or swap the voice, re-synthesize and re-time-fit just that segment, and (remix=true,
     default) rebuild the mixed audio and re-mux the final video. index is the segment's position in the
-    dub job's outputs.segments table (0-based).
+    dub job's outputs.segments table (0-based). The segment's plan and qc fields are refreshed in the result.
 
     Keywords: fix dub line, re-synthesize segment, redo translation, corregir linea doblaje, resintetizar segmento
     """

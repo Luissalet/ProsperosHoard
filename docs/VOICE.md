@@ -141,22 +141,69 @@ asset. A text over 2,000,000 characters is rejected up front
    original" hint; with no local model resolved, the job fails clearly
    (`llm_unavailable`) instead of silently skipping translation - this is
    the one stage that needs a language model, and only for this step.
-4. **Synthesize** each translated segment in the chosen voice.
-5. **Time-fit** each synthesized segment to its original segment's
+   A reply that is empty or just repeats the source line (a reasoning model
+   that spent its budget thinking, or one that ignored the target language)
+   is retried once with a stricter instruction; if it still is not a
+   translation the source line is kept and the segment says
+   `translation: "untranslated"` (`"ok"`/`"retried"` otherwise), counted in
+   `outputs.summary.untranslated` and shown in the Dub tab, instead of being
+   voiced in the wrong language without a word.
+4. **Plan** (`plan`, on by default; `dub_plan.py`): each translated line's
+   spoken length is estimated from the target language's characters per
+   second (`CHARS_PER_SECOND`: es 14.5, en 14.0, fr 14.0, it 14.5, de 13.0,
+   pt 14.5, ja 7.5, zh 5.5, ko 7.0, 13.5 for any other) and compared with
+   its *slot*: the original line's own duration plus the silence before the
+   next line, borrowed up to 0.6 s. The line is `fits` (no speed-up needed),
+   `tight` (up to x1.25) or `impossible` (more); `beyond_hard` marks more than
+   x2. Each `impossible` line goes back to the local model, up to two tries,
+   asking for a version with at most `slot x chars/s` characters that keeps
+   meaning and register ("return only the line"); the shortest version seen is
+   kept and the original is saved as `plan.shortened_from`. With no model
+   available (or none left mid-way) the line stays as it was and is marked
+   `plan.shorten = "no_llm"`. A job can calibrate the pace with
+   `dub_plan.calibrate` (median chars/s of clips already synthesized, at
+   least 3, outliers ignored): `resynthesize_segment` does it from the job's
+   other lines; the first plan of a job uses the table, because nothing has
+   been synthesized yet.
+5. **Synthesize** each translated segment in the chosen voice.
+6. **Time-fit** each synthesized segment to its original segment's
    duration with ffmpeg's `atempo` (chained to cover 0.25x-4x, since a
    single `atempo` only covers 0.5x-2x - `MIN_ATEMPO`/`MAX_ATEMPO`/
    `MAX_OVERALL_FACTOR` in `dubbing.py`), then padded or trimmed to land
-   exactly on the original timing so the mix stays in sync.
-6. **Mix and mux**: the dubbed line plays at the segment's original start,
+   exactly on the original timing so the mix stays in sync. A clip shorter
+   than its slot is eased at most to `MIN_SLOWDOWN` (0.92x) and the rest is
+   silence: stretching speech further drawls it (seen live at 0.55x, where
+   the quality check heard different words).
+   With the plan on, a clip longer than the line's own duration first takes
+   the gap it was planned to borrow (`fit.borrowed_gap_s`; the original is
+   ducked for that long too) and is sped up only for what is left.
+7. **Quality check** (`qc`, on by default): the finished clip is transcribed
+   again with the same speech-to-text engine as the source, in the target
+   language, and compared with the text that was meant to be said: word error
+   rate (case, punctuation and spacing ignored), or character error rate for
+   ja, zh, ko and th. A line over the threshold (`qc_threshold`; default 0.35
+   WER, 0.25 CER) is `flagged`. Each segment gets `qc` = `{status, metric,
+   wer|cer, hyp, threshold, flagged}`; without a working transcriber the
+   segment gets `{status: "skipped", reason}` and the job still finishes. It
+   runs on whatever the source transcription used (CPU-friendly with
+   faster-whisper), so it adds roughly one short transcription per line.
+8. **Mix and mux**: the dubbed line plays at the segment's original start,
    ducked under the rest of the original track (`DUCK_DB = -18 dB`, or
    fully replacing it where a background separator is installed), muxed
    into a new video alongside target-language subtitles.
 
+The job's `outputs.segments` (and the manifest) carry `plan` and `qc` per
+segment, and `outputs.summary` counts `fits`, `tight`, `impossible`,
+`shortened`, `flagged`, `qc_skipped` and `untranslated`. Through MCP, `voice_job` on a finished
+dub returns that table under `result` (without file paths); the Dub tab shows
+a timing badge and the error rate per line, highlights flagged lines and shows
+what was heard on hover.
+
 Every stage's files are kept in the job's work directory (a `manifest.json`
-records each segment's timing, source/translated text and engine), so
+records each segment's timing, source/translated text, plan, QC and engine), so
 `POST /api/voice/dub/{job_id}/segments/{index}/resynthesize` (or
 `voice_resynthesize_segment`) can fix one line's translation and/or voice
-and re-run just that segment - and, with `remix=true` (the default), rebuild
+and re-run just that segment (its plan is re-estimated and its QC redone) - and, with `remix=true` (the default), rebuild
 the mixed audio and re-mux the final video - without repeating
 transcription or translation for the rest.
 `GET /api/voice/dub/{job_id}/download?file=video|subtitles` serves the

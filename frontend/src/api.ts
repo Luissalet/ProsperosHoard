@@ -769,8 +769,48 @@ export interface DubSegment {
   end_s: number;
   source_text: string;
   translated_text: string;
+  /** "untranslated": the model never gave a translation and the source line was kept. */
+  translation?: "ok" | "retried" | "untranslated";
   engine_id?: string;
-  fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean };
+  fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean; borrowed_gap_s?: number };
+  plan?: DubPlan;
+  qc?: DubQc;
+}
+
+/** How a translated line's estimated speech time compares with the slot the original leaves for it. */
+export interface DubPlan {
+  est_s: number;
+  slot_s: number;
+  own_s?: number;
+  gap_s?: number;
+  factor: number;
+  class: "fits" | "tight" | "impossible";
+  beyond_hard?: boolean;
+  shortened_from?: string;
+  shorten?: "shortened" | "unchanged" | "no_llm" | "error";
+}
+
+/** What a transcription of the synthetic clip heard against the requested text (wer, or cer for ja/zh/ko/th). */
+export interface DubQc {
+  status: "ok" | "skipped";
+  metric?: "wer" | "cer";
+  wer?: number;
+  cer?: number;
+  hyp?: string;
+  threshold?: number;
+  flagged: boolean;
+  reason?: string;
+}
+
+export interface DubSummary {
+  fits: number;
+  tight: number;
+  impossible: number;
+  shortened: number;
+  flagged: number;
+  qc_skipped: number;
+  untranslated?: number;
+  calibrated_cps?: number | null;
 }
 
 export interface AudiobookOutputs {
@@ -792,6 +832,7 @@ export interface DubOutputs {
   background_separated?: boolean;
   work_dir?: string;
   segments?: DubSegment[];
+  summary?: DubSummary;
   asset_ids?: string[];
 }
 
@@ -1295,7 +1336,7 @@ export const api = {
 
   dub: (body: { source_path?: string; video_asset_id?: string; target_language: string; source_language?: string;
                 glossary?: Record<string, string>; voice: VoiceSpec; stt_engine_id?: string; title?: string;
-                project?: string; wait_s?: number }) =>
+                plan?: boolean; qc?: boolean; qc_threshold?: number; project?: string; wait_s?: number }) =>
     request<{ job: Job }>("POST", "/api/voice/dub", body),
   dubStatus: (jobId: string) => request<Job>("GET", `/api/voice/dub/${jobId}`),
   dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/api/voice/dub/${jobId}/download${q({ file })}`,
