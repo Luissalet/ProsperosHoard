@@ -344,14 +344,97 @@ def _edit_distance(a: list[str], b: list[str]) -> int:
     return prev[-1]
 
 
-def word_error_rate(ref: str, hyp: str) -> float:
-    """Word-level Levenshtein distance over the reference length (case,
-    punctuation and spacing ignored). An empty reference is 0.0 against an empty
-    hypothesis and 1.0 otherwise. Can exceed 1.0 when the hypothesis is longer."""
-    r, h = normalize_for_compare(ref).split(), normalize_for_compare(hyp).split()
+# -- numbers written as digits on one side and as words on the other ---------
+
+_EN_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+_EN_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+_ES_ONES = ["cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez",
+            "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve",
+            "veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis",
+            "veintisiete", "veintiocho", "veintinueve"]
+_ES_TENS = ["", "", "", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"]
+_ES_HUNDREDS = ["", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos",
+                "setecientos", "ochocientos", "novecientos"]
+
+
+def _en_words(n: int) -> str:
+    if n < 20:
+        return _EN_ONES[n]
+    if n < 100:
+        return _EN_TENS[n // 10] + ("" if n % 10 == 0 else " " + _EN_ONES[n % 10])
+    if n < 1000:
+        return _EN_ONES[n // 100] + " hundred" + ("" if n % 100 == 0 else " " + _en_words(n % 100))
+    for size, name in ((10**9, "billion"), (10**6, "million"), (1000, "thousand")):
+        if n >= size:
+            head, rest = divmod(n, size)
+            return _en_words(head) + " " + name + ("" if rest == 0 else " " + _en_words(rest))
+    return str(n)
+
+
+def _es_words(n: int, apocope: bool = False) -> str:
+    if n < 30:
+        word = _ES_ONES[n]
+        if apocope and n in (1, 21):          # "un mil" never, but "veintiún mil", "un millón"
+            word = word[:-1] if n == 1 else "veintiún"
+        return word
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return _ES_TENS[tens] + ("" if ones == 0 else " y " + _es_words(ones, apocope))
+    if n == 100:
+        return "cien"
+    if n < 1000:
+        hundreds, rest = divmod(n, 100)
+        return _ES_HUNDREDS[hundreds] + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    if n < 10**6:
+        thousands, rest = divmod(n, 1000)
+        head = "mil" if thousands == 1 else _es_words(thousands, apocope=True) + " mil"
+        return head + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    if n < 10**9:
+        millions, rest = divmod(n, 10**6)
+        head = "un millón" if millions == 1 else _es_words(millions, apocope=True) + " millones"
+        return head + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    return str(n)
+
+
+_NUMBER_WORDS = {"en": _en_words, "es": _es_words}
+
+
+def spell_numbers(text: str, lang: Optional[str]) -> str:
+    """The compare-normalized text with each run of digits (up to nine) written
+    out in words, for the languages that have a speller (en, es); unchanged
+    otherwise. "17" and "seventeen" then compare equal."""
+    speller = _NUMBER_WORDS.get(normalize_lang(lang) or "")
+    norm = normalize_for_compare(text)
+    if not speller:
+        return norm
+    out = []
+    for token in norm.split():
+        if token.isascii() and token.isdigit() and len(token) <= 9:
+            out.append(normalize_for_compare(speller(int(token))))
+        else:
+            out.append(token)
+    return " ".join(out)
+
+
+def _wer_tokens(r: list[str], h: list[str]) -> float:
     if not r:
         return 0.0 if not h else 1.0
     return round(_edit_distance(r, h) / len(r), 4)
+
+
+def word_error_rate(ref: str, hyp: str, lang: Optional[str] = None) -> float:
+    """Word-level Levenshtein distance over the reference length (case,
+    punctuation and spacing ignored). An empty reference is 0.0 against an empty
+    hypothesis and 1.0 otherwise. Can exceed 1.0 when the hypothesis is longer.
+    With a `lang` that has a number speller (en, es), digits on either side are
+    also tried written out in words, and the lower rate wins: a script saying
+    "17" heard as "seventeen" is not an error."""
+    base = _wer_tokens(normalize_for_compare(ref).split(), normalize_for_compare(hyp).split())
+    if (normalize_lang(lang) or "") in _NUMBER_WORDS and re.search(r"\d", f"{ref} {hyp}"):
+        spelled = _wer_tokens(spell_numbers(ref, lang).split(), spell_numbers(hyp, lang).split())
+        return min(base, spelled)
+    return base
 
 
 def char_error_rate(ref: str, hyp: str) -> float:
@@ -376,7 +459,7 @@ def qc_line(ref: str, hyp: Optional[str], lang: Optional[str], threshold: Option
     metric = metric_for(lang)
     if threshold is None:
         threshold = DEFAULT_CER_THRESHOLD if metric == "cer" else DEFAULT_WER_THRESHOLD
-    value = char_error_rate(ref, hyp) if metric == "cer" else word_error_rate(ref, hyp)
+    value = char_error_rate(ref, hyp) if metric == "cer" else word_error_rate(ref, hyp, lang)
     return {"status": "ok", "metric": metric, metric: value, "hyp": hyp, "threshold": threshold,
             "flagged": value > threshold}
 

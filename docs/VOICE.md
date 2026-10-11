@@ -240,7 +240,9 @@ asset. A text over 2,000,000 characters is rejected up front
    again with the same speech-to-text engine as the source, in the target
    language, and compared with the text that was meant to be said: word error
    rate (case, punctuation and spacing ignored), or character error rate for
-   ja, zh, ko and th. A line over the threshold (`qc_threshold`; default 0.35
+   ja, zh, ko and th. In Spanish and English, digits on either side are also
+   tried written out in words (`dub_plan.spell_numbers`) and the lower rate
+   wins, so a script saying "17" heard as "seventeen" is not an error. A line over the threshold (`qc_threshold`; default 0.35
    WER, 0.25 CER) is `flagged`. Each segment gets `qc` = `{status, metric,
    wer|cer, hyp, threshold, flagged}`; without a working transcriber the
    segment gets `{status: "skipped", reason}` and the job still finishes. It
