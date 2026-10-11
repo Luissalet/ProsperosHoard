@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   BookOpen, CheckCircle2, Download, Languages, Loader2, Mic, Mic2, Plus, RefreshCw, Save, Sparkles,
   Square, Trash2, UploadCloud, Video, Volume2, Wand2, XCircle,
@@ -419,6 +419,9 @@ function DubTab() {
   const [targetLanguage, setTargetLanguage] = useState("en");
   const [sourceLanguage, setSourceLanguage] = useState("");
   const [spec, setSpec] = useState<VoiceSpec>({});
+  const [translationMode, setTranslationMode] = useState<"direct" | "adapt">("adapt");
+  const [fitMode, setFitMode] = useState<"audio" | "smart">("audio");
+  const [stepsOpen, setStepsOpen] = useState<number | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const job = useJob(jobId);
@@ -431,7 +434,7 @@ function DubTab() {
     try {
       const r = await api.dub({
         video_asset_id: videoAsset.id, target_language: targetLanguage.trim(), source_language: sourceLanguage || undefined,
-        voice: spec, project: dubProjectId || undefined, wait_s: 0,
+        voice: spec, translation_mode: translationMode, fit_mode: fitMode, project: dubProjectId || undefined, wait_s: 0,
       });
       setJobId(r.job.id);
       app.refreshJobs();
@@ -450,6 +453,10 @@ function DubTab() {
     const parts = [t("dubPlanTip", { est: p.est_s.toFixed(1), slot: p.slot_s.toFixed(1), factor: p.factor.toFixed(2) })];
     if (p.shortened_from) parts.push(t("dubShortened", { text: p.shortened_from }));
     if (p.shorten === "no_llm") parts.push(t("dubShortenNoLlm"));
+    const st = s.fit?.strategy;
+    if (st && st.kind !== "fits") {
+      parts.push(t("dubFitTip", { gap: st.borrow_gap_s.toFixed(2), audio: st.audio_factor.toFixed(2), video: st.video_factor.toFixed(2), trim: st.trim_s.toFixed(2) }));
+    }
     return parts.join("\n");
   };
   const planLabel = (c: "fits" | "tight" | "impossible") =>
@@ -481,6 +488,16 @@ function DubTab() {
         </button>
         <input placeholder={t("targetLanguage")} value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} style={{ width: 90 }} />
         <input placeholder={t("sourceLanguage")} value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} style={{ width: 90 }} />
+        <select value={translationMode} onChange={(e) => setTranslationMode(e.target.value as "direct" | "adapt")}
+                title={t("dubTranslationModeTip")} aria-label={t("dubTranslationMode")} data-testid="dub-translation-mode">
+          <option value="adapt">{t("dubModeAdapt")}</option>
+          <option value="direct">{t("dubModeDirect")}</option>
+        </select>
+        <select value={fitMode} onChange={(e) => setFitMode(e.target.value as "audio" | "smart")}
+                title={t("dubFitModeTip")} aria-label={t("dubFitMode")} data-testid="dub-fit-mode">
+          <option value="audio">{t("dubFitAudio")}</option>
+          <option value="smart">{t("dubFitSmart")}</option>
+        </select>
       </div>
       <VoiceSpecPicker spec={spec} setSpec={setSpec} engines={engines.data?.tts || []} voices={voices.data?.items || []} />
       <div className="row">
@@ -501,13 +518,17 @@ function DubTab() {
                   shortened: outputs.summary.shortened, flagged: outputs.summary.flagged })}
                   {(outputs.summary.untranslated || 0) > 0 && (
                     <span className="err-text"> · {t("dubSummaryUntranslated", { n: outputs.summary.untranslated || 0 })}</span>
+                  )}
+                  {(outputs.summary.retimed || 0) > 0 && (
+                    <span data-testid="dub-retimed"> · {t("dubSummaryRetimed", { n: outputs.summary.retimed || 0, s: (outputs.summary.added_s || 0).toFixed(1) })}</span>
                   )}</div>
               )}
               <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
                 <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th>{t("dubPlan")}</th><th>{t("dubQc")}</th><th /></tr></thead>
                 <tbody>
                   {(outputs.segments || []).map((s) => (
-                    <tr key={s.index} data-flagged={s.qc?.flagged ? "true" : undefined}
+                    <Fragment key={s.index}>
+                    <tr data-flagged={s.qc?.flagged ? "true" : undefined}
                         style={s.qc?.flagged ? { background: "color-mix(in srgb, var(--bad) 10%, transparent)" } : undefined}>
                       <td className="mono small">{s.index}</td>
                       <td className="small">{s.source_text}</td>
@@ -518,6 +539,18 @@ function DubTab() {
                         {s.translation === "untranslated" && (
                           <span className="pill bad" style={{ marginLeft: 6 }} data-testid="dub-untranslated"
                                 title={t("dubUntranslatedTip")}>{t("dubUntranslated")}</span>
+                        )}
+                        {s.translation_steps && (
+                          <button className="btn sm ghost" style={{ marginLeft: 6 }} data-testid="dub-steps-toggle"
+                                  aria-expanded={stepsOpen === s.index} title={t("dubSteps")}
+                                  onClick={() => setStepsOpen(stepsOpen === s.index ? null : s.index)}>
+                            {s.translation_steps.issues.length > 0 ? `${s.translation_steps.issues.length} ` : ""}{t("dubSteps")}
+                          </button>
+                        )}
+                        {(s.fit?.strategy?.video_factor ?? 1) > 1 && s.fit?.strategy && (
+                          <span className="pill warn mono" style={{ marginLeft: 6 }} data-testid="dub-retime" title={planTip(s)}>
+                            {t("dubPicture", { x: s.fit.strategy.video_factor.toFixed(2) })}
+                          </span>
                         )}
                       </td>
                       <td>
@@ -543,6 +576,18 @@ function DubTab() {
                           : <button className="btn sm ghost" onClick={() => { setFixIndex(s.index); setFixText(s.translated_text); }}><Sparkles size={12} /> {t("dubResynth")}</button>}
                       </td>
                     </tr>
+                    {s.translation_steps && stepsOpen === s.index && (
+                      <tr data-testid="dub-steps">
+                        <td />
+                        <td colSpan={5} className="small">
+                          <div><b>{t("dubStepLiteral")}:</b> {s.translation_steps.literal || "-"}</div>
+                          <div><b>{t("dubStepIssues")}:</b> {s.translation_steps.issues.length ? s.translation_steps.issues.join(" · ") : t("dubStepNoIssues")}</div>
+                          <div><b>{t("dubStepAdapted")}:</b> {s.translation_steps.adapted || "-"}
+                            {s.translation_steps.fallback && <span className="muted"> ({t("dubStepFallback", { step: s.translation_steps.fallback })})</span>}</div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table></div>
