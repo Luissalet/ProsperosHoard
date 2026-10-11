@@ -48,6 +48,7 @@ from . import trainers as trainers_mod
 from . import timeline as timeline_mod
 from . import voice_engines as ve
 from . import voice_lab
+from . import voice_retake as retake_mod
 from . import voice_pipelines as vp
 from . import voices as voices_mod
 from .backend import Backend, ffmpeg_path
@@ -899,6 +900,17 @@ class VoiceSpeakBody(BaseModel):
     text: str
     voice: VoiceSpecBody = Field(default_factory=VoiceSpecBody)
     project: Optional[str] = None
+
+
+class VoiceRetakeWordsBody(BaseModel):
+    asset_id: str  # the voice line (an audio asset)
+    first_word: int  # index in the line's word timings, inclusive
+    last_word: int
+    text: str  # the replacement words
+    voice: Optional[VoiceSpecBody] = None  # defaults to the voice that spoke the line, when its recipe says
+    words: Optional[list[dict[str, Any]]] = None  # word timings; otherwise the asset's own or a fresh transcription
+    language: Optional[str] = None
+    project: Optional[str] = None  # defaults to the line's project
 
 
 class VoiceInstallBody(BaseModel):
@@ -2352,6 +2364,70 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if "asset" in result:
             return result["asset"]
         return Response(result["wav"], media_type="audio/wav", headers={"X-Engine": result["engine_id"]})
+
+    # ----------------------------------------------------- word-level retake
+    def _line_words(asset: dict[str, Any], path: Path, body: VoiceRetakeWordsBody) -> tuple[list[dict[str, Any]], str]:
+        if body.words:
+            return [dict(w) for w in body.words], "given"
+        recipe = asset.get("recipe") or {}
+        if recipe.get("words"):
+            return [dict(w) for w in recipe["words"]], "asset"
+        result = _run_transcribe(path, body.language, None, True)
+        return retake_mod.flatten_words(result), f"transcribed:{result.get('engine_id')}"
+
+    def op_voice_retake_words(body: VoiceRetakeWordsBody) -> dict[str, Any]:
+        asset = store.get_asset(body.asset_id)
+        if asset.get("kind") != "audio":
+            raise engine.EngineError("not_audio", "a word retake redoes part of a voice line (an audio asset)")
+        path = _asset_path(store, asset["file_path"])
+        data = path.read_bytes()
+        if path.suffix.lower() != ".wav":
+            exe = engine.ffmpeg_path()
+            if not exe:
+                raise engine.EngineError("no_ffmpeg", "ffmpeg is needed to read a non-WAV voice line")
+            res = procutil.run([exe, "-nostdin", "-loglevel", "error", "-i", str(path), "-f", "wav", "-acodec", "pcm_s16le", "-"],
+                               timeout=300)
+            data = bytes(res.stdout or b"")
+        words, words_from = _line_words(asset, path, body)
+        recipe = asset.get("recipe") or {}
+        spec = body.voice.model_dump(exclude_none=True) if body.voice else dict(recipe.get("voice") or {})
+        if not spec:
+            raise engine.EngineError("voice_required", "say which voice speaks the new words (voice.engine_id or voice.voice_id)")
+        used: dict[str, str] = {}
+
+        def synth(text: str) -> bytes:
+            wav, used["engine_id"] = voice_lab.synthesize_with_spec(store, _tts_engines(), spec, text)
+            return wav
+
+        try:
+            result = retake_mod.retake_words(data, words, body.first_word, body.last_word, body.text, synth)
+        except retake_mod.RetakeError as exc:
+            raise engine.EngineError(exc.code, exc.message) from None
+        asset_id = new_id("a")
+        dest = store.path_for_asset_file(asset_id, ".wav")
+        dest.write_bytes(result["wav"])
+        report = result["report"]
+        new = store.create_asset(
+            project_id=body.project or asset.get("project_id"), kind="audio", file_path=engine._rel(store, dest),
+            mime="audio/wav", duration_s=report["duration_after_s"], source="generated",
+            recipe={"operation": "voice_retake_words", "engine": used.get("engine_id"), "voice": spec,
+                    "derived_from": asset["id"], "input_asset_ids": [asset["id"]], "retake": report,
+                    "words": result["words"], "words_from": words_from,
+                    "text": " ".join(w["word"] for w in result["words"])},
+            asset_id=asset_id, name=engine._clip(f"{engine._clip(asset.get('name') or asset['id'], 40)} - retake: {body.text.strip()}", 80),
+            tags=["voice-studio", "retake"],
+        )
+        return {"engine_id": used.get("engine_id"), "words_from": words_from, "retake": report,
+                "asset": engine.asset_view(new)}
+
+    @app.post("/api/voice/retake_words")
+    def voice_retake_words(body: VoiceRetakeWordsBody):
+        return op_voice_retake_words(body)
+
+    @app.post("/api/agent/voice_retake_words")
+    def agent_voice_retake_words(body: VoiceRetakeWordsBody):
+        return agent("voice_retake_words", f"{body.asset_id}:{body.first_word}-{body.last_word}",
+                     lambda: op_voice_retake_words(body))
 
     # ----------------------------------------------------- transcribe/dictate
     def _run_transcribe(path: Path, language: Optional[str], engine_id: Optional[str], word_timestamps: bool) -> dict[str, Any]:
