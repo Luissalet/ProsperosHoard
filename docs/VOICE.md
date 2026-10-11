@@ -240,6 +240,11 @@ asset. A text over 2,000,000 characters is rejected up front
    segment gets `{status: "skipped", reason}` and the job still finishes. It
    runs on whatever the source transcription used (CPU-friendly with
    faster-whisper), so it adds roughly one short transcription per line.
+   The clip is transcribed with its silent edges trimmed (Whisper invents
+   words on a padded silent tail), and a line that is itself one of the
+   phrases the transcriber drops as a silence artifact ("Thanks for
+   watching") is `skipped` with reason `filtered_phrase` when nothing is
+   heard, instead of being flagged.
 8. **Mix and mux**: the dubbed line plays at the segment's start (in the
    retimed video, its `timeline.start_s`),
    ducked under the rest of the original track (`DUCK_DB = -18 dB`, or
