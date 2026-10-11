@@ -541,6 +541,10 @@ function RetakeTab() {
   const [spec, setSpec] = useState<VoiceSpec>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ asset: Asset; retake: RetakeReport; words_from: string } | null>(null);
+  const auk = useAsync(() => api.aukStatus(), []);
+  const [mode, setMode] = useState<"voice" | "context" | null>(null);
+  const aukReady = !!auk.data?.installed;
+  const inContext = (mode ?? (aukReady ? "context" : "voice")) === "context" && aukReady;
 
   const open = async (a: Asset) => {
     setLine(a); setResult(null); setRange(null); setText(""); setWords([]); setWordsFrom("");
@@ -580,8 +584,9 @@ function RetakeTab() {
     if (!line || !range || !text.trim()) return;
     setBusy(true);
     try {
-      const voice = spec.engine_id || spec.voice_id ? spec : undefined;
-      const r = await api.retakeWords({ asset_id: line.id, first_word: range[0], last_word: range[1], text: text.trim(), words, voice });
+      const voice = !inContext && (spec.engine_id || spec.voice_id) ? spec : undefined;
+      const r = await api.retakeWords({ asset_id: line.id, first_word: range[0], last_word: range[1], text: text.trim(), words, voice,
+        context_engine: inContext ? "auk" : undefined });
       setResult(r);
       app.toast(t("saved"), "ok");
       app.bump();
@@ -629,8 +634,18 @@ function RetakeTab() {
           {range && (
             <div className="stack">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("retakeNewText")} aria-label={t("retakeNewText")} />
-              <div className="muted small">{t("retakeVoiceDefault")}</div>
-              <VoiceSpecPicker spec={spec} setSpec={setSpec} engines={engines.data?.tts || []} voices={voices.data?.items || []} />
+              <div className="segmented" role="group" aria-label={t("retakeModeContext")} data-testid="retake-mode">
+                <button className={!inContext ? "on" : ""} aria-pressed={!inContext} onClick={() => setMode("voice")}>{t("retakeModeVoice")}</button>
+                <button className={inContext ? "on" : ""} aria-pressed={inContext} disabled={!aukReady}
+                  title={aukReady ? t("retakeContextHint") : `${t("retakeAukMissing")}: ${auk.data?.reason || ""}`}
+                  onClick={() => setMode("context")}>{t("retakeModeContext")}</button>
+              </div>
+              {inContext ? <div className="muted small">{t("retakeContextHint")}</div> : (
+                <>
+                  <div className="muted small">{t("retakeVoiceDefault")}</div>
+                  <VoiceSpecPicker spec={spec} setSpec={setSpec} engines={engines.data?.tts || []} voices={voices.data?.items || []} />
+                </>
+              )}
               <div className="row">
                 <button className="btn primary" onClick={run} disabled={busy || !text.trim()}>
                   {busy ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {t("retakeRun")}
@@ -651,6 +666,16 @@ function RetakeTab() {
             {result.retake.cut_by && <> · {t("retakeCutBy")}: {result.retake.cut_by.join(" / ")}</>}
             {" "}· «{result.retake.replaced}» → «{result.retake.new_text}»
           </div>
+          {result.retake.auk && (
+            <div className="muted small" data-testid="retake-auk-takes">
+              {t("retakeAukTakes")} ({result.retake.auk.variant}):{" "}
+              {result.retake.auk.candidates.map((c) => (
+                <span key={c.seed} style={{ fontWeight: c.seed === result.retake.auk!.chosen_seed ? 600 : 400 }}>
+                  {c.seed}. «{c.heard}»{c.matched ? " ✓" : ""}{"  "}
+                </span>
+              ))}
+            </div>
+          )}
           <button className="btn sm" style={{ width: "fit-content" }} onClick={continueOnResult}><RefreshCw size={13} /> {t("retakeUseResult")}</button>
         </div>
       )}
