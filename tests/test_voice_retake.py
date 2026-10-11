@@ -207,3 +207,38 @@ def test_snap_keeps_the_timing_when_there_is_no_real_pause():
     tone = (0.3 * np.sin(2 * np.pi * 250 * t) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t))).astype(np.float32)
     x = tone[:, None]  # words run together: dips in loudness, no silence
     assert vr.snap_to_quiet(x, SR, 0.44) == int(round(0.44 * SR))
+
+
+def _glued_line() -> np.ndarray:
+    """Two words run together: loud vowel, a shallow (not silent) dip at 0.38 s, loud again."""
+    t = np.arange(int(1.0 * SR)) / SR
+    env = np.full_like(t, 0.8)
+    env[(t > 0.34) & (t < 0.42)] = 0.55  # the a->i transition: quieter, never silent
+    return (0.4 * env * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+
+def test_valley_moves_a_glued_end_cut_out_to_the_dip():
+    x = _glued_line()[:, None]
+    i = vr.valley_after_glued_boundary(x, SR, 0.30, +1)  # transcriber ended the word at 0.30 s
+    assert i is not None and 0.34 * SR <= i <= 0.42 * SR
+    # looking the other way finds nothing: the dip is not before 0.30
+    assert vr.valley_after_glued_boundary(x, SR, 0.30, -1) is None
+
+
+def test_valley_ignores_steady_loudness():
+    t = np.arange(SR) / SR
+    x = (0.3 * np.sin(2 * np.pi * 250 * t)).astype(np.float32)[:, None]
+    assert vr.valley_after_glued_boundary(x, SR, 0.44, +1) is None
+
+
+def test_retake_of_a_glued_first_word_cuts_at_the_dip():
+    line = _glued_line()
+    words = [{"start_s": 0.0, "end_s": 0.30, "word": "Mañana"}, {"start_s": 0.30, "end_s": 0.76, "word": "iremos"}]
+    out = vr.retake_words(ve.wav_bytes_mono16(line, SR), words, 0, 0, "Hoy", lambda _t: _patch(0.2))
+    rep = out["report"]
+    assert rep["cut_by"] == ["timing", "valley"]
+    assert 0.34 <= rep["cut_end_s"] <= 0.42
+    # a word followed by a real gap in the timings keeps the old behaviour
+    words_gap = [{"start_s": 0.0, "end_s": 0.30, "word": "a"}, {"start_s": 0.36, "end_s": 0.76, "word": "b"}]
+    out2 = vr.retake_words(ve.wav_bytes_mono16(line, SR), words_gap, 0, 0, "Hoy", lambda _t: _patch(0.2))
+    assert out2["report"]["cut_by"][1] == "timing"
