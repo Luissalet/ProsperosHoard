@@ -948,6 +948,9 @@ class VoiceDubBody(BaseModel):
     glossary: Optional[dict[str, str]] = None
     voice: VoiceSpecBody = Field(default_factory=VoiceSpecBody)
     stt_engine_id: Optional[str] = None
+    plan: bool = True  # estimate each line against its slot and shorten the ones that cannot fit
+    qc: bool = True  # transcribe each finished clip and compare it with the requested text
+    qc_threshold: Optional[float] = Field(default=None, gt=0, le=2)  # error rate over which a line is flagged
     title: Optional[str] = None
     project: Optional[str] = None
     wait_s: float = 0
@@ -1068,6 +1071,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         view = engine.job_view(job)
         if job["state"] == "done" and view.get("asset_ids"):
             view["assets"] = [engine.asset_view(store.get_asset(a)) for a in view["asset_ids"][:8]]
+        if job["state"] == "done" and job["type"] == "dub" and (job.get("outputs") or {}).get("segments"):
+            view["result"] = dubbing_mod.agent_result(job["outputs"])  # the line table with plan and QC
         return view
 
     # ---------------------------------------------------------- operations
@@ -2605,6 +2610,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "voice": body.voice.model_dump(exclude_none=True), "stt_engine_id": body.stt_engine_id,
             "title": body.title, "project_id": body.project,
         }
+        # only a departure from the defaults goes into the params, which also key the job's work directory
+        if not body.plan:
+            params["plan"] = False
+        if not body.qc:
+            params["qc"] = False
+        if body.qc_threshold is not None:
+            params["qc_threshold"] = body.qc_threshold
         job = queue.enqueue("dub", "cpu", params, project_id=body.project)
         return {"job": wait(job, body.wait_s)}
 

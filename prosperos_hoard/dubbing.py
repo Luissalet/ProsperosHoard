@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import audio as audio_mod
+from . import dub_plan
 from . import procutil
 from . import voice_engines as ve
 from . import voice_lab
@@ -193,22 +194,8 @@ def build_translation_messages(text: str, target_lang: str, source_lang: Optiona
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
 
-_WRAPPING_QUOTE_PAIRS = [('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("«", "»")]
-
-
-def _clean_translated_line(text: str) -> str:
-    """Defend against a garbled reply despite the prompt's "no quotes, no
-    notes" instruction: collapse embedded newlines/repeated whitespace to
-    single spaces (an embedded blank line would otherwise break the SRT
-    block format), then strip one matching pair of quotes wrapping the
-    *whole* line - not a quote that is only part of the dialogue itself."""
-    text = " ".join(text.split())
-    if len(text) >= 2:
-        for open_q, close_q in _WRAPPING_QUOTE_PAIRS:
-            if text[0] == open_q and text[-1] == close_q:
-                text = text[1:-1].strip()
-                break
-    return text
+# A garbled reply despite the prompt's "no quotes, no notes": one plain line, no wrapping quotes.
+_clean_translated_line = dub_plan.clean_line
 
 
 def translate_segments(chat_fn: ChatFn, segments: list[dict[str, Any]], target_lang: str,
@@ -290,17 +277,28 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
     for seg, tr in zip(segments, translations):
         seg["translated_text"] = tr
 
+    options = {"plan": params.get("plan", True) is not False, "qc": params.get("qc", True) is not False,
+               "qc_threshold": params.get("qc_threshold"), "stt_engine_id": stt_engine.id}
+    if options["plan"]:
+        progress(0.26, "planning line timing")
+        apply_plan(segments, target_lang, chat_fn)
+
     tts_engines = ve.default_tts_engines(voices_dir=store.data_dir / "voices")
     seg_dir = work_dir / "segments"
     seg_dir.mkdir(parents=True, exist_ok=True)
+    qc_engine = stt_engine if options["qc"] else None
     for i, seg in enumerate(segments):
         progress(0.3 + 0.5 * (i / len(segments)), f"voicing segment {i + 1}/{len(segments)}")
-        _synthesize_and_fit_segment(store, tts_engines, voice_spec, seg, seg_dir)
+        _synthesize_and_fit_segment(store, tts_engines, voice_spec, seg, seg_dir, borrow_gap=options["plan"])
+        if options["qc"]:
+            run_qc(qc_engine, seg, target_lang, options["qc_threshold"])
+    summary = dub_plan.summarize(segments)
+    summary["calibrated_cps"] = _calibration(segments)
 
     _write_manifest(manifest_path, {
         "title": title, "target_language": target_lang, "source_language": detected_source_lang,
         "glossary": glossary, "voice": voice_spec, "video_path": str(video_path), "segments": segments,
-        "created_at": now_iso(),
+        "options": options, "summary": summary, "created_at": now_iso(),
     })
 
     progress(0.82, "mixing audio")
@@ -308,17 +306,103 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
     outputs["work_dir"] = _rel(store, work_dir)
     outputs["manifest"] = _rel(store, manifest_path)
     outputs["segments"] = [{k: v for k, v in s.items() if k != "fitted_path"} for s in segments]
+    outputs["summary"] = summary
     return outputs
 
 
+# ------------------------------------------------------- plan and quality
+
+def apply_plan(segments: list[dict[str, Any]], target_lang: str, chat_fn: Optional[ChatFn]) -> None:
+    """Estimate each translated line's spoken length against its slot, ask the
+    model to shorten the ones that cannot possibly fit (no model: they stay and
+    are marked `shorten: "no_llm"`), and record the result in `seg["plan"]`.
+    A shortened line replaces `translated_text`; the original is kept in
+    `plan.shortened_from`."""
+    plan = dub_plan.shorten_lines(chat_fn, dub_plan.plan_segments(segments, target_lang), target_lang)
+    for seg, item in zip(segments, plan):
+        seg["translated_text"] = item["text"]
+        seg["plan"] = _plan_record(item)
+
+
+def _plan_record(item: dict[str, Any]) -> dict[str, Any]:
+    rec = {k: item[k] for k in ("est_s", "slot_s", "own_s", "gap_s", "factor", "class", "beyond_hard", "cps",
+                                "char_budget")}
+    if item.get("shortened_from"):
+        rec["shortened_from"] = item["shortened_from"]
+    if item.get("shorten"):
+        rec["shorten"] = item["shorten"]["status"]
+        rec["shorten_attempts"] = len(item["shorten"]["attempts"])
+    return rec
+
+
+def _calibration(segments: list[dict[str, Any]], skip: Optional[int] = None) -> Optional[float]:
+    """Characters per second the voice really produced in this job (before any
+    time-fit), from the segments synthesized so far."""
+    return dub_plan.calibrate((s["translated_text"], s["raw_duration_s"]) for s in segments
+                              if s.get("raw_duration_s") and s["index"] != skip)
+
+
+def run_qc(stt_engine: Optional[Any], seg: dict[str, Any], target_lang: str, threshold: Optional[float]) -> None:
+    """Transcribe the segment's finished clip and compare it with the text that
+    was meant to be said. No transcriber, or one that fails, marks the segment
+    `skipped` - quality control never fails a dub."""
+    code = dub_plan.normalize_lang(target_lang)
+    if stt_engine is None:
+        seg["qc"] = {"status": "skipped", "reason": "no_transcriber", "flagged": False}
+        return
+    try:
+        heard = stt_engine.transcribe(Path(seg["fitted_path"]), language=code, word_timestamps=False)
+        hyp = (heard.get("text") or " ".join(str(x.get("text", "")) for x in heard.get("segments") or [])).strip()
+    except Exception as exc:  # noqa: BLE001 - a transcriber that cannot run must not sink the job
+        seg["qc"] = {"status": "skipped", "reason": f"transcribe_failed: {str(exc)[:160]}", "flagged": False}
+        return
+    seg["qc"] = dub_plan.qc_line(seg["translated_text"], hyp, code or target_lang, threshold)
+
+
+def agent_result(outputs: dict[str, Any]) -> dict[str, Any]:
+    """A finished dub job's answer for an agent: the per-segment table with the
+    plan and quality-check fields, compact (no file paths, no model attempt logs)."""
+    rows = []
+    for s in outputs.get("segments") or []:
+        row: dict[str, Any] = {k: s[k] for k in ("index", "start_s", "end_s", "source_text", "translated_text") if k in s}
+        plan = s.get("plan")
+        if plan:
+            row["plan"] = {k: plan[k] for k in ("est_s", "slot_s", "class", "shortened_from", "shorten") if k in plan}
+        qc = s.get("qc")
+        if qc:
+            row["qc"] = {k: qc[k] for k in ("status", "reason", "wer", "cer", "hyp", "flagged") if k in qc}
+        if s.get("fit"):
+            row["speedup"] = s["fit"].get("applied_factor")
+        rows.append(row)
+    return {"title": outputs.get("title"), "summary": outputs.get("summary"), "segments": rows}
+
+
+def _mix_windows(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Where each dubbed clip plays: from the line's start for as long as it was
+    fitted (it may run on into the silence before the next line)."""
+    out = []
+    for s in segments:
+        fitted = float((s.get("fit") or {}).get("target_duration_s") or 0.0)
+        out.append({"start_s": s["start_s"], "end_s": max(s["end_s"], s["start_s"] + fitted)})
+    return out
+
+
 def _synthesize_and_fit_segment(store: Store, tts_engines: list[Any], voice_spec: dict[str, Any],
-                                seg: dict[str, Any], seg_dir: Path) -> None:
+                                seg: dict[str, Any], seg_dir: Path, borrow_gap: bool = False) -> None:
     raw_wav = seg_dir / f"seg{seg['index']:04d}.raw.wav"
     fitted_wav = seg_dir / f"seg{seg['index']:04d}.fit.wav"
     wav_bytes, engine_id = voice_lab.synthesize_with_spec(store, tts_engines, voice_spec, seg["translated_text"])
     raw_wav.write_bytes(wav_bytes)
-    target_duration = max(0.05, seg["end_s"] - seg["start_s"])
+    own_duration = max(0.05, seg["end_s"] - seg["start_s"])
+    raw_duration = audio_mod.probe_duration_s(raw_wav) or 0.0
+    target_duration = own_duration
+    if borrow_gap and raw_duration > own_duration:
+        # a line that runs long takes the silence before the next one (as the plan
+        # allowed) before anything is sped up
+        target_duration = min(raw_duration, own_duration + float((seg.get("plan") or {}).get("gap_s") or 0.0))
     fit_info = fit_audio_to_duration(raw_wav, target_duration, fitted_wav)
+    fit_info["borrowed_gap_s"] = round(target_duration - own_duration, 3)
+    seg["raw_duration_s"] = round(raw_duration, 3)
     seg["engine_id"] = engine_id
     seg["fitted_path"] = fitted_wav
     seg["fit"] = fit_info
@@ -333,7 +417,7 @@ def _assemble_dub(store: Store, backend: Backend, work_dir: Path, video_path: Pa
 
     mixed_audio = work_dir / "dub_mix.wav"
     fitted_paths = [Path(s["fitted_path"]) for s in segments]
-    mix_dub_audio(bg_audio, fitted_paths, segments, mixed_audio)
+    mix_dub_audio(bg_audio, fitted_paths, _mix_windows(segments), mixed_audio)
 
     srt_path = work_dir / "subtitles.srt"
     srt_path.write_text(
@@ -399,17 +483,35 @@ def resynthesize_segment(
         s["fitted_path"] = seg_dir / f"seg{s['index']:04d}.fit.wav"
 
     seg = segments[segment_index]
+    options = manifest.get("options") or {}
+    target_lang = manifest.get("target_language") or ""
+    plan_on = bool(options.get("plan", "plan" in seg))
     if new_text is not None:
         seg["translated_text"] = new_text
+        seg.pop("raw_duration_s", None)  # measured on the old text: no use for calibration
     spec = voice_spec or manifest["voice"]
 
     tts_engines = ve.default_tts_engines(voices_dir=store.data_dir / "voices")
-    _synthesize_and_fit_segment(store, tts_engines, spec, seg, seg_dir)
+    _synthesize_and_fit_segment(store, tts_engines, spec, seg, seg_dir, borrow_gap=plan_on)
+    if plan_on:
+        # re-estimated against the pace the voice really showed on the other lines
+        item = dub_plan.plan_segments(segments, target_lang, _calibration(segments, skip=segment_index))[segment_index]
+        previous = seg.get("plan") or {}
+        seg["plan"] = _plan_record(item)
+        if new_text is None:  # the text is still the shortened one: keep how it got there
+            seg["plan"].update({k: previous[k] for k in ("shortened_from", "shorten", "shorten_attempts") if k in previous})
+    if options.get("qc", True) is not False:
+        stt_engine = ve.best_installed_stt(ve.default_stt_engines(), prefer=options.get("stt_engine_id"))
+        run_qc(stt_engine, seg, target_lang, options.get("qc_threshold"))
+    else:
+        seg.pop("qc", None)
     if voice_spec is not None:
         manifest["voice"] = voice_spec  # only the manifest's own default changes; per-segment engine_id is recorded above
+    manifest["summary"] = {**dub_plan.summarize(segments), "calibrated_cps": _calibration(segments)}
     _write_manifest(work_dir / "manifest.json", manifest)
 
-    result: dict[str, Any] = {"segment": {k: v for k, v in seg.items() if k != "fitted_path"}}
+    result: dict[str, Any] = {"segment": {k: v for k, v in seg.items() if k != "fitted_path"},
+                              "summary": manifest["summary"]}
     if remix:
         video_path = Path(manifest["video_path"])
         outputs = _assemble_dub(store, backend, work_dir, video_path, segments, None, manifest["title"],
