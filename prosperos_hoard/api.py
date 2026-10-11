@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import mimetypes
+import os
 import re
 import shutil
 import sys
@@ -4811,6 +4812,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         store=store, backend=backend, settings=family_settings, agent=agent, error_payload=error_payload, export_lookup=_export_lookup,
         resolve_timeline=lambda **kw: _export_timeline_id(ExportTimelineBody(**kw)), casting_project=_casting_project,
         tts_engines=_tts_engines, production_view=production_view, mcp_source=Path(__file__).with_name("mcp_server.py")))
+
+    # Shared conversation and agent execution; this app only supplies domain context.
+    from .hoard_link import LinkConfig
+    from .hoard_link.copilot import make_copilot_router
+    copilot_config = LinkConfig.load(path=backend.config_path, app='prospero')
+    copilot_url = os.environ.get('PROSPERO_FAUSTUS_URL') or os.environ.get('HOARD_FAUSTUS_URL')
+    app.include_router(make_copilot_router('prospero', data_dir,
+        faustus_urls=[copilot_url] if copilot_url else copilot_config.faustus_urls,
+        token=copilot_config.faustus_token, app_name="Prospero's Hoard"))
 
     # -------------------------------------------------------- static / SPA
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

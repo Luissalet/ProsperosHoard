@@ -11,6 +11,7 @@ import { api, type Job, type Project } from "./api";
 import { I18nContext, detectLang, makeT, type Lang, type MessageKey } from "./i18n";
 import { AppContext, type Route, useToasts } from "./components/ui";
 import { Lightbox } from "./components/Lightbox";
+import FaustusCopilot from "./components/FaustusCopilot";
 import { ProjectsView } from "./views/Projects";
 import { OverviewView } from "./views/Overview";
 import { CastView } from "./views/Cast";
@@ -307,6 +308,8 @@ export default function App() {
         {lightbox && <Lightbox assetId={lightbox.id} list={lightbox.list} onClose={() => setLightbox(null)}
           onNavigate={(id) => setLightbox({ ...lightbox, id })} />}
         {host}
+        <FaustusCopilot projectId={projectId} route={route} assetId={lightbox?.id}
+          lang={lang} theme={theme} onChanged={() => { setDataVersion(v => v + 1); refreshJobs(); }} />
       </AppContext.Provider>
     </I18nContext.Provider>
   );
