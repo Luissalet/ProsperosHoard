@@ -196,6 +196,37 @@ def test_word_error_rate_ignores_case_punctuation_and_spacing():
     assert dp.word_error_rate("one", "one two three") == 2.0
 
 
+@pytest.mark.parametrize("n,es,en", [
+    (0, "cero", "zero"), (1, "uno", "one"), (16, "dieciséis", "sixteen"), (17, "diecisiete", "seventeen"),
+    (21, "veintiuno", "twenty one"), (35, "treinta y cinco", "thirty five"), (100, "cien", "one hundred"),
+    (101, "ciento uno", "one hundred one"), (555, "quinientos cincuenta y cinco", "five hundred fifty five"),
+    (1000, "mil", "one thousand"), (2024, "dos mil veinticuatro", "two thousand twenty four"),
+    (21000, "veintiún mil", "twenty one thousand"), (1000000, "un millón", "one million"),
+    (3000000, "tres millones", "three million"),
+])
+def test_numbers_are_spelled_in_spanish_and_english(n, es, en):
+    assert dp.spell_numbers(str(n), "es") == es
+    assert dp.spell_numbers(str(n), "en") == en
+
+
+def test_digits_heard_as_words_are_not_errors():
+    assert dp.word_error_rate("Tengo 17 años", "tengo diecisiete años", "es") == 0.0
+    assert dp.word_error_rate("I am seventeen", "I am 17", "en") == 0.0
+    assert dp.word_error_rate("Back in 2024", "back in two thousand twenty four", "English") == 0.0
+    # a wrong number is still an error, and the plain comparison still counts
+    assert dp.word_error_rate("Tengo 17 años", "tengo dieciocho años", "es") == pytest.approx(1 / 3, abs=0.001)
+    # without a language (or one with no speller) nothing changes
+    assert dp.word_error_rate("I am seventeen", "I am 17") == pytest.approx(1 / 3, abs=0.001)
+    assert dp.word_error_rate("Ich bin 17", "ich bin siebzehn", "de") == pytest.approx(1 / 3, abs=0.001)
+    # tokens that are not plain digits (ordinals, mixed) are left alone
+    assert dp.spell_numbers("the 1st of 3d", "en") == "the 1st of 3d"
+
+
+def test_qc_line_uses_the_target_language_for_numbers():
+    line = dp.qc_line("Son las 5", "son las cinco", "es")
+    assert line["wer"] == 0.0 and not line["flagged"]
+
+
 def test_char_error_rate_for_unspaced_scripts():
     assert dp.char_error_rate("今日は天気がいい", "今日は天気がいい。") == 0.0
     assert dp.char_error_rate("今日は天気がいい", "今日は天気が悪い") == pytest.approx(1 / 8)
