@@ -30,7 +30,6 @@ from . import voice_retake as rt
 SEEDS = (1, 2, 3)
 VRAM_MB = 10_000          # measured peak 8.9 GiB with CPU offload on a 16 GB card
 TIMEOUT_S = 900
-MATCH_RATIO = 0.8
 
 
 @dataclass
@@ -153,9 +152,10 @@ def _word_tokens(words: list[dict[str, Any]], language: Optional[str]) -> tuple[
 
 def find_span(words: list[dict[str, Any]], new_text: str, language: Optional[str] = None,
               before: str = "", after: str = "") -> Optional[tuple[int, int, float]]:
-    """(first word, last word, score) of ``new_text`` inside a transcribed candidate, or None. An exact token match
-    scores 1.0 (plus a little when the neighbours ``before``/``after`` sit right beside it); otherwise the closest
-    window of the same length scores its similarity, kept only from ``MATCH_RATIO`` up."""
+    """(first word, last word, score) of ``new_text`` inside a transcribed candidate, or None. The new words must be
+    heard exactly, token for token after normalising (case, accents, punctuation, «18» = «dieciocho»): a take that says
+    «María» for «Marta» or «veintiuno» for «veinticinco» says something else and is never used. The score is 1.0 plus
+    a little when the neighbours ``before``/``after`` sit right beside it."""
     toks, owner = _word_tokens(words, language)
     want = tokens(new_text, language)
     if not toks or not want:
@@ -163,20 +163,16 @@ def find_span(words: list[dict[str, Any]], new_text: str, language: Optional[str
     pre, post = tokens(before, language), tokens(after, language)
     best: Optional[tuple[int, int, float]] = None
     n = len(want)
-    for size in sorted({n, max(1, n - 1), n + 1}):
-        for s in range(0, len(toks) - size + 1):
-            window = toks[s:s + size]
-            ratio = 1.0 if window == want else difflib.SequenceMatcher(None, " ".join(window), " ".join(want)).ratio()
-            if ratio < MATCH_RATIO:
-                continue
-            bonus = 0.0
-            if pre and toks[max(0, s - len(pre)):s] == pre:
-                bonus += 0.05
-            if post and toks[s + size:s + size + len(post)] == post:
-                bonus += 0.05
-            score = ratio + bonus
-            if best is None or score > best[2]:
-                best = (owner[s], owner[s + size - 1], score)
+    for s in range(0, len(toks) - n + 1):
+        if toks[s:s + n] != want:
+            continue
+        score = 1.0
+        if pre and toks[max(0, s - len(pre)):s] == pre:
+            score += 0.05
+        if post and toks[s + n:s + n + len(post)] == post:
+            score += 0.05
+        if best is None or score > best[2]:
+            best = (owner[s], owner[s + n - 1], score)
     return best
 
 

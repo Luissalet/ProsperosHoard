@@ -44,14 +44,24 @@ def test_tokens_spell_numbers_and_drop_accents():
     assert ar.tokens("It is 42", "en") == ["it", "is", "forty", "two"]
 
 
-def test_find_span_exact_neighbours_fuzzy_and_none():
+def test_find_span_exact_neighbours_and_none():
     heard = [{"word": w} for w in ["Hay", "18", "grados", "con", "sol."]]
     assert ar.find_span(heard, "dieciocho")[:2] == (1, 1)
     with_neighbours = ar.find_span(heard, "dieciocho", before="Hay", after="grados")
     assert with_neighbours[:2] == (1, 1) and with_neighbours[2] == pytest.approx(1.1)
-    assert ar.find_span([{"word": "diciocho"}], "dieciocho")[:2] == (0, 0)          # close enough
     assert ar.find_span(heard, "veinte grados") is None
     assert ar.find_span([], "x") is None
+    assert ar.find_span([{"word": "Dieciocho"}, {"word": "GRADOS"}], "18 grados")[:2] == (0, 1)
+
+
+def test_find_span_never_takes_another_name_or_number():
+    """Review of r1: fuzzy matching accepted «María» for «Marta» and «veintiuno» for «veinticinco»."""
+    assert ar.find_span([{"word": "María"}], "Marta", "es") is None
+    assert ar.find_span([{"word": "Marta,"}], "marta", "es")[:2] == (0, 0)
+    assert ar.find_span([{"word": "veintiuno"}], "veinticinco", "es") is None
+    assert ar.find_span([{"word": "21"}], "veinticinco", "es") is None
+    assert ar.find_span([{"word": "25"}], "veinticinco", "es")[:2] == (0, 0)
+    assert ar.find_span([{"word": "diciocho"}], "dieciocho") is None
 
 
 def test_plan_quotes_the_phrase_with_its_neighbours_and_scales_the_length():
@@ -145,7 +155,7 @@ def test_retake_picks_the_take_that_says_the_new_words_and_keeps_the_rest_bit_fo
     assert runner.calls[0]["gpu"] == 2 and Path(job["audio"]).is_file()
     auk = out["report"]["auk"]
     assert auk["chosen_seed"] == 2 and auk["variant"] == "AuK-Flash" and auk["nfe"] == 4
-    assert [c["matched"] for c in auk["candidates"]] == [True, True, False]   # seed 1 is only close, seed 2 exact
+    assert [c["matched"] for c in auk["candidates"]] == [False, True, False]  # «diecisiocho» is not «dieciocho»
     new, _ = vr.decode_wav(out["wav"])
     orig, _ = vr.decode_wav(original)
     cut0 = int(round(out["report"]["cut_start_s"] * SR)) - int(vr.CROSSFADE_S * SR)
