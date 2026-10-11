@@ -232,7 +232,10 @@ asset. A text over 2,000,000 characters is rejected up front
    re-encoded (x264, CRF 18) only in this mode; `outputs.summary` adds
    `retimed` (lines with a slowed picture) and `added_s` (seconds the video
    grew). Slowing 25 fps footage to half speed repeats frames: it looks like
-   slow motion, not interpolation.
+   slow motion, not interpolation. The background is stretched with `atempo`, which keeps its
+   pitch; in a x2 window music and ambience audibly drag. Two source lines that
+   overlap in time share one slowed window, so the second clip can come out a
+   little longer than its place (rare: windows end at the next line).
 7. **Quality check** (`qc`, on by default): the finished clip is transcribed
    again with the same speech-to-text engine as the source, in the target
    language, and compared with the text that was meant to be said: word error
