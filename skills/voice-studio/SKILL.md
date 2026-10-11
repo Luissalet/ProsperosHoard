@@ -41,7 +41,16 @@ translated text, timing) with a `plan` (estimated speech vs the slot:
 model, `shortened_from` keeps the original) and a `qc` (what a transcription
 of the synthetic clip heard, word or character error rate, `flagged` when
 over the threshold), plus a `summary` of counts. Look at the flagged and
-`impossible` lines first. `plan=false` / `qc=false` switch either off. A
+`impossible` lines first. `plan=false` / `qc=false` switch either off.
+`translation_mode` is `adapt` by default (literal translation, a critique of
+tone, length and glossary, then the final line; each segment's
+`translation_steps` and the result's `issues` show what the critique found)
+or `direct` (one model call per line, faster). `fit_mode` is `audio` by
+default (long lines are only sped up); `smart` uses the silence after the
+line, then splits the rest between a slightly faster voice and a slower
+picture for that line, trims what is left, re-encodes the video and shifts
+every later line (`summary.retimed` / `added_s`, per-segment `fit`): tell
+the person the video will be a little longer. A
 wrong line does not need a full re-run -
 `voice_resynthesize_segment(job_id, index, text=...)` fixes just that one
 and remixes the final video.

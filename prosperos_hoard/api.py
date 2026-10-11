@@ -16,7 +16,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 import httpx
 from fastapi import FastAPI, Request, UploadFile
@@ -951,6 +951,8 @@ class VoiceDubBody(BaseModel):
     plan: bool = True  # estimate each line against its slot and shorten the ones that cannot fit
     qc: bool = True  # transcribe each finished clip and compare it with the requested text
     qc_threshold: Optional[float] = Field(default=None, gt=0, le=2)  # error rate over which a line is flagged
+    translation_mode: Literal["direct", "adapt"] = "adapt"  # adapt: literal -> reflect -> adapt; direct: one call per line
+    fit_mode: Literal["audio", "smart"] = "audio"  # smart: borrow the gap, speed the audio up a little, slow the picture for the rest
     title: Optional[str] = None
     project: Optional[str] = None
     wait_s: float = 0
@@ -2617,6 +2619,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             params["qc"] = False
         if body.qc_threshold is not None:
             params["qc_threshold"] = body.qc_threshold
+        if body.translation_mode != "adapt":
+            params["translation_mode"] = body.translation_mode
+        if body.fit_mode != "audio":
+            params["fit_mode"] = body.fit_mode
         job = queue.enqueue("dub", "cpu", params, project_id=body.project)
         return {"job": wait(job, body.wait_s)}
 

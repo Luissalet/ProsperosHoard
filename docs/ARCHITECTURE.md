@@ -61,10 +61,14 @@ prosperos_hoard/
   voice_lab.py     voice library: sample processing (trim, loudnorm), quality check, storage
   voice_pipelines.py long-form narration: chapters/sentences, per-chapter synthesis job,
                    ffmpeg assembly (mp3/m4b), SRT/LRC export
-  dubbing.py       dub pipeline: extract, transcribe, translate (Hoard Link), plan, synthesize,
-                   time-fit, QC, mix/mux; per-segment re-run
+  dubbing.py       dub pipeline: extract, transcribe, translate (Hoard Link; literal/reflect/adapt),
+                   plan, synthesize, time-fit (audio, or smart with video retime), QC, mix/mux;
+                   per-segment re-run
+  video_retime.py  slow stretches of a video (and its audio) down: chunk timeline, time mapping,
+                   batched ffmpeg trim/setpts + concat; used by dubbing's smart fit
   dub_plan.py      dubbing plan and QC, pure functions: spoken-length estimate per language,
-                   slot/class per line, LLM shortening of lines that cannot fit, WER/CER check
+                   slot/class per line, LLM shortening of lines that cannot fit, WER/CER check,
+                   fit_strategy (gap, audio, picture split)
   timeline.py      auto-cut, edit validation, clip updates, compact view (pure Python)
   video.py         ffmpeg command builders, ASS subtitles and escaping, renderer,
                    animated WebP -> mp4

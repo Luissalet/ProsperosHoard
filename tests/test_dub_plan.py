@@ -322,7 +322,8 @@ def test_dub_job_records_plan_and_qc_in_manifest(tmp_path, monkeypatch):
     assert manifest["segments"][1]["plan"]["shortened_from"] == LONG_LINE.strip()
     assert manifest["segments"][1]["qc"]["flagged"] is True
     assert manifest["summary"]["flagged"] == 1
-    assert manifest["options"] == {"plan": True, "qc": True, "qc_threshold": None, "stt_engine_id": "hearing-stt"}
+    assert manifest["options"] == {"plan": True, "qc": True, "qc_threshold": None, "stt_engine_id": "hearing-stt",
+                                   "translation_mode": "adapt", "fit_mode": "audio"}
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
@@ -521,3 +522,32 @@ def test_short_clip_is_padded_not_drawled(monkeypatch, tmp_path):
     # a long clip is still sped up as before
     monkeypatch.setattr(dubbing.audio_mod, "probe_duration_s", lambda p: 4.0)
     assert dubbing.fit_audio_to_duration(tmp_path / "in.wav", 2.0, tmp_path / "out.wav")["applied_factor"] == 2.0
+
+
+def test_qc_skips_a_line_the_transcriber_filters_by_design(monkeypatch, tmp_path):
+    from prosperos_hoard import dubbing
+    monkeypatch.setattr(dubbing, "_trim_silence", lambda src, dest: src)
+    heard_nothing = type("E", (), {"transcribe": lambda self, p, language=None, word_timestamps=False: {"text": ""}})()
+    seg = {"translated_text": "Thanks for watching.", "fitted_path": str(tmp_path / "c.wav")}
+    dubbing.run_qc(heard_nothing, seg, "en", None)
+    assert seg["qc"]["status"] == "skipped" and seg["qc"]["reason"] == "filtered_phrase" and not seg["qc"]["flagged"]
+    # an ordinary line heard as nothing is still flagged
+    seg = {"translated_text": "The studio checks each line.", "fitted_path": str(tmp_path / "c.wav")}
+    dubbing.run_qc(heard_nothing, seg, "en", None)
+    assert seg["qc"]["flagged"] is True
+
+
+def test_qc_transcribes_the_trimmed_clip_and_falls_back(monkeypatch, tmp_path):
+    from prosperos_hoard import dubbing
+    used = []
+    engine = type("E", (), {"transcribe": lambda self, p, language=None, word_timestamps=False: used.append(p) or {"text": "hello there"}})()
+    trimmed = tmp_path / "c.qc.wav"
+    monkeypatch.setattr(dubbing, "_trim_silence", lambda src, dest: trimmed)
+    dubbing.run_qc(engine, {"translated_text": "hello there", "fitted_path": str(tmp_path / "c.wav")}, "en", None)
+    assert used == [trimmed]
+    # ffmpeg failing leaves the untrimmed clip
+    monkeypatch.undo()
+    monkeypatch.setattr(dubbing.procutil, "run", lambda cmd, timeout=None: type("P", (), {"returncode": 1, "stderr": b""})())
+    monkeypatch.setattr(dubbing, "_ffmpeg", lambda: "ffmpeg")
+    src = tmp_path / "c.wav"
+    assert dubbing._trim_silence(src, tmp_path / "x.wav") == src
