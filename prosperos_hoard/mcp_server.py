@@ -20,7 +20,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 from urllib.parse import urlsplit
 
 import httpx
@@ -1000,9 +1000,10 @@ def voice_dub(
     source_language: Optional[str] = None, glossary: Optional[dict[str, str]] = None,
     engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
     plan: bool = True, qc: bool = True, qc_threshold: Optional[float] = None,
+    translation_mode: Literal["direct", "adapt"] = "adapt", fit_mode: Literal["audio", "smart"] = "audio",
     title: Optional[str] = None, project: Optional[str] = None, wait_s: float = 0,
 ) -> dict[str, Any]:
-    """Dub a video with timing plan and QC / doblar un video con plan de duracion y control de calidad.
+    """Dub a video: 3-step translation, smart fit / doblar video: traduccion en 3 pasos, ajuste con video.
 
     Dubs a video into target_language as a background job: extracts its audio, transcribes it with
     timestamps, translates each line with the local LLM (glossary maps names/terms; fails clearly with no
@@ -1017,13 +1018,21 @@ def voice_dub(
     {wer|cer, hyp, flagged} (qc=true re-transcribes each synthetic clip and flags lines whose error rate is
     over qc_threshold, default 0.35 words / 0.25 characters for ja, zh, ko, th; status skipped without a
     transcriber), plus outputs.summary counts (fits, tight, impossible, shortened, flagged).
+    translation_mode "adapt" (default) translates each line in three steps (literal, a critique of tone, length
+    and glossary, then the final dubbing line within the line's character budget; per segment
+    translation_steps {literal, issues, adapted}); "direct" is one model call per line. fit_mode "audio"
+    (default) only speeds the audio up; "smart" borrows the silence after a line, speeds the audio up to about
+    1.2x, then splits the rest between up to 1.5x audio and slowing the picture for that line (up to 2x), and
+    trims what is left; the video is re-encoded, later lines shift, and outputs.summary adds retimed and added_s.
 
     Keywords: dub video, translate video, voice dubbing, subtitles, doblar video, traducir video, doblaje, subtitulos,
-    dubbing QC, word error rate, timing plan, control de calidad doblaje
+    dubbing QC, word error rate, timing plan, control de calidad doblaje, translation steps, video retime, slow motion,
+    traduccion en tres pasos, ajuste inteligente
     """
     body = {"target_language": target_language, "source_path": source_path, "video_asset_id": video_asset_id,
             "source_language": source_language, "glossary": glossary, "title": title, "project": project,
-            "plan": plan, "qc": qc, "qc_threshold": qc_threshold, "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
+            "plan": plan, "qc": qc, "qc_threshold": qc_threshold, "translation_mode": translation_mode,
+            "fit_mode": fit_mode, "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
     return _call("POST", "/api/agent/voice_dub", json=body)
 
 

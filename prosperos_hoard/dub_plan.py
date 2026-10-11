@@ -14,6 +14,7 @@ error rate instead of going unnoticed.
 
 from __future__ import annotations
 
+import math
 import re
 import statistics
 import unicodedata
@@ -244,6 +245,77 @@ def shorten_lines(chat_fn: Optional[ChatFn], plan: list[dict[str, Any]], target_
         item["shorten"] = {"status": status, "attempts": attempts}
         out.append(item)
     return out
+
+
+# ------------------------------------------------------------- smart fit --
+
+AUDIO_MAX = 1.5      # most a dub clip is sped up when the video may also slow down
+SOFT_AUDIO = 1.2     # up to here only the audio changes: the speed-up is hardly noticeable
+VIDEO_MAX = 2.0      # most a stretch of video is slowed down (2.0 = half speed)
+MIN_VIDEO_SLOWDOWN = 1.05  # a slow-down below this is not worth a cut: the audio takes it (or the tail is trimmed)
+
+
+def fit_strategy(clip_s: float, slot_s: float, gap_s: float, *, audio_max: float = AUDIO_MAX,
+                 soft_audio: float = SOFT_AUDIO, video_max: float = VIDEO_MAX) -> dict[str, Any]:
+    """How to make a synthetic clip of `clip_s` seconds fit the `slot_s` its
+    original line occupies, using the silence after it (`gap_s`, already capped
+    by the plan) before anything else:
+
+    1. the free gap is borrowed, as much as the clip needs (`borrow_gap_s`);
+    2. if the clip still does not fit the window (slot + borrowed gap), only the
+       audio is sped up, up to `soft_audio`;
+    3. beyond that the remaining need `r / soft_audio` is split as its square
+       root between more audio speed (capped at `audio_max`) and slowing the
+       video for that window (`video_factor`, a duration multiplier capped at
+       `video_max`; 1.0 leaves the picture alone);
+    4. whatever the caps leave over is `trim_s`, the tail of the clip that is cut.
+
+    Returns {kind, borrow_gap_s, window_s, audio_factor, video_factor, trim_s}
+    where `kind` is `fits` (nothing to do), `gap`, `audio`, `audio+video` or
+    `trimmed`. After the fit the clip plays for `window_s * video_factor`
+    seconds; a clip shorter than its slot is left to the caller to pad."""
+    slot_s = max(MIN_SLOT_S, float(slot_s))
+    clip_s = max(0.0, float(clip_s))
+    gap_s = max(0.0, float(gap_s))
+    out = {"kind": "fits", "borrow_gap_s": 0.0, "window_s": round(slot_s, 3), "audio_factor": 1.0,
+           "video_factor": 1.0, "trim_s": 0.0}
+    if clip_s <= slot_s + 1e-9:
+        return out
+    borrow = min(clip_s - slot_s, gap_s)
+    window = slot_s + borrow
+    out.update(borrow_gap_s=round(borrow, 3), window_s=round(window, 3))
+    if clip_s <= window + 1e-9:
+        out["kind"] = "gap"
+        return out
+    need = clip_s / window
+    if need <= soft_audio:
+        out.update(kind="audio", audio_factor=round(need, 4))
+        return out
+    audio = min(audio_max, soft_audio * math.sqrt(need / soft_audio))
+    video = min(video_max, need / audio)
+    if video < MIN_VIDEO_SLOWDOWN:
+        video = 1.0
+        audio = min(audio_max, need)
+    kind = "audio+video" if video > 1.0 else "audio"
+    trim = clip_s / audio - window * video
+    if trim > 0.01:
+        out["trim_s"] = round(trim, 3)
+        kind = "trimmed"
+    out.update(kind=kind, audio_factor=round(audio, 4), video_factor=round(video, 4))
+    return out
+
+
+def summarize_retime(segments: list[dict[str, Any]]) -> dict[str, Any]:
+    """{retimed, added_s} for a smart-fit job: how many lines slowed their
+    picture down and how many seconds that added to the video in total."""
+    retimed, added = 0, 0.0
+    for seg in segments:
+        st = (seg.get("fit") or {}).get("strategy") or {}
+        factor = float(st.get("video_factor") or 1.0)
+        if factor > 1.0:
+            retimed += 1
+            added += float(st.get("window_s") or 0.0) * (factor - 1.0)
+    return {"retimed": retimed, "added_s": round(added, 3)}
 
 
 # --------------------------------------------------------------------- QC --

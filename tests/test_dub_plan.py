@@ -322,7 +322,8 @@ def test_dub_job_records_plan_and_qc_in_manifest(tmp_path, monkeypatch):
     assert manifest["segments"][1]["plan"]["shortened_from"] == LONG_LINE.strip()
     assert manifest["segments"][1]["qc"]["flagged"] is True
     assert manifest["summary"]["flagged"] == 1
-    assert manifest["options"] == {"plan": True, "qc": True, "qc_threshold": None, "stt_engine_id": "hearing-stt"}
+    assert manifest["options"] == {"plan": True, "qc": True, "qc_threshold": None, "stt_engine_id": "hearing-stt",
+                                   "translation_mode": "adapt", "fit_mode": "audio"}
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
