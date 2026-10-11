@@ -12,6 +12,7 @@ import json
 import logging
 import mimetypes
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -49,6 +50,7 @@ from . import timeline as timeline_mod
 from . import voice_engines as ve
 from . import voice_lab
 from . import voice_retake as retake_mod
+from . import auk_retake
 from . import voice_pipelines as vp
 from . import voices as voices_mod
 from .backend import Backend, ffmpeg_path
@@ -911,6 +913,9 @@ class VoiceRetakeWordsBody(BaseModel):
     words: Optional[list[dict[str, Any]]] = None  # word timings; otherwise the asset's own or a fresh transcription
     language: Optional[str] = None
     project: Optional[str] = None  # defaults to the line's project
+    # "auk": AuK edits the line in its own voice (no voice needed, also for recordings) and only the new words are spliced
+    context_engine: Optional[str] = None
+    seeds: Optional[int] = None  # AuK takes to try (1-6, default 3); the one that says the new words wins
 
 
 class VoiceInstallBody(BaseModel):
@@ -2375,6 +2380,43 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         result = _run_transcribe(path, body.language, None, True)
         return retake_mod.flatten_words(result), f"transcribed:{result.get('engine_id')}"
 
+    def _auk_retake(data: bytes, words: list[dict[str, Any]], body: VoiceRetakeWordsBody) -> dict[str, Any]:
+        setup, status = auk_retake.discover(store.data_dir)
+        if setup is None:
+            raise engine.EngineError("auk_not_installed", f"AuK is not set up: {status.get('reason')}")
+        seeds = tuple(range(1, max(1, min(6, int(body.seeds or len(auk_retake.SEEDS)))) + 1))
+        work = store.data_dir / "tmp" / "auk" / new_id("k")
+
+        def heard(p: Path) -> list[dict[str, Any]]:
+            return retake_mod.flatten_words(_run_transcribe(p, body.language, None, True))
+
+        lease_cm: Any = None
+        gpu: Optional[int] = None
+        if gpu_lease.enabled():
+            try:
+                from .hoard_link import lease as hub_lease
+                lease_cm = hub_lease(vram_mb=auk_retake.VRAM_MB, purpose=f"voice_retake_words auk {body.asset_id}"[:80],
+                                     owner=gpu_lease.OWNER, timeout_s=gpu_lease.WAIT_S)
+                lease_cm.__enter__()
+                gpu = getattr(lease_cm, "gpu", None)
+            except Exception:  # noqa: BLE001 - no lease: AuK still runs, on the card CUDA picks
+                lease_cm = None
+        try:
+            result = auk_retake.retake_with_auk(data, words, body.first_word, body.last_word, body.text, setup=setup,
+                                                transcribe=heard, work_dir=work, language=body.language, seeds=seeds, gpu=gpu)
+        finally:
+            if lease_cm is not None:
+                try:
+                    lease_cm.__exit__(None, None, None)
+                except Exception:  # noqa: BLE001
+                    pass
+        shutil.rmtree(work, ignore_errors=True)
+        return result
+
+    @app.get("/api/voice/auk")
+    def voice_auk_status():
+        return auk_retake.discover(store.data_dir)[1]
+
     def op_voice_retake_words(body: VoiceRetakeWordsBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)
         if asset.get("kind") != "audio":
@@ -2391,8 +2433,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         words, words_from = _line_words(asset, path, body)
         recipe = asset.get("recipe") or {}
         spec = body.voice.model_dump(exclude_none=True) if body.voice else dict(recipe.get("voice") or {})
-        if not spec:
-            raise engine.EngineError("voice_required", "say which voice speaks the new words (voice.engine_id or voice.voice_id)")
+        context = (body.context_engine or "").strip().lower() or None
+        if context not in (None, "auk"):
+            raise engine.EngineError("bad_context_engine", "context_engine is 'auk' or empty")
+        if not spec and context is None:
+            raise engine.EngineError("voice_required", "say which voice speaks the new words (voice.engine_id or voice.voice_id), "
+                                                       "or use context_engine='auk' to redo them in the line's own voice")
         used: dict[str, str] = {}
 
         def synth(text: str) -> bytes:
@@ -2400,7 +2446,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             return wav
 
         try:
-            result = retake_mod.retake_words(data, words, body.first_word, body.last_word, body.text, synth)
+            if context == "auk":
+                result = _auk_retake(data, words, body)
+                used["engine_id"] = "auk"
+            else:
+                result = retake_mod.retake_words(data, words, body.first_word, body.last_word, body.text, synth)
         except retake_mod.RetakeError as exc:
             raise engine.EngineError(exc.code, exc.message) from None
         asset_id = new_id("a")

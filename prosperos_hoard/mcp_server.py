@@ -941,21 +941,20 @@ def voice_speak(text: str, engine_id: Optional[str] = None, voice_id: Optional[s
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def voice_retake_words(asset_id: str, first_word: int, last_word: int, text: str, engine_id: Optional[str] = None,
                        voice_id: Optional[str] = None, voice_ref: Optional[str] = None, language: Optional[str] = None,
-                       project: Optional[str] = None) -> dict[str, Any]:
-    """Redo some words of a voice line without regenerating the rest: words first_word..last_word
-    (inclusive indexes in the line's word timings) are replaced by `text`, synthesized alone and spliced
-    in between the surrounding pauses with short crossfades; the rest of the line keeps its original
-    samples. Timings come from the asset's own recipe (a previous retake) or a fresh transcription
-    (voice_transcribe shows the words and their order). The voice defaults to the one that spoke the line
-    when its recipe records it; otherwise pass engine_id/voice_id/voice_ref. Saves a new audio asset
-    (derived_from the original, which is kept) with the shift of every later word.
+                       project: Optional[str] = None, in_context: bool = False,
+                       seeds: Optional[int] = None) -> dict[str, Any]:
+    """Redo words first_word..last_word (indexes from voice_transcribe) of a voice line with `text`; the rest
+    keeps its original samples. Default: `text` is synthesized with the line's voice (or engine_id/voice_id/
+    voice_ref) and spliced in. in_context=true: AuK edits the line in the speaker's own voice (no voice needed,
+    works on recordings), tries `seeds` takes (default 3), keeps the one that says the new words and splices only
+    them. Saves a new audio asset derived from the original.
 
-    Keywords: retake word, fix a word, redo word, replace word in voice line, rehacer palabra,
-    corregir palabra, cambiar una palabra de la locucion, retoma de voz
+    Keywords: retake word, fix a word, replace word in voice line, rehacer palabra, corregir palabra, retoma de voz
     """
     voice = {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "language": language}
     body = {"asset_id": asset_id, "first_word": first_word, "last_word": last_word, "text": text,
-            "language": language, "project": project,
+            "language": language, "project": project, "context_engine": "auk" if in_context else None,
+            "seeds": seeds,
             "voice": voice if any(v is not None for v in (engine_id, voice_id, voice_ref)) else None}
     return _call("POST", "/api/agent/voice_retake_words", json=body)
 
