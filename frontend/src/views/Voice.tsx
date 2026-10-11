@@ -3,7 +3,7 @@ import {
   BookOpen, CheckCircle2, Download, Languages, Loader2, Mic, Mic2, Plus, RefreshCw, Save, Sparkles,
   Square, Trash2, UploadCloud, Video, Volume2, Wand2, XCircle,
 } from "lucide-react";
-import { api, fileUrl, type Asset, type DubSegment, type EngineStatus, type Job, type RetakeReport, type RetakeWord, type StudioVoice, type VoiceSpec } from "../api";
+import { api, fileUrl, type Asset, type DubSegment, type DubSummary, type EngineStatus, type Job, type RetakeReport, type RetakeWord, type StudioVoice, type VoiceSpec } from "../api";
 import { useT } from "../i18n";
 import { jobMessage, voiceEngineLabel, voiceEngineText, voiceWarning } from "../messages";
 import { AssetPicker, ConfirmButton, Empty, JobState, Progress, useApp, useAsync } from "../components/ui";
@@ -442,7 +442,19 @@ function DubTab() {
     }
   };
 
-  const outputs = (job?.outputs || {}) as { final_video?: string; subtitles?: string; segments?: DubSegment[] };
+  const outputs = (job?.outputs || {}) as { final_video?: string; subtitles?: string; segments?: DubSegment[]; summary?: DubSummary };
+
+  const planTip = (s: DubSegment) => {
+    const p = s.plan;
+    if (!p) return "";
+    const parts = [t("dubPlanTip", { est: p.est_s.toFixed(1), slot: p.slot_s.toFixed(1), factor: p.factor.toFixed(2) })];
+    if (p.shortened_from) parts.push(t("dubShortened", { text: p.shortened_from }));
+    if (p.shorten === "no_llm") parts.push(t("dubShortenNoLlm"));
+    return parts.join("\n");
+  };
+  const planLabel = (c: "fits" | "tight" | "impossible") =>
+    c === "fits" ? t("dubPlanFits") : c === "tight" ? t("dubPlanTight") : t("dubPlanImpossible");
+  const qcRate = (s: DubSegment) => (s.qc?.status === "ok" ? (s.qc.metric === "cer" ? s.qc.cer : s.qc.wer) : undefined);
 
   const resynth = async (index: number) => {
     if (!job) return;
@@ -483,17 +495,47 @@ function DubTab() {
           {job.state === "failed" && <div className="row"><XCircle size={14} className="err-text" /><span className="small err-text">{jobMessage(job.message, lang)}</span></div>}
           {(outputs.segments?.length || 0) > 0 && (
             <div className="card" style={{ padding: 6 }}>
+              {outputs.summary && (
+                <div className="small muted" style={{ padding: "2px 6px 6px" }} data-testid="dub-summary">{t("dubSummary", {
+                  fits: outputs.summary.fits, tight: outputs.summary.tight, impossible: outputs.summary.impossible,
+                  shortened: outputs.summary.shortened, flagged: outputs.summary.flagged })}
+                  {(outputs.summary.untranslated || 0) > 0 && (
+                    <span className="err-text"> · {t("dubSummaryUntranslated", { n: outputs.summary.untranslated || 0 })}</span>
+                  )}</div>
+              )}
               <div className="table-scroll" tabIndex={0} role="region" aria-label={t("tableScroll")}><table className="list">
-                <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th /></tr></thead>
+                <thead><tr><th>#</th><th>{t("sourceText")}</th><th>{t("translatedText")}</th><th>{t("dubPlan")}</th><th>{t("dubQc")}</th><th /></tr></thead>
                 <tbody>
                   {(outputs.segments || []).map((s) => (
-                    <tr key={s.index}>
+                    <tr key={s.index} data-flagged={s.qc?.flagged ? "true" : undefined}
+                        style={s.qc?.flagged ? { background: "color-mix(in srgb, var(--bad) 10%, transparent)" } : undefined}>
                       <td className="mono small">{s.index}</td>
                       <td className="small">{s.source_text}</td>
                       <td className="small">
                         {fixIndex === s.index
                           ? <input value={fixText} onChange={(e) => setFixText(e.target.value)} style={{ width: "100%" }} />
                           : s.translated_text}
+                        {s.translation === "untranslated" && (
+                          <span className="pill bad" style={{ marginLeft: 6 }} data-testid="dub-untranslated"
+                                title={t("dubUntranslatedTip")}>{t("dubUntranslated")}</span>
+                        )}
+                      </td>
+                      <td>
+                        {s.plan && (
+                          <span className={`pill ${s.plan.class === "fits" ? "ok" : s.plan.class === "tight" ? "warn" : "bad"}`}
+                                title={planTip(s)} data-testid="dub-plan">
+                            {planLabel(s.plan.class)}{s.plan.shortened_from ? " *" : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {s.qc?.status === "ok" && (
+                          <span className={`pill mono ${s.qc.flagged ? "bad" : "ok"}`} data-testid="dub-qc"
+                                title={t("dubQcHeard", { text: s.qc.hyp || "" })}>
+                            {s.qc.metric === "cer" ? "CER" : "WER"} {Math.round((qcRate(s) ?? 0) * 100)}%{s.qc.flagged ? ` · ${t("dubQcFlagged")}` : ""}
+                          </span>
+                        )}
+                        {s.qc?.status === "skipped" && <span className="pill" title={s.qc.reason}>{t("dubQcSkipped")}</span>}
                       </td>
                       <td>
                         {fixIndex === s.index
