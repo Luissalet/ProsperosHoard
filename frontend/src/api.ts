@@ -772,9 +772,23 @@ export interface DubSegment {
   /** "untranslated": the model never gave a translation and the source line was kept. */
   translation?: "ok" | "retried" | "untranslated";
   engine_id?: string;
-  fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean; borrowed_gap_s?: number };
+  fit?: { source_duration_s: number; target_duration_s: number; applied_factor: number; clamped: boolean; borrowed_gap_s?: number; strategy?: DubFitStrategy };
+  /** The three translation steps ("adapt" mode): the faithful line, what the critique found, the line that was voiced. */
+  translation_steps?: { literal: string; issues: string[]; adapted: string; fallback?: "reflect" | "adapt" };
+  /** Smart fit: where the line sits in the retimed video (the source times are start_s / end_s). */
+  timeline?: { start_s: number; end_s: number };
   plan?: DubPlan;
   qc?: DubQc;
+}
+
+/** How the smart fit made a clip fit: gap borrowed, audio speed-up, picture slow-down (a duration multiplier), tail cut. */
+export interface DubFitStrategy {
+  kind: "fits" | "gap" | "audio" | "audio+video" | "trimmed";
+  borrow_gap_s: number;
+  window_s: number;
+  audio_factor: number;
+  video_factor: number;
+  trim_s: number;
 }
 
 /** How a translated line's estimated speech time compares with the slot the original leaves for it. */
@@ -811,6 +825,9 @@ export interface DubSummary {
   qc_skipped: number;
   untranslated?: number;
   calibrated_cps?: number | null;
+  /** Smart fit only: lines whose picture was slowed down, and the seconds that added to the video. */
+  retimed?: number;
+  added_s?: number;
 }
 
 export interface AudiobookOutputs {
@@ -1336,7 +1353,8 @@ export const api = {
 
   dub: (body: { source_path?: string; video_asset_id?: string; target_language: string; source_language?: string;
                 glossary?: Record<string, string>; voice: VoiceSpec; stt_engine_id?: string; title?: string;
-                plan?: boolean; qc?: boolean; qc_threshold?: number; project?: string; wait_s?: number }) =>
+                plan?: boolean; qc?: boolean; qc_threshold?: number; translation_mode?: "direct" | "adapt";
+                fit_mode?: "audio" | "smart"; project?: string; wait_s?: number }) =>
     request<{ job: Job }>("POST", "/api/voice/dub", body),
   dubStatus: (jobId: string) => request<Job>("GET", `/api/voice/dub/${jobId}`),
   dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/api/voice/dub/${jobId}/download${q({ file })}`,

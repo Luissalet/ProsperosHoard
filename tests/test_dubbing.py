@@ -62,8 +62,10 @@ class FakeSync:
     def __init__(self, chat_fn=None, raise_unavailable=False):
         self._chat_fn = chat_fn
         self._raise = raise_unavailable
+        self.efforts = []
 
-    def chat(self, messages, max_tokens=None, temperature=None):
+    def chat(self, messages, max_tokens=None, temperature=None, effort=None):
+        self.efforts.append(effort)
         if self._raise:
             raise Unavailable("llm", ["no local LLM reachable"])
 
@@ -275,6 +277,8 @@ def test_dub_job_end_to_end_with_fakes(tmp_path, monkeypatch):
 
     manifest_path = tmp_path / "data" / outputs["manifest"]
     assert manifest_path.is_file()
+    # every dubbing call asks for no reasoning: short lines, and a reasoning model on its default returned nothing
+    assert backend.link.sync.efforts and set(backend.link.sync.efforts) == {"off"}
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")

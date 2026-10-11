@@ -137,17 +137,40 @@ asset. A text over 2,000,000 characters is rejected up front
    engine).
 3. **Translate** each segment through the local model behind Hoard Link
    (`Link.chat()`), with an optional `glossary` (`{"term": "translation"}`)
-   pinned into the instruction and a "keep it about as long as the
-   original" hint; with no local model resolved, the job fails clearly
-   (`llm_unavailable`) instead of silently skipping translation - this is
-   the one stage that needs a language model, and only for this step.
-   A reply that is empty or just repeats the source line (a reasoning model
-   that spent its budget thinking, or one that ignored the target language)
-   is retried once with a stricter instruction; if it still is not a
-   translation the source line is kept and the segment says
+   pinned into every instruction; with no local model resolved, the job fails
+   clearly (`llm_unavailable`) instead of silently skipping translation - this
+   is the one stage that needs a language model, and only for this step.
+   Every dubbing call asks the model for no reasoning (`effort="off"`): the
+   lines are short, and a reasoning model left on its default spent the whole
+   token budget thinking and returned an empty line after ~100 s.
+   `translation_mode` picks how:
+   - `adapt` (the default) works in three steps per line. **Literal**: a
+     faithful translation. **Reflect**: the model critiques that line as a
+     dubbing line - tone and register against the source, whether it can be
+     spoken in the room the original leaves (a character budget, `slot x
+     chars/s`, worked out from the transcript before translating), glossary
+     terms as given, naturalness - and answers compact JSON `{"issues": [...]}`
+     (anything that is not that JSON counts as no issues). **Adapt**: the final
+     line, fixing the issues inside the budget ("return only the line"). Adapt
+     is skipped when reflect finds nothing and the literal line already fits
+     the budget, and a failing step (an error, an empty or echoed reply, a
+     rewrite that is no shorter and still over budget) leaves the literal line,
+     so a flaky model costs polish, never the dub. At most three calls per
+     line plus the literal retry below. Each segment keeps
+     `translation_steps = {literal, issues, adapted[, fallback]}` and
+     `translated_text` is the adapted line; the Dub tab shows the three steps
+     in an expandable row.
+   - `direct`: one call per line, with a "keep it about as long as the
+     original" hint (the behaviour before the three steps).
+
+   In both modes a literal reply that is empty or just repeats the source line
+   (a reasoning model that spent its budget thinking, or one that ignored the
+   target language) is retried once with a stricter instruction; if it still is
+   not a translation the source line is kept and the segment says
    `translation: "untranslated"` (`"ok"`/`"retried"` otherwise), counted in
    `outputs.summary.untranslated` and shown in the Dub tab, instead of being
-   voiced in the wrong language without a word.
+   voiced in the wrong language without a word. Reflect and adapt are skipped
+   for such a line.
 4. **Plan** (`plan`, on by default; `dub_plan.py`): each translated line's
    spoken length is estimated from the target language's characters per
    second (`CHARS_PER_SECOND`: es 14.5, en 14.0, fr 14.0, it 14.5, de 13.0,
@@ -177,6 +200,42 @@ asset. A text over 2,000,000 characters is rejected up front
    With the plan on, a clip longer than the line's own duration first takes
    the gap it was planned to borrow (`fit.borrowed_gap_s`; the original is
    ducked for that long too) and is sped up only for what is left.
+
+   `fit_mode` (`audio` by default) can be `smart`, which also lets the
+   *picture* give way (`dub_plan.fit_strategy`, `video_retime.py`). For each
+   line, once its clip has been synthesized: (1) the free gap after the line
+   is borrowed as far as the clip needs; (2) if it still does not fit, only
+   the audio is sped up, up to x1.2 (`soft_audio`); (3) beyond that the rest
+   of the need, `r / 1.2`, is split as its square root between more audio
+   speed (at most x1.5, `audio_max`) and slowing the picture over that
+   line's window (at most x2, `video_max`; a slow-down under x1.05 is not
+   worth a cut and goes to the audio); (4) whatever is still left is cut off
+   the end of the clip (`trim_s`). The choice is stored per segment in
+   `fit.strategy` = `{kind: fits|gap|audio|audio+video|trimmed, borrow_gap_s,
+   window_s, audio_factor, video_factor, trim_s}`. A video factor is a
+   duration multiplier (2.0 is half speed). Lines that need no slow-down leave
+   the video exactly as it was.
+
+   When any line slows the picture, the video is cut into consecutive chunks
+   (untouched ones at speed 1.0, the slowed windows stretched with
+   `trim`/`setpts`) and joined again; more than 40 chunks are processed in
+   batches that each read only their own stretch of the source and are joined
+   with the concat demuxer (`-c copy`); a result that rounding left short is
+   held on its last frame (`tpad`) and cut to the exact length. The same chunks
+   are applied to the original or separated background track with `atempo`, so
+   it stays in sync. Everything after a slowed window moves later: each
+   segment's place in the new video is `timeline = {start_s, end_s}` (its
+   `start_s`/`end_s` stay the source times), and the mix and the subtitles use
+   it. The retimed video and background are kept in the work directory
+   (`retimed.mp4`, `retimed_background.wav`) and reused by
+   `resynthesize_segment` while the chunks do not change. The video is
+   re-encoded (x264, CRF 18) only in this mode; `outputs.summary` adds
+   `retimed` (lines with a slowed picture) and `added_s` (seconds the video
+   grew). Slowing 25 fps footage to half speed repeats frames: it looks like
+   slow motion, not interpolation. The background is stretched with `atempo`, which keeps its
+   pitch; in a x2 window music and ambience audibly drag. Two source lines that
+   overlap in time share one slowed window, so the second clip can come out a
+   little longer than its place (rare: windows end at the next line).
 7. **Quality check** (`qc`, on by default): the finished clip is transcribed
    again with the same speech-to-text engine as the source, in the target
    language, and compared with the text that was meant to be said: word error
@@ -187,20 +246,28 @@ asset. A text over 2,000,000 characters is rejected up front
    segment gets `{status: "skipped", reason}` and the job still finishes. It
    runs on whatever the source transcription used (CPU-friendly with
    faster-whisper), so it adds roughly one short transcription per line.
-8. **Mix and mux**: the dubbed line plays at the segment's original start,
+   The clip is transcribed with its silent edges trimmed (Whisper invents
+   words on a padded silent tail), and a line that is itself one of the
+   phrases the transcriber drops as a silence artifact ("Thanks for
+   watching") is `skipped` with reason `filtered_phrase` when nothing is
+   heard, instead of being flagged.
+8. **Mix and mux**: the dubbed line plays at the segment's start (in the
+   retimed video, its `timeline.start_s`),
    ducked under the rest of the original track (`DUCK_DB = -18 dB`, or
    fully replacing it where a background separator is installed), muxed
    into a new video alongside target-language subtitles.
 
 The job's `outputs.segments` (and the manifest) carry `plan` and `qc` per
 segment, and `outputs.summary` counts `fits`, `tight`, `impossible`,
-`shortened`, `flagged`, `qc_skipped` and `untranslated`. Through MCP, `voice_job` on a finished
+`shortened`, `flagged`, `qc_skipped` and `untranslated` (plus `retimed` and
+`added_s` with `fit_mode="smart"`). Through MCP, `voice_job` on a finished
 dub returns that table under `result` (without file paths); the Dub tab shows
 a timing badge and the error rate per line, highlights flagged lines and shows
 what was heard on hover.
 
 Every stage's files are kept in the job's work directory (a `manifest.json`
-records each segment's timing, source/translated text, plan, QC and engine), so
+records each segment's timing, source/translated text, translation steps, plan, fit, QC and engine,
+and the job's `options` including `translation_mode` and `fit_mode`), so
 `POST /api/voice/dub/{job_id}/segments/{index}/resynthesize` (or
 `voice_resynthesize_segment`) can fix one line's translation and/or voice
 and re-run just that segment (its plan is re-estimated and its QC redone) - and, with `remix=true` (the default), rebuild
