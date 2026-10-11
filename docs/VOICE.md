@@ -170,7 +170,10 @@ asset. A text over 2,000,000 characters is rejected up front
    duration with ffmpeg's `atempo` (chained to cover 0.25x-4x, since a
    single `atempo` only covers 0.5x-2x - `MIN_ATEMPO`/`MAX_ATEMPO`/
    `MAX_OVERALL_FACTOR` in `dubbing.py`), then padded or trimmed to land
-   exactly on the original timing so the mix stays in sync.
+   exactly on the original timing so the mix stays in sync. A clip shorter
+   than its slot is eased at most to `MIN_SLOWDOWN` (0.92x) and the rest is
+   silence: stretching speech further drawls it (seen live at 0.55x, where
+   the quality check heard different words).
    With the plan on, a clip longer than the line's own duration first takes
    the gap it was planned to borrow (`fit.borrowed_gap_s`; the original is
    ducked for that long too) and is sped up only for what is left.
