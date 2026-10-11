@@ -20,6 +20,10 @@ EDGE_PAD_S = 0.05
 SILENCE_RATIO = 0.03
 KEEP_PAD_S = 0.02
 SNAP_WINDOW_S = 0.12
+VALLEY_WINDOW_S = 0.10
+VALLEY_LOUD = 0.4
+VALLEY_PROMINENCE = 0.08
+GLUED_GAP_S = 0.03
 
 
 class RetakeError(ValueError):
@@ -140,15 +144,78 @@ def snap_to_quiet(x: np.ndarray, rate: int, t: float, window_s: float = SNAP_WIN
     return int(starts[np.argmin(np.abs(starts - centre))])
 
 
+def valley_after_glued_boundary(x: np.ndarray, rate: int, t: float, direction: int,
+                                window_s: float = VALLEY_WINDOW_S,
+                                prominence: float = VALLEY_PROMINENCE) -> Optional[int]:
+    """For two words run together with no pause, the transcriber tends to put the boundary early, inside
+    the end of the first word (``Mañana|iremos`` ends ``Mañana`` at 0.30 s while its last vowel runs
+    to about 0.38 s), so a cut there leaves half a syllable behind or eats one. When the timing falls
+    on a loud spot (at least ``VALLEY_LOUD`` of the line's loudest 20 ms frame), look from ``t`` in
+    ``direction`` (+1 later, -1 earlier) for the nearest clear dip of the 20 ms loudness envelope: a
+    local minimum at least ``prominence`` under the louder frames on both sides within 50 ms. Returns its
+    sample index, or None when there is no such dip and the timing should stay."""
+    hop = max(1, int(0.01 * rate))
+    win = 2 * hop
+    mono = x.mean(axis=1) if x.ndim == 2 else x
+    n = (len(mono) - win) // hop + 1
+    if n < 5:
+        return None
+    env = np.sqrt(np.array([float(np.mean(mono[k * hop:k * hop + win] ** 2)) for k in range(n)]))
+    peak = float(env.max())
+    if peak <= 0:
+        return None
+    env = env / peak
+    centre = int(round(t * rate / hop - 1))  # frame k is centred on (k + 1) * hop
+    if not (0 <= centre < n) or env[centre] < VALLEY_LOUD:
+        return None  # the timing already falls somewhere quiet: nothing is being cut in half
+    reach = int(round(window_s * rate / hop))
+    lo, hi = (centre, centre + reach) if direction > 0 else (centre - reach, centre)
+    lo, hi = max(1, lo), min(n - 2, hi)
+    side = 5
+    best = None
+    for k in range(lo, hi + 1):
+        if env[k] > env[k - 1] or env[k] > env[k + 1]:
+            continue
+        left = float(env[max(0, k - side):k].max())
+        right = float(env[k + 1:k + 1 + side].max())
+        if min(left, right) - float(env[k]) < prominence:
+            continue
+        if best is None or abs(k - centre) < abs(best - centre):
+            best = k
+    if best is None:
+        return None
+    # plateau: take the middle of equal minima
+    end = best
+    while end + 1 <= hi and env[end + 1] == env[best]:
+        end += 1
+    return int(((best + end) / 2 + 1) * hop)
+
+
 def splice(original: bytes, replacement: bytes, t0: float, t1: float,
-           crossfade_s: float = CROSSFADE_S, snap: bool = True) -> tuple[bytes, dict[str, Any]]:
+           crossfade_s: float = CROSSFADE_S, snap: bool = True,
+           glued_start: bool = False, glued_end: bool = False) -> tuple[bytes, dict[str, Any]]:
     """Replace original[t0:t1] with the trimmed replacement. Returns (wav bytes, report). With ``snap``
-    each cut moves to the quietest point near it (within the line)."""
+    each cut moves to a real pause near it (within the line). ``glued_start``/``glued_end`` say the
+    word on that side runs into its neighbour with no pause in the timings: when there is no real pause
+    either and the timing falls mid-sound, that cut moves later to the nearest clear loudness dip,
+    where the two words actually meet."""
     x, rate = decode_wav(original)
     y, yrate = decode_wav(replacement)
     y = _match_channels(_resample(trim_silence(y, yrate), yrate, rate), x.shape[1])
+    how = ["timing", "timing"]
     if snap:
         i0, i1 = snap_to_quiet(x, rate, t0), snap_to_quiet(x, rate, t1)
+        for side, (t, i, glued, direction) in enumerate(((t0, i0, glued_start, 1), (t1, i1, glued_end, 1))):
+            if i != int(round(t * rate)):
+                how[side] = "pause"
+            elif glued:
+                v = valley_after_glued_boundary(x, rate, t, direction)
+                if v is not None:
+                    how[side] = "valley"
+                    if side == 0:
+                        i0 = v
+                    else:
+                        i1 = v
     else:
         i0, i1 = int(round(t0 * rate)), int(round(t1 * rate))
     i0, i1 = max(0, min(i0, len(x))), max(0, min(i1, len(x)))
@@ -161,7 +228,7 @@ def splice(original: bytes, replacement: bytes, t0: float, t1: float,
     out = _join(_join(x[:i0], patch, cf), x[i1:], cf)
     new_dur = len(out) / rate
     report = {"cut_start_s": round(i0 / rate, 3), "cut_end_s": round(i1 / rate, 3),
-              "timing_cut_s": [round(t0, 3), round(t1, 3)], "snapped": bool(snap),
+              "timing_cut_s": [round(t0, 3), round(t1, 3)], "snapped": bool(snap), "cut_by": how,
               "replacement_s": round(len(y) / rate, 3), "duration_before_s": round(len(x) / rate, 3),
               "duration_after_s": round(new_dur, 3), "shift_after_cut_s": round(new_dur - len(x) / rate, 3),
               "sample_rate": rate, "untouched_before_s": round(max(0, i0 - cf) / rate, 3)}
@@ -201,7 +268,10 @@ def retake_words(original: bytes, words: list[dict[str, Any]], first: int, last:
         x, rate = decode_wav(original)
         duration_s = len(x) / rate
     t0, t1 = word_cut(words, first, last, duration_s)
-    wav, report = splice(original, synthesize(new_text.strip()), t0, t1)
+    glued_start = first > 0 and float(words[first]["start_s"]) - float(words[first - 1]["end_s"]) < GLUED_GAP_S
+    glued_end = last + 1 < len(words) and float(words[last + 1]["start_s"]) - float(words[last]["end_s"]) < GLUED_GAP_S
+    wav, report = splice(original, synthesize(new_text.strip()), t0, t1,
+                         glued_start=glued_start, glued_end=glued_end)
     replaced = " ".join(str(w.get("word", "")).strip() for w in words[first:last + 1])
     return {"wav": wav, "report": {**report, "replaced": replaced, "new_text": new_text.strip(),
                                    "first_word": first, "last_word": last},
