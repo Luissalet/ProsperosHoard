@@ -1,5 +1,12 @@
 # HTTP API
 
+The shared copilot exposes `GET /api/copilot/info`, `GET /api/copilot/panel.js`
+and `POST /api/copilot/proxy`. The host uses the shared HoardLink relay for native
+JSON, binary multipart and streaming Faustus requests, injecting its app/data-space
+identity on the server. Conversation, history, draft and turn storage belong to
+Faustus; the common `hub_copilot_request` MCP tool controls the same service.
+Prospero's existing 94 studio tools remain on its standalone MCP server.
+
 Spaces starter templates now include `character_outfit_motion`. Asset/cast
 nodes accept optional `title` and `ref_role`; video node `seconds` controls real
 workflow duration. Conflicting guides and excess image references return clear
