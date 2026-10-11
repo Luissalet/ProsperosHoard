@@ -125,19 +125,30 @@ const modalStack: symbol[] = [];
 let dialogLayer = 110;
 
 /** One keyboard owner for nested previews and editors; restore the opener's focus. */
-export function useDialog(ref: { current: HTMLElement | null }, onClose: () => void) {
+export function useDialog(ref: { current: HTMLElement | null }, onClose: () => void,
+  options: { trapFocus?: boolean; ignoreSelector?: string } = {}) {
   const [me] = useState(() => Symbol("dialog"));
-  const [layer] = useState(() => ++dialogLayer);
-  const [previous] = useState(() => document.activeElement as HTMLElement | null);
+  // Leave a layer for a companion panel between a viewer and its nested dialogs.
+  const [layer] = useState(() => dialogLayer += 2);
+  const [previous] = useState(() => {
+    let element = document.activeElement;
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    return element as HTMLElement | null;
+  });
   const close = useRef(onClose);
   close.current = onClose;
+  const behavior = useRef(options);
+  behavior.current = options;
   useEffect(() => {
     modalStack.push(me);
     const root = ref.current;
     root?.focus();
     const key = (event: KeyboardEvent) => {
       if (modalStack.at(-1) !== me) return;
+      const ignore = behavior.current.ignoreSelector;
+      if (ignore && event.composedPath().some(node => node instanceof HTMLElement && node.closest(ignore))) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close.current(); }
+      if (behavior.current.trapFocus === false) return;
       if (event.key !== "Tab" || !ref.current) return;
       const controls = [...ref.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')]
         .filter((element) => element.getClientRects().length > 0);
