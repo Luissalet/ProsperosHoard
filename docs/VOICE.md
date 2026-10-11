@@ -140,6 +140,9 @@ asset. A text over 2,000,000 characters is rejected up front
    pinned into every instruction; with no local model resolved, the job fails
    clearly (`llm_unavailable`) instead of silently skipping translation - this
    is the one stage that needs a language model, and only for this step.
+   Every dubbing call asks the model for no reasoning (`effort="off"`): the
+   lines are short, and a reasoning model left on its default spent the whole
+   token budget thinking and returned an empty line after ~100 s.
    `translation_mode` picks how:
    - `adapt` (the default) works in three steps per line. **Literal**: a
      faithful translation. **Reflect**: the model critiques that line as a

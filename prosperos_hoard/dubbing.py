@@ -472,7 +472,9 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
 
     def chat_fn(messages: list[dict[str, Any]]) -> str:
         # room for models that reason before answering: 200 tokens could be spent thinking and leave no line
-        result = backend.link.sync.chat(messages=messages, max_tokens=800, temperature=0.3)
+        # dubbing lines are short: no reasoning (a reasoning model left on its default spent the whole budget thinking
+        # and returned an empty line, ~100 s per call, measured live), the same "off" the rest of the studio uses
+        result = backend.link.sync.chat(messages=messages, max_tokens=800, temperature=0.3, effort="off")
         return result.text
 
     translation_mode = resolve_translation_mode(params.get("translation_mode"), chat_fn)
