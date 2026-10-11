@@ -1242,7 +1242,7 @@ const en = {
   dubTranslationModeTip: "Adapted: literal translation, then a critique (tone, length, glossary), then the final dubbing line. Direct: one model call per line.",
   dubFitMode: "Fit", dubFitAudio: "Fit: audio only", dubFitSmart: "Fit: smart (audio + picture)",
   dubFitModeTip: "Audio only: long lines are sped up. Smart: use the silence after the line, speed the audio up a little and slow the picture down for the rest (the video is re-encoded).",
-  dubSteps: "steps", dubStepLiteral: "Literal", dubStepIssues: "Issues", dubStepAdapted: "Adapted", dubStepNoIssues: "none",
+  dubSteps: "steps", dubStepsIssue: "{n} issue", dubStepsIssues: "{n} issues", dubStepLiteral: "Literal", dubStepIssues: "Issues", dubStepAdapted: "Adapted", dubStepNoIssues: "none",
   dubStepFallback: "{step} step failed, kept the literal line",
   dubFitTip: "Fit: gap {gap}s, audio x{audio}, picture x{video} slower, {trim}s cut.", dubPicture: "picture x{x}",
   // character kit
@@ -2808,7 +2808,7 @@ const es: Record<MessageKey, string> = {
   dubTranslationModeTip: "Adaptada: traducción literal, luego una crítica (tono, longitud, glosario) y por último la línea final de doblaje. Directa: una llamada al modelo por línea.",
   dubFitMode: "Ajuste", dubFitAudio: "Ajuste: solo audio", dubFitSmart: "Ajuste: inteligente (audio + imagen)",
   dubFitModeTip: "Solo audio: las líneas largas se aceleran. Inteligente: aprovecha el silencio tras la línea, acelera un poco el audio y ralentiza la imagen para el resto (el vídeo se recodifica).",
-  dubSteps: "pasos", dubStepLiteral: "Literal", dubStepIssues: "Problemas", dubStepAdapted: "Adaptada", dubStepNoIssues: "ninguno",
+  dubSteps: "pasos", dubStepsIssue: "{n} problema", dubStepsIssues: "{n} problemas", dubStepLiteral: "Literal", dubStepIssues: "Problemas", dubStepAdapted: "Adaptada", dubStepNoIssues: "ninguno",
   dubStepFallback: "falló el paso {step}, se dejó la línea literal",
   dubFitTip: "Ajuste: hueco {gap} s, audio x{audio}, imagen x{video} más lenta, {trim} s recortados.", dubPicture: "imagen x{x}",
   // character kit

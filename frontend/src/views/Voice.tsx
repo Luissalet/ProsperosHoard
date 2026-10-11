@@ -544,7 +544,8 @@ function DubTab() {
                           <button className="btn sm ghost" style={{ marginLeft: 6 }} data-testid="dub-steps-toggle"
                                   aria-expanded={stepsOpen === s.index} title={t("dubSteps")}
                                   onClick={() => setStepsOpen(stepsOpen === s.index ? null : s.index)}>
-                            {s.translation_steps.issues.length > 0 ? `${s.translation_steps.issues.length} ` : ""}{t("dubSteps")}
+                            {t("dubSteps")}{s.translation_steps.issues.length > 0
+                              ? ` · ${t(s.translation_steps.issues.length === 1 ? "dubStepsIssue" : "dubStepsIssues", { n: s.translation_steps.issues.length })}` : ""}
                           </button>
                         )}
                         {(s.fit?.strategy?.video_factor ?? 1) > 1 && s.fit?.strategy && (
