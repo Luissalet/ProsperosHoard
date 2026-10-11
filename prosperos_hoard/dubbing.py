@@ -23,6 +23,7 @@ from . import video_retime
 from . import voice_lab
 from .backend import Backend, ffmpeg_path
 from .hoard_link.media import ffmpeg as ffmpeg_shared
+from .hoard_link.media.stt import is_hallucination
 from .ids import new_id
 from .store import Store
 from .util import now_iso
@@ -562,19 +563,44 @@ def _calibration(segments: list[dict[str, Any]], skip: Optional[int] = None) -> 
                               if s.get("raw_duration_s") and s["index"] != skip)
 
 
+def _trim_silence(src: Path, dest: Path) -> Path:
+    """The clip without its leading and trailing silence, for the quality check: a fitted clip is padded with silence
+    (MIN_SLOWDOWN) and Whisper invents words on a silent tail ("see you in the next video"). Falls back to ``src``."""
+    edge = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05"
+    cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(src), "-af",
+           f"{edge},areverse,{edge},areverse,apad=pad_dur=0.25", str(dest)]
+    try:
+        proc = procutil.run(cmd, timeout=60)
+    except Exception:  # noqa: BLE001 - trimming is a nicety; the untrimmed clip still works
+        return src
+    if proc.returncode != 0 or not dest.is_file() or dest.stat().st_size < 1024:
+        return src
+    return dest
+
+
 def run_qc(stt_engine: Optional[Any], seg: dict[str, Any], target_lang: str, threshold: Optional[float]) -> None:
     """Transcribe the segment's finished clip and compare it with the text that
     was meant to be said. No transcriber, or one that fails, marks the segment
-    `skipped` - quality control never fails a dub."""
+    `skipped` - quality control never fails a dub.
+
+    The clip is transcribed with its silent edges trimmed. A line that is itself
+    one of the phrases the transcriber drops as a silence artifact ("Thanks for
+    watching") cannot be heard back by design: when nothing is heard it is
+    `skipped` with reason `filtered_phrase` instead of being flagged."""
     code = dub_plan.normalize_lang(target_lang)
     if stt_engine is None:
         seg["qc"] = {"status": "skipped", "reason": "no_transcriber", "flagged": False}
         return
+    fitted = Path(seg["fitted_path"])
     try:
-        heard = stt_engine.transcribe(Path(seg["fitted_path"]), language=code, word_timestamps=False)
+        clip = _trim_silence(fitted, fitted.with_name(fitted.stem + ".qc.wav"))
+        heard = stt_engine.transcribe(clip, language=code, word_timestamps=False)
         hyp = (heard.get("text") or " ".join(str(x.get("text", "")) for x in heard.get("segments") or [])).strip()
     except Exception as exc:  # noqa: BLE001 - a transcriber that cannot run must not sink the job
         seg["qc"] = {"status": "skipped", "reason": f"transcribe_failed: {str(exc)[:160]}", "flagged": False}
+        return
+    if not hyp and is_hallucination(seg.get("translated_text") or "", deny_weak=False):
+        seg["qc"] = {"status": "skipped", "reason": "filtered_phrase", "flagged": False}
         return
     seg["qc"] = dub_plan.qc_line(seg["translated_text"], hyp, code or target_lang, threshold)
 
