@@ -43,6 +43,14 @@ export interface Analysis {
   notes?: string;
 }
 
+export interface RetakeWord { start_s: number; end_s: number; word: string; estimated?: boolean }
+
+export interface RetakeReport {
+  cut_start_s: number; cut_end_s: number; timing_cut_s: [number, number]; snapped: boolean;
+  cut_by?: ("pause" | "valley" | "timing")[]; replacement_s: number; duration_before_s: number; duration_after_s: number;
+  shift_after_cut_s: number; replaced: string; new_text: string; first_word: number; last_word: number;
+}
+
 export interface Asset {
   id: string;
   project_id: string;
@@ -1257,33 +1265,8 @@ export const api = {
   speak: (text: string, voice: VoiceSpec, project?: string) =>
     request<Blob | Asset>("POST", "/api/voice/speak", { text, voice, project }),
 
-  retakeWords: (body: {
-    asset_id: string;
-    first_word: number;
-    last_word: number;
-    text: string;
-    voice?: VoiceSpec;
-    words?: { start_s: number; end_s: number; word: string }[];
-    language?: string;
-    project?: string;
-  }) =>
-    request<{
-      engine_id?: string;
-      words_from: string;
-      retake: {
-        cut_start_s: number;
-        cut_end_s: number;
-        cut_by?: { start?: string; end?: string } | string[];
-        replaced?: string;
-        new_text?: string;
-        first_word?: number;
-        last_word?: number;
-        duration_before_s?: number;
-        duration_after_s?: number;
-        [key: string]: unknown;
-      };
-      asset: Asset;
-    }>("POST", "/api/voice/retake_words", body),
+  retakeWords: (body: { asset_id: string; first_word: number; last_word: number; text: string; words?: RetakeWord[]; voice?: VoiceSpec; project?: string; language?: string }) =>
+    request<{ engine_id: string | null; words_from: string; retake: RetakeReport; asset: Asset }>("POST", "/api/voice/retake_words", body),
 
   transcribe: (body: { path?: string; asset_id?: string; language?: string; engine_id?: string; word_timestamps?: boolean }) =>
     request<Transcript & { text: string; language: string | null }>("POST", "/api/voice/transcribe", body),

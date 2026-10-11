@@ -3,13 +3,13 @@ import {
   BookOpen, CheckCircle2, Download, Languages, Loader2, Mic, Mic2, Plus, RefreshCw, Save, Sparkles,
   Square, Trash2, UploadCloud, Video, Volume2, Wand2, XCircle,
 } from "lucide-react";
-import { api, fileUrl, type Asset, type DubSegment, type EngineStatus, type Job, type StudioVoice, type VoiceSpec } from "../api";
+import { api, fileUrl, type Asset, type DubSegment, type EngineStatus, type Job, type RetakeReport, type RetakeWord, type StudioVoice, type VoiceSpec } from "../api";
 import { useT } from "../i18n";
 import { jobMessage, voiceEngineLabel, voiceEngineText, voiceWarning } from "../messages";
 import { AssetPicker, ConfirmButton, Empty, JobState, Progress, useApp, useAsync } from "../components/ui";
-import { flattenTranscriptWords, formatCutBy, wordRangeAfterClick, type RetakeReport, type WordTiming } from "../voiceRetakeUi";
+import { flattenTranscriptWords } from "../voiceRetakeUi";
 
-type Tab = "engines" | "library" | "speak" | "transcribe" | "audiobook" | "dub";
+type Tab = "engines" | "library" | "speak" | "transcribe" | "retake" | "audiobook" | "dub";
 
 function EngineRow({ e, onInstalled }: { e: EngineStatus; onInstalled: () => void }) {
   const { t, lang } = useT();
@@ -196,110 +196,21 @@ function SpeakTab() {
   const [spec, setSpec] = useState<VoiceSpec>({});
   const [speaking, setSpeaking] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [line, setLine] = useState<Asset | null>(null);
-  const [words, setWords] = useState<WordTiming[]>([]);
-  const [loadingWords, setLoadingWords] = useState(false);
-  const [selAnchor, setSelAnchor] = useState<number | null>(null);
-  const [selFirst, setSelFirst] = useState<number | null>(null);
-  const [selLast, setSelLast] = useState<number | null>(null);
-  const [replacement, setReplacement] = useState("");
-  const [retaking, setRetaking] = useState(false);
-  const [retakeAsset, setRetakeAsset] = useState<Asset | null>(null);
-  const [retakeReport, setRetakeReport] = useState<RetakeReport | null>(null);
-
-  const loadWordsFor = async (asset: Asset) => {
-    setLoadingWords(true);
-    setWords([]);
-    setSelAnchor(null);
-    setSelFirst(null);
-    setSelLast(null);
-    setRetakeAsset(null);
-    setRetakeReport(null);
-    try {
-      const recipeWords = (asset.recipe as { words?: WordTiming[] } | null)?.words;
-      if (Array.isArray(recipeWords) && recipeWords.length) {
-        setWords(recipeWords.map((w) => ({ start_s: Number(w.start_s), end_s: Number(w.end_s), word: String(w.word || "").trim() })).filter((w) => w.word));
-        return;
-      }
-      const tr = await api.transcribe({ asset_id: asset.id, word_timestamps: true });
-      setWords(flattenTranscriptWords(tr.segments || []));
-    } catch (e) {
-      app.toast((e as Error).message, "bad");
-      setWords([]);
-    } finally {
-      setLoadingWords(false);
-    }
-  };
 
   const speak = async () => {
     if (!text.trim() || (!spec.engine_id && !spec.voice_id)) return;
     setSpeaking(true);
     try {
       const result = await api.speak(text.trim(), spec, app.projectId || undefined);
-      if (result instanceof Blob) {
-        if (audioUrl) URL.revokeObjectURL(audioUrl);
-        setAudioUrl(URL.createObjectURL(result));
-        setLine(null);
-        setWords([]);
-        setRetakeAsset(null);
-        setRetakeReport(null);
-      } else {
-        if (audioUrl) URL.revokeObjectURL(audioUrl);
-        setAudioUrl(null);
-        setLine(result);
-        app.toast(t("saved"), "ok");
-        app.bump();
-        await loadWordsFor(result);
-      }
+      if (result instanceof Blob) setAudioUrl(URL.createObjectURL(result));
+      else app.toast(t("saved"), "ok");
+      app.bump();
     } catch (e) {
       app.toast((e as Error).message, "bad");
     } finally {
       setSpeaking(false);
     }
   };
-
-  const onWordClick = (index: number) => {
-    const next = wordRangeAfterClick(index, selAnchor, selFirst, selLast);
-    setSelAnchor(next.selAnchor);
-    setSelFirst(next.selFirst);
-    setSelLast(next.selLast);
-  };
-
-  const runRetake = async () => {
-    if (!line || selFirst === null || selLast === null || !replacement.trim()) return;
-    if (!spec.engine_id && !spec.voice_id) return;
-    setRetaking(true);
-    try {
-      const out = await api.retakeWords({
-        asset_id: line.id,
-        first_word: selFirst,
-        last_word: selLast,
-        text: replacement.trim(),
-        voice: spec,
-        words: words.length ? words : undefined,
-        project: app.projectId || undefined,
-      });
-      setRetakeAsset(out.asset);
-      setRetakeReport(out.retake as RetakeReport);
-      app.toast(t("saved"), "ok");
-      app.bump();
-    } catch (e) {
-      app.toast((e as Error).message, "bad");
-    } finally {
-      setRetaking(false);
-    }
-  };
-
-  const continueFromRetake = async () => {
-    if (!retakeAsset) return;
-    setLine(retakeAsset);
-    setText(String((retakeAsset.recipe as { text?: string } | null)?.text || replacement.trim()));
-    setReplacement("");
-    await loadWordsFor(retakeAsset);
-  };
-
-  const cutByLabel = formatCutBy(retakeReport, { start: t("voiceRetakeCutStart"), end: t("voiceRetakeCutEnd") });
-  const hasSelection = selFirst !== null && selLast !== null;
 
   return (
     <div className="card stack">
@@ -309,80 +220,9 @@ function SpeakTab() {
         <button className="btn primary" onClick={speak} disabled={speaking || !text.trim() || (!spec.engine_id && !spec.voice_id)}>
           {speaking ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {t("voiceSpeakBtn")}
         </button>
-        {app.projectId ? <span className="muted small">{t("savesToProject")}</span> : <span className="muted small">{t("voiceRetakeNeedsProject")}</span>}
+        {app.projectId && <span className="muted small">{t("savesToProject")}</span>}
       </div>
       {audioUrl && <audio src={audioUrl} controls autoPlay style={{ width: "100%" }} />}
-      {line && (
-        <div className="stack" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border, #333)" }}>
-          <h3 style={{ margin: 0, fontSize: "0.95rem" }}><Mic2 size={14} /> {t("voiceRetakeTitle")}</h3>
-          <p className="muted small" style={{ margin: 0 }}>{t("voiceRetakeHint")}</p>
-          <audio src={fileUrl(line.id)} controls style={{ width: "100%" }} />
-          {loadingWords ? (
-            <div className="row muted small"><Loader2 size={14} className="spin" /> {t("voiceRetakeLoadingWords")}</div>
-          ) : words.length === 0 ? (
-            <p className="muted small">{t("voiceRetakeNoWords")}</p>
-          ) : (
-            <>
-              <div className="muted small">{t("voiceRetakeSelectWords")}</div>
-              <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                {words.map((w, i) => {
-                  const selected = hasSelection && i >= (selFirst as number) && i <= (selLast as number);
-                  return (
-                    <button
-                      key={`${i}-${w.word}`}
-                      type="button"
-                      className={selected ? "btn sm primary" : "btn sm"}
-                      aria-pressed={selected}
-                      onClick={() => onWordClick(i)}
-                      title={`${w.start_s.toFixed(2)}–${w.end_s.toFixed(2)} s`}
-                    >
-                      {w.word}
-                    </button>
-                  );
-                })}
-              </div>
-              <label className="stack" style={{ gap: 4 }}>
-                <span className="muted small">{t("voiceRetakeReplacement")}</span>
-                <input
-                  value={replacement}
-                  onChange={(e) => setReplacement(e.target.value)}
-                  placeholder={hasSelection ? words.slice(selFirst!, selLast! + 1).map((w) => w.word).join(" ") : ""}
-                />
-              </label>
-              <div className="row">
-                <button
-                  className="btn primary"
-                  onClick={runRetake}
-                  disabled={retaking || !hasSelection || !replacement.trim() || (!spec.engine_id && !spec.voice_id)}
-                >
-                  {retaking ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("voiceRetakeBtn")}
-                </button>
-              </div>
-            </>
-          )}
-          {retakeAsset && (
-            <div className="stack" style={{ marginTop: 4 }}>
-              <div className="muted small">{t("voiceRetakeOriginalKept")}</div>
-              <div className="stack">
-                <span className="small">{t("voiceRetakeBefore")}</span>
-                <audio src={fileUrl(line.id)} controls style={{ width: "100%" }} />
-              </div>
-              <div className="stack">
-                <span className="small">{t("voiceRetakeAfter")}</span>
-                <audio src={fileUrl(retakeAsset.id)} controls autoPlay style={{ width: "100%" }} />
-              </div>
-              {cutByLabel && (
-                <p className="muted small" style={{ margin: 0 }}>
-                  {t("voiceRetakeCutBy")}: {cutByLabel}
-                </p>
-              )}
-              <button className="btn sm" type="button" onClick={continueFromRetake}>
-                {t("voiceRetakeKeep")}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -685,6 +525,143 @@ function DubTab() {
   );
 }
 
+function RetakeTab() {
+  const { t } = useT();
+  const app = useApp();
+  const engines = useAsync(() => api.voiceEngines(), []);
+  const voices = useAsync(() => api.studioVoices(), []);
+  const projects = useAsync(() => api.projects(), []);
+  const [projectId, setProjectId] = useState<string>(app.projectId || "");
+  const [picking, setPicking] = useState(false);
+  const [line, setLine] = useState<Asset | null>(null);
+  const [words, setWords] = useState<RetakeWord[]>([]);
+  const [wordsFrom, setWordsFrom] = useState("");
+  const [range, setRange] = useState<[number, number] | null>(null);
+  const [text, setText] = useState("");
+  const [spec, setSpec] = useState<VoiceSpec>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ asset: Asset; retake: RetakeReport; words_from: string } | null>(null);
+
+  const open = async (a: Asset) => {
+    setLine(a); setResult(null); setRange(null); setText(""); setWords([]); setWordsFrom("");
+    // list views and retake results can carry a trimmed asset: read the full one for its recipe's word timings
+    let full = a;
+    try { full = await api.asset(a.id); } catch { /* keep what we have */ }
+    setLine(full);
+    const recipeWords = (full.recipe?.words as RetakeWord[] | undefined) || [];
+    setWords(recipeWords); setWordsFrom(recipeWords.length ? "recipe" : "");
+  };
+
+  const loadWords = async () => {
+    if (!line) return;
+    setBusy(true);
+    try {
+      const r = await api.transcribe({ asset_id: line.id, word_timestamps: true });
+      const flat = flattenTranscriptWords(r.segments || []) as RetakeWord[];
+      setWords(flat); setWordsFrom("transcription"); setRange(null);
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = (i: number, extend: boolean) => {
+    if (range && (extend || range[0] === range[1])) {
+      const a = Math.min(range[0], i), b = Math.max(range[1], i);
+      setRange(extend || i !== range[0] ? [a, b] : [i, i]);
+    } else {
+      setRange([i, i]);
+    }
+    if (!text && !range) setText(words[i]?.word || "");
+  };
+
+  const run = async () => {
+    if (!line || !range || !text.trim()) return;
+    setBusy(true);
+    try {
+      const voice = spec.engine_id || spec.voice_id ? spec : undefined;
+      const r = await api.retakeWords({ asset_id: line.id, first_word: range[0], last_word: range[1], text: text.trim(), words, voice });
+      setResult(r);
+      app.toast(t("saved"), "ok");
+      app.bump();
+    } catch (e) {
+      app.toast((e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const continueOnResult = () => { if (result) open(result.asset); };
+  const selected = (i: number) => !!range && i >= range[0] && i <= range[1];
+
+  return (
+    <div className="card stack">
+      <p className="muted small">{t("retakeLead")}</p>
+      <div className="row wrap">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label={t("noProject")}>
+          <option value="">{t("noProject")}</option>
+          {(projects.data?.items || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button className="btn sm" onClick={() => setPicking(true)} disabled={!projectId}>
+          <Volume2 size={13} /> {line ? line.name || line.id : t("retakePickLine")}
+        </button>
+        {line && (
+          <button className="btn sm" onClick={loadWords} disabled={busy}>
+            {busy ? <Loader2 size={13} className="spin" /> : <Languages size={13} />} {t("retakeLoadWords")}
+          </button>
+        )}
+      </div>
+      {line && <audio src={fileUrl(line.id)} controls style={{ width: "100%" }} data-testid="retake-before-audio" />}
+      {line && !words.length && <p className="muted small">{t("retakeNoWords")}</p>}
+      {words.length > 0 && (
+        <div className="stack">
+          <div className="muted small">{t("retakeWordsFrom")}: {wordsFrom} · {t("retakeSelectHint")}</div>
+          <div className="row wrap" role="group" aria-label={t("retakeSelectHint")} data-testid="retake-words">
+            {words.map((w, i) => (
+              <button key={`${i}-${w.start_s}`} className={`btn sm${selected(i) ? " primary" : ""}`} aria-pressed={selected(i)}
+                title={`${w.start_s.toFixed(2)}–${w.end_s.toFixed(2)} s`}
+                aria-label={`${w.word} (${w.start_s.toFixed(2)}–${w.end_s.toFixed(2)} s)`} onClick={(e) => pick(i, e.shiftKey)}>
+                {w.word}
+              </button>
+            ))}
+          </div>
+          {range && (
+            <div className="stack">
+              <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("retakeNewText")} aria-label={t("retakeNewText")} />
+              <div className="muted small">{t("retakeVoiceDefault")}</div>
+              <VoiceSpecPicker spec={spec} setSpec={setSpec} engines={engines.data?.tts || []} voices={voices.data?.items || []} />
+              <div className="row">
+                <button className="btn primary" onClick={run} disabled={busy || !text.trim()}>
+                  {busy ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {t("retakeRun")}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {result && line && (
+        <div className="stack" data-testid="retake-result">
+          <div className="row wrap">
+            <div className="grow"><div className="small">{t("retakeBefore")}</div><audio src={fileUrl(line.id)} controls style={{ width: "100%" }} /></div>
+            <div className="grow"><div className="small">{t("retakeAfter")}</div><audio src={fileUrl(result.asset.id)} controls style={{ width: "100%" }} /></div>
+          </div>
+          <div className="muted small">
+            {t("retakeCut")}: {result.retake.cut_start_s.toFixed(3)}–{result.retake.cut_end_s.toFixed(3)} s
+            {result.retake.cut_by && <> · {t("retakeCutBy")}: {result.retake.cut_by.join(" / ")}</>}
+            {" "}· «{result.retake.replaced}» → «{result.retake.new_text}»
+          </div>
+          <button className="btn sm" style={{ width: "fit-content" }} onClick={continueOnResult}><RefreshCw size={13} /> {t("retakeUseResult")}</button>
+        </div>
+      )}
+      {picking && projectId && (
+        <AssetPicker projectId={projectId} kind="audio" title={t("retakePickLine")}
+          onPick={(a) => { open(a); setPicking(false); }} onClose={() => setPicking(false)} />
+      )}
+    </div>
+  );
+}
+
 export function VoiceView() {
   const { t } = useT();
   const [tab, setTab] = useState<Tab>("engines");
@@ -698,6 +675,7 @@ export function VoiceView() {
             <button className={tab === "library" ? "on" : ""} onClick={() => setTab("library")}>{t("voiceTabLibrary")}</button>
             <button className={tab === "speak" ? "on" : ""} onClick={() => setTab("speak")}>{t("voiceTabSpeak")}</button>
             <button className={tab === "transcribe" ? "on" : ""} onClick={() => setTab("transcribe")}>{t("voiceTabTranscribe")}</button>
+            <button className={tab === "retake" ? "on" : ""} onClick={() => setTab("retake")}>{t("voiceTabRetake")}</button>
             <button className={tab === "audiobook" ? "on" : ""} onClick={() => setTab("audiobook")}>{t("voiceTabAudiobook")}</button>
             <button className={tab === "dub" ? "on" : ""} onClick={() => setTab("dub")}>{t("voiceTabDub")}</button>
           </div>
@@ -707,6 +685,7 @@ export function VoiceView() {
       {tab === "library" && <LibraryTab />}
       {tab === "speak" && <SpeakTab />}
       {tab === "transcribe" && <TranscribeTab />}
+      {tab === "retake" && <RetakeTab />}
       {tab === "audiobook" && <AudiobookTab />}
       {tab === "dub" && <DubTab />}
     </>
