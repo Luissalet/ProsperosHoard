@@ -1257,6 +1257,34 @@ export const api = {
   speak: (text: string, voice: VoiceSpec, project?: string) =>
     request<Blob | Asset>("POST", "/api/voice/speak", { text, voice, project }),
 
+  retakeWords: (body: {
+    asset_id: string;
+    first_word: number;
+    last_word: number;
+    text: string;
+    voice?: VoiceSpec;
+    words?: { start_s: number; end_s: number; word: string }[];
+    language?: string;
+    project?: string;
+  }) =>
+    request<{
+      engine_id?: string;
+      words_from: string;
+      retake: {
+        cut_start_s: number;
+        cut_end_s: number;
+        cut_by?: { start?: string; end?: string } | string[];
+        replaced?: string;
+        new_text?: string;
+        first_word?: number;
+        last_word?: number;
+        duration_before_s?: number;
+        duration_after_s?: number;
+        [key: string]: unknown;
+      };
+      asset: Asset;
+    }>("POST", "/api/voice/retake_words", body),
+
   transcribe: (body: { path?: string; asset_id?: string; language?: string; engine_id?: string; word_timestamps?: boolean }) =>
     request<Transcript & { text: string; language: string | null }>("POST", "/api/voice/transcribe", body),
   transcribeUpload: (file: File, opts: { language?: string; engineId?: string } = {}) => {
