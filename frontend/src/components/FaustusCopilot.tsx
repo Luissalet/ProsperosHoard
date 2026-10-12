@@ -3,6 +3,8 @@ import { api } from '../api';
 import type { Route } from './ui';
 import '../copilot.css';
 
+const faustusMark = new URL('../assets/faustus-mark.svg', import.meta.url).href;
+
 interface Panel extends HTMLElement {
   server: string; locale: string; theme: string; session: string | null;
   fetch: typeof fetch; contextProvider: () => Promise<unknown>;
@@ -89,7 +91,7 @@ export default function FaustusCopilot(props: Props) {
     if (panel) { panel.locale = props.lang; panel.theme = props.theme; }
   }, [props.lang,props.theme]);
   return <>
-    <button type="button" className="btn sm prospero-copilot-toggle" style={{zIndex:props.overlayLayer}} aria-expanded={open} onClick={() => setOpen(!open)}>Faustus</button>
+    <button type="button" className="prospero-copilot-toggle" style={{zIndex:props.overlayLayer}} aria-label="Faustus" aria-expanded={open} onClick={() => setOpen(!open)}><img src={faustusMark} alt="" aria-hidden="true" /></button>
     {open && <aside className="prospero-copilot" style={{zIndex:props.overlayLayer}} aria-label="Faustus">
       <header><strong>Faustus · Prospero</strong><button type="button" className="btn sm" onClick={() => setOpen(false)} aria-label={props.lang === 'es' ? 'Cerrar Faustus' : 'Close Faustus'}>×</button></header>
       {error && <p role="alert">{error}</p>}
