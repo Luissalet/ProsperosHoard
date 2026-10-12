@@ -4,4 +4,5 @@
 .prospero-copilot-content { flex: 1; min-height: 0; }
 .prospero-copilot faustus-chat { border: 0; border-radius: 0 0 12px 12px; height: 100%; }
 @media (max-width: 600px) { .prospero-copilot { top: 8px; right: 8px; bottom: 58px; width: calc(100vw - 16px); } }
+@media (min-width: 1000px) { .overlay.prospero-copilot-viewer { padding-right: 440px; } }
 

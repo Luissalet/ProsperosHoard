@@ -228,7 +228,7 @@ export default function App() {
   return (
     <I18nContext.Provider value={{ t, lang }}>
       <AppContext.Provider value={ctx}>
-        <div className="app">
+        <div className="app" inert={Boolean(lightbox)}>
           <aside className="studio-rail" aria-label={t("studio")}>
             <button className="rail-logo" onClick={() => go("projects")} title={t("navProjects")}><img src="/favicon-192.png" alt={t("appName")} /></button>
             {PROJECT_SECTIONS.filter((s) => ["generate", "spaces", "cast", "timeline", "audio", "designer"].includes(s.id)).map((s) =>

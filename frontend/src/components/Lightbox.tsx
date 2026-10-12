@@ -15,7 +15,9 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const { isTop, layer } = useDialog(dialogRef, onClose, {trapFocus:!copilotOpen,ignoreSelector:'.prospero-copilot'});
+  const { isTop, layer } = useDialog(dialogRef, onClose, {
+    ignoreSelector:'.prospero-copilot', companionSelector:'.prospero-copilot, .prospero-copilot-toggle',
+  });
   useEffect(() => { onLayerChanged?.(layer); }, [layer,onLayerChanged]);
   const [zoom, setZoom] = useState(false);
   const [tags, setTags] = useState("");
@@ -120,7 +122,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
     }
   };
 
-  if (!asset) return <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={t("open")}>
+  if (!asset) return <div ref={dialogRef} tabIndex={-1} className={`overlay${copilotOpen ? ' prospero-copilot-viewer' : ''}`} style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={t("open")}>
     <div className="lightbox-loading"><button className="btn" onClick={onClose}><X size={16} />{t("close")}</button>
       {loadError ? <><p role="alert">{loadError}</p><button className="btn" onClick={() => setRetry((n) => n + 1)}>{lang === "es" ? "Reintentar" : "Retry"}</button></>
         : <p role="status">{lang === "es" ? "Cargando el archivo…" : "Loading the file…"}</p>}</div></div>;
@@ -135,7 +137,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
   ];
 
   return (
-    <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={assetName(asset.name, lang) || asset.id}>
+    <div ref={dialogRef} tabIndex={-1} className={`overlay${copilotOpen ? ' prospero-copilot-viewer' : ''}`} style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={assetName(asset.name, lang) || asset.id}>
       <div className="lightbox-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="lightbox-tools">
           <button type="button" className="btn sm" aria-label={lang === 'es' ? 'Hablar con Faustus sobre este recurso' : 'Ask Faustus about this asset'}
