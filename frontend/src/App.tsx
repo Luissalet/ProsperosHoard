@@ -11,6 +11,7 @@ import { api, type Job, type Project } from "./api";
 import { I18nContext, detectLang, makeT, type Lang, type MessageKey } from "./i18n";
 import { AppContext, type Route, useToasts } from "./components/ui";
 import { Lightbox } from "./components/Lightbox";
+import FaustusCopilot from "./components/FaustusCopilot";
 import { ProjectsView } from "./views/Projects";
 import { OverviewView } from "./views/Overview";
 import { CastView } from "./views/Cast";
@@ -93,6 +94,9 @@ export default function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [demo, setDemo] = useState(false);
   const [lightbox, setLightbox] = useState<{ id: string; list: string[] } | null>(null);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [viewerLayer, setViewerLayer] = useState(40);
+  useEffect(() => { if (!lightbox) setViewerLayer(40); }, [lightbox]);
   const [dataVersion, setDataVersion] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsOpener = useRef<HTMLButtonElement | null>(null);
@@ -171,8 +175,8 @@ export default function App() {
   // global shortcuts: G generate, / search (Library handles focus), Esc handled by overlays
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (e.composedPath().some(node => node instanceof HTMLElement &&
+        (node.tagName === "INPUT" || node.tagName === "TEXTAREA" || node.tagName === "SELECT" || node.isContentEditable))) return;
       if (e.ctrlKey || e.metaKey || e.altKey || lightbox) return;
       if (e.key === "g" || e.key === "G") { e.preventDefault(); go("generate"); }
       if (e.key === "/") {
@@ -224,7 +228,7 @@ export default function App() {
   return (
     <I18nContext.Provider value={{ t, lang }}>
       <AppContext.Provider value={ctx}>
-        <div className="app">
+        <div className="app" inert={Boolean(lightbox)}>
           <aside className="studio-rail" aria-label={t("studio")}>
             <button className="rail-logo" onClick={() => go("projects")} title={t("navProjects")}><img src="/favicon-192.png" alt={t("appName")} /></button>
             {PROJECT_SECTIONS.filter((s) => ["generate", "spaces", "cast", "timeline", "audio", "designer"].includes(s.id)).map((s) =>
@@ -305,8 +309,11 @@ export default function App() {
           </main>
         </div>
         {lightbox && <Lightbox assetId={lightbox.id} list={lightbox.list} onClose={() => setLightbox(null)}
-          onNavigate={(id) => setLightbox({ ...lightbox, id })} />}
+          onNavigate={(id) => setLightbox({ ...lightbox, id })} copilotOpen={copilotOpen} onLayerChanged={setViewerLayer} />}
         {host}
+        <FaustusCopilot projectId={projectId} route={route} assetId={lightbox?.id}
+          overlayLayer={viewerLayer + 1} onOpenChanged={setCopilotOpen}
+          lang={lang} theme={theme} onChanged={() => { setDataVersion(v => v + 1); refreshJobs(); }} />
       </AppContext.Provider>
     </I18nContext.Provider>
   );

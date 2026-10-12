@@ -1,6 +1,14 @@
 <img src="app-icon.png" width="96" alt="">
 
 # Prospero's Hoard
+
+The Faustus button opens the shared copilot panel for the selected project.
+Faustus owns conversations, drafts, model selection and agent execution;
+Prospero supplies its native studio tools, project, current section and selected
+asset. Chats remain available in Faustus Studio, while completed turns refresh
+domain views through the existing data refresh flow. Creative engines and jobs
+retain their normal configuration. Configure the family Faustus endpoint in
+`data/backend.json` or `PROSPERO_FAUSTUS_URL`.
 ### Such stuff as dreams are made on: can an agent direct a whole production?
 **A local media studio that drives your ComfyUI, ffmpeg and a local TTS to make consistent characters, photocards, album art and music videos cut on the beat, by hand or entirely over MCP, and remembers exactly how every asset was made.**
 
