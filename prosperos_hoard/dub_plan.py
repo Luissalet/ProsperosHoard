@@ -397,21 +397,40 @@ def _es_words(n: int, apocope: bool = False) -> str:
     return str(n)
 
 
+def _en_year(n: int) -> Optional[str]:
+    """English year reading for 1100-2099 when it differs from the cardinal:
+    1999 nineteen ninety nine, 1905 nineteen oh five, 2024 twenty twenty four
+    1900 nineteen hundred (2000-2009 are read as cardinals)."""
+    if not 1100 <= n <= 2099 or 2000 <= n <= 2009 or n == 2100:
+        return None
+    head, tail = divmod(n, 100)
+    if tail == 0:
+        return _en_words(head) + " hundred"        # 1900 nineteen hundred
+    return _en_words(head) + " " + ("oh " + _EN_ONES[tail] if tail < 10 else _en_words(tail))
+
+
 _NUMBER_WORDS = {"en": _en_words, "es": _es_words}
+_YEAR_WORDS = {"en": _en_year}
 
 
-def spell_numbers(text: str, lang: Optional[str]) -> str:
+def spell_numbers(text: str, lang: Optional[str], *, years: bool = False) -> str:
     """The compare-normalized text with each run of digits (up to nine) written
     out in words, for the languages that have a speller (en, es); unchanged
-    otherwise. "17" and "seventeen" then compare equal."""
-    speller = _NUMBER_WORDS.get(normalize_lang(lang) or "")
+    otherwise. "17" and "seventeen" then compare equal. With `years`, a
+    four-digit year uses the language's year reading where it has one
+    ("2024" -> "twenty twenty four" in English)."""
+    code = normalize_lang(lang) or ""
+    speller = _NUMBER_WORDS.get(code)
+    year_speller = _YEAR_WORDS.get(code) if years else None
     norm = normalize_for_compare(text)
     if not speller:
         return norm
     out = []
     for token in norm.split():
         if token.isascii() and token.isdigit() and len(token) <= 9:
-            out.append(normalize_for_compare(speller(int(token))))
+            n = int(token)
+            words = (year_speller(n) if year_speller and len(token) == 4 else None) or speller(n)
+            out.append(normalize_for_compare(words))
         else:
             out.append(token)
     return " ".join(out)
@@ -431,9 +450,13 @@ def word_error_rate(ref: str, hyp: str, lang: Optional[str] = None) -> float:
     also tried written out in words, and the lower rate wins: a script saying
     "17" heard as "seventeen" is not an error."""
     base = _wer_tokens(normalize_for_compare(ref).split(), normalize_for_compare(hyp).split())
-    if (normalize_lang(lang) or "") in _NUMBER_WORDS and re.search(r"\d", f"{ref} {hyp}"):
-        spelled = _wer_tokens(spell_numbers(ref, lang).split(), spell_numbers(hyp, lang).split())
-        return min(base, spelled)
+    code = normalize_lang(lang) or ""
+    if code in _NUMBER_WORDS and re.search(r"\d", f"{ref} {hyp}"):
+        rates = [base, _wer_tokens(spell_numbers(ref, lang).split(), spell_numbers(hyp, lang).split())]
+        if code in _YEAR_WORDS:
+            rates.append(_wer_tokens(spell_numbers(ref, lang, years=True).split(),
+                                     spell_numbers(hyp, lang, years=True).split()))
+        return min(rates)
     return base
 
 
