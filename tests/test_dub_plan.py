@@ -222,6 +222,21 @@ def test_digits_heard_as_words_are_not_errors():
     assert dp.spell_numbers("the 1st of 3d", "en") == "the 1st of 3d"
 
 
+@pytest.mark.parametrize("year,words", [
+    (2024, "twenty twenty four"), (1999, "nineteen ninety nine"), (1905, "nineteen oh five"),
+    (2010, "twenty ten"), (2005, "two thousand five"), (1900, "nineteen hundred"),
+])
+def test_english_years_have_their_own_reading(year, words):
+    assert dp.spell_numbers(str(year), "en", years=True) == words
+    assert dp.spell_numbers(str(year), "es", years=True) == dp.spell_numbers(str(year), "es")
+
+
+def test_a_year_read_aloud_is_not_an_error():
+    assert dp.word_error_rate("It is twenty twenty four", "it is 2024", "en") == 0.0
+    assert dp.word_error_rate("Born in 1999", "born in nineteen ninety nine", "en") == 0.0
+    assert dp.word_error_rate("Back in 2024", "back in two thousand twenty four", "en") == 0.0
+
+
 def test_qc_line_uses_the_target_language_for_numbers():
     line = dp.qc_line("Son las 5", "son las cinco", "es")
     assert line["wer"] == 0.0 and not line["flagged"]
