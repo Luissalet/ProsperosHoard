@@ -237,6 +237,24 @@ def test_a_year_read_aloud_is_not_an_error():
     assert dp.word_error_rate("Back in 2024", "back in two thousand twenty four", "en") == 0.0
 
 
+@pytest.mark.parametrize("ref,heard,lang", [
+    ("Value 1.7", "value one seven", "en"),        # a decimal is not two cardinals
+    ("Valor 1,7", "valor uno siete", "es"),
+    ("El 1.º", "el uno o", "es"),                  # an ordinal keeps its form
+    ("La 2ª fila", "la dos a fila", "es"),
+    ("Son 2.024 euros", "son dos veinticuatro euros", "es"),  # grouped thousands are not split either
+])
+def test_decimals_ordinals_and_grouped_numbers_are_not_spelled(ref, heard, lang):
+    assert dp.word_error_rate(ref, heard, lang) == dp.word_error_rate(ref, heard) > 0
+    assert dp.qc_line(ref, heard, lang, threshold=0)["flagged"]
+
+
+def test_sentence_punctuation_around_a_number_still_counts():
+    assert dp.word_error_rate("Tengo 17.", "tengo diecisiete", "es") == 0.0
+    assert dp.word_error_rate("Tengo 17, y tú?", "tengo diecisiete y tú", "es") == 0.0
+    assert dp.word_error_rate("(17) days", "seventeen days", "en") == 0.0
+
+
 def test_qc_line_uses_the_target_language_for_numbers():
     line = dp.qc_line("Son las 5", "son las cinco", "es")
     assert line["wer"] == 0.0 and not line["flagged"]
