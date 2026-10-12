@@ -344,14 +344,126 @@ def _edit_distance(a: list[str], b: list[str]) -> int:
     return prev[-1]
 
 
-def word_error_rate(ref: str, hyp: str) -> float:
-    """Word-level Levenshtein distance over the reference length (case,
-    punctuation and spacing ignored). An empty reference is 0.0 against an empty
-    hypothesis and 1.0 otherwise. Can exceed 1.0 when the hypothesis is longer."""
-    r, h = normalize_for_compare(ref).split(), normalize_for_compare(hyp).split()
+# -- numbers written as digits on one side and as words on the other ---------
+
+_EN_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+_EN_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+_ES_ONES = ["cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez",
+            "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve",
+            "veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis",
+            "veintisiete", "veintiocho", "veintinueve"]
+_ES_TENS = ["", "", "", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"]
+_ES_HUNDREDS = ["", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos",
+                "setecientos", "ochocientos", "novecientos"]
+
+
+def _en_words(n: int) -> str:
+    if n < 20:
+        return _EN_ONES[n]
+    if n < 100:
+        return _EN_TENS[n // 10] + ("" if n % 10 == 0 else " " + _EN_ONES[n % 10])
+    if n < 1000:
+        return _EN_ONES[n // 100] + " hundred" + ("" if n % 100 == 0 else " " + _en_words(n % 100))
+    for size, name in ((10**9, "billion"), (10**6, "million"), (1000, "thousand")):
+        if n >= size:
+            head, rest = divmod(n, size)
+            return _en_words(head) + " " + name + ("" if rest == 0 else " " + _en_words(rest))
+    return str(n)
+
+
+def _es_words(n: int, apocope: bool = False) -> str:
+    if n < 30:
+        word = _ES_ONES[n]
+        if apocope and n in (1, 21):          # "un mil" never, but "veintiún mil", "un millón"
+            word = word[:-1] if n == 1 else "veintiún"
+        return word
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return _ES_TENS[tens] + ("" if ones == 0 else " y " + _es_words(ones, apocope))
+    if n == 100:
+        return "cien"
+    if n < 1000:
+        hundreds, rest = divmod(n, 100)
+        return _ES_HUNDREDS[hundreds] + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    if n < 10**6:
+        thousands, rest = divmod(n, 1000)
+        head = "mil" if thousands == 1 else _es_words(thousands, apocope=True) + " mil"
+        return head + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    if n < 10**9:
+        millions, rest = divmod(n, 10**6)
+        head = "un millón" if millions == 1 else _es_words(millions, apocope=True) + " millones"
+        return head + ("" if rest == 0 else " " + _es_words(rest, apocope))
+    return str(n)
+
+
+def _en_year(n: int) -> Optional[str]:
+    """English year reading for 1100-2099 when it differs from the cardinal:
+    1999 nineteen ninety nine, 1905 nineteen oh five, 2024 twenty twenty four
+    1900 nineteen hundred (2000-2009 are read as cardinals)."""
+    if not 1100 <= n <= 2099 or 2000 <= n <= 2009 or n == 2100:
+        return None
+    head, tail = divmod(n, 100)
+    if tail == 0:
+        return _en_words(head) + " hundred"        # 1900 nineteen hundred
+    return _en_words(head) + " " + ("oh " + _EN_ONES[tail] if tail < 10 else _en_words(tail))
+
+
+_NUMBER_WORDS = {"en": _en_words, "es": _es_words}
+_YEAR_WORDS = {"en": _en_year}
+
+
+# A run of ASCII digits standing alone as a cardinal: not part of a word ("1st", "3d", "mp4"), not either side of a
+# decimal or grouped number ("1.7", "1,7", "2.024"), not an ordinal ("1.º", "2ª", "3 º"). Decided on the original
+# text, before punctuation is folded away; a sentence-final "17." still counts.
+_STANDALONE_NUMBER = re.compile(r"(?<![\w.,])([0-9]{1,9})(?![0-9\w]|[.,][0-9]|\.?\s?[ºª°])")
+
+
+def spell_numbers(text: str, lang: Optional[str], *, years: bool = False) -> str:
+    """The compare-normalized text with each standalone cardinal (up to nine
+    digits) written out in words, for the languages that have a speller (en,
+    es); unchanged otherwise. "17" and "seventeen" then compare equal; decimals,
+    ordinals and digits inside words are left as they are. With `years`, a
+    four-digit year uses the language's year reading where it has one
+    ("2024" -> "twenty twenty four" in English)."""
+    code = normalize_lang(lang) or ""
+    speller = _NUMBER_WORDS.get(code)
+    if not speller:
+        return normalize_for_compare(text)
+    year_speller = _YEAR_WORDS.get(code) if years else None
+
+    def spell(match: re.Match) -> str:
+        token = match.group(1)
+        n = int(token)
+        words = (year_speller(n) if year_speller and len(token) == 4 else None) or speller(n)
+        return f" {words} "
+
+    raw = unicodedata.normalize("NFC", text or "")
+    return normalize_for_compare(_STANDALONE_NUMBER.sub(spell, raw))
+
+
+def _wer_tokens(r: list[str], h: list[str]) -> float:
     if not r:
         return 0.0 if not h else 1.0
     return round(_edit_distance(r, h) / len(r), 4)
+
+
+def word_error_rate(ref: str, hyp: str, lang: Optional[str] = None) -> float:
+    """Word-level Levenshtein distance over the reference length (case,
+    punctuation and spacing ignored). An empty reference is 0.0 against an empty
+    hypothesis and 1.0 otherwise. Can exceed 1.0 when the hypothesis is longer.
+    With a `lang` that has a number speller (en, es), digits on either side are
+    also tried written out in words, and the lower rate wins: a script saying
+    "17" heard as "seventeen" is not an error."""
+    base = _wer_tokens(normalize_for_compare(ref).split(), normalize_for_compare(hyp).split())
+    code = normalize_lang(lang) or ""
+    if code in _NUMBER_WORDS and re.search(r"\d", f"{ref} {hyp}"):
+        rates = [base, _wer_tokens(spell_numbers(ref, lang).split(), spell_numbers(hyp, lang).split())]
+        if code in _YEAR_WORDS:
+            rates.append(_wer_tokens(spell_numbers(ref, lang, years=True).split(),
+                                     spell_numbers(hyp, lang, years=True).split()))
+        return min(rates)
+    return base
 
 
 def char_error_rate(ref: str, hyp: str) -> float:
@@ -376,7 +488,7 @@ def qc_line(ref: str, hyp: Optional[str], lang: Optional[str], threshold: Option
     metric = metric_for(lang)
     if threshold is None:
         threshold = DEFAULT_CER_THRESHOLD if metric == "cer" else DEFAULT_WER_THRESHOLD
-    value = char_error_rate(ref, hyp) if metric == "cer" else word_error_rate(ref, hyp)
+    value = char_error_rate(ref, hyp) if metric == "cer" else word_error_rate(ref, hyp, lang)
     return {"status": "ok", "metric": metric, metric: value, "hyp": hyp, "threshold": threshold,
             "flagged": value > threshold}
 

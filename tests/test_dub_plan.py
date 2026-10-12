@@ -196,6 +196,70 @@ def test_word_error_rate_ignores_case_punctuation_and_spacing():
     assert dp.word_error_rate("one", "one two three") == 2.0
 
 
+@pytest.mark.parametrize("n,es,en", [
+    (0, "cero", "zero"), (1, "uno", "one"), (16, "dieciséis", "sixteen"), (17, "diecisiete", "seventeen"),
+    (21, "veintiuno", "twenty one"), (35, "treinta y cinco", "thirty five"), (100, "cien", "one hundred"),
+    (101, "ciento uno", "one hundred one"), (555, "quinientos cincuenta y cinco", "five hundred fifty five"),
+    (1000, "mil", "one thousand"), (2024, "dos mil veinticuatro", "two thousand twenty four"),
+    (21000, "veintiún mil", "twenty one thousand"), (1000000, "un millón", "one million"),
+    (3000000, "tres millones", "three million"),
+])
+def test_numbers_are_spelled_in_spanish_and_english(n, es, en):
+    assert dp.spell_numbers(str(n), "es") == es
+    assert dp.spell_numbers(str(n), "en") == en
+
+
+def test_digits_heard_as_words_are_not_errors():
+    assert dp.word_error_rate("Tengo 17 años", "tengo diecisiete años", "es") == 0.0
+    assert dp.word_error_rate("I am seventeen", "I am 17", "en") == 0.0
+    assert dp.word_error_rate("Back in 2024", "back in two thousand twenty four", "English") == 0.0
+    # a wrong number is still an error, and the plain comparison still counts
+    assert dp.word_error_rate("Tengo 17 años", "tengo dieciocho años", "es") == pytest.approx(1 / 3, abs=0.001)
+    # without a language (or one with no speller) nothing changes
+    assert dp.word_error_rate("I am seventeen", "I am 17") == pytest.approx(1 / 3, abs=0.001)
+    assert dp.word_error_rate("Ich bin 17", "ich bin siebzehn", "de") == pytest.approx(1 / 3, abs=0.001)
+    # tokens that are not plain digits (ordinals, mixed) are left alone
+    assert dp.spell_numbers("the 1st of 3d", "en") == "the 1st of 3d"
+
+
+@pytest.mark.parametrize("year,words", [
+    (2024, "twenty twenty four"), (1999, "nineteen ninety nine"), (1905, "nineteen oh five"),
+    (2010, "twenty ten"), (2005, "two thousand five"), (1900, "nineteen hundred"),
+])
+def test_english_years_have_their_own_reading(year, words):
+    assert dp.spell_numbers(str(year), "en", years=True) == words
+    assert dp.spell_numbers(str(year), "es", years=True) == dp.spell_numbers(str(year), "es")
+
+
+def test_a_year_read_aloud_is_not_an_error():
+    assert dp.word_error_rate("It is twenty twenty four", "it is 2024", "en") == 0.0
+    assert dp.word_error_rate("Born in 1999", "born in nineteen ninety nine", "en") == 0.0
+    assert dp.word_error_rate("Back in 2024", "back in two thousand twenty four", "en") == 0.0
+
+
+@pytest.mark.parametrize("ref,heard,lang", [
+    ("Value 1.7", "value one seven", "en"),        # a decimal is not two cardinals
+    ("Valor 1,7", "valor uno siete", "es"),
+    ("El 1.º", "el uno o", "es"),                  # an ordinal keeps its form
+    ("La 2ª fila", "la dos a fila", "es"),
+    ("Son 2.024 euros", "son dos veinticuatro euros", "es"),  # grouped thousands are not split either
+])
+def test_decimals_ordinals_and_grouped_numbers_are_not_spelled(ref, heard, lang):
+    assert dp.word_error_rate(ref, heard, lang) == dp.word_error_rate(ref, heard) > 0
+    assert dp.qc_line(ref, heard, lang, threshold=0)["flagged"]
+
+
+def test_sentence_punctuation_around_a_number_still_counts():
+    assert dp.word_error_rate("Tengo 17.", "tengo diecisiete", "es") == 0.0
+    assert dp.word_error_rate("Tengo 17, y tú?", "tengo diecisiete y tú", "es") == 0.0
+    assert dp.word_error_rate("(17) days", "seventeen days", "en") == 0.0
+
+
+def test_qc_line_uses_the_target_language_for_numbers():
+    line = dp.qc_line("Son las 5", "son las cinco", "es")
+    assert line["wer"] == 0.0 and not line["flagged"]
+
+
 def test_char_error_rate_for_unspaced_scripts():
     assert dp.char_error_rate("今日は天気がいい", "今日は天気がいい。") == 0.0
     assert dp.char_error_rate("今日は天気がいい", "今日は天気が悪い") == pytest.approx(1 / 8)
