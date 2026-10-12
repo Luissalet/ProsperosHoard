@@ -124,27 +124,55 @@ export function Progress({ value, waiting }: { value: number; waiting?: boolean 
 const modalStack: symbol[] = [];
 let dialogLayer = 110;
 
+function dialogControls(root: ParentNode): HTMLElement[] {
+  const controls: HTMLElement[] = [];
+  for (const element of root.querySelectorAll<HTMLElement>('*')) {
+    if (element.tabIndex >= 0 && !element.matches(':disabled') &&
+        element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible') controls.push(element);
+    if (element.shadowRoot) controls.push(...dialogControls(element.shadowRoot));
+  }
+  return controls;
+}
+
 /** One keyboard owner for nested previews and editors; restore the opener's focus. */
-export function useDialog(ref: { current: HTMLElement | null }, onClose: () => void) {
+export function useDialog(ref: { current: HTMLElement | null }, onClose: () => void,
+  options: { trapFocus?: boolean; ignoreSelector?: string; companionSelector?: string } = {}) {
   const [me] = useState(() => Symbol("dialog"));
-  const [layer] = useState(() => ++dialogLayer);
-  const [previous] = useState(() => document.activeElement as HTMLElement | null);
+  // Leave a layer for a companion panel between a viewer and its nested dialogs.
+  const [layer] = useState(() => dialogLayer += 2);
+  const [previous] = useState(() => {
+    let element = document.activeElement;
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    return element as HTMLElement | null;
+  });
   const close = useRef(onClose);
   close.current = onClose;
+  const behavior = useRef(options);
+  behavior.current = options;
   useEffect(() => {
     modalStack.push(me);
     const root = ref.current;
     root?.focus();
     const key = (event: KeyboardEvent) => {
       if (modalStack.at(-1) !== me) return;
+      const ignore = behavior.current.ignoreSelector;
+      if (event.key !== 'Tab' && ignore && event.composedPath().some(node => node instanceof HTMLElement && node.closest(ignore))) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close.current(); }
+      if (behavior.current.trapFocus === false) return;
       if (event.key !== "Tab" || !ref.current) return;
-      const controls = [...ref.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')]
-        .filter((element) => element.getClientRects().length > 0);
+      const companions = behavior.current.companionSelector;
+      const roots = [ref.current, ...(companions ? document.querySelectorAll<HTMLElement>(companions) : [])];
+      const controls = [...new Set(roots.flatMap(root => {
+        const children = dialogControls(root);
+        return root.tabIndex >= 0 ? [root, ...children] : children;
+      }))].filter(element => element !== ref.current);
       const first = controls[0], last = controls.at(-1);
       if (!first) { event.preventDefault(); ref.current.focus(); return; }
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
+      let active = document.activeElement;
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      if (!controls.includes(active as HTMLElement)) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
+      else if (event.shiftKey && active === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener("keydown", key, true);
     return () => {

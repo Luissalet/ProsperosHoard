@@ -5,8 +5,9 @@ import { useT, type MessageKey } from "../i18n";
 import { AssetPicker, ConfirmButton, Stars, useApp, useAsync, useDialog } from "./ui";
 import { assetName, kindName, sourceName } from "../messages";
 
-export function Lightbox({ assetId, list, onClose, onNavigate }: {
+export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = false, onLayerChanged }: {
   assetId: string; list: string[]; onClose: () => void; onNavigate: (id: string) => void;
+  copilotOpen?: boolean; onLayerChanged?: (layer: number) => void;
 }) {
   const { t, lang } = useT();
   const app = useApp();
@@ -14,7 +15,10 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const { isTop, layer } = useDialog(dialogRef, onClose);
+  const { isTop, layer } = useDialog(dialogRef, onClose, {
+    ignoreSelector:'.prospero-copilot', companionSelector:'.prospero-copilot, .prospero-copilot-toggle',
+  });
+  useEffect(() => { onLayerChanged?.(layer); }, [layer,onLayerChanged]);
   const [zoom, setZoom] = useState(false);
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
@@ -59,6 +63,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isTop()) return;
+      if (e.composedPath().some(node => node instanceof HTMLElement && node.closest('.prospero-copilot'))) return;
       const el = e.target as HTMLElement;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
       if (typing) return;
@@ -117,7 +122,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
     }
   };
 
-  if (!asset) return <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal="true" aria-label={t("open")}>
+  if (!asset) return <div ref={dialogRef} tabIndex={-1} className={`overlay${copilotOpen ? ' prospero-copilot-viewer' : ''}`} style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={t("open")}>
     <div className="lightbox-loading"><button className="btn" onClick={onClose}><X size={16} />{t("close")}</button>
       {loadError ? <><p role="alert">{loadError}</p><button className="btn" onClick={() => setRetry((n) => n + 1)}>{lang === "es" ? "Reintentar" : "Retry"}</button></>
         : <p role="status">{lang === "es" ? "Cargando el archivo…" : "Loading the file…"}</p>}</div></div>;
@@ -132,9 +137,11 @@ export function Lightbox({ assetId, list, onClose, onNavigate }: {
   ];
 
   return (
-    <div ref={dialogRef} tabIndex={-1} className="overlay" style={{ zIndex: layer }} role="dialog" aria-modal="true" aria-label={assetName(asset.name, lang) || asset.id}>
+    <div ref={dialogRef} tabIndex={-1} className={`overlay${copilotOpen ? ' prospero-copilot-viewer' : ''}`} style={{ zIndex: layer }} role="dialog" aria-modal={!copilotOpen} aria-label={assetName(asset.name, lang) || asset.id}>
       <div className="lightbox-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="lightbox-tools">
+          <button type="button" className="btn sm" aria-label={lang === 'es' ? 'Hablar con Faustus sobre este recurso' : 'Ask Faustus about this asset'}
+            onClick={() => window.dispatchEvent(new Event('prospero:copilot-open'))}>Faustus</button>
           <button className="btn sm" onClick={onClose}><X size={15} /> {t("close")}</button>
           {asset.kind === "image" && (
             <button className="btn sm" onClick={() => setZoom(!zoom)}>{zoom ? <Minimize2 size={15} /> : <Maximize2 size={15} />} {zoom ? t("fit") : t("zoom")}</button>

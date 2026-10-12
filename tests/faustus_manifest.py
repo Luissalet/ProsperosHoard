@@ -33,7 +33,8 @@ class ManifestError(ValueError):
 def _unknown(obj: Any, allowed: set, where: str) -> None:
     if not isinstance(obj, dict):
         raise ManifestError(f"{where} must be an object")
-    extra = sorted(set(obj) - allowed)
+    # Match the canonical parser's established extension convention.
+    extra = sorted(key for key in set(obj) - allowed if not str(key).lower().startswith(('x-', 'x_')))
     if extra:
         raise ManifestError(f"{where} has unknown key(s): {', '.join(extra)}")
 
