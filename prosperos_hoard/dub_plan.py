@@ -413,27 +413,33 @@ _NUMBER_WORDS = {"en": _en_words, "es": _es_words}
 _YEAR_WORDS = {"en": _en_year}
 
 
+# A run of ASCII digits standing alone as a cardinal: not part of a word ("1st", "3d", "mp4"), not either side of a
+# decimal or grouped number ("1.7", "1,7", "2.024"), not an ordinal ("1.º", "2ª", "3 º"). Decided on the original
+# text, before punctuation is folded away; a sentence-final "17." still counts.
+_STANDALONE_NUMBER = re.compile(r"(?<![\w.,])([0-9]{1,9})(?![0-9\w]|[.,][0-9]|\.?\s?[ºª°])")
+
+
 def spell_numbers(text: str, lang: Optional[str], *, years: bool = False) -> str:
-    """The compare-normalized text with each run of digits (up to nine) written
-    out in words, for the languages that have a speller (en, es); unchanged
-    otherwise. "17" and "seventeen" then compare equal. With `years`, a
+    """The compare-normalized text with each standalone cardinal (up to nine
+    digits) written out in words, for the languages that have a speller (en,
+    es); unchanged otherwise. "17" and "seventeen" then compare equal; decimals,
+    ordinals and digits inside words are left as they are. With `years`, a
     four-digit year uses the language's year reading where it has one
     ("2024" -> "twenty twenty four" in English)."""
     code = normalize_lang(lang) or ""
     speller = _NUMBER_WORDS.get(code)
-    year_speller = _YEAR_WORDS.get(code) if years else None
-    norm = normalize_for_compare(text)
     if not speller:
-        return norm
-    out = []
-    for token in norm.split():
-        if token.isascii() and token.isdigit() and len(token) <= 9:
-            n = int(token)
-            words = (year_speller(n) if year_speller and len(token) == 4 else None) or speller(n)
-            out.append(normalize_for_compare(words))
-        else:
-            out.append(token)
-    return " ".join(out)
+        return normalize_for_compare(text)
+    year_speller = _YEAR_WORDS.get(code) if years else None
+
+    def spell(match: re.Match) -> str:
+        token = match.group(1)
+        n = int(token)
+        words = (year_speller(n) if year_speller and len(token) == 4 else None) or speller(n)
+        return f" {words} "
+
+    raw = unicodedata.normalize("NFC", text or "")
+    return normalize_for_compare(_STANDALONE_NUMBER.sub(spell, raw))
 
 
 def _wer_tokens(r: list[str], h: list[str]) -> float:
