@@ -69,6 +69,36 @@ def test_voice_engines_route(client):
     assert "fake-tts" in ids
 
 
+def test_agent_voice_engines_exposes_the_same_piper_presets_as_the_ui(client, data_dir):
+    c, _app, _allowed = client
+    voices_dir = data_dir / 'voices'
+    voices_dir.mkdir(exist_ok=True)
+    (voices_dir / 'es_ES-davefx-medium.onnx').write_bytes(b'private inventory fixture')
+    (voices_dir / 'es_ES-davefx-medium.onnx.json').write_text('{}', encoding='utf-8')
+    # A half download must remain unavailable, even though the model exists.
+    (voices_dir / 'es_ES-sharvard-medium.onnx').write_bytes(b'partial fixture')
+    before = {path.name: path.read_bytes() for path in voices_dir.iterdir()}
+    headers = {'Authorization': 'Bearer ' + (data_dir / 'mcp-token').read_text(encoding='utf-8').strip()}
+    response = c.get('/api/agent/voice_engines', headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body['piper_voices'] == c.get('/api/voices').json()['items']
+    presets = {item['id']: item for item in body['piper_voices']}
+    assert presets['es_ES-davefx-medium']['downloaded'] is True
+    assert presets['es_ES-sharvard-medium']['downloaded'] is False
+    assert presets['en_US-amy-medium']['downloaded'] is False
+    assert before == {path.name: path.read_bytes() for path in voices_dir.iterdir()}
+
+
+def test_empty_reusable_voice_library_does_not_hide_curated_piper_presets(client, data_dir):
+    c, _app, _allowed = client
+    headers = {'Authorization': 'Bearer ' + (data_dir / 'mcp-token').read_text(encoding='utf-8').strip()}
+    assert c.get('/api/agent/voice_list', headers=headers).json()['items'] == []
+    body = c.get('/api/agent/voice_engines', headers=headers).json()
+    assert body['piper_voices']
+    assert all(item['downloaded'] is False for item in body['piper_voices'])
+
+
 def test_voice_speak_returns_wav_bytes(client):
     c, app, _allowed = client
     resp = c.post("/api/voice/speak", json={"text": "hello", "voice": {"engine_id": "fake-tts"}})

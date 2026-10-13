@@ -2241,6 +2241,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "tts": [{k: v for k, v in e.items() if k != "capabilities"} | {"languages": e["capabilities"]["languages"],
                         "cloning": e["capabilities"]["cloning"]} for e in status["tts"]],
                 "stt": [{k: v for k, v in e.items() if k != "capabilities"} for e in status["stt"]],
+                "piper_voices": voices_mod.list_curated_voices(store.data_dir / "voices"),
             }
         return agent("voice_engines", "", run)
 
