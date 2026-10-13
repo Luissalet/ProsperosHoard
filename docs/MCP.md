@@ -230,7 +230,7 @@ behind Hoard Link and fails with a clear message without one.
 
 | Tool | Read-only | Arguments (defaults) | Returns |
 | --- | --- | --- | --- |
-| `voice_engines` | yes | - | `{tts[{id, label, installed, languages, cloning, install_hint, reason}], stt[...]}` |
+| `voice_engines` | yes | - | `{tts[{id, label, installed, languages, cloning, install_hint, reason}], stt[...], piper_voices[{id, lang, label, path, size_mb, downloaded}]}`; curated presets match `/api/voices`, and `downloaded` requires both local model files |
 | `voice_create` | no | `name, engine_id, source_path, language=None, project=None` | the voice (id first) with its quality report (`duration_s, snr_db, clipping_pct, warnings, ok`) |
 | `voice_list` | yes | `project=None` | `items[{id, name, engine_id, language, cloned, has_sample, quality, presets, tags}]` |
 | `voice_speak` | no | `text, engine_id=None, voice_id=None, voice_ref=None, preset=None, speed=None, language=None, project=None` | with `project`: an audio asset summary; without: `{engine_id, bytes}` |

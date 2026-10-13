@@ -884,6 +884,8 @@ def voice_engines() -> dict[str, Any]:
     streaming, GPU need) and an install hint for anything missing. Piper is the same engine used by
     studio_voice; the others (XTTS, F5-TTS, Kokoro, Chatterbox, faster-whisper) add cloning and dictation.
     Nothing is installed automatically - the app's Voice screen has an explicit install action per engine.
+    piper_voices lists the same curated presets as the Voice screen, with id, language, label and downloaded.
+    A downloaded preset can be used directly by studio_voice without searching files or downloading another voice.
 
     Keywords: voice engines, tts, stt, speech to text, install engine, motores de voz, texto a voz, instalar motor
     """
