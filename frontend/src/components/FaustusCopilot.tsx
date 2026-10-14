@@ -81,7 +81,7 @@ export default function FaustusCopilot(props: Props) {
         container.current?.replaceChildren(panel);
         await panel.loadHistory();
         setError('');
-      } catch (problem) { if (!disposed) setError(problem instanceof Error ? problem.message : String(problem)); }
+      } catch (problem) { if (!disposed) setError(((current.current.lang) === 'es' ? 'Faustus no está disponible ahora mismo. Prospero sigue funcionando y tu borrador se conserva; cierra y vuelve a abrir el panel cuando Faustus esté en marcha.' : 'Faustus is not available right now. Prospero keeps working and your draft is kept; close and reopen the panel once Faustus is running.') + ' (' + (problem instanceof Error ? problem.message : String(problem)) + ')'); }
     }
     void mount();
     return () => { disposed = true; panel?.remove(); };
