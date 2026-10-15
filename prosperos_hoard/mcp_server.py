@@ -1682,13 +1682,14 @@ def studio_production_cast(production: str, cast: list[dict[str, Any]], per_shot
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 def studio_download_media(project: str, url: str, audio_only: bool = False, start_s: Optional[float] = None,
                           end_s: Optional[float] = None) -> dict[str, Any]:
-    """Download a video from a link (YouTube, X, Instagram...) into the project's library as mp4 / descargar video.
+    """Import a video from a link into a studio project's library as a reference / importar vídeo de referencia al proyecto.
 
-    Queues a job; the asset id is in its outputs when done (poll studio_job). start_s/end_s cut just
-    that section (a dance move, a scene), up to 20 min when uncut. audio_only keeps an mp3. Then
-    studio_video_frames turns it into reference stills.
+    Only for material a production will use (a dance move, a scene to copy): it needs a project. A plain
+    «descárgame este vídeo» to keep or watch is Links Hoard's media_download, not this. Queues a job; the
+    asset id is in its outputs when done (poll studio_job). start_s/end_s cut just that section, up to
+    20 min when uncut. audio_only keeps an mp3. Then studio_video_frames turns it into reference stills.
 
-    Keywords: download video, youtube link, paste link, reference video, descargar video, enlace de youtube, bajar video
+    Keywords: reference video for the project, import clip into the studio, vídeo de referencia, importar al proyecto, clip para el videoclip
     """
     return _call("POST", "/api/agent/studio_download_media", params={"project": project},
                  json={"url": url, "audio_only": audio_only, "start_s": start_s, "end_s": end_s})
