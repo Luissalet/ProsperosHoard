@@ -13,6 +13,7 @@ import uvicorn
 
 from . import __version__
 from .hoard_link.atomic import write_text_atomic
+from .hoard_link.appconfig import load_dotenv
 from .api import create_app
 
 DEFAULT_PORT = 8815
@@ -37,6 +38,8 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
+    # Settings kept out of git (engine and model folders such as PROSPERO_AUK_HOME); the real environment wins.
+    load_dotenv(repo_root / ".env")
     if args.data_dir:
         data_dir = args.data_dir
     elif args.demo:
