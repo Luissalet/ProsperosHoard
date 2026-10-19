@@ -255,5 +255,5 @@ export function Collapsible({ title, children, defaultOpen = false }) {
 }
 
 export function Logo({ size = 22 }) {
-  return <img src="/icon-192.png" width={size} height={size} alt="" style={{ borderRadius: Math.round(size / 5), display: "block" }} />;
+  return <img src="/studio-assets/app-icon.png" width={size} height={size} alt="" style={{ borderRadius: Math.round(size / 5), display: "block" }} />;
 }
