@@ -18,6 +18,8 @@ dependencies = [
     "imageio-ffmpeg==0.5.1",
     "piper-tts==1.8.0",
     "yt-dlp==2026.8.19",
+    "opentimelineio==0.18.1",
+    "playwright==1.64.0",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +27,7 @@ dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
 ]
+editing-analysis = ["faster-whisper==1.2.1", "opencv-python-headless==4.13.0.92"]
 
 [project.urls]
 Repository = "https://github.com/Luissalet/ProsperosHoard"

@@ -1,0 +1,123 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal
+lumiere-codecbase-time = { path = "crates/time" }
+lumiere-codecbase-geom = { path = "crates/geom" }
+lumiere-codecbase-color = { path = "crates/color" }
+lumiere-codecbase-bitstream = { path = "crates/bitstream" }
+lumiere-codecbase-isobmff = { path = "crates/isobmff" }
+lumiere-codecbase-matroska = { path = "crates/matroska" }
+lumiere-codecbase-mxf = { path = "crates/mxf" }
+lumiere-codecbase-cfb = { path = "crates/cfb" }
+lumiere-codecbase-mpegts = { path = "crates/mpegts" }
+lumiere-codecbase-mpeg2v = { path = "crates/mpeg2v" }
+lumiere-codecbase-ac3 = { path = "crates/ac3" }
+lumiere-codecbase-ogg = { path = "crates/ogg" }
+lumiere-codecbase-h264 = { path = "crates/h264" }
+lumiere-codecbase-hevc = { path = "crates/hevc" }
+lumiere-codecbase-vp9 = { path = "crates/vp9" }
+lumiere-codecbase-prores = { path = "crates/prores" }
+lumiere-codecbase-dnx = { path = "crates/dnx" }
+lumiere-codecbase-av1 = { path = "crates/av1" }
+lumiere-codecbase-aac = { path = "crates/aac" }
+lumiere-codecbase-opus = { path = "crates/opus" }
+lumiere-codecbase-h264enc = { path = "crates/h264enc" }
+lumiere-codecbase-audio-dsp = { path = "crates/audio-dsp" }
+lumiere-codecbase-frame = { path = "crates/frame" }
+lumiere-codecbase-media = { path = "crates/media" }
+lumiere-codecbase-codecs = { path = "crates/codecs" }
+lumiere-codecbase-project = { path = "crates/project" }
+lumiere-codecbase-edit = { path = "crates/edit" }
+lumiere-codecbase-interchange = { path = "crates/interchange" }
+lumiere-codecbase-text = { path = "crates/text" }
+lumiere-codecbase-captions = { path = "crates/captions" }
+lumiere-codecbase-speech = { path = "crates/speech" }
+lumiere-codecbase-render = { path = "crates/render" }
+lumiere-codecbase-gpu = { path = "crates/gpu" }
+lumiere-codecbase-scopes = { path = "crates/scopes" }
+lumiere-codecbase-export = { path = "crates/export" }
+lumiere-codecbase-format = { path = "crates/format" }
+lumiere-codecbase-engine = { path = "crates/engine" }
+lumiere-codecbase-ui-egui = { path = "crates/ui-egui" }
+lumiere-codecbase-automation = { path = "crates/automation" }
+lumiere-codecbase-testkit = { path = "crates/testkit" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+log = "0.4"
+rayon = "1"
+proptest = "1"
+roxmltree = "0.21"
+
+# ui
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+egui_kittest = "0.36"
+rfd = "0.17"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+# Codec hot loops: debug-build tests (RFC/oracle vectors) are minutes slower below opt-level 3.
+[profile.dev.package.lumiere-codecbase-h264]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-h264enc]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-hevc]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-prores]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-dnx]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-av1]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-aac]
+opt-level = 3
+
+# Audio effects: realtime-factor tests and long convolution / spectral runs.
+[profile.dev.package.lumiere-codecbase-audio-dsp]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-mxf]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-opus]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-vp9]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

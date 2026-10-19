@@ -1,0 +1,19 @@
+[package]
+name = "lumiere-codecbase-isobmff"
+description = "Clean-room ISO BMFF (MP4) and QuickTime (MOV) demuxer and muxer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-codecbase-bitstream = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lumiere-codecbase-testkit = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }

@@ -1,7 +1,8 @@
 <img src="app-icon.png" width="96" alt="">
 
 # Prospero's Hoard
-### Estamos hechos de la misma materia que los sueños: ¿puede un agente dirigir una producción entera?
+
+Prospero incorpora los módulos completos de generación y montaje nativo, apagados hasta activarlos expresamente. La portada común enlaza revisiones reales de proyectos y cortes y sus resultados XML con ambos editores en `/generation/` y `/editing/`; consultar API/MCP no arranca sus motores. Véanse [instalación, flujo común y transición de datos](docs/STUDIO.md). El candidato cuenta con comprobaciones sintéticas de transferencia/MCP y motores nativos compilados; quedan pendientes la aprobación visual, la continuidad del perfil real y el despliegue del modelo global. No se ha integrado ni instalado sobre datos reales.
 **Un estudio multimedia local que maneja tu ComfyUI, ffmpeg y una voz sintética local para crear personajes coherentes, photocards, portadas y videoclips montados al ritmo, a mano o por completo desde MCP, y que recuerda exactamente cómo se hizo cada recurso.**
 
 [English](README.md) · [Inicio rápido](#inicio-rápido) · [Producción real de ejemplo](#la-ejecución-real) · [Conectar con Faustus](#conectarlo-a-faustus) · [Referencia MCP](docs/MCP.md) · [Estudio de voz](docs/VOICE.md) · [Portfolio](https://luissalet.github.io/Portfolio/#projects)

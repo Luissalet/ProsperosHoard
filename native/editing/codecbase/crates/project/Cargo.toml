@@ -1,0 +1,22 @@
+[package]
+name = "lumiere-codecbase-project"
+description = "Lumiere Edit document model: projects, bins, clips, sequences, tracks, effects, keyframes, markers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-codecbase-time = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

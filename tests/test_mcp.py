@@ -90,9 +90,15 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_production_lyrics", "studio_production_cast", "studio_production_song", "studio_production_timing", "studio_production_settings", "studio_production_finishing", "studio_canvas", "studio_spaces", "studio_prompt_enhance", "studio_cinema", "studio_export_timeline", "studio_video_frames", "studio_download_media",
                          "production_export_lumiere", "cast_import_character", "production_from_storyboard", "voice_tts"}
             assert expected <= set(by_name)
+            native_contracts = json.loads((REPO_ROOT / 'prosperos_hoard' / 'studio_mcp_catalog.json').read_text(encoding='utf-8'))
+            generation_names = {t['name'] for t in native_contracts['generation']}
             for t in tools.tools:
                 assert "Keywords:" in (t.description or ""), t.name
-                assert t.annotations is not None and (t.annotations.destructiveHint is False or t.name == "studio_trash")
+                assert t.annotations is not None
+                if t.name in generation_names:
+                    assert t.annotations.destructiveHint is False or t.name == "studio_trash"
+            for contract in native_contracts['editing']:
+                assert by_name[contract['name']].annotations.destructiveHint == contract['annotations']['destructiveHint']
             assert by_name["studio_show"].annotations.readOnlyHint is True
             smooth = by_name["studio_interpolate"]
             assert smooth.annotations.readOnlyHint is False

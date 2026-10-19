@@ -1,0 +1,20 @@
+[package]
+name = "lumiere-edit-edit"
+description = "Pure timeline edit algebra: insert, overwrite, razor, ripple, roll, slip, slide, rate stretch, lift, extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-project = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+lumiere-edit-media = { workspace = true }
+serde_json = { workspace = true }

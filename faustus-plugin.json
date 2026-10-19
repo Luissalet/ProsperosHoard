@@ -1,9 +1,16 @@
 {
   "schema": 1,
-  "x-family": {"copilot": {"contract_version": "1.0", "info": "/api/copilot/info", "panel": "/api/copilot/panel.js", "proxy": "/api/copilot/proxy"}},
+  "x-family": {
+    "copilot": {
+      "contract_version": "1.0",
+      "info": "/api/copilot/info",
+      "panel": "/api/copilot/panel.js",
+      "proxy": "/api/copilot/proxy"
+    }
+  },
   "id": "prospero",
   "name": "Prospero's Hoard",
-  "purpose": "Directs a media studio (ComfyUI, ffmpeg, TTS) to produce consistent characters (model sheets, local LoRA training, portable character packs), photocards, album art, beat-cut music videos as resumable productions and reusable recipes, narrated vertical shorts from a topic or a script (voice-over, word-by-word captions, stock or generated pictures, ducked music), cloned voices, audiobooks and dubbed video.",
+  "purpose": "Directs a media studio (ComfyUI, ffmpeg, TTS) to produce consistent characters (model sheets, local LoRA training, portable character packs), photocards, album art, beat-cut music videos as resumable productions and reusable recipes, narrated vertical shorts from a topic or a script (voice-over, word-by-word captions, stock or generated pictures, ducked music), cloned voices, audiobooks and dubbed video. Owns complete native timeline editing, subtitle and text editing, creative engines and revisioned audiovisual project transfer, with independent demand-start modules.",
   "capabilities": [
     "image generation",
     "video editing",
@@ -37,7 +44,11 @@
     "outpainting",
     "expanded-canvas-mask",
     "audio.cpp-local-tts",
-    "yovoice-adapter"
+    "yovoice-adapter",
+    "native multitrack editing",
+    "native creative engines",
+    "revisioned audiovisual projects",
+    "independent demand-start modules"
   ],
   "placeholders": [
     "PROSPERO_DIR",

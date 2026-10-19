@@ -1,0 +1,25 @@
+[package]
+name = "lumiere-motion-lottie"
+description = "Lottie JSON import and export: compositions, precomps, shape/solid/null/image/text layers, keyframes with temporal and spatial easing, masks, track mattes and a few effects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-path = { workspace = true }
+lumiere-motion-text = { workspace = true }
+lumiere-motion-effects = { workspace = true }
+kurbo = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lumiere-motion-render = { workspace = true }

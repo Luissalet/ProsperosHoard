@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from .lifetime import Threads
 import time
 from typing import Any, Callable, Optional
 
@@ -190,6 +191,7 @@ class Notifier:
 
     def __init__(self, store: Store, settings: FamilySettings, hub: Any = None, *, background: bool = True):
         self.store, self.settings, self.background = store, settings, background
+        self._threads = Threads()
         self.router = fam_notify.Router(lambda: settings.get("notify.via"), None, "Prospero's Hoard", hub=hub)
         self.sent: list[dict[str, Any]] = []        # what was asked of the hub, newest last (status and tests read it)
 
@@ -213,9 +215,12 @@ class Notifier:
         dedupe = "prospero:production:failed" if kind == "failed" else f"prospero:production:{slug}:{kind}:{job['id']}"
         args = (*notice, priority, url, "production", dedupe)
         if self.background:
-            threading.Thread(target=self._deliver, args=args, daemon=True, name="prospero-notify").start()
+            self._threads.start(self._deliver, args, "prospero-notify")
         else:
             self._deliver(*args)
+
+    def close(self) -> None:
+        self._threads.close()
 
     def _deliver(self, title: str, body: str, priority: str, url: str, group: str, dedupe: str) -> None:
         try:

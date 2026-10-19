@@ -1,0 +1,29 @@
+editing_frontend/src/hoard-theme.css:789: new blank line at EOF.
+native/editing/codecbase/assets/fonts/OFL-JetBrainsMono.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/codecbase/assets/fonts/OFL-NotoSerif.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/codecbase/crates/vp9/src/spec_tables.rs:1427: new blank line at EOF.
+native/editing/edit/assets/fonts/OFL-JetBrainsMono.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/edit/assets/fonts/OFL-NotoSerif.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/edit/crates/vp9/src/spec_tables.rs:1427: new blank line at EOF.
+native/editing/motion/assets/fonts/OFL-JetBrainsMono.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/motion/assets/fonts/OFL-NotoSerif.txt:21: trailing whitespace.
++fonts, including any derivative works, can be bundled, embedded, 
+native/editing/motion/crates/effects/Cargo.toml:24: new blank line at EOF.
+prosperos_hoard/editing/analysis/speakers.py:618: new blank line at EOF.
+prosperos_hoard/editing/hoard_link/text.py:215: new blank line at EOF.
+prosperos_hoard/editing/hoard_link/ui/hoard-theme.css:829: new blank line at EOF.
+prosperos_hoard/editing/hoard_link/web/meta.py:388: new blank line at EOF.
+tasks/editing-tests.txt:13: trailing whitespace.
++E     
+tasks/editing-tests.txt:16: trailing whitespace.
++E     
+tasks/editing-tests.txt:22: trailing whitespace.
++E     
+tasks/frontend-builds.txt:83: new blank line at EOF.
+tasks/generation-tests.txt:147: trailing whitespace.
++      |   

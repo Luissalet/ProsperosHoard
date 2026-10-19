@@ -1,0 +1,18 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.3.4, pluggy-1.7.0 -- D:\LocalAI\worktrees\prospero-fisiones929\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\LocalAI\worktrees\prospero-fisiones929
+configfile: pyproject.toml
+plugins: anyio-4.15.1, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function
+collecting ... collected 1 item
+
+tests/test_studio_fusion.py::test_common_writes_preserve_native_profiles_and_compact_journal PASSED
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:40
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 1 passed, 1 warning in 0.23s =========================

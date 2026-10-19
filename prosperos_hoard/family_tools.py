@@ -34,7 +34,7 @@ def _slug(text: str) -> str:
 # ---------------------------------------------------------------- production_export_lumiere
 
 def export_to_lumiere(store: Store, *, production: str, aspect: Optional[str], timeline_id: Optional[str], lookup: exporters.Lookup,
-                      resolve_timeline: Callable[..., str], call: Callable[..., dict[str, Any]]) -> dict[str, Any]:
+                      resolve_timeline: Callable[..., str], call: Callable[..., dict[str, Any]], local_handoff=None) -> dict[str, Any]:
     """Export a production's cut (or one timeline) to files and hand it to the video editor.
 
     `resolve_timeline(timeline_id=, production=, aspect=)` is the app's own rule for which timeline a production means;
@@ -55,14 +55,17 @@ def export_to_lumiere(store: Store, *, production: str, aspect: Optional[str], t
     visual = next((t for t in timeline.get("tracks") or [] if t.get("type") == "visual"), {"clips": []})
     out: dict[str, Any] = {"ok": False, "timeline_id": tid, "clips": len(visual["clips"]), "fps": timeline.get("fps"),
                            "files": {"xml": str(xml_path), "edl": str(edl_path)}}
-    res = call("lumiere", "project_from_timeline", {"title": title, "fcpxml_path": str(xml_path)})
+    payload = {"title": title, "fcpxml_path": str(xml_path)}
+    res = (local_handoff(payload, {'timeline_id':tid,'production':production,'project_id':timeline['project_id']})
+           if local_handoff else call("lumiere", "project_from_timeline", payload))
     result = res.get("result") if isinstance(res.get("result"), dict) else {}
     if res.get("ok") and result.get("ok", True) and result.get("project_id"):
         out.update(ok=True, project_id=result["project_id"], url=result.get("url"), imported_clips=result.get("clips"),
                    skipped=result.get("skipped") or [])
     else:
         out["error"] = str(res.get("error") or result.get("error") or "the video editor did not take the cut")[:300]
-        out["hint"] = ("Open Lumiere's Hoard and try again; if it only reads some folders (LUMIERE_FILE_ROOTS), allow Prospero's data "
+        out["hint"] = ("Activa Montaje en los módulos de Prospero y vuelve a llevar el corte. Los archivos XML y EDL se conservan."
+                       if local_handoff else "Open Lumiere's Hoard and try again; if it only reads some folders (LUMIERE_FILE_ROOTS), allow Prospero's data "
                        "folder. The XML and EDL files above can also be opened in it by hand.")
     return out
 

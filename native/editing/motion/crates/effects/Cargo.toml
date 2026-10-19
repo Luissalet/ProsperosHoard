@@ -1,0 +1,24 @@
+[package]
+name = "lumiere-motion-effects"
+description = "Effect registry (specs, parameters, categories) and CPU implementations of the effects library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-geom = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-raster = { workspace = true }
+lumiere-motion-segment = { workspace = true }
+lumiere-motion-track = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+

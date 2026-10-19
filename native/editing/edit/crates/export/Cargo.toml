@@ -1,0 +1,37 @@
+[package]
+name = "lumiere-edit-export"
+description = "Export pipeline: parallel render → encode → mux, presets, progress/cancel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-render = { workspace = true }
+lumiere-edit-audio-dsp = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-text = { workspace = true }
+lumiere-edit-isobmff = { workspace = true }
+lumiere-edit-prores = { workspace = true }
+lumiere-edit-dnx = { workspace = true }
+lumiere-edit-mxf = { workspace = true }
+lumiere-edit-aac = { workspace = true }
+lumiere-edit-h264enc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true }
+web-time = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "tiff", "bmp"] }
+
+[dev-dependencies]
+lumiere-edit-testkit = { workspace = true }
+lumiere-edit-codecs = { workspace = true }

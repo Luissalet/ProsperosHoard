@@ -36,9 +36,10 @@ class WriterStalled(ProductionError):
     """The language model accepted the request and then stopped making progress."""
 
 
-def _stream_text(lines: Any, api: str) -> Any:
+def _stream_text(lines: Any, api: str, strict: bool = False) -> Any:
     """The text pieces of a streamed chat reply (Ollama NDJSON or OpenAI SSE);
     yields "" for keep-alive lines so the caller's clock still sees traffic."""
+    finish = None
     for raw in lines:
         line = (raw or "").strip()
         if not line:
@@ -56,14 +57,25 @@ def _stream_text(lines: Any, api: str) -> Any:
             continue
         data = line[5:].strip()
         if data == "[DONE]":
+            if strict and finish != 'stop':
+                raise WriterStalled('llm_incomplete', 'The global model did not complete the answer.')
             return
         try:
             obj = json.loads(data)
         except ValueError:
+            if strict:
+                raise WriterStalled('llm_incomplete', 'The global model returned an invalid stream.')
             continue
-        delta = ((obj.get("choices") or [{}])[0].get("delta") or {})
+        if strict and obj.get('error'):
+            raise WriterStalled('llm_incomplete', 'The global model returned an error.')
+        choice = (obj.get('choices') or [{}])[0]
+        if choice.get('finish_reason') is not None:
+            finish = choice['finish_reason']
+        delta = choice.get('delta') or {}
         # content only: a reasoning model's thinking must not pass for progress on the JSON
         yield str(delta.get("content") or "")
+    if strict and finish != 'stop':
+        raise WriterStalled('llm_incomplete', 'The global model interrupted the answer.')
 
 
 def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S, first_token_s: float = WRITER_FIRST_TOKEN_S,
@@ -82,8 +94,11 @@ def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S, first_token_s
 
     from .hoard_link.errors import Unavailable
     from .hoard_link.link import _ollama_endpoint, _openai_endpoint
+    from .global_model import operation
 
+    @operation
     def chat(messages: list[dict[str, Any]], max_tokens: int, temperature: float) -> str:
+        choice = backend.link.global_selection() if hasattr(backend.link, 'global_selection') else None
         res = backend.link.sync.resolve("llm")
         if not res.resolved or not res.url:
             raise Unavailable("llm", (res.details or {}).get("reasons") or [res.reason or "no language model"])
@@ -96,6 +111,9 @@ def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S, first_token_s
             payload = {"model": res.model, "messages": messages, "stream": True, "max_tokens": max_tokens,
                        "temperature": temperature, "chat_template_kwargs": {"enable_thinking": False},
                        "reasoning_budget": 0}
+        if choice is not None:
+            from .global_model import payload as pinned_payload
+            url, payload = choice['url'], pinned_payload(payload, choice)
         started = time.monotonic()
         last = None  # time of the last piece of text
         parts: list[str] = []
@@ -116,10 +134,10 @@ def writer_chat(backend: Any, timeout_s: float = WRITER_TIMEOUT_S, first_token_s
         # (prompt processing stuck) trips it without a byte arriving
         read_timeout = max(5.0, first_token_s, stall_s)
         try:
-            with httpx.stream("POST", url, json=payload,
+            with httpx.stream("POST", url, json=payload, headers=choice['headers'] if choice else {},
                               timeout=httpx.Timeout(timeout_s, connect=10.0, read=read_timeout)) as r:
                 r.raise_for_status()
-                for piece in _stream_text(r.iter_lines(), res.api):
+                for piece in _stream_text(r.iter_lines(), res.api, strict=choice is not None):
                     now = time.monotonic()
                     if piece:
                         parts.append(piece)

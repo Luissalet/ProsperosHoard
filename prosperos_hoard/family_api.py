@@ -271,7 +271,8 @@ def install(app: FastAPI, ctx: Context, app_id: str = "prospero") -> None:
         def run():
             return family_tools.export_to_lumiere(
                 store, production=body.production, aspect=body.aspect, timeline_id=body.timeline_id, lookup=ctx.export_lookup,
-                resolve_timeline=ctx.resolve_timeline, call=lambda *a, **k: family.call(*a, **k))
+                resolve_timeline=ctx.resolve_timeline, call=lambda *a, **k: family.call(*a, **k),
+                local_handoff=getattr(app.state, 'editing_handoff', None))
         return ctx.agent("production_export_lumiere", body.production[:80], run)
 
     @app.post(PREFIX + "cast_import_character")

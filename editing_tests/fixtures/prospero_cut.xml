@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+<sequence id="sequence-1"><name>Mi corte</name><duration>216</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate>
+<timecode><string>00:00:00:00</string><frame>0</frame><displayformat>NDF</displayformat><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate></timecode>
+<media><video><format><samplecharacteristics><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><width>1280</width><height>720</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format><track>
+<clipitem id="clipitem-1"><name>shot one.mp4</name><duration>288</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><start>0</start><end>72</end><in>24</in><out>96</out><file id="file-a1"><name>shot one.mp4</name><pathurl>file://localhost@MEDIA@/shot%20one.mp4</pathurl><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><duration>288</duration><media><video><samplecharacteristics><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><width>1280</width><height>720</height></samplecharacteristics></video></media></file></clipitem>
+<clipitem id="clipitem-2"><name>shot two.mp4</name><duration>144</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><start>72</start><end>132</end><in>0</in><out>60</out><file id="file-a2"><name>shot two.mp4</name><pathurl>file://localhost@MEDIA@/shot%20two.mp4</pathurl><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><duration>144</duration><media><video><samplecharacteristics><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><width>1280</width><height>720</height></samplecharacteristics></video></media></file></clipitem>
+<clipitem id="clipitem-3"><name>still.png</name><duration>48</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><start>132</start><end>180</end><in>0</in><out>48</out><file id="file-a3"><name>still.png</name><pathurl>file://localhost@MEDIA@/still.png</pathurl><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><media><video><samplecharacteristics><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><width>800</width><height>600</height></samplecharacteristics></video></media></file></clipitem>
+<clipitem id="clipitem-4"><name>shot one.mp4</name><duration>288</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><start>180</start><end>216</end><in>144</in><out>180</out><file id="file-a1"/></clipitem>
+</track></video><audio><track>
+<clipitem id="clipitem-audio"><name>Ana&#x27;s song.wav</name><duration>480</duration><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><start>0</start><end>216</end><in>0</in><out>216</out><file id="file-song"><name>Ana&#x27;s song.wav</name><pathurl>file://localhost@MEDIA@/Ana%27s%20song.wav</pathurl><rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate><duration>480</duration><media><audio><channelcount>2</channelcount></audio></media></file><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack></clipitem>
+</track></audio></media>
+<marker><name>first line</name><comment></comment><in>12</in><out>-1</out></marker>
+<marker><name>second &lt;line&gt; &amp; more</name><comment></comment><in>96</in><out>-1</out></marker>
+</sequence></xmeml>

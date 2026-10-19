@@ -1,0 +1,25 @@
+[package]
+name = "lumiere-motion-interchange"
+description = "Premiere Pro interop through timeline interchange: Final Cut Pro 7 XML (xmeml), FCPXML, OpenTimelineIO and CMX 3600 EDL sequences to and from compositions (via lumiere-codecbase-interchange)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-codecbase-interchange = { workspace = true }
+lumiere-codecbase-project = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-time = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

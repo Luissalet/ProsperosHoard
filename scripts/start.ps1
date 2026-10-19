@@ -70,26 +70,21 @@ if ($installed -ne $LockHash) {
     Set-Content -LiteralPath $Stamp -Value $LockHash -Encoding ascii
 }
 
-$Dist = Join-Path $Root "frontend\dist\index.html"
-$needBuild = -not (Test-Path -LiteralPath $Dist)
-if (-not $needBuild) {
-    $built = (Get-Item -LiteralPath $Dist).LastWriteTimeUtc
-    $newest = Get-ChildItem -LiteralPath (Join-Path $Root "frontend\src") -Recurse -File |
-        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    if ($newest -and $newest.LastWriteTimeUtc -gt $built) { $needBuild = $true }
+$needBuild = $false
+foreach ($view in @(@("frontend", "frontend\dist\index.html"), @("editing_frontend", "prosperos_hoard\editing\static\index.html"))) {
+    $dist = Join-Path $Root $view[1]
+    if (-not (Test-Path -LiteralPath $dist)) { $needBuild = $true; continue }
+    $built = (Get-Item -LiteralPath $dist).LastWriteTimeUtc
+    $sources = @(Get-ChildItem -LiteralPath (Join-Path $Root ($view[0] + "\src")) -Recurse -File)
+    $sources += @(Get-ChildItem -LiteralPath (Join-Path $Root $view[0]) -File)
+    if ($sources | Where-Object { $_.LastWriteTimeUtc -gt $built }) { $needBuild = $true }
 }
+if (-not (Test-Path -LiteralPath (Join-Path $Root "prosperos_hoard\studio_ui\fonts\cinzel-latin-400-normal.woff2"))) { $needBuild = $true }
 if ($needBuild) {
     if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
-        Write-Host "Building the interface (npm ci && npm run build)..."
-        Push-Location -LiteralPath (Join-Path $Root "frontend")
-        try {
-            # npm.cmd, not npm: Node 22's npm.ps1 shim misreads "& npm ci" as
-            # "pm ci" when invoked this way from Windows PowerShell.
-            & npm.cmd ci
-            if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-            & npm.cmd run build
-            if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
-        } finally { Pop-Location }
+        Write-Host "Building both native interfaces and shared fonts..."
+        & $VenvPython (Join-Path $Root "scripts\build_studio_assets.py")
+        if ($LASTEXITCODE -ne 0) { throw "Studio asset build failed" }
     } else {
         Write-Warning "npm (Node 22) was not found: the API will run, but the interface cannot be built."
     }

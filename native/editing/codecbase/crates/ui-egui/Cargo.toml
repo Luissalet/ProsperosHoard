@@ -1,0 +1,44 @@
+[package]
+name = "lumiere-codecbase-ui-egui"
+description = "The Lumiere Edit egui frontend (swappable): panels, docking, timeline, monitors, control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-codecbase-time = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-frame = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-project = { workspace = true }
+lumiere-codecbase-edit = { workspace = true }
+lumiere-codecbase-render = { workspace = true }
+lumiere-codecbase-text = { workspace = true }
+lumiere-codecbase-audio-dsp = { workspace = true }
+lumiere-codecbase-engine = { workspace = true }
+lumiere-codecbase-gpu = { workspace = true }
+lumiere-codecbase-scopes = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+web-time = "1"
+# ArtCraft wordmark (PNG) for the About dialog and Home screen.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Thread/process CPU clocks for frame-job profiling (safe wrappers; see frames.rs).
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "time"] }
+
+[dev-dependencies]
+pollster = "0.4"
+lumiere-codecbase-codecs = { workspace = true }
+lumiere-codecbase-interchange = { workspace = true }
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }

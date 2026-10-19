@@ -1,0 +1,185 @@
+...........................................FF...F....................... [ 17%]
+.......................F..sssssss....................................... [ 35%]
+....F...............................F............F...................... [ 53%]
+........................................................................ [ 70%]
+.............FF......................................................... [ 88%]
+.................................FFFFFF.....F..                          [100%]
+================================== FAILURES ===================================
+____________________ test_no_banned_words_in_product_files ____________________
+editing_tests\test_api.py:46: in test_no_banned_words_in_product_files
+    assert w not in text, (f.name, w)
+E   AssertionError: ('README.md', 'openai')
+E   assert 'openai' not in '<img src="a...led model.\n'
+E     
+E     'openai' is contained here:
+E        optional openai-whisper for speech-to-text), installed on request, never silently; a voice library from an uploaded sample (loudness normalisation, silence trim, an snr/clipping quality check, an automatic reference transcript, named presets); transcription and short-clip dictation with word timestamps and srt/vtt/txt export; audiobook narration from text or a `.txt`/`.md`/`.epub` file as a resumable background job (per-chapter files, mp3 or m4b with chapter markers, an aligned srt/lrc); video dubbing (extract audio, transcribe with timestamps, translate segme...
+E     
+E     ...Full output truncated (877 lines hidden), use '-vv' to show
+________________________ test_manifest_matches_the_app ________________________
+editing_tests\test_api.py:51: in test_manifest_matches_the_app
+    assert m["id"] == "lumiere" and m["app"]["health"]["expect"]["service"] == "lumiere-hoard"
+E   AssertionError: assert ('prospero' == 'lumiere'
+E     
+E     - lumiere
+E     + prospero)
+__________________________ test_package_json_scripts __________________________
+editing_tests\test_api.py:112: in test_package_json_scripts
+    pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\package.json'
+_________ test_incorporated_discovery_ignores_external_configuration __________
+editing_tests\test_creative_engines.py:30: in test_incorporated_discovery_ignores_external_configuration
+    assert engines.executable("motion")==binary
+E   AssertionError: assert None == WindowsPath('C:/Users/luism/AppData/Local/Temp/pytest-of-luism/pytest-11634/test_incorporated_discovery_ig0/product/native/bin/lumiere-compositor.exe')
+E    +  where None = executable('motion')
+E    +    where executable = <prosperos_hoard.editing.creative_engines.CreativeEngines object at 0x000001518C1D6F90>.executable
+_ test_every_event_the_code_sends_is_in_the_contract_and_in_the_instructions __
+editing_tests\test_family.py:211: in test_every_event_the_code_sends_is_in_the_contract_and_in_the_instructions
+    assert sent and sent <= set(family_events.EMITS), sent - set(family_events.EMITS)
+E   AssertionError: set()
+E   assert (set())
+_ test_storyboard_reports_actual_source_bytes_changed_outside_saved_revision __
+editing_tests\test_html_motion.py:156: in test_storyboard_reports_actual_source_bytes_changed_outside_saved_revision
+    result=store.storyboard(saved['id'],[0])
+prosperos_hoard\editing\html_motion.py:265: in storyboard
+    with HtmlFrameWorker(worker_manifest) as worker:
+prosperos_hoard\editing\html_motion.py:61: in __enter__
+    self._receive()
+prosperos_hoard\editing\html_motion.py:74: in _receive
+    raise LumiereError("HTML frame did not finish within the configured frame timeout.", code="html_motion_timeout")
+E   prosperos_hoard.editing.errors.LumiereError: HTML frame did not finish within the configured frame timeout.
+______________ test_cancel_unresolved_seek_releases_render_lane _______________
+editing_tests\test_html_motion.py:310: in test_cancel_unresolved_seek_releases_render_lane
+    assert time.monotonic() - started < 4
+E   assert (4848.2825581 - 4843.9998442) < 4
+E    +  where 4848.2825581 = <built-in function monotonic>()
+E    +    where <built-in function monotonic> = time.monotonic
+________________ test_preview_strings_exist_in_both_languages _________________
+editing_tests\test_preview.py:133: in test_preview_strings_exist_in_both_languages
+    text = (ROOT / "client" / "src" / "i18n.js").read_text(encoding="utf-8")
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\client\\src\\i18n.js'
+______________ test_the_preview_check_script_stays_out_of_pytest ______________
+editing_tests\test_preview.py:141: in test_the_preview_check_script_stays_out_of_pytest
+    assert script.exists() and not script.name.startswith("test_")
+E   AssertionError: assert (False)
+E    +  where False = exists()
+E    +    where exists = WindowsPath('D:/LocalAI/worktrees/prospero-fisiones929/scripts/preview_check.py').exists
+_______________ test_the_studios_xml_becomes_a_project_exactly ________________
+editing_tests\test_timeline_import.py:69: in test_the_studios_xml_becomes_a_project_exactly
+    xml = write_fixture(folder, "prospero_cut.xml")
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.xml'
+_________________ test_the_studios_edl_gives_the_same_project _________________
+editing_tests\test_timeline_import.py:78: in test_the_studios_edl_gives_the_same_project
+    edl = write_fixture(folder, "prospero_cut.edl")
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.edl'
+_____________ test_the_edl_files_are_found_by_name_in_media_dirs ______________
+editing_tests\test_timeline_import.py:86: in test_the_edl_files_are_found_by_name_in_media_dirs
+    edl = write_fixture(folder, "prospero_cut.edl")
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.edl'
+_______________ test_an_xml_whose_files_moved_still_finds_them ________________
+editing_tests\test_timeline_import.py:99: in test_an_xml_whose_files_moved_still_finds_them
+    xml = write_fixture(folder, "prospero_cut.xml")
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.xml'
+_______ test_a_missing_file_is_skipped_and_listed_and_the_rest_arrives ________
+editing_tests\test_timeline_import.py:109: in test_a_missing_file_is_skipped_and_listed_and_the_rest_arrives
+    res = timeline_import.project_from_timeline(services, fcpxml_path=str(write_fixture(folder, "prospero_cut.xml")))
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.xml'
+________ test_an_unreadable_media_is_reported_without_losing_the_rest _________
+editing_tests\test_timeline_import.py:123: in test_an_unreadable_media_is_reported_without_losing_the_rest
+    result=timeline_import.project_from_timeline(services,fcpxml_path=str(write_fixture(folder,'prospero_cut.xml')))
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.xml'
+______________________ test_the_tool_and_the_http_route _______________________
+editing_tests\test_timeline_import.py:200: in test_the_tool_and_the_http_route
+    xml = write_fixture(folder, "prospero_cut.xml")
+editing_tests\test_timeline_import.py:42: in write_fixture
+    text = (FIX / name).read_text(encoding="utf-8").replace("@MEDIA@", quoted_folder(folder))
+C:\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+C:\Python313\Lib\pathlib\_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktrees\\prospero-fisiones929\\tests\\fixtures\\prospero_cut.xml'
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:40
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED editing_tests/test_api.py::test_no_banned_words_in_product_files - Ass...
+FAILED editing_tests/test_api.py::test_manifest_matches_the_app - AssertionEr...
+FAILED editing_tests/test_api.py::test_package_json_scripts - FileNotFoundErr...
+FAILED editing_tests/test_creative_engines.py::test_incorporated_discovery_ignores_external_configuration
+FAILED editing_tests/test_family.py::test_every_event_the_code_sends_is_in_the_contract_and_in_the_instructions
+FAILED editing_tests/test_html_motion.py::test_storyboard_reports_actual_source_bytes_changed_outside_saved_revision
+FAILED editing_tests/test_html_motion.py::test_cancel_unresolved_seek_releases_render_lane
+FAILED editing_tests/test_preview.py::test_preview_strings_exist_in_both_languages
+FAILED editing_tests/test_preview.py::test_the_preview_check_script_stays_out_of_pytest
+FAILED editing_tests/test_timeline_import.py::test_the_studios_xml_becomes_a_project_exactly
+FAILED editing_tests/test_timeline_import.py::test_the_studios_edl_gives_the_same_project
+FAILED editing_tests/test_timeline_import.py::test_the_edl_files_are_found_by_name_in_media_dirs
+FAILED editing_tests/test_timeline_import.py::test_an_xml_whose_files_moved_still_finds_them
+FAILED editing_tests/test_timeline_import.py::test_a_missing_file_is_skipped_and_listed_and_the_rest_arrives
+FAILED editing_tests/test_timeline_import.py::test_an_unreadable_media_is_reported_without_losing_the_rest
+FAILED editing_tests/test_timeline_import.py::test_the_tool_and_the_http_route
+16 failed, 384 passed, 8 skipped, 1 warning in 1272.07s (0:21:12)

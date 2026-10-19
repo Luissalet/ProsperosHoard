@@ -1,0 +1,26 @@
+[package]
+name = "lumiere-codecbase-gpu"
+description = "wgpu compositor: YUV/RGB layer sampling, linear-light premultiplied compositing in WGSL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-frame = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-render = { workspace = true }
+wgpu = { version = "30", default-features = false, features = ["wgsl"] }
+log = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+pollster = "0.4"
+wgpu = { version = "30", features = ["wgsl", "metal", "vulkan", "dx12", "gles"] }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-project = { workspace = true }
+lumiere-codecbase-time = { workspace = true }

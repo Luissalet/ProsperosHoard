@@ -1,0 +1,20 @@
+[package]
+name = "lumiere-motion-automation"
+description = "Lumiere Motion MCP server (JSON-RPC 2.0 over stdio) over a headless session or bridged to the running app's control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-engine = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+lumiere-motion-script = { workspace = true }
+lumiere-motion-host = { workspace = true }

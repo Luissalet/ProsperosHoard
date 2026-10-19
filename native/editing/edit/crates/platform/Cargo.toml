@@ -1,0 +1,40 @@
+[package]
+name = "lumiere-edit-platform"
+description = "OS media integration: hardware video decoding through the operating system's codecs (VideoToolbox on macOS), with transparent fallback to the pure-Rust decoders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The one crate allowed to contain `unsafe` (OS media FFI; AGENTS.md §0.3, docs/adr/0001-platform-ffi.md).
+# The workspace lints, except that `unsafe_code` is `deny` instead of `forbid`: only the FFI modules
+# opt in with `#[allow(unsafe_code)]`, and every `unsafe` block carries a `// SAFETY:` comment.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+undocumented_unsafe_blocks = "deny"
+
+[dependencies]
+lumiere-edit-codecs = { workspace = true }
+lumiere-edit-isobmff = { workspace = true }
+log = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-time = { workspace = true }
+objc2-core-foundation = "0.3.2"
+objc2-core-media = "0.3.2"
+objc2-core-video = "0.3.2"
+objc2-video-toolbox = "0.3.2"
+
+[dev-dependencies]
+lumiere-edit-testkit = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-frame = { workspace = true }

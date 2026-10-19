@@ -1,0 +1,25 @@
+.......................................................................F [ 91%]
+.......                                                                  [100%]
+================================== FAILURES ===================================
+__________ test_a_lumiere_that_is_away_leaves_the_files_and_says_why __________
+tests\test_family.py:532: in test_a_lumiere_that_is_away_leaves_the_files_and_says_why
+    assert r.status_code == 200 and body["ok"] is False and "hub not reachable" in body["error"] and "LUMIERE_FILE_ROOTS" in body["hint"]
+E   AssertionError: assert (200 == 200 and False is False and 'hub not reachable' in 'hub not reachable' and 'LUMIERE_FILE_ROOTS' in 'The editor is unavailable; the XML and EDL files above are still available.')
+E    +  where 200 = <Response [200 OK]>.status_code
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:40
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_shutdown.py::test_app_shutdown_leaves_no_thread_alive
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_shutdown.py::test_app_shutdown_leaves_no_thread_alive
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_family.py::test_a_lumiere_that_is_away_leaves_the_files_and_says_why
+1 failed, 78 passed, 3 warnings in 56.30s

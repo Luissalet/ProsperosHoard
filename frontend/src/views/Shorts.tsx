@@ -207,7 +207,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
           <div className="row wrap">
             {Object.entries(animatic.renders).map(([aspect, id]) => (
               <div key={aspect} className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
-                <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+                <video src={fileUrl(id)} controls preload="metadata" poster={`/generation/api/assets/${id}/thumb`} />
               </div>
             ))}
           </div>
@@ -223,7 +223,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
                 <div key={aspect} className="stack" style={{ gap: 4 }}>
                   <span className="small muted">{aspect}</span>
                   <div className="video-frame" style={{ width: aspect === "16:9" ? 380 : 220 }}>
-                    <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+                    <video src={fileUrl(id)} controls preload="metadata" poster={`/generation/api/assets/${id}/thumb`} />
                   </div>
                 </div>
               ) : null;
@@ -251,7 +251,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
               const shown = clips[shot.key] || item?.asset_id;
               return (
                 <button key={shot.key} className="tile" title={item?.ref || shot.key} onClick={() => shown && app.openAsset(shown)}>
-                  {shown ? <img src={`/api/assets/${shown}/thumb`} alt="" loading="lazy" /> : <div className="media-icon"><Clapperboard size={22} /></div>}
+                  {shown ? <img src={`/generation/api/assets/${shown}/thumb`} alt="" loading="lazy" /> : <div className="media-icon"><Clapperboard size={22} /></div>}
                   <div className="tile-badges">
                     <span className="pill badge-dark">{shot.key}</span>
                     {item && <span className="pill badge-dark">{t(item.source === "stock" ? "sourceStockBadge" : "sourceGeneratedBadge")}</span>}

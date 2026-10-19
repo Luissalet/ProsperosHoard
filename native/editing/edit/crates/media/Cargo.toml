@@ -1,0 +1,19 @@
+[package]
+name = "lumiere-edit-media"
+description = "Media sources: probing, decoding traits, frame cache, generators, stills"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp"] }

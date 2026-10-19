@@ -1,0 +1,14 @@
+[
+  {
+    "engine": "motion",
+    "binary": "lumiere-compositor.exe",
+    "sha256": "3472d49e54fa618507fdc1f43f15d8b4dab8c7f1ee1b7d79a2fb4dbf437f7a61",
+    "lock_sha256": "3ebfb65cf8ed28df55372db5a7facd9d0b490241b089ca138faf7aa2cc0fce55"
+  },
+  {
+    "engine": "edit",
+    "binary": "lumiere-editor.exe",
+    "sha256": "6821d5b9fe63e15fabd5bec5bf871ef1b3f53f12e13bf6e49c7d7ff20f5feb07",
+    "lock_sha256": "f1ceeb813cba010c3d975f1604186e958ce24cf5771d1835df297a3fd76d8d59"
+  }
+]

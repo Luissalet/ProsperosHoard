@@ -1,0 +1,15 @@
+[package]
+name = "lumiere-motion-raster"
+description = "f32 premultiplied RGBA images: sampling, projective warps, blurs, convolution, compositing (rayon-parallel)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-geom = { workspace = true }
+lumiere-motion-color = { workspace = true }
+rayon = { workspace = true }

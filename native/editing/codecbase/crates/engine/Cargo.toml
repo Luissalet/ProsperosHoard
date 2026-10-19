@@ -1,0 +1,46 @@
+[package]
+name = "lumiere-codecbase-engine"
+description = "Lumiere Edit engine façade: session, command registry, history, media pool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Speech-to-text with Whisper (candle, CPU). Off by default and in wasm builds.
+whisper = ["lumiere-codecbase-speech/whisper"]
+# Speech-model downloads over HTTPS.
+speech-download = ["lumiere-codecbase-speech/download"]
+
+[dependencies]
+lumiere-codecbase-time = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-frame = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-codecs = { workspace = true }
+lumiere-codecbase-project = { workspace = true }
+lumiere-codecbase-edit = { workspace = true }
+lumiere-codecbase-render = { workspace = true }
+lumiere-codecbase-scopes = { workspace = true }
+lumiere-codecbase-text = { workspace = true }
+lumiere-codecbase-audio-dsp = { workspace = true }
+lumiere-codecbase-export = { workspace = true }
+lumiere-codecbase-mxf = { workspace = true }
+lumiere-codecbase-format = { workspace = true }
+lumiere-codecbase-interchange = { workspace = true }
+lumiere-codecbase-captions = { workspace = true }
+lumiere-codecbase-speech = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+web-time = "1"
+
+[dev-dependencies]
+lumiere-codecbase-testkit = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -1,0 +1,28 @@
+[package]
+name = "lumiere-motion-render"
+description = "The CPU compositor: property evaluation, layer sources (solids, footage, text, shapes, precomps), masks, effects, track mattes, 2D/3D transforms, motion blur and blending"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-geom = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-raster = { workspace = true }
+lumiere-motion-path = { workspace = true }
+lumiere-motion-text = { workspace = true }
+lumiere-motion-effects = { workspace = true }
+lz4_flex = { version = "0.11", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
+lumiere-motion-model = { workspace = true }
+kurbo = { workspace = true }
+rayon = { workspace = true }
+web-time = { workspace = true }
+serde = { workspace = true }
+log = { workspace = true }

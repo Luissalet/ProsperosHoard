@@ -1,0 +1,195 @@
+........................................................................ [  7%]
+........................................................................ [ 14%]
+........................................................................ [ 21%]
+........................................................................ [ 28%]
+........................................................................ [ 35%]
+........................................................................ [ 42%]
+....................................................................F... [ 49%]
+........................................................................ [ 56%]
+........................................................................ [ 63%]
+........................................................................ [ 70%]
+.....................................................s.s..s............. [ 77%]
+........F...F........................................................... [ 84%]
+........................................................................ [ 91%]
+........................................................................ [ 98%]
+............                                                             [100%]
+================================== FAILURES ===================================
+________________________ test_mcp_protocol_end_to_end _________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\runner.py", line 341, in from_call
+  |     result: TResult | None = func()
+  |                              ~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\runner.py", line 242, in <lambda>
+  |     lambda: runtest_hook(item=item, **kwds), when=when, reraise=reraise
+  |             ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_caller.py", line 197, in __call__
+  |     return self._hookexec(
+  |            ~~~~~~~~~~~~~~^
+  |         self.name, self._hookimpls.copy(), call_kwargs, firstresult
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     )
+  |     ^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_manager.py", line 183, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |            ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 195, in _multicall
+  |     raise exception
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\threadexception.py", line 92, in pytest_runtest_call
+  |     yield from thread_exception_runtest_hook()
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\threadexception.py", line 68, in thread_exception_runtest_hook
+  |     yield
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\unraisableexception.py", line 95, in pytest_runtest_call
+  |     yield from unraisable_exception_runtest_hook()
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\unraisableexception.py", line 70, in unraisable_exception_runtest_hook
+  |     yield
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\logging.py", line 846, in pytest_runtest_call
+  |     yield from self._runtest_for(item, "call")
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\logging.py", line 829, in _runtest_for
+  |     yield
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\capture.py", line 880, in pytest_runtest_call
+  |     return (yield)
+  |             ^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\skipping.py", line 257, in pytest_runtest_call
+  |     return (yield)
+  |             ^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 147, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\runner.py", line 174, in pytest_runtest_call
+  |     item.runtest()
+  |     ~~~~~~~~~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pytest_asyncio\plugin.py", line 533, in runtest
+  |     super().runtest()
+  |     ~~~~~~~~~~~~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\python.py", line 1627, in runtest
+  |     self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+  |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_caller.py", line 197, in __call__
+  |     return self._hookexec(
+  |            ~~~~~~~~~~~~~~^
+  |         self.name, self._hookimpls.copy(), call_kwargs, firstresult
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     )
+  |     ^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_manager.py", line 183, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |            ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 195, in _multicall
+  |     raise exception
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 64, in run_old_style_hookwrapper
+  |     return result.get_result()
+  |            ~~~~~~~~~~~~~~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_result.py", line 103, in get_result
+  |     raise exc.with_traceback(tb)
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 49, in run_old_style_hookwrapper
+  |     res = yield
+  |           ^^^^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pluggy\_execution.py", line 147, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\_pytest\python.py", line 159, in pytest_pyfunc_call
+  |     result = testfunction(**testargs)
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\pytest_asyncio\plugin.py", line 1026, in inner
+  |     _loop.run_until_complete(task)
+  |     ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "C:\Python313\Lib\asyncio\base_events.py", line 725, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\tests\test_mcp.py", line 72, in test_mcp_protocol_end_to_end
+  |     async with stdio_client(params) as (read, write):
+  |                ~~~~~~~~~~~~^^^^^^^^
+  |   File "C:\Python313\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\mcp\client\stdio\__init__.py", line 173, in stdio_client
+  |     anyio.create_task_group() as tg,
+  |     ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\mcp\client\stdio\__init__.py", line 179, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\LocalAI\worktrees\prospero-fisiones929\tests\test_mcp.py", line 73, in test_mcp_protocol_end_to_end
+    |     async with ClientSession(read, write) as session:
+    |                ~~~~~~~~~~~~~^^^^^^^^^^^^^
+    |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\mcp\shared\session.py", line 218, in __aexit__
+    |     return await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\LocalAI\worktrees\prospero-fisiones929\tests\test_mcp.py", line 92, in test_mcp_protocol_end_to_end
+      |     assert expected <= set(by_name)
+      | AssertionError: assert {'cast_import...nimatic', ...} <= {'audiovisual...abilize', ...}
+      |   
+      |   Extra items in the left set:
+      |   'studio_production_cast'
+      |   'studio_production_lyrics'
+      +------------------------------------
+---------------------------- Captured stderr call -----------------------------
+Processing request of type ListToolsRequest
+
+_______________ test_cold_import_has_no_native_engines_or_store _______________
+tests\test_studio_fusion.py:28: in test_cold_import_has_no_native_engines_or_store
+    subprocess.run([sys.executable, '-c', code, str(tmp_path / 'cold')], check=True)
+C:\Python313\Lib\subprocess.py:577: in run
+    raise CalledProcessError(retcode, process.args,
+E   subprocess.CalledProcessError: Command '['D:\\LocalAI\\worktrees\\prospero-fisiones929\\.venv\\Scripts\\python.exe', '-c', "\nfrom pathlib import Path\nimport sys\nfrom prosperos_hoard.studio import Studio\ns = Studio(Path(sys.argv[1]))\nassert len(s.tools) == 165\nassert all(m.phase == 'off' for m in s.modules.values())\nassert 'prosperos_hoard.api' not in sys.modules\nassert 'prosperos_hoard.editing.main' not in sys.modules\nassert not Path(sys.argv[1]).exists()\n", 'C:\\Users\\luism\\AppData\\Local\\Temp\\pytest-of-luism\\pytest-11635\\test_cold_import_has_no_native0\\cold']' returned non-zero exit status 1.
+---------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+
+  File "<string>", line 6, in <module>
+
+    assert len(s.tools) == 165
+
+           ^^^^^^^^^^^^^^^^^^^
+
+AssertionError
+
+___________ test_http_discovery_and_projects_do_not_enable_modules ____________
+tests\test_studio_fusion.py:92: in test_http_discovery_and_projects_do_not_enable_modules
+    assert len((await client.get('/api/agent/tools')).json()['tools']) == 166
+E   AssertionError: assert 166 == 165
+E    +  where 166 = len([{'annotations': {'readOnlyHint': False}, 'description': 'Add a cast member that another app describes / importar pers...: 0, 'title': 'Wait S', 'type': 'number'}}, 'required': ['reason'], 'type': 'object'}, 'name': 'studio_animatic'}, ...])
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:40
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_agent_accountability.py::test_a_write_without_a_reason_is_refused_with_a_hint
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_agent_accountability.py::test_a_write_without_a_reason_is_refused_with_a_hint
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_mcp.py::test_mcp_protocol_end_to_end - ExceptionGroup: unha...
+FAILED tests/test_studio_fusion.py::test_cold_import_has_no_native_engines_or_store
+FAILED tests/test_studio_fusion.py::test_http_discovery_and_projects_do_not_enable_modules
+3 failed, 1014 passed, 3 skipped, 2 deselected, 3 warnings in 1431.71s (0:23:51)

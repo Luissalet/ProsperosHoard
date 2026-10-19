@@ -1,0 +1,27 @@
+[package]
+name = "lumiere-motion-script"
+description = "Lumiere Motion scripting: JavaScript (boa) with an After Effects-style object model (app, project, CompItem, Layer, Property…) over the engine's undoable commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-engine = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-time = { workspace = true }
+lumiere-motion-render = { workspace = true }
+lumiere-motion-path = { workspace = true }
+serde_json = { workspace = true }
+boa_engine = { workspace = true }
+
+# On the web, boa's clock and Math.random need the browser (getrandom `wasm_js`, web-time).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+boa_engine = { workspace = true, features = ["js"] }
+
+[dev-dependencies]
+lumiere-motion-expr = { workspace = true }

@@ -12,3 +12,12 @@ frontend/tsconfig.tsbuildinfo
 test-results/
 .DS_Store
 *.egg-info/
+editing_frontend/node_modules/
+editing_frontend/dist/
+editing_tests/__pycache__/
+prosperos_hoard/editing/static/
+native/editing/bin/
+native/editing/**/target/
+native/editing/.build/
+prosperos_hoard/studio_ui/fonts/
+tasks/qa-data/

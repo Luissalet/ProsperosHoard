@@ -1,0 +1,26 @@
+[package]
+name = "lumiere-edit-gpu"
+description = "wgpu compositor: YUV/RGB layer sampling, linear-light premultiplied compositing in WGSL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-render = { workspace = true }
+wgpu = { version = "30", default-features = false, features = ["wgsl"] }
+log = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+pollster = "0.4"
+wgpu = { version = "30", features = ["wgsl", "metal", "vulkan", "dx12", "gles"] }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-time = { workspace = true }

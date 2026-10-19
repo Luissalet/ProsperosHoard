@@ -693,7 +693,7 @@ function TakesTab({ character, threshold, onChanged }: { character: Character; t
             const idOk = tk.identity != null && tk.identity >= threshold;
             return (
               <div key={tk.asset_id} className="tile" style={{ cursor: "default" }}>
-                <img src={`/api/assets/${tk.asset_id}/thumb`} alt="" loading="lazy" onClick={() => app.openAsset(tk.asset_id)} style={{ cursor: "zoom-in" }} />
+                <img src={`/generation/api/assets/${tk.asset_id}/thumb`} alt="" loading="lazy" onClick={() => app.openAsset(tk.asset_id)} style={{ cursor: "zoom-in" }} />
                 <div className="tile-badges">
                   <span className="pill badge-dark">{t("kitTakeOf", { n: tk.take, m: tk.takes_in_shot })}</span>
                   {tk.identity != null && (

@@ -1,0 +1,20 @@
+[package]
+name = "lumiere-edit-format"
+description = "Lumiere Edit .lumedit files: schema versions + migrations, atomic saves, auto-save naming and rotation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-project = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-media = { workspace = true }

@@ -1176,384 +1176,384 @@ export interface CinemaGuide {
   items: CinemaEntry[];
 }
 
-export const fileUrl = (id: string) => `/api/assets/${id}/file`;
+export const fileUrl = (id: string) => `/generation/api/assets/${id}/file`;
 export const thumbUrl = (a: Pick<Asset, "id" | "thumb_path" | "kind">) =>
-  a.thumb_path ? `/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
+  a.thumb_path ? `/generation/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
 
 export const api = {
-  health: () => request<{ service: string; version: string; demo: boolean; active_jobs: number }>("GET", "/api/health"),
-  projects: () => request<Paged<Project>>("GET", "/api/projects"),
-  createProject: (name: string, brief?: string) => request<Project>("POST", "/api/projects", { name, brief }),
-  project: (id: string) => request<Project>("GET", `/api/projects/${id}`),
+  health: () => request<{ service: string; version: string; demo: boolean; active_jobs: number }>("GET", "/generation/api/health"),
+  projects: () => request<Paged<Project>>("GET", "/generation/api/projects"),
+  createProject: (name: string, brief?: string) => request<Project>("POST", "/generation/api/projects", { name, brief }),
+  project: (id: string) => request<Project>("GET", `/generation/api/projects/${id}`),
   projectDeletePreview: (id: string) => request<{ id: string; name: string; counts: Record<string, number>;
     productions: { slug: string; name: string | null; status: string }[]; live_jobs: { id: string; type: string; state: string }[] }>(
-    "GET", `/api/projects/${id}/delete-preview`),
-  deleteProject: (id: string) => request<{ id: string; productions: string[] }>("DELETE", `/api/projects/${id}`),
-  restoreProject: (id: string) => request<{ id: string; productions: string[] }>("POST", `/api/projects/${id}/restore`),
+    "GET", `/generation/api/projects/${id}/delete-preview`),
+  deleteProject: (id: string) => request<{ id: string; productions: string[] }>("DELETE", `/generation/api/projects/${id}`),
+  restoreProject: (id: string) => request<{ id: string; productions: string[] }>("POST", `/generation/api/projects/${id}/restore`),
   purgeProject: (id: string) => request<{ id: string; assets: number; files_deleted: number; productions_deleted: number }>(
-    "POST", `/api/projects/${id}/purge`),
-  projectTrash: () => request<{ items: TrashedProject[] }>("GET", "/api/trash/projects"),
+    "POST", `/generation/api/projects/${id}/purge`),
+  projectTrash: () => request<{ items: TrashedProject[] }>("GET", "/generation/api/trash/projects"),
   updateProject: (id: string, patch: Partial<Pick<Project, "name" | "brief" | "cover_asset_id">>) =>
-    request<Project>("PATCH", `/api/projects/${id}`, patch),
+    request<Project>("PATCH", `/generation/api/projects/${id}`, patch),
 
-  characters: (pid: string) => request<{ items: Character[] }>("GET", `/api/projects/${pid}/characters`),
+  characters: (pid: string) => request<{ items: Character[] }>("GET", `/generation/api/projects/${pid}/characters`),
   createCharacter: (pid: string, name: string, fields: Partial<Character>) =>
-    request<Character>("POST", `/api/projects/${pid}/characters`, { name, fields }),
-  updateCharacter: (id: string, fields: Partial<Character>) => request<Character>("PATCH", `/api/characters/${id}`, { fields }),
+    request<Character>("POST", `/generation/api/projects/${pid}/characters`, { name, fields }),
+  updateCharacter: (id: string, fields: Partial<Character>) => request<Character>("PATCH", `/generation/api/characters/${id}`, { fields }),
   deleteCharacter: (id: string, force = false) =>
-    request<{ deleted: string; name: string }>("DELETE", `/api/characters/${id}${force ? "?force=true" : ""}`),
-  restoreCharacter: (id: string) => request<Character>("POST", `/api/characters/${id}/restore`),
-  deletedCharacters: (pid: string) => request<{ items: Character[] }>("GET", `/api/projects/${pid}/characters/deleted`),
-  deleteGroup: (id: string) => request<{ deleted: string; name: string }>("DELETE", `/api/groups/${id}`),
-  groups: (pid: string) => request<{ items: Group[] }>("GET", `/api/projects/${pid}/groups`),
+    request<{ deleted: string; name: string }>("DELETE", `/generation/api/characters/${id}${force ? "?force=true" : ""}`),
+  restoreCharacter: (id: string) => request<Character>("POST", `/generation/api/characters/${id}/restore`),
+  deletedCharacters: (pid: string) => request<{ items: Character[] }>("GET", `/generation/api/projects/${pid}/characters/deleted`),
+  deleteGroup: (id: string) => request<{ deleted: string; name: string }>("DELETE", `/generation/api/groups/${id}`),
+  groups: (pid: string) => request<{ items: Group[] }>("GET", `/generation/api/projects/${pid}/groups`),
   createGroup: (pid: string, name: string, fields: Partial<Group>) =>
-    request<Group>("POST", `/api/projects/${pid}/groups`, { name, fields }),
-  updateGroup: (id: string, fields: Partial<Group>) => request<Group>("PATCH", `/api/groups/${id}`, { fields }),
+    request<Group>("POST", `/generation/api/projects/${pid}/groups`, { name, fields }),
+  updateGroup: (id: string, fields: Partial<Group>) => request<Group>("PATCH", `/generation/api/groups/${id}`, { fields }),
 
-  styles: (pid?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project: pid })}`),
+  styles: (pid?: string) => request<{ items: StylePreset[] }>("GET", `/generation/api/style-presets${q({ project: pid })}`),
   compose: (pid: string, prompt: string, negative: string, style: string | null, opts: { engine?: string; references?: number } = {}) =>
-    request<Composed>("POST", `/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style, ...opts }),
-  imageEngines: (pid?: string) => request<ImageEngines>("GET", `/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
+    request<Composed>("POST", `/generation/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style, ...opts }),
+  imageEngines: (pid?: string) => request<ImageEngines>("GET", `/generation/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
   generate: (pid: string, body: Record<string, unknown>) =>
-    request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/api/projects/${pid}/generate`, body),
+    request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/generation/api/projects/${pid}/generate`, body),
   edit: (assetId: string, body: Record<string, unknown>) =>
-      request<{ job: Job }>("POST", `/api/assets/${assetId}/edit`, { asset_id: assetId, ...body }),
+      request<{ job: Job }>("POST", `/generation/api/assets/${assetId}/edit`, { asset_id: assetId, ...body }),
   outpaint: (assetId: string, body: Record<string, unknown>) =>
-      request<{ job: Job }>("POST", `/api/assets/${assetId}/outpaint`, { asset_id: assetId, ...body }),
+      request<{ job: Job }>("POST", `/generation/api/assets/${assetId}/outpaint`, { asset_id: assetId, ...body }),
   animate: (assetId: string, body: Record<string, unknown>) =>
-    request<{ job: Job }>("POST", `/api/assets/${assetId}/animate`, { asset_id: assetId, ...body }),
-  workflows: () => request<{ builtin: WorkflowSpec[]; custom: WorkflowSpec[] }>("GET", "/api/workflows"),
+    request<{ job: Job }>("POST", `/generation/api/assets/${assetId}/animate`, { asset_id: assetId, ...body }),
+  workflows: () => request<{ builtin: WorkflowSpec[]; custom: WorkflowSpec[] }>("GET", "/generation/api/workflows"),
   importWorkflow: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return request<WorkflowSpec>("POST", `/api/workflows/import-file`, fd);
+    return request<WorkflowSpec>("POST", `/generation/api/workflows/import-file`, fd);
   },
-  updateWorkflow: (id: string, patch: Partial<WorkflowSpec>) => request<WorkflowSpec>("PATCH", `/api/workflows/${id}`, patch),
+  updateWorkflow: (id: string, patch: Partial<WorkflowSpec>) => request<WorkflowSpec>("PATCH", `/generation/api/workflows/${id}`, patch),
 
   voice: (pid: string, text: string, character_id?: string, voice?: string) =>
-    request<Asset>("POST", `/api/projects/${pid}/voice`, { text, character_id, voice }),
-  voices: () => request<{ items: CuratedVoice[]; piper_installed: boolean }>("GET", "/api/voices"),
-  downloadVoice: (id: string) => request<Job>("POST", `/api/voices/${id}/download`),
+    request<Asset>("POST", `/generation/api/projects/${pid}/voice`, { text, character_id, voice }),
+  voices: () => request<{ items: CuratedVoice[]; piper_installed: boolean }>("GET", "/generation/api/voices"),
+  downloadVoice: (id: string) => request<Job>("POST", `/generation/api/voices/${id}/download`),
 
   upload: (pid: string, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return request<Asset>("POST", `/api/projects/${pid}/import-upload`, fd);
+    return request<Asset>("POST", `/generation/api/projects/${pid}/import-upload`, fd);
   },
-  importPath: (pid: string, path: string) => request<Asset>("POST", `/api/projects/${pid}/import-path`, { path }),
+  importPath: (pid: string, path: string) => request<Asset>("POST", `/generation/api/projects/${pid}/import-path`, { path }),
 
-  analyze: (assetId: string, force = false) => request<Analysis>("POST", `/api/assets/${assetId}/analyze${q({ force })}`),
-  lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[]; all_lines?: { time_s: number; text: string }[] }>("GET", `/api/assets/${assetId}/lyrics`),
+  analyze: (assetId: string, force = false) => request<Analysis>("POST", `/generation/api/assets/${assetId}/analyze${q({ force })}`),
+  lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[]; all_lines?: { time_s: number; text: string }[] }>("GET", `/generation/api/assets/${assetId}/lyrics`),
   timeLyrics: (pid: string, songAssetId: string, lyrics: string, name?: string) =>
     request<{ id: string; lines: number; sections: { label: string; energy: string; start_s: number; end_s: number }[]; note: string }>(
-      "POST", `/api/agent/studio_time_lyrics${q({ project: pid })}`, { song_asset_id: songAssetId, lyrics, name }),
-  saveLyrics: (assetId: string, text: string) => request<{ lines: { time_s: number; text: string }[] }>("PUT", `/api/assets/${assetId}/lyrics`, { text }),
-  createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/api/projects/${pid}/lyrics`, { text, name }),
+      "POST", `/generation/api/agent/studio_time_lyrics${q({ project: pid })}`, { song_asset_id: songAssetId, lyrics, name }),
+  saveLyrics: (assetId: string, text: string) => request<{ lines: { time_s: number; text: string }[] }>("PUT", `/generation/api/assets/${assetId}/lyrics`, { text }),
+  createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/generation/api/projects/${pid}/lyrics`, { text, name }),
 
-  templates: () => request<{ items: DesignTemplate[] }>("GET", "/api/design/templates"),
+  templates: () => request<{ items: DesignTemplate[] }>("GET", "/generation/api/design/templates"),
   preview: (template: string, fields: Record<string, string>, variant: string | null) =>
-    request<Blob>("POST", "/api/design/preview", { template, fields, variant }),
+    request<Blob>("POST", "/generation/api/design/preview", { template, fields, variant }),
   design: (pid: string, template: string, fields: Record<string, string>, variant: string | null, print: boolean) =>
-    request<Asset>("POST", `/api/projects/${pid}/design`, { template, fields, variant, options: { print } }),
+    request<Asset>("POST", `/generation/api/projects/${pid}/design`, { template, fields, variant, options: { print } }),
   photocardSet: (pid: string, group_id: string) =>
     request<{ front_ids: string[]; back_ids: string[]; contact_sheet_id: string; skipped_members?: string[] }>(
-      "POST", `/api/projects/${pid}/photocard-set`, { group_id }),
+      "POST", `/generation/api/projects/${pid}/photocard-set`, { group_id }),
 
-  timelines: (pid: string) => request<{ items: Timeline[] }>("GET", `/api/projects/${pid}/timelines`),
-  timeline: (id: string) => request<Timeline>("GET", `/api/timelines/${id}`),
-  autoCut: (pid: string, body: Record<string, unknown>) => request<Timeline>("POST", `/api/projects/${pid}/timelines/auto`, body),
-  patchTimeline: (id: string, patch: Record<string, unknown>) => request<Timeline>("PATCH", `/api/timelines/${id}`, patch),
+  timelines: (pid: string) => request<{ items: Timeline[] }>("GET", `/generation/api/projects/${pid}/timelines`),
+  timeline: (id: string) => request<Timeline>("GET", `/generation/api/timelines/${id}`),
+  autoCut: (pid: string, body: Record<string, unknown>) => request<Timeline>("POST", `/generation/api/projects/${pid}/timelines/auto`, body),
+  patchTimeline: (id: string, patch: Record<string, unknown>) => request<Timeline>("PATCH", `/generation/api/timelines/${id}`, patch),
   render: (id: string, quality: "preview" | "final") =>
-    request<{ job: Job }>("POST", `/api/timelines/${id}/render`, { timeline_id: id, quality }),
+    request<{ job: Job }>("POST", `/generation/api/timelines/${id}/render`, { timeline_id: id, quality }),
 
-  jobs: (params: { state?: string; project?: string; limit?: number } = {}) => request<Paged<Job>>("GET", `/api/jobs${q(params)}`),
-  job: (id: string) => request<Job>("GET", `/api/jobs/${id}`),
-  cancelJob: (id: string) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  jobs: (params: { state?: string; project?: string; limit?: number } = {}) => request<Paged<Job>>("GET", `/generation/api/jobs${q(params)}`),
+  job: (id: string) => request<Job>("GET", `/generation/api/jobs/${id}`),
+  cancelJob: (id: string) => request<Job>("POST", `/generation/api/jobs/${id}/cancel`),
 
   assets: (pid: string, params: Record<string, string | number | boolean | undefined> = {}) =>
-    request<Paged<Asset>>("GET", `/api/projects/${pid}/assets${q(params)}`),
-  asset: (id: string) => request<Asset>("GET", `/api/assets/${id}`),
+    request<Paged<Asset>>("GET", `/generation/api/projects/${pid}/assets${q(params)}`),
+  asset: (id: string) => request<Asset>("GET", `/generation/api/assets/${id}`),
   updateAsset: (id: string, patch: Partial<Pick<Asset, "tags" | "rating" | "favourite" | "notes" | "name">>) =>
-    request<Asset>("PATCH", `/api/assets/${id}`, patch),
+    request<Asset>("PATCH", `/generation/api/assets/${id}`, patch),
   lineage: (id: string) => request<{ recipe: Recipe | null; inputs?: { asset_id: string; operation?: string; seed?: number }[] }>(
-    "GET", `/api/assets/${id}/lineage`),
+    "GET", `/generation/api/assets/${id}/lineage`),
 
-  boards: (pid: string) => request<{ items: Board[] }>("GET", `/api/projects/${pid}/boards`),
-  createBoard: (pid: string, name: string, kind: string) => request<Board>("POST", `/api/projects/${pid}/boards`, { name, kind }),
-  updateBoard: (id: string, patch: { name?: string; kind?: string }) => request<Board>("PATCH", `/api/boards/${id}`, patch),
-  deleteBoard: (id: string) => request<{ ok: boolean }>("DELETE", `/api/boards/${id}`),
-  setBoardItems: (id: string, items: Board["items"]) => request<Board>("PUT", `/api/boards/${id}/items`, { items }),
+  boards: (pid: string) => request<{ items: Board[] }>("GET", `/generation/api/projects/${pid}/boards`),
+  createBoard: (pid: string, name: string, kind: string) => request<Board>("POST", `/generation/api/projects/${pid}/boards`, { name, kind }),
+  updateBoard: (id: string, patch: { name?: string; kind?: string }) => request<Board>("PATCH", `/generation/api/boards/${id}`, patch),
+  deleteBoard: (id: string) => request<{ ok: boolean }>("DELETE", `/generation/api/boards/${id}`),
+  setBoardItems: (id: string, items: Board["items"]) => request<Board>("PUT", `/generation/api/boards/${id}/items`, { items }),
 
-  backend: () => request<BackendStatus>("GET", "/api/backend"),
-  setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/api/backend", patch),
-  freeComfy: () => request<{ message: string }>("POST", "/api/backend/comfy/free"),
-  services: () => request<ServicesStatus>("GET", "/api/backend/services"),
-  memory: () => request<GpuMemory>("GET", "/api/backend/memory"),
+  backend: () => request<BackendStatus>("GET", "/generation/api/backend"),
+  setBackend: (patch: Record<string, unknown>) => request<BackendStatus>("POST", "/generation/api/backend", patch),
+  freeComfy: () => request<{ message: string }>("POST", "/generation/api/backend/comfy/free"),
+  services: () => request<ServicesStatus>("GET", "/generation/api/backend/services"),
+  memory: () => request<GpuMemory>("GET", "/generation/api/backend/memory"),
   deleteAssets: (ids: string[], force = false) =>
-    request<{ deleted: string[]; failed: { id: string; error: string; message: string }[] }>("POST", "/api/assets/delete", { ids, force }),
-  restoreAsset: (id: string) => request<Asset>("POST", `/api/assets/${id}/restore`),
-  trash: (project?: string) => request<{ items: TrashItem[] }>("GET", `/api/trash${project ? `?project=${encodeURIComponent(project)}` : ""}`),
-  emptyTrash: (project?: string, ids?: string[]) => request<{ purged: string[] }>("POST", "/api/trash/empty", { project: project || null, ids: ids || null }),
-  startService: (id: string, gpu?: string) => request<ServiceStart>("POST", "/api/backend/services/start", { id, gpu: gpu || null }),
-  stopService: (id: string) => request<ServiceStart>("POST", "/api/backend/services/stop", { id }),
-  setLaunch: (patch: Record<string, unknown>) => request<ServicesStatus>("PUT", "/api/backend/launch", patch),
-  agentCalls: (limit = 100) => request<{ items: AgentCall[] }>("GET", `/api/agent-calls${q({ limit })}`),
+    request<{ deleted: string[]; failed: { id: string; error: string; message: string }[] }>("POST", "/generation/api/assets/delete", { ids, force }),
+  restoreAsset: (id: string) => request<Asset>("POST", `/generation/api/assets/${id}/restore`),
+  trash: (project?: string) => request<{ items: TrashItem[] }>("GET", `/generation/api/trash${project ? `?project=${encodeURIComponent(project)}` : ""}`),
+  emptyTrash: (project?: string, ids?: string[]) => request<{ purged: string[] }>("POST", "/generation/api/trash/empty", { project: project || null, ids: ids || null }),
+  startService: (id: string, gpu?: string) => request<ServiceStart>("POST", "/generation/api/backend/services/start", { id, gpu: gpu || null }),
+  stopService: (id: string) => request<ServiceStart>("POST", "/generation/api/backend/services/stop", { id }),
+  setLaunch: (patch: Record<string, unknown>) => request<ServicesStatus>("PUT", "/generation/api/backend/launch", patch),
+  agentCalls: (limit = 100) => request<{ items: AgentCall[] }>("GET", `/generation/api/agent-calls${q({ limit })}`),
 
   // -------------------------------------------------------------- voice studio
-  voiceEngines: () => request<{ tts: EngineStatus[]; stt: EngineStatus[] }>("GET", "/api/voice/engines"),
+  voiceEngines: () => request<{ tts: EngineStatus[]; stt: EngineStatus[] }>("GET", "/generation/api/voice/engines"),
   installVoiceEngine: (engineId: string, kind: "tts" | "stt") =>
-    request<Job>("POST", `/api/voice/engines/${engineId}/install`, { kind }),
+    request<Job>("POST", `/generation/api/voice/engines/${engineId}/install`, { kind }),
 
   studioVoices: (project?: string, engineId?: string) =>
-    request<{ items: StudioVoice[] }>("GET", `/api/voice/voices${q({ project, engine_id: engineId })}`),
-  studioVoice: (id: string) => request<StudioVoice>("GET", `/api/voice/voices/${id}`),
+    request<{ items: StudioVoice[] }>("GET", `/generation/api/voice/voices${q({ project, engine_id: engineId })}`),
+  studioVoice: (id: string) => request<StudioVoice>("GET", `/generation/api/voice/voices/${id}`),
   createStudioVoice: (name: string, engineId: string, sourcePath: string, opts: { language?: string; project?: string; tags?: string[] } = {}) =>
-    request<StudioVoice>("POST", "/api/voice/voices", { name, engine_id: engineId, source_path: sourcePath, ...opts }),
+    request<StudioVoice>("POST", "/generation/api/voice/voices", { name, engine_id: engineId, source_path: sourcePath, ...opts }),
   uploadStudioVoice: (file: File, name: string, engineId: string, opts: { language?: string; project?: string } = {}) => {
     const fd = new FormData();
     fd.append("file", file);
-    return request<StudioVoice>("POST", `/api/voice/voices/upload${q({ name, engine_id: engineId, ...opts })}`, fd);
+    return request<StudioVoice>("POST", `/generation/api/voice/voices/upload${q({ name, engine_id: engineId, ...opts })}`, fd);
   },
   updateStudioVoice: (id: string, patch: { name?: string; tags?: string[]; notes?: string }) =>
-    request<StudioVoice>("PATCH", `/api/voice/voices/${id}`, patch),
-  deleteStudioVoice: (id: string) => request<{ ok: boolean }>("DELETE", `/api/voice/voices/${id}`),
+    request<StudioVoice>("PATCH", `/generation/api/voice/voices/${id}`, patch),
+  deleteStudioVoice: (id: string) => request<{ ok: boolean }>("DELETE", `/generation/api/voice/voices/${id}`),
   addVoicePreset: (id: string, preset: { name: string; speed?: number; pitch?: number; style?: string }) =>
-    request<StudioVoice>("POST", `/api/voice/voices/${id}/presets`, preset),
-  voiceSampleUrl: (id: string) => `/api/voice/voices/${id}/sample`,
+    request<StudioVoice>("POST", `/generation/api/voice/voices/${id}/presets`, preset),
+  voiceSampleUrl: (id: string) => `/generation/api/voice/voices/${id}/sample`,
   previewStudioVoice: (id: string, text: string, spec: VoiceSpec = {}) =>
-    request<Blob>("POST", `/api/voice/voices/${id}/preview`, { text, voice: spec }),
+    request<Blob>("POST", `/generation/api/voice/voices/${id}/preview`, { text, voice: spec }),
 
   speak: (text: string, voice: VoiceSpec, project?: string) =>
-    request<Blob | Asset>("POST", "/api/voice/speak", { text, voice, project }),
+    request<Blob | Asset>("POST", "/generation/api/voice/speak", { text, voice, project }),
 
   retakeWords: (body: { asset_id: string; first_word: number; last_word: number; text: string; words?: RetakeWord[]; voice?: VoiceSpec; project?: string; language?: string; context_engine?: "auk"; seeds?: number }) =>
-    request<{ engine_id: string | null; words_from: string; retake: RetakeReport; asset: Asset }>("POST", "/api/voice/retake_words", body),
-  aukStatus: () => request<AukStatus>("GET", "/api/voice/auk"),
+    request<{ engine_id: string | null; words_from: string; retake: RetakeReport; asset: Asset }>("POST", "/generation/api/voice/retake_words", body),
+  aukStatus: () => request<AukStatus>("GET", "/generation/api/voice/auk"),
 
   transcribe: (body: { path?: string; asset_id?: string; language?: string; engine_id?: string; word_timestamps?: boolean }) =>
-    request<Transcript & { text: string; language: string | null }>("POST", "/api/voice/transcribe", body),
+    request<Transcript & { text: string; language: string | null }>("POST", "/generation/api/voice/transcribe", body),
   transcribeUpload: (file: File, opts: { language?: string; engineId?: string } = {}) => {
     const fd = new FormData();
     fd.append("file", file);
     return request<Transcript & { text: string; language: string | null }>(
-      "POST", `/api/voice/transcribe/upload${q({ language: opts.language, engine_id: opts.engineId })}`, fd);
+      "POST", `/generation/api/voice/transcribe/upload${q({ language: opts.language, engine_id: opts.engineId })}`, fd);
   },
   dictate: (file: File | Blob, language?: string) => {
     const fd = new FormData();
     fd.append("file", file, "clip.wav");
     return request<{ text: string; language: string | null; engine_id: string }>(
-      "POST", `/api/voice/dictate${q({ language })}`, fd);
+      "POST", `/generation/api/voice/dictate${q({ language })}`, fd);
   },
 
   audiobook: (body: { text?: string; source_path?: string; title?: string; voice: VoiceSpec; format?: "mp3" | "m4b"; project?: string; wait_s?: number }) =>
-    request<{ job: Job }>("POST", "/api/voice/audiobook", body),
-  audiobookStatus: (jobId: string) => request<Job>("GET", `/api/voice/audiobook/${jobId}`),
+    request<{ job: Job }>("POST", "/generation/api/voice/audiobook", body),
+  audiobookStatus: (jobId: string) => request<Job>("GET", `/generation/api/voice/audiobook/${jobId}`),
   audiobookDownloadUrl: (jobId: string, file: "final" | "srt" | "lrc" = "final") =>
-    `/api/voice/audiobook/${jobId}/download${q({ file })}`,
+    `/generation/api/voice/audiobook/${jobId}/download${q({ file })}`,
 
   dub: (body: { source_path?: string; video_asset_id?: string; target_language: string; source_language?: string;
                 glossary?: Record<string, string>; voice: VoiceSpec; stt_engine_id?: string; title?: string;
                 plan?: boolean; qc?: boolean; qc_threshold?: number; translation_mode?: "direct" | "adapt";
                 fit_mode?: "audio" | "smart"; project?: string; wait_s?: number }) =>
-    request<{ job: Job }>("POST", "/api/voice/dub", body),
-  dubStatus: (jobId: string) => request<Job>("GET", `/api/voice/dub/${jobId}`),
-  dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/api/voice/dub/${jobId}/download${q({ file })}`,
+    request<{ job: Job }>("POST", "/generation/api/voice/dub", body),
+  dubStatus: (jobId: string) => request<Job>("GET", `/generation/api/voice/dub/${jobId}`),
+  dubDownloadUrl: (jobId: string, file: "video" | "subtitles" = "video") => `/generation/api/voice/dub/${jobId}/download${q({ file })}`,
   // ------------------------------------------------------------- productions
-  productions: () => request<{ items: ProductionSummary[] }>("GET", "/api/productions"),
-  production: (slug: string) => request<ProductionState>("GET", `/api/productions/${slug}`),
+  productions: () => request<{ items: ProductionSummary[] }>("GET", "/generation/api/productions"),
+  production: (slug: string) => request<ProductionState>("GET", `/generation/api/productions/${slug}`),
   continueProduction: (slug: string, take?: number) =>
-    request<{ production: ProductionView; job: Job }>("POST", `/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
+    request<{ production: ProductionView; job: Job }>("POST", `/generation/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   setProductionLyrics: (slug: string, lyrics: string, run = false) =>
-      request<{ status: string }>("PUT", `/api/productions/${slug}/lyrics`, { lyrics, run }),
+      request<{ status: string }>("PUT", `/generation/api/productions/${slug}/lyrics`, { lyrics, run }),
   setProductionSegments: (slug: string, body: { text?: string; segments?: ScriptSegment[] }) =>
-    request<{ slug: string; segments: ScriptSegment[]; retimed: string[]; timed: number }>("PUT", `/api/productions/${slug}/segments`, body),
+    request<{ slug: string; segments: ScriptSegment[]; retimed: string[]; timed: number }>("PUT", `/generation/api/productions/${slug}/segments`, body),
   setProductionSong: (slug: string, body: SongChange) =>
     request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(
-      "PUT", `/api/productions/${slug}/song`, body),
+      "PUT", `/generation/api/productions/${slug}/song`, body),
   productionPreflight: (slug: string) =>
     request<{ ok: boolean; items: { level: "error" | "warn" | "info"; code: string; message: string; startable?: boolean }[] }>(
-      "GET", `/api/productions/${slug}/preflight`),
+      "GET", `/generation/api/productions/${slug}/preflight`),
   makeCanvas: (slug: string, seconds = 8, start_s?: number) =>
-    request<{ asset_id: string; start_s: number; start_from: string; seconds: number }>("POST", `/api/productions/${slug}/canvas`, { seconds, start_s }),
+    request<{ asset_id: string; start_s: number; start_from: string; seconds: number }>("POST", `/generation/api/productions/${slug}/canvas`, { seconds, start_s }),
   setProductionFinishing: (slug: string, finishing: Finishing, render = true) =>
-    request<{ finishing: Finishing; rerender: string[]; job?: Job }>("PATCH", `/api/productions/${slug}/finishing`, { finishing, render }),
+    request<{ finishing: Finishing; rerender: string[]; job?: Job }>("PATCH", `/generation/api/productions/${slug}/finishing`, { finishing, render }),
   setProductionSettings: (slug: string, body: { autopilot?: boolean; animatic?: boolean; song_review?: boolean; qa?: Record<string, unknown>; clip_quality?: "draft" | "final" }) =>
-    request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/api/productions/${slug}/settings`, body),
+    request<{ settings: Record<string, unknown>; autopilot: boolean }>("PATCH", `/generation/api/productions/${slug}/settings`, body),
   exportToLumiere: (production: string, timelineId?: string, aspect?: string) =>
     request<{ ok: boolean; project_id?: string; url?: string; imported_clips?: number; error?: string; hint?: string; files: { xml: string; edl: string } }>(
-      "POST", "/api/agent/production_export_lumiere", { production, timeline_id: timelineId, aspect }),
-  familySettings: () => request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("GET", "/api/family/settings"),
+      "POST", "/generation/api/agent/production_export_lumiere", { production, timeline_id: timelineId, aspect }),
+  familySettings: () => request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("GET", "/generation/api/family/settings"),
   setFamilySettings: (body: Record<string, string>) =>
-    request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("PUT", "/api/family/settings", body),
+    request<{ "notify.via": string; "notify.language": string; choices: Record<string, string[]> }>("PUT", "/generation/api/family/settings", body),
   timelineExportUrl: (timelineId: string, format: "zip" | "xml" | "edl" = "zip", name?: string) =>
-    `/api/timelines/${timelineId}/export${q({ format, name })}`,
+    `/generation/api/timelines/${timelineId}/export${q({ format, name })}`,
   composeSong: (pid: string, body: { tags: string; lyrics: string; bpm?: number; duration?: number; key?: string; language?: string; count?: number }) =>
-    request<{ job: Job }>("POST", `/api/projects/${pid}/compose`, body),
+    request<{ job: Job }>("POST", `/generation/api/projects/${pid}/compose`, body),
   timeProductionLyrics: (slug: string) =>
-    request<{ lyrics_asset_id: string | null; lines: number }>("POST", `/api/productions/${slug}/time-lyrics`),
+    request<{ lyrics_asset_id: string | null; lines: number }>("POST", `/generation/api/productions/${slug}/time-lyrics`),
   allAssets: (params: Record<string, string | number | boolean | undefined> = {}) =>
-    request<Paged<Asset & { project_name?: string }>>("GET", `/api/assets${q(params)}`),
+    request<Paged<Asset & { project_name?: string }>>("GET", `/generation/api/assets${q(params)}`),
   setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>
-    request<{ status: string; redraw: string[] }>("PUT", `/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
+    request<{ status: string; redraw: string[] }>("PUT", `/generation/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
-    request<{ job: Job }>("POST", `/api/projects/${pid}/download`, body),
+    request<{ job: Job }>("POST", `/generation/api/projects/${pid}/download`, body),
   videoFrames: (assetId: string, count = 6, atS?: number) =>
-    request<{ items: Asset[] }>("POST", `/api/assets/${assetId}/frames?count=${count}${atS != null ? `&at_s=${atS}` : ""}`),
+    request<{ items: Asset[] }>("POST", `/generation/api/assets/${assetId}/frames?count=${count}${atS != null ? `&at_s=${atS}` : ""}`),
   clipEditPreview: (assetId: string, body: ClipEditRequest) =>
-    request<ClipEditPlan>("POST", `/api/assets/${assetId}/clip-edit/prompt`, { asset_id: assetId, ...body }),
+    request<ClipEditPlan>("POST", `/generation/api/assets/${assetId}/clip-edit/prompt`, { asset_id: assetId, ...body }),
   clipEdit: (assetId: string, body: ClipEditRequest) =>
-    request<{ job: Job; plan: ClipEditPlan }>("POST", `/api/assets/${assetId}/clip-edit`, { asset_id: assetId, ...body }),
+    request<{ job: Job; plan: ClipEditPlan }>("POST", `/generation/api/assets/${assetId}/clip-edit`, { asset_id: assetId, ...body }),
   reframeProduction: (slug: string, aspects: string[], framing?: string, run = true) =>
-    request<{ aspects: string[]; new: string[]; rerender: string[]; job?: Job }>("POST", `/api/productions/${slug}/reframe`, { aspects, framing, run }),
+    request<{ aspects: string[]; new: string[]; rerender: string[]; job?: Job }>("POST", `/generation/api/productions/${slug}/reframe`, { aspects, framing, run }),
   retake: (assetId: string, body: { start_s: number; end_s: number; prompt?: string; quality?: "draft" | "final" }) =>
-    request<{ job: Job }>("POST", `/api/assets/${assetId}/retake`, { asset_id: assetId, ...body }),
-  assetStems: (assetId: string) => request<{ stems: Record<string, string> }>("GET", `/api/assets/${assetId}/stems`),
+    request<{ job: Job }>("POST", `/generation/api/assets/${assetId}/retake`, { asset_id: assetId, ...body }),
+  assetStems: (assetId: string) => request<{ stems: Record<string, string> }>("GET", `/generation/api/assets/${assetId}/stems`),
   makeStems: (assetId: string, force = false) =>
-    request<{ job?: Job; stems: Record<string, string>; reused?: boolean }>("POST", `/api/assets/${assetId}/stems`, { asset_id: assetId, force }),
+    request<{ job?: Job; stems: Record<string, string>; reused?: boolean }>("POST", `/generation/api/assets/${assetId}/stems`, { asset_id: assetId, force }),
   reframeAsset: (assetId: string, aspect: string, framing = "fill", quality = "final") =>
-    request<{ job: Job }>("POST", `/api/assets/${assetId}/reframe`, { asset_id: assetId, aspect, framing, quality }),
+    request<{ job: Job }>("POST", `/generation/api/assets/${assetId}/reframe`, { asset_id: assetId, aspect, framing, quality }),
   productionTakes: (slug: string, key?: string) =>
-    request<{ shots: ShotTakes[] }>("GET", `/api/productions/${slug}/takes${q({ key })}`),
+    request<{ shots: ShotTakes[] }>("GET", `/generation/api/productions/${slug}/takes${q({ key })}`),
   regenerateUnlocked: (slug: string, stage: "frames" | "clips", keys?: string[], run = true) =>
-    request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/regenerate`, { stage, keys, run }),
+    request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/generation/api/productions/${slug}/regenerate`, { stage, keys, run }),
   promoteClips: (slug: string, keys?: string[], run = true) =>
-    request<{ promoted: string[]; chained: string[]; job?: Job }>("POST", `/api/productions/${slug}/promote`, { keys, run }),
-  graphicOptions: () => request<GraphicOptions>("GET", "/api/graphics/options"),
+    request<{ promoted: string[]; chained: string[]; job?: Job }>("POST", `/generation/api/productions/${slug}/promote`, { keys, run }),
+  graphicOptions: () => request<GraphicOptions>("GET", "/generation/api/graphics/options"),
   graphicPreview: (body: { production?: string; project?: string; graphic: GraphicSpec; start_s?: number; end_s?: number; duration_s?: number;
                            aspect?: string; at_s?: number; max_side?: number }, signal?: AbortSignal) =>
-    request<Blob>("POST", "/api/graphics/preview", body, signal),
+    request<Blob>("POST", "/generation/api/graphics/preview", body, signal),
   setGraphicShot: (slug: string, body: Record<string, unknown>) =>
-    request<{ shot: { key: string }; changed: string[]; production: ProductionView; job?: Job }>("POST", `/api/productions/${slug}/graphic`, { production: slug, ...body }),
+    request<{ shot: { key: string }; changed: string[]; production: ProductionView; job?: Job }>("POST", `/generation/api/productions/${slug}/graphic`, { production: slug, ...body }),
   renderGraphic: (slug: string, shot: string, what: "video" | "still" | "alpha", aspect?: string) =>
-    request<{ job: Job }>("POST", `/api/productions/${slug}/graphic-render`, { production: slug, shot, what, aspect }),
-  styleCards: (project?: string) => request<{ items: StylePreset[] }>("GET", `/api/style-presets${q({ project })}`),
-  createStyleCard: (body: StyleCardInput & { project?: string }) => request<StyleCard>("POST", "/api/style-presets", { action: "create", ...body }),
-  updateStyleCard: (id: string, body: StyleCardInput) => request<StyleCard>("PATCH", `/api/style-presets/${id}`, { action: "update", ...body }),
-  deleteStyleCard: (id: string) => request<{ deleted: string }>("DELETE", `/api/style-presets/${id}`),
+    request<{ job: Job }>("POST", `/generation/api/productions/${slug}/graphic-render`, { production: slug, shot, what, aspect }),
+  styleCards: (project?: string) => request<{ items: StylePreset[] }>("GET", `/generation/api/style-presets${q({ project })}`),
+  createStyleCard: (body: StyleCardInput & { project?: string }) => request<StyleCard>("POST", "/generation/api/style-presets", { action: "create", ...body }),
+  updateStyleCard: (id: string, body: StyleCardInput) => request<StyleCard>("PATCH", `/generation/api/style-presets/${id}`, { action: "update", ...body }),
+  deleteStyleCard: (id: string) => request<{ deleted: string }>("DELETE", `/generation/api/style-presets/${id}`),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
-    request<{ changed: string[]; production: ProductionView }>("PATCH", `/api/productions/${slug}/shots`, { changes, run }),
-  exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/api/productions/${slug}/recipe`, { production: slug, name }),
+    request<{ changed: string[]; production: ProductionView }>("PATCH", `/generation/api/productions/${slug}/shots`, { changes, run }),
+  exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/generation/api/productions/${slug}/recipe`, { production: slug, name }),
   runQa: (slug: string, body: { stage?: string; dry_run?: boolean; keys?: string[] }) =>
-    request<{ job: Job; scorecard?: QaScorecard }>("POST", `/api/productions/${slug}/qa`, { production: slug, ...body }),
+    request<{ job: Job; scorecard?: QaScorecard }>("POST", `/generation/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
-    request<{ job: Job }>("POST", `/api/productions/${slug}/animatic`, { production: slug, aspects }),
+    request<{ job: Job }>("POST", `/generation/api/productions/${slug}/animatic`, { production: slug, aspects }),
   critiquePlan: (body: Record<string, unknown>, signal?: AbortSignal) =>
-    request<{ issues: string[]; revised: boolean; shots?: VideoShot[] }>("POST", "/api/productions/plan/critique", body, signal),
-  planVideo: (body: Record<string, unknown>, signal?: AbortSignal) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/api/productions/plan", body, signal),
-  videoFromPlan: (body: Record<string, unknown>) => request<{ production: ProductionView; job: Job }>("POST", "/api/productions/from-plan", body),
+    request<{ issues: string[]; revised: boolean; shots?: VideoShot[] }>("POST", "/generation/api/productions/plan/critique", body, signal),
+  planVideo: (body: Record<string, unknown>, signal?: AbortSignal) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/generation/api/productions/plan", body, signal),
+  videoFromPlan: (body: Record<string, unknown>) => request<{ production: ProductionView; job: Job }>("POST", "/generation/api/productions/from-plan", body),
   createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;
                         settings?: Record<string, unknown>; count?: number; project?: string }) =>
-    request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/api/shorts", body),
+    request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/generation/api/shorts", body),
   shortScript: (slug: string, script?: unknown, run = true) =>
-    request<{ production?: ProductionView; job?: Job; script?: ShortScript }>("PUT", `/api/productions/${slug}/script`, { production: slug, script, run }),
-  stockStatus: () => request<StockStatus>("GET", "/api/backend/stock"),
-  setStockKeys: (keys: { pexels?: string; pixabay?: string }) => request<StockStatus>("PUT", "/api/backend/stock", keys),
-  recipes: () => request<{ items: RecipeSummary[] }>("GET", "/api/recipes"),
+    request<{ production?: ProductionView; job?: Job; script?: ShortScript }>("PUT", `/generation/api/productions/${slug}/script`, { production: slug, script, run }),
+  stockStatus: () => request<StockStatus>("GET", "/generation/api/backend/stock"),
+  setStockKeys: (keys: { pexels?: string; pixabay?: string }) => request<StockStatus>("PUT", "/generation/api/backend/stock", keys),
+  recipes: () => request<{ items: RecipeSummary[] }>("GET", "/generation/api/recipes"),
   runRecipe: (name: string, body: { cast: Record<string, unknown>; name?: string; options?: Record<string, unknown> }) =>
-    request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/api/recipes/${name}/run`, body),
+    request<{ production: ProductionView; job: Job; notes: string[] }>("POST", `/generation/api/recipes/${name}/run`, body),
   resynthesizeDubSegment: (jobId: string, index: number, opts: { text?: string; voice?: VoiceSpec; remix?: boolean } = {}) =>
-    request<{ segment: DubSegment }>("POST", `/api/voice/dub/${jobId}/segments/${index}/resynthesize`, opts),
+    request<{ segment: DubSegment }>("POST", `/generation/api/voice/dub/${jobId}/segments/${index}/resynthesize`, opts),
 
   // -------------------------------------------------------------- character kit
-  charKit: (charId: string) => request<CharKitView>("GET", `/api/characters/${charId}/kit`),
+  charKit: (charId: string) => request<CharKitView>("GET", `/generation/api/characters/${charId}/kit`),
   charSettings: (charId: string, settings: { trigger?: string; use_adapters?: boolean; identity_threshold?: number }) =>
-    request<CharKitView>("POST", `/api/characters/${charId}/adapters`, { action: "settings", settings }),
+    request<CharKitView>("POST", `/generation/api/characters/${charId}/adapters`, { action: "settings", settings }),
 
   charSheet: (charId: string, body: { views?: string[]; engine?: string; seed?: number; width?: number; height?: number }) =>
-    request<{ job: Job; views: string[] }>("POST", `/api/characters/${charId}/sheet`, body),
+    request<{ job: Job; views: string[] }>("POST", `/generation/api/characters/${charId}/sheet`, body),
 
-  datasetGet: (charId: string) => request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "get" }),
+  datasetGet: (charId: string) => request<DatasetView>("POST", `/generation/api/characters/${charId}/dataset`, { action: "get" }),
   datasetReport: (charId: string) => request<{ character_id: string; trigger: string; items: DatasetItem[]; report: DatasetReport }>(
-    "POST", `/api/characters/${charId}/dataset`, { action: "report" }),
+    "POST", `/generation/api/characters/${charId}/dataset`, { action: "report" }),
   datasetBuild: (charId: string, sources: string[], minIdentity?: number, replace = false) =>
-    request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "build", sources, min_identity: minIdentity, replace }),
+    request<DatasetView>("POST", `/generation/api/characters/${charId}/dataset`, { action: "build", sources, min_identity: minIdentity, replace }),
   datasetUpdate: (charId: string, items: { asset_id: string; caption?: string; include?: boolean; remove?: boolean }[]) =>
-    request<DatasetView>("POST", `/api/characters/${charId}/dataset`, { action: "update", items }),
+    request<DatasetView>("POST", `/generation/api/characters/${charId}/dataset`, { action: "update", items }),
   datasetCaption: (charId: string, onlyMissing = false) =>
-    request<{ job: Job }>("POST", `/api/characters/${charId}/dataset`, { action: "caption", only_missing: onlyMissing }),
+    request<{ job: Job }>("POST", `/generation/api/characters/${charId}/dataset`, { action: "caption", only_missing: onlyMissing }),
 
-  trainers: () => request<TrainersInfo>("POST", "/api/training", { action: "trainers" }),
-  trainingSettings: (settings: TrainingSettings) => request<TrainingSettings>("POST", "/api/training", { action: "settings", training: settings }),
-  trainingLog: (runId: string) => request<{ run_id: string; lines: string[] }>("POST", "/api/training", { action: "log", run_id: runId }),
+  trainers: () => request<TrainersInfo>("POST", "/generation/api/training", { action: "trainers" }),
+  trainingSettings: (settings: TrainingSettings) => request<TrainingSettings>("POST", "/generation/api/training", { action: "settings", training: settings }),
+  trainingLog: (runId: string) => request<{ run_id: string; lines: string[] }>("POST", "/generation/api/training", { action: "log", run_id: runId }),
 
   trainPlan: (charId: string, arch: string, overrides: Record<string, unknown> = {}, trainer?: string) =>
-    request<TrainPlan>("POST", `/api/characters/${charId}/train`, { action: "plan", arch, overrides, trainer }),
+    request<TrainPlan>("POST", `/generation/api/characters/${charId}/train`, { action: "plan", arch, overrides, trainer }),
   trainStart: (charId: string, arch: string, overrides: Record<string, unknown> = {}, trainer?: string) =>
     request<{ job: Job; plan: TrainPlan["plan"]; trainer: string | null }>(
-      "POST", `/api/characters/${charId}/train`, { action: "start", arch, overrides, trainer }),
-  trainStatus: (charId: string) => request<TrainStatus>("POST", `/api/characters/${charId}/train`, { action: "status" }),
+      "POST", `/generation/api/characters/${charId}/train`, { action: "start", arch, overrides, trainer }),
+  trainStatus: (charId: string) => request<TrainStatus>("POST", `/generation/api/characters/${charId}/train`, { action: "status" }),
 
-  adaptersList: (charId: string) => request<CharKitView>("POST", `/api/characters/${charId}/adapters`, { action: "list" }),
+  adaptersList: (charId: string) => request<CharKitView>("POST", `/generation/api/characters/${charId}/adapters`, { action: "list" }),
   adaptersAvailable: (charId: string) => request<{ loras: string[]; comfy: boolean }>(
-    "POST", `/api/characters/${charId}/adapters`, { action: "available" }),
+    "POST", `/generation/api/characters/${charId}/adapters`, { action: "available" }),
   adapterAttach: (charId: string, loraName: string, arch: string, strength = 1, trigger?: string) =>
-    request<{ adapter: Adapter; note?: string }>("POST", `/api/characters/${charId}/adapters`,
+    request<{ adapter: Adapter; note?: string }>("POST", `/generation/api/characters/${charId}/adapters`,
       { action: "attach", lora_name: loraName, arch, strength, trigger }),
   adapterUpdate: (charId: string, adapterId: string, patch: { strength?: number; trigger?: string; enabled?: boolean }) =>
-    request<{ adapter: Adapter }>("POST", `/api/characters/${charId}/adapters`, { action: "update", adapter_id: adapterId, ...patch }),
+    request<{ adapter: Adapter }>("POST", `/generation/api/characters/${charId}/adapters`, { action: "update", adapter_id: adapterId, ...patch }),
   adapterRemove: (charId: string, adapterId: string) =>
-    request<{ removed: string }>("POST", `/api/characters/${charId}/adapters`, { action: "remove", adapter_id: adapterId }),
+    request<{ removed: string }>("POST", `/generation/api/characters/${charId}/adapters`, { action: "remove", adapter_id: adapterId }),
 
   takesList: (charId: string, sort: "recent" | "identity" = "recent", limit = 60) =>
-    request<TakesList>("POST", `/api/characters/${charId}/takes`, { action: "list", sort, limit }),
+    request<TakesList>("POST", `/generation/api/characters/${charId}/takes`, { action: "list", sort, limit }),
   takesScore: (charId: string, force = false, limit = 24) =>
-    request<{ job: Job }>("POST", `/api/characters/${charId}/takes`, { action: "score", force, limit }),
+    request<{ job: Job }>("POST", `/generation/api/characters/${charId}/takes`, { action: "score", force, limit }),
   takeAction: (charId: string, assetId: string, takeAction: "reference" | "unreference" | "canonical" | "dataset" | "reject" | "unreject") =>
-    request<{ asset_id: string; action: string }>("POST", `/api/characters/${charId}/takes`, { action: "act", asset_id: assetId, take_action: takeAction }),
+    request<{ asset_id: string; action: string }>("POST", `/generation/api/characters/${charId}/takes`, { action: "act", asset_id: assetId, take_action: takeAction }),
 
   charPackExport: (charId: string, includeDataset = true, includeAdapters = true) =>
-    request<PackExport>("POST", `/api/characters/${charId}/pack`, { include_dataset: includeDataset, include_adapters: includeAdapters }),
-  charPackDownloadUrl: (file: string) => `/api/character-packs/${file}`,
+    request<PackExport>("POST", `/generation/api/characters/${charId}/pack`, { include_dataset: includeDataset, include_adapters: includeAdapters }),
+  charPackDownloadUrl: (file: string) => `/generation/api/character-packs/${file}`,
   charPackInspect: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return request<PackInspect>("POST", "/api/character-packs/inspect", fd);
+    return request<PackInspect>("POST", "/generation/api/character-packs/inspect", fd);
   },
   charPackImport: (projectId: string, file: File, rename?: string) => {
     const fd = new FormData();
     fd.append("file", file);
-    return request<PackImportResult>("POST", `/api/projects/${projectId}/character-packs${q({ rename })}`, fd);
+    return request<PackImportResult>("POST", `/generation/api/projects/${projectId}/character-packs${q({ rename })}`, fd);
   },
 
   libraryList: (projectId: string, query?: string) =>
-    request<{ items: LibraryEntry[] }>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "list", query }),
+    request<{ items: LibraryEntry[] }>("POST", `/generation/api/library/characters${q({ project: projectId })}`, { action: "list", query }),
   librarySave: (projectId: string, charId: string, note?: string, includeAdapters = true) =>
-    request<LibrarySaveResult>("POST", `/api/library/characters${q({ project: projectId })}`,
+    request<LibrarySaveResult>("POST", `/generation/api/library/characters${q({ project: projectId })}`,
       { action: "save", character_id: charId, note, include_adapters: includeAdapters }),
   libraryUse: (projectId: string, libId: string, version?: number, rename?: string) =>
-    request<PackImportResult>("POST", `/api/library/characters${q({ project: projectId })}`,
+    request<PackImportResult>("POST", `/generation/api/library/characters${q({ project: projectId })}`,
       { action: "use", id: libId, version, rename }),
   libraryHistory: (projectId: string, libId: string) =>
-    request<LibraryHistory>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "history", id: libId }),
+    request<LibraryHistory>("POST", `/generation/api/library/characters${q({ project: projectId })}`, { action: "history", id: libId }),
   libraryDelete: (projectId: string, libId: string) =>
-    request<{ deleted: string }>("POST", `/api/library/characters${q({ project: projectId })}`, { action: "delete", id: libId }),
-  spaces: (pid: string, deleted = false) => request<{ items: SpaceSummary[] }>("GET", `/api/projects/${pid}/spaces${deleted ? "?deleted=true" : ""}`),
-  createSpace: (pid: string, name: string, template: string) => request<Space>("POST", `/api/projects/${pid}/spaces`, { name, template }),
-  space: (id: string) => request<Space>("GET", `/api/spaces/${id}`),
+    request<{ deleted: string }>("POST", `/generation/api/library/characters${q({ project: projectId })}`, { action: "delete", id: libId }),
+  spaces: (pid: string, deleted = false) => request<{ items: SpaceSummary[] }>("GET", `/generation/api/projects/${pid}/spaces${deleted ? "?deleted=true" : ""}`),
+  createSpace: (pid: string, name: string, template: string) => request<Space>("POST", `/generation/api/projects/${pid}/spaces`, { name, template }),
+  space: (id: string) => request<Space>("GET", `/generation/api/spaces/${id}`),
   saveSpace: (id: string, graph: SpaceGraph, version: number | null, name?: string) =>
-    request<Space>("PUT", `/api/spaces/${id}`, { graph, version, name }),
-  deleteSpace: (id: string) => request<Space>("DELETE", `/api/spaces/${id}`),
-  restoreSpace: (id: string) => request<Space>("POST", `/api/spaces/${id}/restore`),
-  exportSpace: (id: string, group?: string) => request<Record<string, any>>("GET", `/api/spaces/${id}/export${q({ group })}`),
+    request<Space>("PUT", `/generation/api/spaces/${id}`, { graph, version, name }),
+  deleteSpace: (id: string) => request<Space>("DELETE", `/generation/api/spaces/${id}`),
+  restoreSpace: (id: string) => request<Space>("POST", `/generation/api/spaces/${id}/restore`),
+  exportSpace: (id: string, group?: string) => request<Record<string, any>>("GET", `/generation/api/spaces/${id}/export${q({ group })}`),
   importSpace: (pid: string, bundle: unknown, name?: string, space?: string) =>
     request<{ space: { id: string }; added: string[]; cast_bound: string[]; cast_missing: string[]; to_fill: string[]; models: string[] }>(
-      "POST", `/api/projects/${pid}/spaces/import`, { bundle, name, space }),
+      "POST", `/generation/api/projects/${pid}/spaces/import`, { bundle, name, space }),
   runSpace: (id: string, mode: "node" | "downstream" | "upto" | "all", nodeIds: string[] = [], force = false) =>
-    request<{ job: Job; nodes: string[] }>("POST", `/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
+    request<{ job: Job; nodes: string[] }>("POST", `/generation/api/spaces/${id}/run`, { mode, node_ids: nodeIds, force }),
   spaceEstimate: (id: string, mode = "all", nodeIds: string[] = []) =>
-    request<SpaceEstimate>("GET", `/api/spaces/${id}/estimate${q({ mode, node_ids: nodeIds.join(",") || undefined })}`),
-  spaceApp: (id: string) => request<SpaceApp>("GET", `/api/spaces/${id}/app`),
+    request<SpaceEstimate>("GET", `/generation/api/spaces/${id}/estimate${q({ mode, node_ids: nodeIds.join(",") || undefined })}`),
+  spaceApp: (id: string) => request<SpaceApp>("GET", `/generation/api/spaces/${id}/app`),
   runSpaceApp: (id: string, values: Record<string, unknown>) =>
-    request<{ job: Job; nodes: string[]; app: SpaceApp }>("POST", `/api/spaces/${id}/app/run`, { values }),
+    request<{ job: Job; nodes: string[]; app: SpaceApp }>("POST", `/generation/api/spaces/${id}/app/run`, { values }),
   buildSpace: (id: string, requestText: string) =>
-    request<{ note: string; added: string[]; wires: number }>("POST", `/api/spaces/${id}/build`, { request: requestText }),
-  stopSpace: (id: string) => request<{ stopped: string[] }>("POST", `/api/spaces/${id}/stop`),
+    request<{ note: string; added: string[]; wires: number }>("POST", `/generation/api/spaces/${id}/build`, { request: requestText }),
+  stopSpace: (id: string) => request<{ stopped: string[] }>("POST", `/generation/api/spaces/${id}/stop`),
   spaceNode: (id: string, nodeId: string, patch: { excluded?: string[]; outputs?: string[] }) =>
-    request<Space>("PATCH", `/api/spaces/${id}/nodes/${nodeId}`, patch),
+    request<Space>("PATCH", `/generation/api/spaces/${id}/nodes/${nodeId}`, patch),
   enhancePrompt: (text: string, kind: "image" | "video" | "music", project?: string) =>
-    request<{ text: string }>("POST", "/api/prompt/enhance", { text, kind, project }),
-  cinema: () => request<CinemaGuide>("GET", "/api/cinema"),
-  libraryPreviewUrl: (libId: string) => `/api/library/characters/${libId}/preview`,
+    request<{ text: string }>("POST", "/generation/api/prompt/enhance", { text, kind, project }),
+  cinema: () => request<CinemaGuide>("GET", "/generation/api/cinema"),
+  libraryPreviewUrl: (libId: string) => `/generation/api/library/characters/${libId}/preview`,
 };
 
 export type ClipEditMode = "auto" | "edit" | "restyle" | "reference" | "propagate";

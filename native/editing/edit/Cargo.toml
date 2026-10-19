@@ -1,0 +1,124 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "host"]
+default-members = ["host"]
+
+[workspace.package]
+version = "0.2.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal
+lumiere-edit-time = { path = "crates/time" }
+lumiere-edit-geom = { path = "crates/geom" }
+lumiere-edit-color = { path = "crates/color" }
+lumiere-edit-bitstream = { path = "crates/bitstream" }
+lumiere-edit-isobmff = { path = "crates/isobmff" }
+lumiere-edit-matroska = { path = "crates/matroska" }
+lumiere-edit-mxf = { path = "crates/mxf" }
+lumiere-edit-cfb = { path = "crates/cfb" }
+lumiere-edit-mpegts = { path = "crates/mpegts" }
+lumiere-edit-mpeg2v = { path = "crates/mpeg2v" }
+lumiere-edit-ac3 = { path = "crates/ac3" }
+lumiere-edit-ogg = { path = "crates/ogg" }
+lumiere-edit-h264 = { path = "crates/h264" }
+lumiere-edit-hevc = { path = "crates/hevc" }
+lumiere-edit-vp9 = { path = "crates/vp9" }
+lumiere-edit-prores = { path = "crates/prores" }
+lumiere-edit-dnx = { path = "crates/dnx" }
+lumiere-edit-av1 = { path = "crates/av1" }
+lumiere-edit-aac = { path = "crates/aac" }
+lumiere-edit-opus = { path = "crates/opus" }
+lumiere-edit-h264enc = { path = "crates/h264enc" }
+lumiere-edit-audio-dsp = { path = "crates/audio-dsp" }
+lumiere-edit-frame = { path = "crates/frame" }
+lumiere-edit-media = { path = "crates/media" }
+lumiere-edit-codecs = { path = "crates/codecs" }
+lumiere-edit-project = { path = "crates/project" }
+lumiere-edit-edit = { path = "crates/edit" }
+lumiere-edit-interchange = { path = "crates/interchange" }
+lumiere-edit-text = { path = "crates/text" }
+lumiere-edit-captions = { path = "crates/captions" }
+lumiere-edit-speech = { path = "crates/speech" }
+lumiere-edit-render = { path = "crates/render" }
+lumiere-edit-gpu = { path = "crates/gpu" }
+lumiere-edit-scopes = { path = "crates/scopes" }
+lumiere-edit-export = { path = "crates/export" }
+lumiere-edit-format = { path = "crates/format" }
+lumiere-edit-engine = { path = "crates/engine" }
+lumiere-edit-ui-egui = { path = "crates/ui-egui" }
+lumiere-edit-automation = { path = "crates/automation" }
+lumiere-edit-platform = { path = "crates/platform" }
+lumiere-edit-testkit = { path = "crates/testkit" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+log = "0.4"
+rayon = "1"
+proptest = "1"
+roxmltree = "0.21"
+
+# ui
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+egui_kittest = "0.36"
+rfd = "0.17"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+# Codec hot loops: debug-build tests (RFC/oracle vectors) are minutes slower below opt-level 3.
+[profile.dev.package.lumiere-edit-h264]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-h264enc]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-hevc]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-prores]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-dnx]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-av1]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-aac]
+opt-level = 3
+
+# Audio effects: realtime-factor tests and long convolution / spectral runs.
+[profile.dev.package.lumiere-edit-audio-dsp]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-mxf]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-opus]
+opt-level = 3
+
+[profile.dev.package.lumiere-edit-vp9]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

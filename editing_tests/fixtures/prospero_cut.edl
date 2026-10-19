@@ -1,0 +1,20 @@
+TITLE: Mi corte
+FCM: NON-DROP FRAME
+
+001  AX       V     C        00:00:01:00 00:00:04:00 00:00:00:00 00:00:03:00
+* FROM CLIP NAME: shot one.mp4
+
+002  AX       V     C        00:00:00:00 00:00:02:12 00:00:03:00 00:00:05:12
+* FROM CLIP NAME: shot two.mp4
+
+003  AX       V     C        00:00:00:00 00:00:02:00 00:00:05:12 00:00:07:12
+* FROM CLIP NAME: still.png
+
+004  AX       V     C        00:00:06:00 00:00:07:12 00:00:07:12 00:00:09:00
+* FROM CLIP NAME: shot one.mp4
+
+005  AX       A     C        00:00:00:00 00:00:09:00 00:00:00:00 00:00:09:00
+* FROM CLIP NAME: Ana's song.wav
+
+* LYRIC 00:00:00:12 first line
+* LYRIC 00:00:04:00 second <line> & more

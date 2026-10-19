@@ -1,0 +1,22 @@
+[package]
+name = "lumiere-edit-prores"
+description = "Clean-room Apple ProRes (SMPTE RDD 36) decoder and encoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+lumiere-edit-bitstream = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+lumiere-edit-testkit = { workspace = true }

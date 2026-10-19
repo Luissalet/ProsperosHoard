@@ -1,0 +1,25 @@
+.............................................sssssss...F................ [ 97%]
+..                                                                       [100%]
+================================== FAILURES ===================================
+_________ test_a_failed_model_call_is_retried_once_with_fresh_probes __________
+editing_tests\test_script.py:71: in chat
+    raise RuntimeError("HTTP 404 from a server picked while the usual one was busy")
+E   RuntimeError: HTTP 404 from a server picked while the usual one was busy
+
+The above exception was the direct cause of the following exception:
+editing_tests\test_script.py:82: in test_a_failed_model_call_is_retried_once_with_fresh_probes
+    assert generate.chat_text(Svc(), [{"role": "user", "content": "x"}]) == ("hola", "m")
+prosperos_hoard\global_model.py:50: in wrapped
+    return function(*args, **kwargs)
+prosperos_hoard\editing\generate.py:82: in chat_text
+    raise ModelUnavailable(f"{type(error).__name__}: {str(error)[:200]}") from error
+E   prosperos_hoard.editing.errors.ModelUnavailable: RuntimeError: HTTP 404 from a server picked while the usual one was busy
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:40
+  D:\LocalAI\worktrees\prospero-fisiones929\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED editing_tests/test_script.py::test_a_failed_model_call_is_retried_once_with_fresh_probes
+1 failed, 66 passed, 7 skipped, 1 warning in 74.30s (0:01:14)
