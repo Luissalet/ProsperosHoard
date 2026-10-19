@@ -9,9 +9,9 @@ function node(tag, text, parent) {const element=document.createElement(tag);if(t
 function fail(error){$('error').textContent=error.message;}
 async function modules(){
   const state=await api('modules');$('modules').replaceChildren();
-  for(const module of state.modules){const row=node('div',null,$('modules'));node('strong',labels[module.id],row);node('span',module.phase==='on'?'Activo':'Apagado',row);
+  for(const module of state.modules){const row=node('div',null,$('modules'));node('strong',labels[module.id],row);node('span',module.phase==='on'?'Activo':module.phase==='stopping'?'Cierre pendiente':'Apagado',row);
     const label=node('label',null,row),automatic=node('input',null,label);automatic.type='checkbox';automatic.checked=module.automatic;label.append(' Reanudar trabajos anteriores');
-    const button=node('button',module.enabled?'Apagar':'Activar',row);button.onclick=async()=>{button.disabled=true;$('error').textContent='';try{await api('modules/'+module.id,'PUT',{enabled:!module.enabled,automatic:automatic.checked});await modules();}catch(e){fail(e);button.disabled=false;}};
+    const button=node('button',module.phase==='stopping'?'Reintentar apagado':module.enabled?'Apagar':'Activar',row);button.onclick=async()=>{button.disabled=true;$('error').textContent='';try{await api('modules/'+module.id,'PUT',{enabled:module.phase!=='stopping'&&!module.enabled,automatic:automatic.checked});await modules();}catch(e){fail(e);await modules();}};
     if(module.enabled){const link=node('a','Abrir '+labels[module.id],row);link.href=module.url;}
   }
 }

@@ -50,6 +50,7 @@ class Module:
         self.name, self.factory, self.root, self.port, self.demo = name, factory, root, port, demo
         self.lock = asyncio.Lock()
         self.app = self.context = None
+        self.context_exited = False
         self.phase = 'off'
         self.automatic = False
         self.requests = {}
@@ -73,6 +74,8 @@ class Module:
                 self.transition = None
 
     async def _set(self, enabled, automatic):
+        if enabled and self.phase == 'stopping':
+            raise RuntimeError('Retry module shutdown before enabling it again.')
         if enabled and self.app is None:
             self.phase = 'starting'
             app = None
@@ -81,6 +84,7 @@ class Module:
                 context = app.router.lifespan_context(app)
                 await context.__aenter__()
                 self.app, self.context, self.automatic = app, context, bool(automatic)
+                self.context_exited = False
                 self.phase = 'on'
             except BaseException:
                 if app is not None and hasattr(app.state, 'shutdown'):
@@ -96,7 +100,16 @@ class Module:
                 disconnect.set()
             if active:
                 await asyncio.gather(*(t for t, _ in active), return_exceptions=True)
-            await self.context.__aexit__(None, None, None)
+            if self.context_exited:
+                retry = getattr(self.app.state, 'retry_shutdown', None)
+                if retry is None:
+                    raise RuntimeError('Native cleanup failed and has no retry callback; resources remain owned.')
+                await retry()
+            else:
+                # A generator consumes its finally even if cleanup raises. Never
+                # mistake a second __aexit__ on that generator for a retry.
+                self.context_exited = True
+                await self.context.__aexit__(None, None, None)
             self.app = self.context = None
             self.phase, self.automatic = 'off', False
         return self.status()
@@ -245,7 +258,11 @@ class Studio:
             if name not in self.modules or not isinstance(body.get('enabled'), bool) or not isinstance(body.get('automatic',False), bool):
                 return await self.json(send, {'error':'Choose a module and boolean enabled value.'}, 400)
             self.token()
-            return await self.json(send, await self.modules[name].set(bool(body.get('enabled')), bool(body.get('automatic'))))
+            try:
+                result = await self.modules[name].set(bool(body.get('enabled')), bool(body.get('automatic')))
+            except Exception as error:
+                return await self.json(send, {'error': str(error), 'module': self.modules[name].status()}, 503)
+            return await self.json(send, result)
         if path == '/api/studio/projects':
             result = await asyncio.to_thread(self.projects.create, (await self.body(receive)).get('title')) if method == 'POST' else await asyncio.to_thread(self.projects.list)
             return await self.json(send, result)

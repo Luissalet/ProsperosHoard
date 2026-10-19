@@ -1012,14 +1012,22 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # production/QA handlers are registered below, next to the operations
     # they queue sub-jobs through; the workers start at the end of create_app
 
+    shutdown_steps = None
+
     def shutdown() -> None:
         """Stop what the app started: the job workers first (nothing may be mid-call on the link's loop), then Hoard Link's
         background event loop. Idempotent; called when the server shuts down and by whoever built the app without one."""
-        queue.stop()
-        job_events.notifier.close()
-        backend.close()
-        from .db import close_all
-        close_all(data_dir)
+        nonlocal shutdown_steps
+        if shutdown_steps is None:
+            from .db import close_all
+            shutdown_steps = [queue.stop, job_events.notifier.close, backend.close,
+                              lambda: close_all(data_dir)]
+        while shutdown_steps:
+            shutdown_steps[0]()
+            shutdown_steps.pop(0)
+
+    async def retry_shutdown():
+        await asyncio.to_thread(shutdown)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -1033,6 +1041,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     app.state.backend = backend
     app.state.queue = queue
     app.state.shutdown = shutdown
+    app.state.retry_shutdown = retry_shutdown
 
     async def _any_error(request: Request, exc: Exception):
         status, payload = error_payload(exc)

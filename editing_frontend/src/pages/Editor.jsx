@@ -54,7 +54,7 @@ function TopBar({ ed, onExport, onContactSheet, onJobs, onHelp }) {
   return (
     <div className="ed-top">
       <button type="button" className="btn btn-ghost btn-icon" onClick={() => go("")} title={t("back")} aria-label={t("back")}><Icon name="back" size={18} /></button>
-      <a href="#/" title="Lumiere's Hoard" style={{ display: "flex" }}><Logo size={22} /></a>
+      <a href="#/" title="Prospero · Montaje" style={{ display: "flex" }}><Logo size={22} /></a>
       <input className="field hoard-display" style={{ width: 230, background: "transparent", border: "1px solid transparent", fontWeight: 700, fontSize: 15, height: 30, letterSpacing: "0.01em" }} value={name} aria-label={t("project_name")} onChange={(e) => setName(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { setName(view.name); e.target.blur(); } }} onFocus={(e) => e.target.select()} />
       <span style={{ width: 1, height: 20, background: "var(--line-2)", margin: "0 4px" }} />
       <button type="button" className="btn btn-ghost btn-icon" disabled={!view.can_undo} onClick={ed.undo} title={`${t("undo")}${view.undo_label ? `: ${view.undo_label}` : ""} (Ctrl+Z)`} aria-label={t("undo")}><Icon name="undo" size={17} /></button>
@@ -116,7 +116,7 @@ function EditorInner({ proj }) {
 
   useEffect(() => { pb.configure(duration, doc.canvas.fps); }, [pb, duration, doc.canvas.fps]);
   useEffect(() => () => pb.destroy(), [pb]);
-  useEffect(() => { document.title = `${view.name} · Lumiere's Hoard`; return () => { document.title = "Lumiere's Hoard"; }; }, [view.name]);
+  useEffect(() => { document.title = `${view.name} · Prospero · Montaje`; return () => { document.title = "Prospero · Montaje"; }; }, [view.name]);
 
   // keep the selection valid when clips disappear
   useEffect(() => {

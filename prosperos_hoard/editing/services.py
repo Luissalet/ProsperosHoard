@@ -111,14 +111,14 @@ class Services:
         self.jobs.start(resume_pending=resume_pending)
 
     def stop(self) -> None:
-        self.jobs.stop()
-        self.notifier.close()
-        if self._link is not None:
-            try:
-                self.link_sync.close()
-            except Exception:  # noqa: BLE001
-                pass
-        self.db.close()
+        if not hasattr(self, '_shutdown_steps'):
+            self._shutdown_steps = [self.jobs.stop, self.notifier.close]
+            if self._link is not None:
+                self._shutdown_steps.append(self.link_sync.close)
+            self._shutdown_steps.append(self.db.close)
+        while self._shutdown_steps:
+            self._shutdown_steps[0]()
+            self._shutdown_steps.pop(0)
 
     def _build_link(self) -> Any:
         from ..global_model import GlobalLink
