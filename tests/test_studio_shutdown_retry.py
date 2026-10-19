@@ -12,6 +12,62 @@ from prosperos_hoard.studio import Module, generation, editing
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['pool', 'inner', 'retired_pool', 'retired_inner'])
+async def test_generation_retains_real_clients_after_failed_close(kind, tmp_path, monkeypatch):
+    from prosperos_hoard.hoard_link import family
+    monkeypatch.setattr(family, 'emit', lambda *args, **kwargs: False)
+    connect = socket.socket.connect
+    pair = getattr(socket.socketpair, '__code__', None)
+    def offline(sock, *args, **kwargs):
+        frame = sys._getframe(1)
+        while frame:
+            if frame.f_code is pair:
+                return connect(sock, *args, **kwargs)
+            frame = frame.f_back
+        raise OSError('No outbound service in actual-client closure QA')
+    monkeypatch.setattr(socket.socket, 'connect', offline)
+    owner = Module('generation', generation, tmp_path, 64839, False)
+    await owner.set(True)
+    app, attempts = owner.app, []
+    backend = app.state.backend
+    if 'pool' in kind:
+        resource = await asyncio.to_thread(backend._pool_client, 'http://synthetic.invalid')
+        client = resource._client
+    else:
+        await asyncio.to_thread(backend.run_async, lambda link: asyncio.sleep(0))
+        resource = client = backend.link.sync._inner._client
+    if kind.startswith('retired'):
+        backend.reload()
+        await asyncio.to_thread(backend._pool_client, 'http://synthetic.invalid')
+    thread = backend.link.sync._thread
+    original = resource.aclose
+    async def fail_twice():
+        attempts.append('close')
+        if len(attempts) < 3:
+            raise OSError('Actual HTTP client remains open')
+        await original()
+    monkeypatch.setattr(resource, 'aclose', fail_twice)
+    try:
+        for count in (1, 2):
+            with pytest.raises(OSError):
+                await owner.set(False)
+            assert len(attempts) == count and not client.is_closed
+            assert owner.app is app and owner.phase == 'stopping'
+            assert thread.is_alive() and backend.link.sync._inner is not None
+            with pytest.raises(RuntimeError, match='shutdown before enabling'):
+                await owner.set(True)
+        await owner.set(False)
+        assert client.is_closed and not thread.is_alive()
+        assert not backend._pool_clients and not backend._retired_clients and not backend._retired_links
+        assert backend.link.sync._inner is None and len(attempts) == 3
+        assert owner.app is None and owner.phase == 'off'
+    finally:
+        if owner.app is not None:
+            monkeypatch.setattr(resource, 'aclose', original)
+            await app.state.retry_shutdown()
+
+
+@pytest.mark.asyncio
 async def test_failed_control_returns_json_and_retains_pending_owner(tmp_path):
     from prosperos_hoard.studio import create_app
     @asynccontextmanager

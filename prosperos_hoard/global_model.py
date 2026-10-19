@@ -73,15 +73,25 @@ def payload(body, choice):
 
 
 class GlobalSync(SyncFacade):
-    def close(self, timeout=2.0):
-        loop, thread = self._loop, self._thread
-        if loop is not None and loop.is_running() and thread is not threading.current_thread():
-            async def drain(_link):
-                await asyncio.get_running_loop().shutdown_default_executor()
-            self._run(drain)
-        super().close(timeout)
-        if thread is not None and thread is not threading.current_thread():
+    def close(self, timeout=None):
+        loop, inner, thread = self._loop, self._inner, self._thread
+        if thread is threading.current_thread():
+            raise RuntimeError('Close the global client from its owning module')
+        if loop is not None:
+            if loop.is_running():
+                async def drain():
+                    if inner is not None and inner._owns_client and not inner._client.is_closed:
+                        await inner._client.aclose()
+                    await asyncio.get_running_loop().shutdown_default_executor()
+                asyncio.run_coroutine_threadsafe(drain(), loop).result()
+                loop.call_soon_threadsafe(loop.stop)
+            elif inner is not None and inner._owns_client and not inner._client.is_closed:
+                raise RuntimeError('The owned client still needs its shutdown loop')
+        if thread is not None:
             thread.join()
+        if loop is not None:
+            loop.close()
+        self._loop = self._thread = self._inner = None
 
     def _twin(self):
         with self._start_lock:
@@ -97,6 +107,11 @@ class GlobalLink(Link):
         super().__init__(*args, **kwargs)
         self.sync = GlobalSync(self)
         self._selection = ContextVar('prospero_call_selection', default=None)
+
+    async def aclose(self):
+        await asyncio.to_thread(self.sync.close)
+        if self._owns_client:
+            await self._client.aclose()
 
     def global_selection(self):
         pin = _job.get()

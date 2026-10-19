@@ -226,35 +226,41 @@ class Backend:
         job queue is stopped, so no worker is mid-call on that loop."""
         link = self.link
         with self._pool_lock:
-            pooled, self._pool_clients = list(self._pool_clients.values()), {}
-            retired_clients, self._retired_clients = self._retired_clients, []
-        retired_links, self._retired_links = self._retired_links, []
-        loop = link.sync._loop
-        if loop is not None and loop.is_running():
-            async def drain(_link: Any) -> None:
-                clients = [client for _owner, client in pooled] + retired_clients
-                for owner in retired_links:
+            pooled = list(self._pool_clients.values())
+            retired_clients = list(self._retired_clients)
+        retired_links = list(self._retired_links)
+        if not hasattr(self, '_shutdown_clients'):
+            clients = [client for _owner, client in pooled] + retired_clients
+            if link._owns_client:
+                clients.append(link._client)
+            for owner in retired_links:
+                if owner._owns_client:
                     clients.append(owner._client)
-                    if owner.sync._inner is not None:
-                        clients.append(owner.sync._inner._client)
-                unique = {id(client):client for client in clients}
-                for client in unique.values():
-                    try:
-                        await client.aclose()
-                    except Exception:  # noqa: BLE001 - closing is best effort
-                        pass
-                await asyncio.get_running_loop().shutdown_default_executor()  # the to_thread() workers ("asyncio_N")
-
-            try:
-                link.sync._run(drain)
-            except Exception:  # noqa: BLE001 - a loop that is already going away needs nothing more
-                pass
+                if owner.sync._inner is not None and owner.sync._inner._owns_client:
+                    clients.append(owner.sync._inner._client)
+            self._shutdown_clients = list({id(client): client for client in clients}.values())
+        loop = link.sync._loop
+        async def drain():
+            while self._shutdown_clients:
+                await self._shutdown_clients[0].aclose()
+                self._shutdown_clients.pop(0)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(drain(), loop).result()
+        elif self._shutdown_clients:
+            # With no background loop these clients have never been dispatched
+            # through run_async. A failed close remains in the retained list.
+            asyncio.run(drain())
         owned_thread = link.sync._thread
         link.sync.close(timeout)
         if owned_thread is not None and owned_thread is not threading.current_thread():
             owned_thread.join()
         for owner in retired_links:
             owner.sync._loop = owner.sync._thread = owner.sync._inner = None
+        with self._pool_lock:
+            self._pool_clients.clear()
+            self._retired_clients.clear()
+        self._retired_links.clear()
+        del self._shutdown_clients
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:
