@@ -4,14 +4,36 @@ from html.parser import HTMLParser
 
 
 def scoped(value, module, port):
-    if isinstance(value, list):
-        return [scoped(v, module, port) for v in value]
-    if isinstance(value, dict):
-        return {k: scoped(v, module, port) for k, v in value.items()}
+    """One known server URL, never an arbitrary JSON string or disk path."""
     if isinstance(value, str):
         for origin in ('', f'http://127.0.0.1:{port}', f'http://localhost:{port}'):
             if value.startswith(tuple(origin + p for p in ('/api/', '/assets/', '/_hoard/', '/#/'))):
                 return '/' + module + value[len(origin):]
+    return value
+
+
+URL_FIELDS = frozenset({
+    'url', 'href', 'thumbnail', 'thumbnail_url', 'thumb_url', 'preview_url', 'proxy_url',
+    'waveform_url', 'download_url', 'file_url', 'project_url', 'native_url',
+    'render_url', 'media_receive_url', 'image_url', 'audio_url', 'video_url',
+    'events_url', 'stream_url', 'source_url', 'poster_url',
+})
+OPAQUE_FIELDS = frozenset({'snapshot', 'snapshots', 'manifest', 'manifests', 'document', 'doc',
+    'native_document', 'prompt', 'prompts', 'metadata', 'provenance', 'params', 'parameters',
+    'arguments', 'recipe', 'settings'})
+MEDIA_URL_FIELDS = frozenset({'play', 'file', 'poster', 'sprite', 'waveform'})
+
+
+def scoped_json(value, module, port):
+    """Rewrite declared HTTP-link fields while native snapshots/text stay exact."""
+    if isinstance(value, list):
+        return [scoped_json(item, module, port) for item in value]
+    if isinstance(value, dict):
+        return {key: item if key in OPAQUE_FIELDS else
+            {name: scoped(link, module, port) if name in MEDIA_URL_FIELDS else link
+                for name, link in item.items()} if key == 'urls' and isinstance(item, dict) else
+            scoped(item, module, port) if key in URL_FIELDS and isinstance(item, str) else
+            scoped_json(item, module, port) for key, item in value.items()}
     return value
 
 
@@ -69,7 +91,7 @@ class NativeResponse:
                 return
             raw = b''.join(self.parts)
             if self.kind == b'application/json':
-                raw = json.dumps(scoped(json.loads(raw), self.module, self.port), ensure_ascii=False).encode()
+                raw = json.dumps(scoped_json(json.loads(raw), self.module, self.port), ensure_ascii=False).encode()
             else:
                 parser = HTML(self.module, self.port)
                 parser.feed(raw.decode('utf-8'))

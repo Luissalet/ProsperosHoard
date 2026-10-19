@@ -37,3 +37,5 @@ Keep the existing Prospero data root and configuration unchanged. The editor's o
 The task receipt records synthetic API and real stdio MCP transfer/reopen/OFF checks, native tests and the two native Rust binary hashes. Headless HTML worker tests exercise their rendering runtime, but do not constitute visual approval of either client. Coordinator CUA, real-data continuity, deployment of the global-model contract, live models and optional hardware/model paths remain separate acceptance steps. Theseus is incomplete and paused and is outside this merger.
 
 The common home/module bar currently uses Spanish labels; both complete native clients retain their existing English/Spanish selection. Translation of the new common controls is pending visual review. The standalone editor preview comparison helper has been relocated but has not been run against the prefixed built client.
+
+CAS2 correction: repeated caller cancellation now retains owned cleanup until its task finishes before publishing OFF. Response URL scoping applies only to known derived link fields and native media URL maps; native documents, snapshots, manifests, text and disk paths remain exact.

@@ -14,6 +14,7 @@ from typing import Any
 
 from .studio_projects import Projects
 from .studio_contract import NAMES as HOST_TOOLS
+from .cancellation import join_tasks
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = Path(__file__).with_name('studio_catalog.json')
@@ -65,7 +66,7 @@ class Module:
             try:
                 return await asyncio.shield(task)
             except asyncio.CancelledError:
-                await task
+                await join_tasks([task])
                 raise
             finally:
                 self.transition = None
@@ -147,7 +148,7 @@ class Module:
             event = self.requests.get(task)
             if event:
                 event.set()
-            await asyncio.gather(task, return_exceptions=True)
+            await join_tasks([task])
             raise
 
 
