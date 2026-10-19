@@ -17,6 +17,7 @@ from . import __version__
 from .hoard_link.atomic import write_text_atomic
 from .hoard_link.appconfig import load_dotenv
 from .studio import create_app
+from .resources import installed
 
 DEFAULT_PORT = 8815
 
@@ -40,8 +41,16 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
+    if installed():
+        # Installed files are immutable code/resources, never the user's profile.
+        repo_root = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData/Local') / 'ProsperosHoard'
     # Settings kept out of git (engine and model folders such as PROSPERO_AUK_HOME); the real environment wins.
-    load_dotenv(repo_root / ".env")
+    configuration_root = repo_root
+    if installed() and not args.demo:
+        selected = args.data_dir or os.environ.get('PROSPERO_DATA_DIR')
+        if selected:
+            configuration_root = Path(selected).expanduser().resolve().parent
+    load_dotenv(configuration_root / ".env")
     if args.data_dir:
         data_dir = args.data_dir
     elif args.demo:

@@ -29,15 +29,31 @@ dev = [
 ]
 editing-analysis = ["faster-whisper==1.2.1", "opencv-python-headless==4.13.0.92"]
 
+[project.scripts]
+prosperos-hoard = "prosperos_hoard.__main__:main"
+prosperos-hoard-mcp = "prosperos_hoard.mcp_server:main"
+
 [project.urls]
 Repository = "https://github.com/Luissalet/ProsperosHoard"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77", "wheel>=0.43"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["prosperos_hoard*"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-data]
+"*" = ["_data/*.json", "ui/*.css", "LICENSE", "VENDORED.txt"]
+"prosperos_hoard" = ["studio*.json", "fonts/**/*", "workflows/*.json", "studio_ui/**/*"]
+"prosperos_hoard.editing" = ["static/**/*"]
+"prosperos_hoard.devtools" = ["comfy_object_info.json"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/__pycache__/**", "**/*.pyc", "**/.env", "**/node_modules/**", "**/.venv/**", "**/data/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

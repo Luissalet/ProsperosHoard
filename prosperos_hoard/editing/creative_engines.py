@@ -123,7 +123,8 @@ class CreativeEngines:
     def executable(self, engine: str) -> Path | None:
         self._validate_engine(engine)
         name = {"motion":"lumiere-compositor", "edit":"lumiere-editor"}[engine]
-        path = Path(__file__).resolve().parents[2]/"native"/"editing"/"bin"/(name+(".exe" if os.name == "nt" else ""))
+        from ..resources import editing_engine
+        path = editing_engine(name+(".exe" if os.name == "nt" else ""))
         return path if path.is_file() else None
 
     def status(self) -> dict[str, Any]:
