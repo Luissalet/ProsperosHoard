@@ -1,0 +1,27 @@
+Processing request of type ListToolsRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+{
+  "method": "actual stdio MCP/private ASGI; native stores/handlers; inert media probe; no model/browser/GPU",
+  "mcp_tools": 168,
+  "initial_off": true,
+  "api_mcp_native_transfer": true,
+  "legacy_export_internal": true,
+  "off_project_and_range_artifact": true,
+  "native_id_reopened": true,
+  "final_off": true
+}
