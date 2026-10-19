@@ -1,0 +1,36 @@
+[package]
+name = "lumiere-motion-ui-egui"
+description = "The Lumiere Motion egui frontend (swappable): docking panels, composition viewer, timeline, effect controls, control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-geom = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-path = { workspace = true }
+lumiere-motion-text = { workspace = true }
+lumiere-motion-render = { workspace = true }
+lumiere-motion-engine = { workspace = true }
+lumiere-motion-gpu = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+web-time = { workspace = true }
+kurbo = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }
+pollster = "0.4"
+lumiere-motion-host = { workspace = true }

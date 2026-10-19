@@ -62,7 +62,7 @@ export function JobsView({ projects }: { projects: Project[] }) {
                             <button key={id} onClick={() => app.openAsset(id, ids)} title={id}>
                               {audioOut
                                 ? <AudioLines size={16} style={{ color: "var(--muted)" }} />
-                                : <img src={`/api/assets/${id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />}
+                                : <img src={`/generation/api/assets/${id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />}
                             </button>
                           ))}
                         </div>

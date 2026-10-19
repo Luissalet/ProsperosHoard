@@ -1,0 +1,46 @@
+[package]
+name = "lumiere-edit-engine"
+description = "Lumiere Edit engine façade: session, command registry, history, media pool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Speech-to-text with Whisper (candle, CPU). Off by default and in wasm builds.
+whisper = ["lumiere-edit-speech/whisper"]
+# Speech-model downloads over HTTPS.
+speech-download = ["lumiere-edit-speech/download"]
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-codecs = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-edit = { workspace = true }
+lumiere-edit-render = { workspace = true }
+lumiere-edit-scopes = { workspace = true }
+lumiere-edit-text = { workspace = true }
+lumiere-edit-audio-dsp = { workspace = true }
+lumiere-edit-export = { workspace = true }
+lumiere-edit-mxf = { workspace = true }
+lumiere-edit-format = { workspace = true }
+lumiere-edit-interchange = { workspace = true }
+lumiere-edit-captions = { workspace = true }
+lumiere-edit-speech = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+web-time = "1"
+
+[dev-dependencies]
+lumiere-edit-testkit = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png"] }

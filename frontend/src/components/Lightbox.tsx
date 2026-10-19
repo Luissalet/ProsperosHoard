@@ -204,7 +204,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
                   <div className="input-thumbs">
                     {recipe.input_asset_ids!.slice(0, 16).map((id) => (
                       <button key={id} onClick={() => onNavigate(id)} title={id}>
-                        <img src={`/api/assets/${id}/thumb`} alt="" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
+                        <img src={`/generation/api/assets/${id}/thumb`} alt="" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
                       </button>
                     ))}
                   </div>
@@ -269,7 +269,7 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
                 {["vocals", "drums", "bass", "other", "instrumental"].filter((k) => stemList[k]).map((k) => (
                   <div key={k} className="row" style={{ gap: 6 }}>
                     <span className="small mono" style={{ width: 60 }}>{t(`stem_${k}` as never)}</span>
-                    <audio controls preload="none" src={`/api/assets/${stemList[k]}/file`} style={{ flex: 1, height: 30 }} />
+                    <audio controls preload="none" src={`/generation/api/assets/${stemList[k]}/file`} style={{ flex: 1, height: 30 }} />
                   </div>
                 ))}
               </div>

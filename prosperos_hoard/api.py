@@ -967,14 +967,15 @@ class VoiceResegmentBody(BaseModel):
 
 # ------------------------------------------------------------------- app
 
-def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 8815, demo: bool = False) -> FastAPI:
+def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 8815, demo: bool = False,
+               *, resume_pending: bool = True, start_workers: bool = True, url_prefix: str = '') -> FastAPI:
     data_dir = Path(data_dir)
     store = Store(data_dir)
     backend = Backend(data_dir, demo=demo)
     # one GPU worker for the main ComfyUI plus one per render-pool server
     # the family: events for the hub, notices when a production needs the person, the hub's GPU lease (family_api.install below)
     family_settings = FamilySettings(data_dir)
-    job_events = jobevents.JobEvents(store, family.emit, base_url=lambda: f"http://127.0.0.1:{port}",
+    job_events = jobevents.JobEvents(store, family.emit, base_url=lambda: f"http://127.0.0.1:{port}{url_prefix}",
                                      notifier=jobevents.Notifier(store, family_settings))
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
                      target_ready=backend.pool_server_ready, accepts=backend.accepts_job, events=job_events,
@@ -1015,7 +1016,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         """Stop what the app started: the job workers first (nothing may be mid-call on the link's loop), then Hoard Link's
         background event loop. Idempotent; called when the server shuts down and by whoever built the app without one."""
         queue.stop()
+        job_events.notifier.close()
         backend.close()
+        from .db import close_all
+        close_all(data_dir)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -3893,6 +3897,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             out["job"] = engine.job_view(queue_production(slug))
         return {**out, "production": production_view(slug)}
 
+    @app.post('/api/agent/studio_production_lyrics')
+    def agent_production_lyrics(production: str, body: ProductionLyricsBody):
+        return agent('studio_production_lyrics',production,lambda:production_lyrics(production,body))
+
     def op_production_song(slug: str, body: ProductionSongBody) -> dict[str, Any]:
         out = productions_mod.set_song(store, slug, asset_id=body.asset_id, take=body.take, compose=body.compose,
                                        lyrics=body.lyrics)
@@ -4338,6 +4346,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.run and out["redraw"]:
             out["job"] = engine.job_view(queue_production(slug))
         return {**out, "production": production_view(slug)}
+
+    @app.post('/api/agent/studio_production_cast')
+    def agent_production_cast(production: str, body: ProductionCastBody):
+        return agent('studio_production_cast',production,lambda:production_cast(production,body))
 
     def op_download(project_id: str, body: DownloadMediaBody) -> dict[str, Any]:
         store.get_project(project_id)
@@ -4872,7 +4884,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "</body></html>"
             )
 
-    queue.start()
+    if start_workers:
+        queue.start(resume_pending=resume_pending)
     return app
 
 

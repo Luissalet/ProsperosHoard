@@ -1,0 +1,23 @@
+{
+  "task": 929,
+  "performed": false,
+  "owner": "prospero",
+  "generation_data": "Preserve the existing owner data directory, configuration, database, assets, jobs, recipes, productions and identities in place.",
+  "editing_destination": "<owner-data>/editing",
+  "editing_inventory": [
+    "lumiere.db and any WAL/SHM sidecars after quiescence",
+    "uploads, proxies, thumbnails, cache, renders, exports and work directories",
+    "creative engine source files, revisions, HTML motion, native project formats and history",
+    "backend/settings files, family connection settings, mcp-token and agent token registry",
+    "external media references, absolute source paths and saved native identifiers",
+    "unfinished jobs and explicit resumption choice"
+  ],
+  "common_new_files": ["studio-projects.sqlite3", "studio-artifacts/<project>/<sha256>.xml"],
+  "constraints": [
+    "quiesce old and new owners before any real-data transition",
+    "no copies, symlinks or junctions of production data",
+    "do not replace tokens or rewrite identities",
+    "verify legacy URLs/aliases separately; no alias deployment is claimed",
+    "global text/vision selection is owned by Faustus, legacy preferred settings remain stored"
+  ]
+}

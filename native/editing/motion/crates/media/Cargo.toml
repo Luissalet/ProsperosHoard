@@ -1,0 +1,31 @@
+[package]
+name = "lumiere-motion-media"
+description = "Footage import: probing, stills, image sequences, video and audio via Lumiere Edit's pure-Rust codecs, memory-budgeted frame cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-raster = { workspace = true }
+lumiere-motion-render = { workspace = true }
+lumiere-motion-psd = { workspace = true }
+lumiere-motion-svg = { workspace = true }
+lumiere-motion-pdf = { workspace = true }
+lumiere-motion-model = { workspace = true }
+lumiere-codecbase-codecs = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-frame = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-time = { workspace = true }
+exr = { workspace = true }
+image = { workspace = true, features = ["gif", "webp", "tiff", "bmp", "exr"] }
+rayon = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

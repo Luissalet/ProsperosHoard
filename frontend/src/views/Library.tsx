@@ -168,7 +168,7 @@ export function LibraryView() {
             <div className="masonry">
               {trash.map((x) => (
                 <div key={x.id} className="tile" style={{ cursor: "default" }}>
-                  {x.thumb ? <img src={`/api/trash/${x.id}/thumb`} alt="" loading="lazy" style={{ opacity: 0.7 }} />
+                  {x.thumb ? <img src={`/generation/api/trash/${x.id}/thumb`} alt="" loading="lazy" style={{ opacity: 0.7 }} />
                     : <div className="media-icon"><Trash2 size={22} /></div>}
                   <div className="tile-meta" style={{ opacity: 1 }}>
                     <span className="ellipsis grow">{assetName(x.name, lang) || x.id}</span>

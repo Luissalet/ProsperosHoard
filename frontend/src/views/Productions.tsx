@@ -451,7 +451,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                         <div key={aspect} className="stack" style={{ gap: 4 }}>
                           <span className="small muted">{aspect}{byQuality.final ? "" : ` · ${t("previewQuality")}`}{stale[aspect] ? ` · ${t("lookPrevious")}` : ""}</span>
                           <div className="video-frame" style={{ width: aspect === "16:9" ? 480 : 260 }}>
-                            <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+                            <video src={fileUrl(id)} controls preload="metadata" poster={`/generation/api/assets/${id}/thumb`} />
                           </div>
                           <div className="row wrap" style={{ gap: 6 }}>
                             <a className="btn sm ghost" href={fileUrl(id)} download><Download size={13} /> {t("download")}</a>
@@ -472,7 +472,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                       <div className="stack" style={{ gap: 4 }}>
                         <span className="small muted">{t("canvasTitle")}</span>
                         <div className="video-frame" style={{ width: 150, aspectRatio: "9 / 16" }}>
-                          <video src={fileUrl(canvasId)} poster={`/api/assets/${canvasId}/thumb`} autoPlay loop muted playsInline preload="metadata"
+                          <video src={fileUrl(canvasId)} poster={`/generation/api/assets/${canvasId}/thumb`} autoPlay loop muted playsInline preload="metadata"
                             style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         </div>
                         <a className="btn sm ghost" href={`${fileUrl(canvasId)}?download=true`} download><Download size={13} /> {t("download")}</a>
@@ -585,7 +585,7 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
             <div key={aspect} className="stack" style={{ gap: 4 }}>
               <span className="small muted">{aspect}</span>
               <div className="video-frame" style={{ width: aspect === "16:9" ? 560 : 300 }}>
-                <video src={fileUrl(id)} controls preload="metadata" poster={`/api/assets/${id}/thumb`} />
+                <video src={fileUrl(id)} controls preload="metadata" poster={`/generation/api/assets/${id}/thumb`} />
               </div>
             </div>
           ))}
@@ -638,7 +638,7 @@ function ShotsModal({ state, onClose, onSaved }: { state: ProductionState; onClo
                 {variants.map((id, i) => (
                   <button key={id} className={`tile${i === bestIndex ? " selected" : ""}`} style={{ width: 84 }}
                     onClick={() => set(shot.key, { best: i })} title={id}>
-                    <img src={`/api/assets/${id}/thumb`} alt="" loading="lazy" />
+                    <img src={`/generation/api/assets/${id}/thumb`} alt="" loading="lazy" />
                   </button>
                 ))}
               </div>
@@ -705,7 +705,7 @@ function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void })
                 <div key={`${i.stage}-${i.key}`} className="row" style={{ alignItems: "flex-start" }}>
                   {i.asset_id && (
                     <button className="tile" style={{ width: 64, flex: "none" }} onClick={() => app.openAsset(i.asset_id!)}>
-                      <img src={`/api/assets/${i.asset_id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
+                      <img src={`/generation/api/assets/${i.asset_id}/thumb`} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
                     </button>
                   )}
                   <div className="small">
@@ -768,7 +768,7 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
   return (
     <button className={`prod-card${compact ? " compact" : ""}`} onClick={onOpen}>
       <div className="prod-cover">
-        {p.cover ? <img src={`/api/assets/${p.cover.asset_id}/thumb`} alt="" loading="lazy" /> : <Clapperboard size={compact ? 18 : 28} />}
+        {p.cover ? <img src={`/generation/api/assets/${p.cover.asset_id}/thumb`} alt="" loading="lazy" /> : <Clapperboard size={compact ? 18 : 28} />}
         {p.cover?.kind === "video" && <span className="prod-play"><Play size={compact ? 10 : 14} /></span>}
       </div>
       <div className="prod-info">

@@ -40,6 +40,7 @@ from typing import Any, Callable, Optional
 
 from .store import NotFound, Store
 from .util import now_iso
+from .global_model import job as global_job
 
 logger = logging.getLogger("prosperos_hoard.jobs")
 
@@ -135,6 +136,7 @@ class JobQueue:
         # for this card goes to one that holds it
         self._accepts = accepts
         self._claim_lock = threading.Lock()
+        self._held_jobs: set[str] = set()
         self.events = events
         self._gpu_guard = gpu_guard
 
@@ -149,8 +151,12 @@ class JobQueue:
     def register(self, type_: str, handler: Handler) -> None:
         self._handlers[type_] = handler
 
-    def start(self) -> None:
-        self.store.requeue_running_jobs()
+    def start(self, *, resume_pending: bool = True) -> None:
+        if resume_pending:
+            self.store.requeue_running_jobs()
+        else:
+            self._held_jobs = {row['id'] for row in self.store.conn.execute(
+                "SELECT id FROM jobs WHERE state IN ('queued','running','waiting_gpu')")}
         workers: list[tuple[str, Optional[str]]] = ([("gpu", target) for target in self._gpu_targets]
                                                     + [("cpu", None), ("orchestrator", None)])
         for i, (lane, target) in enumerate(workers):
@@ -164,7 +170,7 @@ class JobQueue:
         for ev in self._wake.values():
             ev.set()
         for t in self._threads:
-            t.join(timeout=5.0)
+            t.join()
 
     def enqueue(self, type_: str, lane: str, params: dict[str, Any], inputs: Optional[dict[str, Any]] = None,
                 project_id: Optional[str] = None) -> dict[str, Any]:
@@ -210,13 +216,13 @@ class JobQueue:
         """Take the oldest queued job of a lane (that this GPU worker accepts);
         with several GPU workers the read and the state change happen under
         one lock, so no two workers start the same job."""
-        skipped: set[str] = set()
+        skipped: set[str] = set(self._held_jobs)
         with self._claim_lock:
             while True:
                 if lane == "orchestrator":
-                    job = self.store.next_queued_job("cpu", types=ORCHESTRATOR_TYPES)
+                    job = self.store.next_queued_job("cpu", types=ORCHESTRATOR_TYPES, skip_ids=skipped or None)
                 elif lane == "cpu":
-                    job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES)
+                    job = self.store.next_queued_job("cpu", exclude_types=ORCHESTRATOR_TYPES, skip_ids=skipped or None)
                 else:
                     job = self.store.next_queued_job(lane, skip_ids=skipped or None)
                 if job is None or not gpu_worker or self._accepts is None or len(skipped) >= 50:
@@ -231,6 +237,7 @@ class JobQueue:
                 self.store.update_job(job["id"], state="running", started_at=now_iso(), message="starting")
             return job
 
+    @global_job
     def _run_job(self, job: dict[str, Any]) -> None:
         try:
             self._run_job_inner(job)

@@ -1,0 +1,37 @@
+[package]
+name = "lumiere-codecbase-export"
+description = "Export pipeline: parallel render → encode → mux, presets, progress/cancel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-codecbase-time = { workspace = true }
+lumiere-codecbase-frame = { workspace = true }
+lumiere-codecbase-color = { workspace = true }
+lumiere-codecbase-media = { workspace = true }
+lumiere-codecbase-project = { workspace = true }
+lumiere-codecbase-render = { workspace = true }
+lumiere-codecbase-audio-dsp = { workspace = true }
+lumiere-codecbase-geom = { workspace = true }
+lumiere-codecbase-text = { workspace = true }
+lumiere-codecbase-isobmff = { workspace = true }
+lumiere-codecbase-prores = { workspace = true }
+lumiere-codecbase-dnx = { workspace = true }
+lumiere-codecbase-mxf = { workspace = true }
+lumiere-codecbase-aac = { workspace = true }
+lumiere-codecbase-h264enc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true }
+web-time = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "tiff", "bmp"] }
+
+[dev-dependencies]
+lumiere-codecbase-testkit = { workspace = true }
+lumiere-codecbase-codecs = { workspace = true }

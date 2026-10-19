@@ -1,0 +1,189 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "host"]
+default-members = ["host"]
+
+[workspace.package]
+version = "0.3.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal
+lumiere-motion-time = { path = "crates/time" }
+lumiere-motion-geom = { path = "crates/geom" }
+lumiere-motion-color = { path = "crates/color" }
+lumiere-motion-raster = { path = "crates/raster" }
+lumiere-motion-path = { path = "crates/path" }
+lumiere-motion-keyframe = { path = "crates/keyframe" }
+lumiere-motion-project = { path = "crates/project" }
+lumiere-motion-text = { path = "crates/text" }
+lumiere-motion-effects = { path = "crates/effects" }
+lumiere-motion-track = { path = "crates/track" }
+lumiere-motion-segment = { path = "crates/segment" }
+lumiere-motion-model = { path = "crates/model" }
+lumiere-motion-render = { path = "crates/render" }
+lumiere-motion-gpu = { path = "crates/gpu" }
+lumiere-motion-media = { path = "crates/media" }
+lumiere-motion-export = { path = "crates/export" }
+lumiere-motion-expr = { path = "crates/expr" }
+lumiere-motion-lottie = { path = "crates/lottie" }
+lumiere-motion-interchange = { path = "crates/interchange" }
+lumiere-motion-pdf = { path = "crates/pdf" }
+lumiere-motion-psd = { path = "crates/psd" }
+lumiere-motion-vp9enc = { path = "crates/vp9enc" }
+lumiere-motion-svg = { path = "crates/svg" }
+lumiere-motion-engine = { path = "crates/engine" }
+lumiere-motion-host = { path = "crates/host" }
+lumiere-motion-ui-egui = { path = "crates/ui-egui" }
+lumiere-motion-automation = { path = "crates/automation" }
+lumiere-motion-opusenc = { path = "crates/opusenc" }
+lumiere-motion-script = { path = "crates/script" }
+lumiere-motion-hevcenc = { path = "crates/hevcenc" }
+lumiere-motion-av1enc = { path = "crates/av1enc" }
+lumiere-motion-plugin = { path = "crates/plugin" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+log = "0.4"
+rayon = "1"
+# std::time::Instant/SystemTime on native; the browser clock on wasm32 (std's panic there).
+web-time = "1"
+gif = "0.14"
+proptest = "1"
+
+# scripting (expressions)
+boa_engine = { version = "0.22", default-features = false }
+# WebAssembly effect plug-ins (sandboxed interpreter; MIT/Apache-2.0, pure Rust)
+wasmi = { version = "2", default-features = false, features = ["std", "validate", "wat", "deterministic", "portable-dispatch"] }
+
+# geometry / fonts
+kurbo = { version = "0.13", features = ["serde"] }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
+harfrust = { version = "0.12", default-features = false, features = ["std"] }
+exr = "1.74"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# media codecs + containers: Lumiere Edit's pure-Rust crates, pinned to a revision (plan/adr/0001).
+# Only `crates/media`, `crates/export` and `crates/interchange` may depend on these.
+lumiere-codecbase-codecs = { path = "../codecbase/crates/codecs" }
+lumiere-codecbase-media = { path = "../codecbase/crates/media" }
+lumiere-codecbase-frame = { path = "../codecbase/crates/frame" }
+lumiere-codecbase-color = { path = "../codecbase/crates/color" }
+lumiere-codecbase-time = { path = "../codecbase/crates/time" }
+# encoders + muxer (crates/export)
+lumiere-codecbase-h264enc = { path = "../codecbase/crates/h264enc" }
+lumiere-codecbase-prores = { path = "../codecbase/crates/prores" }
+lumiere-codecbase-aac = { path = "../codecbase/crates/aac" }
+lumiere-codecbase-isobmff = { path = "../codecbase/crates/isobmff" }
+# decoder used as the round-trip oracle of lumiere-motion-opusenc (crates/export dev-dependency)
+lumiere-codecbase-opus = { path = "../codecbase/crates/opus" }
+lumiere-codecbase-vp9 = { path = "../codecbase/crates/vp9" }
+# decoders used as the round-trip oracles of lumiere-motion-hevcenc / lumiere-motion-av1enc (dev-dependencies only)
+lumiere-codecbase-hevc = { path = "../codecbase/crates/hevc" }
+lumiere-codecbase-av1 = { path = "../codecbase/crates/av1" }
+# timeline interchange (EDL, FCP7 XML, FCPXML, OTIO) for Premiere Pro interop (crates/interchange only)
+lumiere-codecbase-interchange = { path = "../codecbase/crates/interchange" }
+lumiere-codecbase-project = { path = "../codecbase/crates/project" }
+lumiere-codecbase-geom = { path = "../codecbase/crates/geom" }
+
+# gpu (the same wgpu eframe / egui-wgpu use)
+wgpu = { version = "30.0.1", features = ["fragile-send-sync-non-atomic-wasm"] }
+bytemuck = "1"
+pollster = "0.4"
+
+# ui
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+egui_kittest = "0.36"
+rfd = "0.17"
+cpal = "0.16"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+# Pixel hot loops: keep debug builds interactive.
+[profile.dev.package.lumiere-motion-raster]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-render]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-gpu]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-effects]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-track]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-path]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-media]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-opusenc]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-export]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-vp9enc]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-hevcenc]
+opt-level = 3
+
+[profile.dev.package.lumiere-motion-av1enc]
+opt-level = 3
+
+# Lumiere Edit codec hot loops (same settings as Lumiere Edit's own workspace).
+[profile.dev.package.lumiere-codecbase-h264]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-h264enc]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-hevc]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-vp9]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-prores]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-dnx]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-av1]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-aac]
+opt-level = 3
+
+[profile.dev.package.lumiere-codecbase-opus]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

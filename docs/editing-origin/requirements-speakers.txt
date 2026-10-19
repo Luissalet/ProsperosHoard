@@ -1,0 +1,6 @@
+# Optional: voice embeddings for separating speakers in a transcript (pip install -r requirements-speakers.txt).
+# Without it Lumiere uses its built-in engine (pitch + spectral shape per word), which separates clearly different voices well;
+# embeddings help when the voices are similar. Everything runs locally; the models are public (no accounts, no gated downloads).
+# Either library is enough: speechbrain (ECAPA-TDNN, downloaded once on first use) is tried first, then resemblyzer.
+resemblyzer>=0.1.4
+# speechbrain>=1.0

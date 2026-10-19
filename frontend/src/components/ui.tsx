@@ -229,7 +229,7 @@ export function AssetTile({ asset, onClick, selected, focused, square, draggable
           onError={(e) => {
             // a missing thumbnail: the picture itself for an image, the kind's icon otherwise
             const img = e.currentTarget;
-            if (asset.kind === "image" && !img.dataset.fallback) { img.dataset.fallback = "1"; img.src = `/api/assets/${asset.id}/file`; }
+            if (asset.kind === "image" && !img.dataset.fallback) { img.dataset.fallback = "1"; img.src = `/generation/api/assets/${asset.id}/file`; }
             else img.style.visibility = "hidden";
           }} />
       ) : (
@@ -341,13 +341,13 @@ export function AssetPicker({ projectId, kind = "image", onPick, onClose, title,
         <div className="picker2-preview">
           {focus ? (
             <>
-              {focus.kind === "video" ? <video key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay muted loop playsInline />
+              {focus.kind === "video" ? <video key={focus.id} src={`/generation/api/assets/${focus.id}/file`} controls autoPlay muted loop playsInline />
                 : focus.kind === "audio" ? (
                   <div className="stack" style={{ gap: 8, width: "100%" }}>
                     <div className="media-icon" style={{ height: 120 }}><KindIcon kind="audio" size={40} /></div>
-                    <audio key={focus.id} src={`/api/assets/${focus.id}/file`} controls autoPlay style={{ width: "100%" }} />
+                    <audio key={focus.id} src={`/generation/api/assets/${focus.id}/file`} controls autoPlay style={{ width: "100%" }} />
                   </div>
-                ) : <button className="reference-preview" onClick={() => app.openAsset(focus.id)} aria-label={lang === "es" ? "Ampliar referencia" : "Enlarge reference"}><img src={focus.kind === "image" ? `/api/assets/${focus.id}/file` : thumbUrl(focus)} alt={focus.name || ""} /></button>}
+                ) : <button className="reference-preview" onClick={() => app.openAsset(focus.id)} aria-label={lang === "es" ? "Ampliar referencia" : "Enlarge reference"}><img src={focus.kind === "image" ? `/generation/api/assets/${focus.id}/file` : thumbUrl(focus)} alt={focus.name || ""} /></button>}
               <strong className="ellipsis" style={{ maxWidth: "100%" }}>{assetName(focus.name, lang) || focus.id}</strong>
               <span className="small muted">
                 {[focus.project_name, focus.width && focus.height ? `${focus.width}×${focus.height}` : "",

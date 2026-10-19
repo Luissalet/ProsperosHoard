@@ -1,0 +1,83 @@
+
+added 94 packages, and audited 95 packages in 16s
+
+13 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+
+> prosperos-hoard-frontend@0.1.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 1790 modules transformed.
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+rendering chunks...
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+computing gzip size...
+dist/index.html                                                     0.73 kB │ gzip:   0.38 kB
+dist/assets/source-sans-3-cyrillic-ext-400-normal-BwJdxs7r.woff2    5.58 kB
+dist/assets/source-sans-3-greek-ext-400-normal-CpIwTHMM.woff2       6.02 kB
+dist/assets/source-sans-3-vietnamese-400-normal-CwtaIDr2.woff2      6.22 kB
+dist/assets/space-grotesk-vietnamese-wght-normal-D0rl6rjA.woff2     6.71 kB
+dist/assets/source-sans-3-cyrillic-ext-400-normal-BqOlcezh.woff     7.11 kB
+dist/assets/jetbrains-mono-vietnamese-wght-normal-Bt-aOZkq.woff2    7.50 kB
+dist/assets/cinzel-latin-ext-400-normal-XQK_CSAr.woff2              7.86 kB
+dist/assets/source-sans-3-greek-ext-400-normal-CN4VBqpr.woff        7.99 kB
+dist/assets/source-sans-3-greek-400-normal-DZReXJla.woff2           8.02 kB
+dist/assets/source-sans-3-vietnamese-400-normal-eMQk7hmk.woff       8.28 kB
+dist/assets/jetbrains-mono-greek-wght-normal-Bw9x6K1M.woff2         9.00 kB
+dist/assets/cinzel-latin-ext-400-normal-DJ0Lq8y-.woff               9.29 kB
+dist/assets/source-sans-3-cyrillic-400-normal-DjhbW-4D.woff2        9.60 kB
+dist/assets/source-sans-3-greek-400-normal-DyO2Yfz5.woff           10.12 kB
+dist/assets/source-sans-3-cyrillic-400-normal-DkNBMcYd.woff        12.10 kB
+dist/assets/jetbrains-mono-cyrillic-wght-normal-D73BlboJ.woff2     12.11 kB
+dist/assets/cinzel-latin-400-normal-DnUIPmzd.woff2                 14.13 kB
+dist/assets/jetbrains-mono-latin-ext-wght-normal-DBQx-q_a.woff2    15.20 kB
+dist/assets/source-sans-3-latin-400-normal-DQi5PRDE.woff2          15.70 kB
+dist/assets/cinzel-latin-400-normal-C8jUSQqm.woff                  16.62 kB
+dist/assets/space-grotesk-latin-ext-wght-normal-D9tNdqV9.woff2     18.94 kB
+dist/assets/source-sans-3-latin-400-normal-RR2C27NP.woff           19.99 kB
+dist/assets/space-grotesk-latin-wght-normal-BhU9QXUp.woff2         22.29 kB
+dist/assets/source-sans-3-latin-ext-400-normal-UNsKFIBq.woff2      33.02 kB
+dist/assets/jetbrains-mono-latin-wght-normal-B9CIFXIH.woff2        40.40 kB
+dist/assets/source-sans-3-latin-ext-400-normal-D5P-Ud2J.woff       43.74 kB
+dist/assets/Spaces-BnuhLJ6X.css                                    15.87 kB │ gzip:   2.67 kB
+dist/assets/index-C4tMBLv5.css                                    110.12 kB │ gzip:  23.48 kB
+dist/assets/Spaces-DiavlNvD.js                                    261.32 kB │ gzip:  83.43 kB
+dist/assets/index-CshETWfB.js                                     919.57 kB │ gzip: 270.34 kB
+✓ built in 5.77s
+
+
+
+added 78 packages, and audited 79 packages in 7s
+
+12 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+
+> prospero-native-editing@0.1.0 build
+> vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 87 modules transformed.
+rendering chunks...
+computing gzip size...
+../prosperos_hoard/editing/static/index.html                   0.77 kB │ gzip:   0.40 kB
+../prosperos_hoard/editing/static/assets/index-DRf9bkc0.css   50.77 kB │ gzip:  10.45 kB
+../prosperos_hoard/editing/static/assets/index-v6661q7-.js   613.34 kB │ gzip: 190.67 kB
+✓ built in 2.86s
+

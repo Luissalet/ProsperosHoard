@@ -236,6 +236,17 @@ CREATE INDEX IF NOT EXISTS idx_agent_calls_created ON agent_calls(created_at);
 
 
 _local = threading.local()
+_owners: dict[str, set[sqlite3.Connection]] = {}
+_owners_lock = threading.Lock()
+
+
+def close_all(data_dir: Path) -> None:
+    """After requests and workers join, close every connection of this store."""
+    key = str(Path(data_dir).resolve())
+    with _owners_lock:
+        connections = _owners.pop(key, set())
+    for conn in connections:
+        conn.close()
 
 
 def connect(data_dir: Path) -> sqlite3.Connection:
@@ -249,11 +260,12 @@ def connect(data_dir: Path) -> sqlite3.Connection:
     data_dir.mkdir(parents=True, exist_ok=True)
     key = str(data_dir.resolve())
     cache: dict[str, sqlite3.Connection] = getattr(_local, "conns", None) or {}
-    if key in cache:
-        return cache[key]
+    with _owners_lock:
+        if key in cache and cache[key] in _owners.get(key, set()):
+            return cache[key]
 
     db_path = data_dir / "prosperos.sqlite3"
-    conn = sqlite3.connect(str(db_path), timeout=15.0)
+    conn = sqlite3.connect(str(db_path), timeout=15.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA journal_mode=WAL")
@@ -270,6 +282,8 @@ def connect(data_dir: Path) -> sqlite3.Connection:
     conn.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('version', ?)", (str(SCHEMA_VERSION),))
     conn.commit()
     cache[key] = conn
+    with _owners_lock:
+        _owners.setdefault(key, set()).add(conn)
     _local.conns = cache
     return conn
 

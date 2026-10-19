@@ -205,6 +205,8 @@ class Backend:
         self.config_path = self.data_dir / "backend.json"
         self.demo = demo
         self.link = self._build_link()
+        self._retired_links: list[Any] = []
+        self._retired_clients: list[Any] = []
         # starts ComfyUI/Ollama/configured servers itself when Faustus is not
         # there (shared with the family: ~/.hoard/backends.json)
         self.launcher = Launcher(app="prospero")
@@ -225,10 +227,18 @@ class Backend:
         link = self.link
         with self._pool_lock:
             pooled, self._pool_clients = list(self._pool_clients.values()), {}
+            retired_clients, self._retired_clients = self._retired_clients, []
+        retired_links, self._retired_links = self._retired_links, []
         loop = link.sync._loop
         if loop is not None and loop.is_running():
             async def drain(_link: Any) -> None:
-                for _owner, client in pooled:
+                clients = [client for _owner, client in pooled] + retired_clients
+                for owner in retired_links:
+                    clients.append(owner._client)
+                    if owner.sync._inner is not None:
+                        clients.append(owner.sync._inner._client)
+                unique = {id(client):client for client in clients}
+                for client in unique.values():
                     try:
                         await client.aclose()
                     except Exception:  # noqa: BLE001 - closing is best effort
@@ -239,7 +249,12 @@ class Backend:
                 link.sync._run(drain)
             except Exception:  # noqa: BLE001 - a loop that is already going away needs nothing more
                 pass
+        owned_thread = link.sync._thread
         link.sync.close(timeout)
+        if owned_thread is not None and owned_thread is not threading.current_thread():
+            owned_thread.join()
+        for owner in retired_links:
+            owner.sync._loop = owner.sync._thread = owner.sync._inner = None
 
     # -- config -----------------------------------------------------
     def _raw_config(self) -> dict[str, Any]:
@@ -253,7 +268,8 @@ class Backend:
 
     def _build_link(self) -> Link:
         config = LinkConfig.load(self.config_path, env=os.environ, app="prosperos")
-        return Link(config)
+        from .global_model import GlobalLink
+        return GlobalLink(config)
 
     def reload(self) -> None:
         # The previous Link is not closed: a GPU job may be mid-call with a
@@ -264,6 +280,7 @@ class Backend:
         old = getattr(self, "link", None)
         new = self._build_link()
         if old is not None:
+            self._retired_links.append(old)
             with old.sync._start_lock:
                 if old.sync._loop is not None:
                     new.sync._loop, new.sync._thread = old.sync._loop, old.sync._thread
@@ -334,6 +351,8 @@ class Backend:
                 if current and current[0] is link:
                     client = current[1]
                 else:
+                    if current:
+                        self._retired_clients.append(current[1])
                     self._pool_clients[url] = (link, client)
         return client
 

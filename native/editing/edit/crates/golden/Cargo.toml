@@ -1,0 +1,28 @@
+[package]
+name = "lumiere-edit-golden"
+description = "Golden-image tests for the CPU renderer/compositor and GPU-vs-CPU parity (test-only crate)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Test-only: the library is empty and everything is a dev-dependency, so the crate adds no edges
+# to the layer graph. Goldens live in `goldens/` (see docs/testing.md §3).
+[dependencies]
+
+[dev-dependencies]
+lumiere-edit-testkit = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-time = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-render = { workspace = true }
+lumiere-edit-gpu = { workspace = true }
+pollster = "0.4"
+wgpu = { version = "30", features = ["wgsl", "metal", "vulkan", "dx12", "gles"] }

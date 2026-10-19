@@ -4,6 +4,8 @@ import {
   Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
+import "@fontsource/cinzel";
+import "@fontsource/source-sans-3";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 import "./studio.css";

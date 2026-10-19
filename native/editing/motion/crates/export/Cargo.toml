@@ -1,0 +1,37 @@
+[package]
+name = "lumiere-motion-export"
+description = "Render Queue jobs and output modules: H.264 MP4 (+AAC) and ProRes MOV (+PCM) via Lumiere Edit, HEVC / AV1 MP4 (+AAC) and WebM (VP9 or AV1 + Opus) via Lumiere Motion encoders, PNG/JPEG/TIFF/EXR sequences, animated GIF, WAV/AIFF"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-motion-time = { workspace = true }
+lumiere-motion-project = { workspace = true }
+lumiere-motion-raster = { workspace = true }
+lumiere-motion-render = { workspace = true }
+lumiere-codecbase-h264enc = { workspace = true }
+lumiere-codecbase-prores = { workspace = true }
+lumiere-codecbase-aac = { workspace = true }
+lumiere-codecbase-isobmff = { workspace = true }
+lumiere-motion-opusenc = { workspace = true }
+lumiere-motion-vp9enc = { workspace = true }
+lumiere-motion-hevcenc = { workspace = true }
+lumiere-motion-av1enc = { workspace = true }
+image = { workspace = true, features = ["png", "jpeg", "tiff", "exr"] }
+gif = { workspace = true }
+rayon = { workspace = true }
+web-time = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+lumiere-motion-media = { workspace = true }
+lumiere-motion-color = { workspace = true }
+lumiere-codecbase-opus = { workspace = true }
+lumiere-codecbase-vp9 = { workspace = true }
+lumiere-motion-keyframe = { workspace = true }

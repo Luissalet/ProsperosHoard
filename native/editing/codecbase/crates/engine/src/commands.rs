@@ -1,0 +1,2839 @@
+//! The command registry. Ids follow Premiere's menu structure; every menu item, panel button,
+//! shortcut and timeline gesture maps to exactly one of these.
+
+use std::sync::OnceLock;
+
+use lumiere_codecbase_edit as edit;
+use lumiere_codecbase_edit::{Edge, TrimMode};
+use lumiere_codecbase_media::Generator;
+use lumiere_codecbase_media::generators::GeneratorSource;
+use lumiere_codecbase_project::{
+    ClipId, ItemId, ItemKind, Label, Marker, MarkerId, MarkerKind, MediaClip, MediaRef, ParamValue, SequenceSettings, TrackId, TrackKind, Transition,
+    TransitionId, resolve_auto_points,
+};
+use lumiere_codecbase_time::{FrameRate, TICKS_PER_SECOND, Tick, TimeRange, parse_timecode};
+use serde_json::{Value, json};
+
+use crate::{EngineError, Result, Session};
+
+type Run = fn(&mut Session, &Value) -> Result<Value>;
+type Enabled = fn(&Session) -> std::result::Result<(), String>;
+
+/// Metadata + implementation for one command.
+pub struct CommandSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Menu placement, e.g. `["Sequence"]` or `["File", "New"]`. Empty = not in menus.
+    pub menu: &'static [&'static str],
+    /// Default shortcut (egui-style names, `Cmd` = ⌘ on macOS / Ctrl elsewhere).
+    pub shortcut: Option<&'static str>,
+    /// Parameter description (JSON-ish, for agents and the MCP schema).
+    pub params: &'static str,
+    pub enabled: Enabled,
+    pub run: Run,
+    /// Record in the journal (false for pure queries).
+    pub journal: bool,
+}
+
+macro_rules! cmd {
+    ($id:literal, $label:literal, [$($m:literal),*], $sc:expr, $params:literal, $en:expr, $run:expr) => {
+        CommandSpec { id: $id, label: $label, menu: &[$($m),*], shortcut: $sc, params: $params, enabled: $en, run: $run, journal: true }
+    };
+}
+macro_rules! query {
+    ($id:literal, $label:literal, $params:literal, $run:expr) => {
+        CommandSpec { id: $id, label: $label, menu: &[], shortcut: None, params: $params, enabled: always, run: $run, journal: false }
+    };
+}
+
+pub fn command_specs() -> &'static [CommandSpec] {
+    static SPECS: OnceLock<Vec<CommandSpec>> = OnceLock::new();
+    SPECS.get_or_init(build)
+}
+
+pub fn find(id: &str) -> Option<&'static CommandSpec> {
+    command_specs().iter().find(|c| c.id == id)
+}
+
+// ---------- enablement ----------
+
+pub(crate) fn always(_: &Session) -> std::result::Result<(), String> {
+    Ok(())
+}
+fn has_edit_points(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    if s.state.edit_points.is_empty() { Err("no edit points selected".into()) } else { Ok(()) }
+}
+
+fn has_saved_path(s: &Session) -> std::result::Result<(), String> {
+    if s.path.is_some() { Ok(()) } else { Err("the project has not been saved yet".into()) }
+}
+fn has_recovery(s: &Session) -> std::result::Result<(), String> {
+    if s.recovery_candidates().is_empty() { Err("there are no unsaved changes to recover".into()) } else { Ok(()) }
+}
+
+pub(crate) fn has_seq(s: &Session) -> std::result::Result<(), String> {
+    s.active_sequence().map(|_| ()).ok_or_else(|| "no sequence is open".into())
+}
+pub(crate) fn has_selection(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    if s.state.selection.is_empty() { Err("no clips selected".into()) } else { Ok(()) }
+}
+/// Clips or captions selected (Clear / Ripple Delete work on either).
+fn has_any_selection(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    if s.state.selection.is_empty() && s.state.caption_selection.is_empty() { Err("nothing selected".into()) } else { Ok(()) }
+}
+fn has_source(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    s.state.source_item.map(|_| ()).ok_or_else(|| "no clip in the Source monitor".into())
+}
+fn can_undo(s: &Session) -> std::result::Result<(), String> {
+    if s.history.can_undo() { Ok(()) } else { Err("nothing to undo".into()) }
+}
+fn can_redo(s: &Session) -> std::result::Result<(), String> {
+    if s.history.can_redo() { Ok(()) } else { Err("nothing to redo".into()) }
+}
+fn has_in_out(s: &Session) -> std::result::Result<(), String> {
+    let seq = s.active_sequence().ok_or("no sequence is open")?;
+    if seq.mark_in.is_some() || seq.mark_out.is_some() { Ok(()) } else { Err("mark an In or Out point first".into()) }
+}
+fn has_previews(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    if s.previews.count() == 0 { Err("there are no render files".into()) } else { Ok(()) }
+}
+pub(crate) fn has_project_selection(s: &Session) -> std::result::Result<(), String> {
+    if s.state.project_selection.is_empty() { Err("select an item in the Project panel".into()) } else { Ok(()) }
+}
+fn has_clipboard(s: &Session) -> std::result::Result<(), String> {
+    has_seq(s)?;
+    if s.state.clipboard.is_empty() { Err("clipboard is empty".into()) } else { Ok(()) }
+}
+
+// ---------- param helpers ----------
+
+pub(crate) fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
+    EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
+}
+pub(crate) fn str_p<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
+    p.get(k).and_then(Value::as_str)
+}
+pub(crate) fn f64_p(p: &Value, k: &str) -> Option<f64> {
+    p.get(k).and_then(Value::as_f64)
+}
+pub(crate) fn bool_p(p: &Value, k: &str) -> Option<bool> {
+    p.get(k).and_then(Value::as_bool)
+}
+pub(crate) fn u64_p(p: &Value, k: &str) -> Option<u64> {
+    p.get(k).and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+}
+
+/// Parse a time from params: `time` (ticks), `frame`, `seconds` or `timecode`, with `prefix`.
+pub(crate) fn time_p(s: &Session, p: &Value, prefix: &str) -> Option<Tick> {
+    let rate = s.sequence_rate();
+    let k = |n: &str| if prefix.is_empty() { n.to_string() } else { format!("{prefix}{}{}", n[..1].to_uppercase(), &n[1..]) };
+    if let Some(t) = p.get(k("time")).and_then(Value::as_i64) {
+        return Some(Tick(t));
+    }
+    if let Some(f) = p.get(k("frame")).and_then(Value::as_i64) {
+        return Some(rate.tick_of(f));
+    }
+    if let Some(sec) = p.get(k("seconds")).and_then(Value::as_f64) {
+        return Some(Tick::from_seconds_f64(sec));
+    }
+    if let Some(tc) = p.get(k("timecode")).and_then(Value::as_str) {
+        let df = s.active_sequence().map(|q| q.settings.drop_frame).unwrap_or(false);
+        let cur = rate.frame_at(s.playhead());
+        return parse_timecode(tc, rate, df, cur).ok().map(|f| rate.tick_of(f));
+    }
+    None
+}
+
+pub(crate) fn clip_p(p: &Value, k: &str) -> Option<ClipId> {
+    u64_p(p, k).map(ClipId)
+}
+/// Effect by id or display name. Names shared by several definitions ("Invert", "Volume",
+/// "Channel Volume") resolve to an applicable (non-intrinsic) effect whose kind matches the
+/// target clips' tracks.
+fn resolve_effect_name(s: &Session, p: &Value, name: &str) -> Option<&'static lumiere_codecbase_project::EffectDef> {
+    if let Some(d) = lumiere_codecbase_project::find_effect(name) {
+        return Some(d);
+    }
+    let n = name.to_ascii_lowercase();
+    let cands: Vec<_> = lumiere_codecbase_project::effect_defs().iter().filter(|e| e.name.to_ascii_lowercase() == n).collect();
+    if cands.len() <= 1 {
+        return cands.first().copied().or_else(|| lumiere_codecbase_project::find_effect(&n));
+    }
+    let on_audio = s.active_sequence().is_some_and(|q| {
+        let clips = clips_p(s, p);
+        !clips.is_empty() && clips.iter().all(|c| q.find_item(*c).and_then(|(t, _)| q.track(t)).is_some_and(|t| t.kind == TrackKind::Audio))
+    });
+    let want = if on_audio { lumiere_codecbase_project::EffectKind::Audio } else { lumiere_codecbase_project::EffectKind::Video };
+    cands.iter().find(|d| !d.intrinsic && d.kind == want).or_else(|| cands.iter().find(|d| !d.intrinsic)).or(cands.first()).copied()
+}
+
+pub(crate) fn clips_p(s: &Session, p: &Value) -> Vec<ClipId> {
+    match p.get("clips").and_then(Value::as_array) {
+        Some(a) => a.iter().filter_map(|v| v.as_u64().map(ClipId)).collect(),
+        None => clip_p(p, "clip").map(|c| vec![c]).unwrap_or_else(|| s.state.selection.clone()),
+    }
+}
+pub(crate) fn track_p(s: &Session, p: &Value, k: &str) -> Option<TrackId> {
+    let v = p.get(k)?;
+    if let Some(id) = v.as_u64() {
+        return Some(TrackId(id));
+    }
+    // "V1", "A2"
+    let name = v.as_str()?;
+    let seq = s.active_sequence()?;
+    let (kind, idx) = name.split_at(1);
+    let i: usize = idx.parse().ok()?;
+    let tracks = if kind.eq_ignore_ascii_case("v") { &seq.video_tracks } else { &seq.audio_tracks };
+    tracks.get(i.checked_sub(1)?).map(|t| t.id)
+}
+pub(crate) fn item_p(p: &Value, k: &str) -> Option<ItemId> {
+    u64_p(p, k).map(ItemId)
+}
+
+/// Expand a clip selection with linked partners (when linked selection is on).
+pub fn with_links(s: &Session, clips: &[ClipId]) -> Vec<ClipId> {
+    let Some(seq) = s.active_sequence() else { return clips.to_vec() };
+    let mut out = clips.to_vec();
+    if s.state.linked_selection {
+        let links: Vec<u64> = clips.iter().filter_map(|c| seq.find_item(*c).and_then(|(_, i)| i.link)).collect();
+        for t in seq.all_tracks() {
+            for i in &t.items {
+                if i.link.is_some_and(|l| links.contains(&l)) && !out.contains(&i.id) {
+                    out.push(i.id);
+                }
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn default_seq_settings_for(info: &lumiere_codecbase_media::MediaInfo) -> SequenceSettings {
+    let mut st = SequenceSettings::default();
+    if let Some(v) = &info.video {
+        st.width = v.width;
+        st.height = v.height;
+        st.frame_rate = v.frame_rate;
+        st.preset = format!("{}x{} {}", v.width, v.height, v.frame_rate.label());
+    }
+    if let Some(a) = &info.audio {
+        st.sample_rate = a.sample_rate.max(8000);
+    }
+    st
+}
+
+/// Import bytes as a media item (engine-level; the UI reads files through services).
+pub fn import_bytes(s: &mut Session, path: &str, bytes: std::sync::Arc<[u8]>, bin: Option<lumiere_codecbase_project::BinId>) -> Result<ItemId> {
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+    let identity = crate::relink::identity_of_bytes(&bytes);
+    let src = s.media.open_bytes(&name, bytes)?;
+    import_source(s, path, name, src, identity, bin)
+}
+
+/// Import a media file through the host's random-access reader ([`crate::Services::reader`]):
+/// only the container index is read now (web `Blob`s are never copied whole for containers).
+pub fn import_streamed(s: &mut Session, path: &str, bin: Option<lumiere_codecbase_project::BinId>) -> Result<ItemId> {
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+    let identity = crate::relink::identity_of(&*s.services, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let src = s.media.open_file(path, &*s.services)?;
+    import_source(s, path, name, src, identity, bin)
+}
+
+/// Import the image sequence that the numbered still `path` starts (File ▸ Import with Image
+/// Sequence): one movie item at Settings ▸ Media ▸ Indeterminate Media Timebase. Returns the item,
+/// the frame count and the missing frame numbers (relative to the first).
+pub fn import_image_sequence(s: &mut Session, path: &str, bin: Option<lumiere_codecbase_project::BinId>) -> Result<(ItemId, usize, Vec<usize>)> {
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+    let rate = crate::settings::timebase_rate(&s.prefs.media.indeterminate_timebase);
+    let frames = crate::media_pool::image_sequence_frames(path, &*s.services)?;
+    let missing: Vec<usize> = frames.iter().enumerate().filter(|(_, f)| f.is_none()).map(|(i, _)| i).collect();
+    let src = crate::media_pool::open_image_sequence(path, &*s.services, rate, &name)?;
+    let identity = crate::relink::identity_of(&*s.services, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let id = import_source(s, path, name, src, identity, bin)?;
+    Ok((id, frames.len(), missing))
+}
+
+/// Settings ▸ Media ▸ Import image sequences: a single numbered still with later frames beside it.
+fn detect_image_sequence(s: &Session, path: &str) -> bool {
+    lumiere_codecbase_media::sequence::Numbered::parse(path).is_some() && crate::media_pool::image_sequence_frames(path, &*s.services).is_ok_and(|f| f.len() > 1)
+}
+
+fn import_source(
+    s: &mut Session,
+    path: &str,
+    name: String,
+    src: lumiere_codecbase_media::SharedSource,
+    identity: lumiere_codecbase_project::MediaIdentity,
+    bin: Option<lumiere_codecbase_project::BinId>,
+) -> Result<ItemId> {
+    let mut info = src.info().clone();
+    // Settings ▸ Labels ▸ Label Defaults
+    let label = s.prefs.labels.for_media(info.kind, info.has_video(), info.has_audio());
+    // Settings ▸ Media ▸ Indeterminate Media Timebase: the frame rate stills report
+    if info.kind == lumiere_codecbase_media::MediaKind::Still
+        && let Some(v) = info.video.as_mut()
+    {
+        v.frame_rate = crate::settings::timebase_rate(&s.prefs.media.indeterminate_timebase);
+    }
+    let path_s = path.to_string();
+    let id = s.edit(&format!("Import {name}"), |p, _| {
+        Ok(p.add_item(
+            &name,
+            label,
+            ItemKind::Media(MediaClip {
+                media: MediaRef::File { path: path_s },
+                info,
+                interpret: Default::default(),
+                mark_in: None,
+                mark_out: None,
+                markers: vec![],
+                offline: false,
+                proxy: None,
+                identity: Some(identity),
+            }),
+            bin,
+        ))
+    })?;
+    s.media.insert_file(id, path, src);
+    Ok(id)
+}
+
+fn new_generator(s: &mut Session, g: Generator, name: &str, label: Label, p: &Value) -> Result<Value> {
+    let st = s.active_sequence().map(|q| q.settings.clone()).unwrap_or_default();
+    let w = u64_p(p, "width").map(|v| v as u32).unwrap_or(st.width);
+    let h = u64_p(p, "height").map(|v| v as u32).unwrap_or(st.height);
+    let secs = f64_p(p, "seconds").unwrap_or(5.0);
+    let name = str_p(p, "name").unwrap_or(name).to_string();
+    let src = GeneratorSource::new(g, w, h, st.frame_rate, Tick::from_seconds_f64(secs));
+    let pool = s.media.clone();
+    let id = s.edit(&format!("New {name}"), |pr, st| {
+        let id = crate::demo::add_generator(pr, &pool, src, &name, label, None);
+        st.project_selection = vec![id];
+        Ok(id)
+    })?;
+    Ok(json!({"item": id.0}))
+}
+
+/// Place a project item on the timeline (drag from Project, or Insert/Overwrite from source).
+pub(crate) fn place_item(
+    s: &mut Session,
+    item: ItemId,
+    range: TimeRange,
+    at: Tick,
+    vdest: Option<TrackId>,
+    adest: Option<TrackId>,
+    insert: bool,
+    label: &str,
+    audio_split: Option<(TimeRange, Tick)>,
+) -> Result<Vec<ClipId>> {
+    let pi = s.project.item(item).ok_or_else(|| bad(label, "no such item"))?.clone();
+    let has_v = pi.has_video() && vdest.is_some();
+    let has_a = pi.has_audio() && adest.is_some();
+    if !has_v && !has_a {
+        return Err(EngineError::Other("no destination track for this media (check source patching)".into()));
+    }
+    let src_size = match &pi.kind {
+        ItemKind::Media(m) => m.info.video.as_ref().map(|v| (v.width, v.height)),
+        ItemKind::Sequence(q) => Some((q.settings.width, q.settings.height)),
+        ItemKind::AdjustmentLayer { width, height, .. } => Some((*width, *height)),
+        _ => None,
+    }
+    .unwrap_or((1920, 1080));
+    let seq_id = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+    let media = s.media.clone();
+    let scaling = s.prefs.media.default_media_scaling.clone();
+    let is_media = matches!(pi.kind, ItemKind::Media(_) | ItemKind::Subclip { .. });
+    s.edit(label, |p, st| {
+        let seq = p.sequence(seq_id).ok_or(EngineError::NoSequence)?;
+        let rate = seq.settings.frame_rate;
+        let frame = (seq.settings.width, seq.settings.height);
+        let mut placements = Vec::new();
+        let link = if has_v && has_a { Some(p.alloc_id()) } else { None };
+        if has_v {
+            let mut v = p.make_track_item(item, TrackKind::Video, at, range, rate).ok_or_else(|| bad(label, "bad item"))?;
+            v.link = link;
+            for e in &mut v.effects {
+                resolve_auto_points(e, frame, src_size);
+            }
+            if is_media && src_size != frame {
+                crate::settings::apply_media_scaling(&mut v, &scaling, frame, src_size);
+            }
+            placements.push((vdest.expect("checked"), v));
+        }
+        if has_a {
+            let adest = adest.expect("checked");
+            let (arange, aat) = audio_split.unwrap_or((range, at));
+            let mut a = p.make_track_item(item, TrackKind::Audio, aat, arange, rate).ok_or_else(|| bad(label, "bad item"))?;
+            // Modify ▸ Audio Channels with several audio clips: one per clip, on the tracks below
+            let extra: Vec<Vec<u16>> = p
+                .item(item)
+                .and_then(|i| i.as_media())
+                .and_then(|m| m.interpret.audio_channels.as_ref())
+                .map(|m| m.clips.iter().skip(1).cloned().collect())
+                .unwrap_or_default();
+            let tracks: Vec<TrackId> = p.sequence(seq_id).map(|q| q.audio_tracks.iter().map(|t| t.id).collect()).unwrap_or_default();
+            let first = tracks.iter().position(|t| *t == adest).unwrap_or(0);
+            a.link = if link.is_none() && !extra.is_empty() { Some(p.alloc_id()) } else { link };
+            placements.push((adest, a.clone()));
+            for (k, chans) in extra.into_iter().enumerate() {
+                let Some(tid) = tracks.get(first + k + 1) else { break };
+                let mut b = a.clone();
+                b.id = ClipId(p.alloc_id());
+                b.source_channels = chans;
+                placements.push((*tid, b));
+            }
+        }
+        let snapshot = p.clone();
+        let durations = move |id: ItemId| crate::media_duration(&snapshot, &media, id);
+        let min = rate.frame_duration();
+        let mut next = p.next_id;
+        let seq = p.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
+        let mut ctx = edit::EditCtx { next_id: &mut next, media_duration: &durations, min_duration: min };
+        let span = placements.iter().map(|x| x.1.start).min().zip(placements.iter().map(|x| x.1.end()).max());
+        let ids = if insert { edit::insert(seq, placements, &mut ctx)? } else { edit::overwrite(seq, placements, &mut ctx)? };
+        if insert
+            && st.ripple_sequence_markers
+            && let Some((a, b)) = span
+        {
+            crate::sequence_tools::ripple_markers(&mut seq.markers, a, b - a);
+        }
+        p.next_id = next;
+        st.selection = ids.clone();
+        Ok(ids)
+    })
+}
+
+pub(crate) fn source_range(s: &Session) -> Option<(ItemId, TimeRange)> {
+    let item = s.state.source_item?;
+    let pi = s.project.item(item)?;
+    let dur = match &pi.kind {
+        ItemKind::Media(m) if matches!(m.info.kind, lumiere_codecbase_media::MediaKind::Still) => s.prefs.timeline.still_duration(s.sequence_rate()),
+        _ => pi.duration(),
+    };
+    let (mi, mo) = match &pi.kind {
+        ItemKind::Media(m) => (m.mark_in, m.mark_out),
+        ItemKind::Sequence(q) => (q.mark_in, q.mark_out),
+        _ => (None, None),
+    };
+    // a subclip shows its range of the parent's media (its clips use the parent's media time)
+    if let ItemKind::Subclip { range, .. } = &pi.kind {
+        return Some((item, *range));
+    }
+    let start = mi.unwrap_or(Tick::ZERO);
+    let rate = pi.frame_rate();
+    let end = mo.map(|o| o + rate.frame_duration()).unwrap_or(dur).min(if dur.0 > 0 { dur } else { Tick::MAX });
+    Some((item, TimeRange::from_bounds(start, end.max(start + rate.frame_duration()))))
+}
+
+fn edit_at_source(s: &mut Session, insert: bool) -> Result<Value> {
+    let (item, range) = source_range(s).ok_or_else(|| EngineError::Other("no source clip".into()))?;
+    let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    // Three-point editing: sequence In wins over the playhead.
+    let at = seq.mark_in.unwrap_or(s.playhead());
+    let tg = s.targeting();
+    let label = if insert { "Insert" } else { "Overwrite" };
+    // split points: each channel takes its own range, offset by the difference of the In points
+    let (vr, ar) = crate::sequence_tools::split_source_ranges(s, item, range);
+    let base = vr.start.min(ar.start);
+    let (vat, aat) = (at + (vr.start - base), at + (ar.start - base));
+    let ids = if vr == ar {
+        place_item(s, item, range, at, tg.video_dest, tg.audio_dest, insert, label, None)?
+    } else {
+        place_item(s, item, vr, vat, tg.video_dest, tg.audio_dest, insert, label, Some((ar, aat)))?
+    };
+    let end =
+        if vr == ar { at + s.sequence_rate().snap_nearest(range.duration) } else { s.sequence_rate().snap_nearest((vat + vr.duration).max(aat + ar.duration)) };
+    s.set_playhead(end);
+    Ok(json!({"clips": ids.iter().map(|c| c.0).collect::<Vec<_>>()}))
+}
+
+fn marker_list_mut(s: &mut Session) -> Result<(ItemId, Tick)> {
+    let seq = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+    Ok((seq, s.playhead()))
+}
+
+fn build() -> Vec<CommandSpec> {
+    let mut v = vec![
+        // ================= File =================
+        cmd!("file.newProject", "Project…", ["File", "New"], Some("Cmd+Alt+N"), r#"{"name":str}"#, always, |s, p| {
+            let name = str_p(p, "name").unwrap_or("Untitled").to_string();
+            s.project = std::sync::Arc::new(lumiere_codecbase_project::Project::new(&name));
+            s.history = Default::default();
+            s.history.limit = 200;
+            s.state = crate::Session::default().state;
+            if s.path.take().is_some() {
+                s.previews.reset_temp();
+            }
+            s.revision += 1;
+            s.saved_revision = s.revision;
+            s.events.push(crate::Event::ProjectChanged { revision: s.revision });
+            Ok(Value::Null)
+        }),
+        cmd!("file.openDemoProject", "Demo Project", ["File", "New"], None, "{}", always, |s, _| {
+            let (p, seq) = crate::demo::demo_project(&s.media);
+            s.project = std::sync::Arc::new(p);
+            s.history = Default::default();
+            s.history.limit = 200;
+            s.state = crate::Session::default().state;
+            s.state.active_sequence = Some(seq);
+            s.state.open_sequences = vec![seq];
+            s.state.playheads.insert(seq, FrameRate::FPS_23_976.tick_of(4 * 24 + 6));
+            s.revision += 1;
+            s.saved_revision = s.revision;
+            s.events.push(crate::Event::ProjectChanged { revision: s.revision });
+            s.events.push(crate::Event::OpenSequence(seq));
+            Ok(json!({"sequence": seq.0}))
+        }),
+        cmd!(
+            "file.newSequence",
+            "Sequence…",
+            ["File", "New"],
+            Some("Cmd+N"),
+            r#"{"name":str,"width":u32=1920,"height":u32=1080,"fps":f64=23.976,"sampleRate":u32=48000,"video":n=3,"audio":n=3,"mix":"Stereo|Mono|5.1|Adaptive"?,"trackType":"Standard|Mono|5.1|Adaptive"?,"fromItem":itemId?}"#,
+            always,
+            |s, p| {
+                let mut st = SequenceSettings::default();
+                if let Some(from) = item_p(p, "fromItem").and_then(|i| s.project.item(i)).and_then(|i| i.as_media()) {
+                    st = default_seq_settings_for(&from.info);
+                }
+                if let Some(w) = u64_p(p, "width") {
+                    st.width = w as u32;
+                }
+                if let Some(h) = u64_p(p, "height") {
+                    st.height = h as u32;
+                }
+                if let Some(fps) = f64_p(p, "fps") {
+                    st.frame_rate = FrameRate::from_f64(fps);
+                }
+                if let Some(sr) = u64_p(p, "sampleRate") {
+                    st.sample_rate = sr as u32;
+                }
+                if let Some(m) = str_p(p, "mix") {
+                    st.audio_master =
+                        crate::mixer::channels_from(m).ok_or_else(|| bad("file.newSequence", format!("unknown mix `{m}` (Stereo, Mono, 5.1, Adaptive)")))?;
+                }
+                let track_type = match str_p(p, "trackType") {
+                    Some(t) => Some(
+                        crate::mixer::channels_from(t)
+                            .ok_or_else(|| bad("file.newSequence", format!("unknown track type `{t}` (Standard, Mono, 5.1, Adaptive)")))?,
+                    ),
+                    None => None,
+                };
+                st.preset = format!("{}x{} {}", st.width, st.height, st.frame_rate.label());
+                let nv = u64_p(p, "video").unwrap_or(3) as usize;
+                let na = u64_p(p, "audio").unwrap_or(3) as usize;
+                let n = s.project.sequences().count() + 1;
+                let name = str_p(p, "name").map(str::to_string).unwrap_or_else(|| format!("Sequence {n:02}"));
+                let seq_label = s.prefs.labels.defaults.sequence;
+                let id = s.edit("New Sequence", |pr, st2| {
+                    let id = pr.new_sequence(&name, st, nv, na, None);
+                    if let Some(it) = pr.item_mut(id) {
+                        it.label = seq_label;
+                    }
+                    if let (Some(c), Some(q)) = (track_type, pr.sequence_mut(id)) {
+                        q.audio_tracks.iter_mut().for_each(|t| t.channels = c);
+                    }
+                    st2.active_sequence = Some(id);
+                    if !st2.open_sequences.contains(&id) {
+                        st2.open_sequences.push(id);
+                    }
+                    Ok(id)
+                })?;
+                if let Some(from) = item_p(p, "fromItem") {
+                    let dur = s.project.item(from).map(|i| i.duration()).unwrap_or_default();
+                    let tg = s.targeting();
+                    place_item(s, from, TimeRange::new(Tick::ZERO, dur), Tick::ZERO, tg.video_dest, tg.audio_dest, false, "New Sequence From Clip", None)?;
+                }
+                s.events.push(crate::Event::OpenSequence(id));
+                Ok(json!({"sequence": id.0}))
+            }
+        ),
+        cmd!("file.newBin", "Bin", ["File", "New"], Some("Cmd+B"), r#"{"name":str,"parent":binId?}"#, always, |s, p| {
+            let n = str_p(p, "name").unwrap_or("New Bin").to_string();
+            let parent = u64_p(p, "parent").map(lumiere_codecbase_project::BinId);
+            let id = s.edit("New Bin", |pr, _| Ok(pr.add_bin(&n, parent)))?;
+            Ok(json!({"bin": id.0}))
+        }),
+        cmd!("file.newAdjustmentLayer", "Adjustment Layer…", ["File", "New"], None, r#"{"seconds":f64=5}"#, always, |s, p| {
+            let st = s.active_sequence().map(|q| q.settings.clone()).unwrap_or_default();
+            let secs = f64_p(p, "seconds").unwrap_or(5.0);
+            let id = s.edit("New Adjustment Layer", |pr, st2| {
+                let id = pr.add_item(
+                    "Adjustment Layer",
+                    Label::Lavender,
+                    ItemKind::AdjustmentLayer { width: st.width, height: st.height, rate: st.frame_rate, duration: Tick::from_seconds_f64(secs) },
+                    None,
+                );
+                st2.project_selection = vec![id];
+                Ok(id)
+            })?;
+            Ok(json!({"item": id.0}))
+        }),
+        cmd!("file.newBarsAndTone", "Bars and Tone…", ["File", "New"], None, r#"{"seconds":f64=10}"#, always, |s, p| new_generator(
+            s,
+            Generator::BarsAndTone,
+            "Bars and Tone",
+            Label::Lavender,
+            p
+        )),
+        cmd!("file.newBlackVideo", "Black Video…", ["File", "New"], None, r#"{"seconds":f64}"#, always, |s, p| new_generator(
+            s,
+            Generator::BlackVideo,
+            "Black Video",
+            Label::Lavender,
+            p
+        )),
+        cmd!("file.newColorMatte", "Color Matte…", ["File", "New"], None, r##"{"color":"#rrggbb","seconds":f64}"##, always, |s, p| {
+            let c = str_p(p, "color").and_then(lumiere_codecbase_color::parse_hex).unwrap_or([0.1, 0.1, 0.1, 1.0]);
+            new_generator(s, Generator::ColorMatte { color: c }, "Color Matte", Label::Lavender, p)
+        }),
+        cmd!("file.newCountingLeader", "Universal Counting Leader…", ["File", "New"], None, "{}", always, |s, p| new_generator(
+            s,
+            Generator::CountingLeader,
+            "Universal Counting Leader",
+            Label::Lavender,
+            p
+        )),
+        cmd!("file.newTransparentVideo", "Transparent Video…", ["File", "New"], None, "{}", always, |s, p| new_generator(
+            s,
+            Generator::TransparentVideo,
+            "Transparent Video",
+            Label::Lavender,
+            p
+        )),
+        cmd!(
+            "file.importDemoFootage",
+            "Demo Footage",
+            ["File", "Import From"],
+            None,
+            r#"{"scene":"OceanSunset|Aurora|CityNight|Dunes|Plasma|Forest"}"#,
+            always,
+            |s, p| {
+                let scenes: Vec<lumiere_codecbase_media::DemoScene> = match str_p(p, "scene") {
+                    Some(n) => lumiere_codecbase_media::DemoScene::ALL.iter().copied().filter(|d| format!("{d:?}").eq_ignore_ascii_case(n)).collect(),
+                    None => lumiere_codecbase_media::DemoScene::ALL.to_vec(),
+                };
+                let pool = s.media.clone();
+                let ids = s.edit("Import Demo Footage", |pr, _| {
+                    Ok(scenes
+                        .iter()
+                        .map(|sc| crate::demo::add_generator(pr, &pool, GeneratorSource::demo(*sc), sc.file_name(), Label::Iris, None))
+                        .collect::<Vec<_>>())
+                })?;
+                Ok(json!({"items": ids.iter().map(|i| i.0).collect::<Vec<_>>()}))
+            }
+        ),
+        cmd!("file.import", "Import…", ["File"], Some("Cmd+I"), r#"{"paths":[str],"bin":binId?,"imageSequence":bool?}"#, always, |s, p| {
+            let bin = u64_p(p, "bin").map(lumiere_codecbase_project::BinId);
+            let paths: Vec<String> = match p.get("paths").and_then(Value::as_array) {
+                Some(a) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+                None => str_p(p, "path").map(|x| vec![x.to_string()]).unwrap_or_default(),
+            };
+            if paths.is_empty() {
+                return Err(bad("file.import", "need `paths`"));
+            }
+            let mut ids = Vec::new();
+            let mut errors = Vec::new();
+            let mut sequences = Vec::new();
+            let mut reports = Vec::new();
+            let mut image_sequences = Vec::new();
+            // Image Sequence: each path is the first frame of a numbered still sequence. With
+            // Settings ▸ Media ▸ Import image sequences on, a single numbered still is detected.
+            let as_sequence = p.get("imageSequence").and_then(Value::as_bool).unwrap_or(false);
+            let detect = !as_sequence && s.prefs.media.import_image_sequences && paths.len() == 1;
+            for path in paths {
+                if as_sequence || (detect && detect_image_sequence(s, &path)) {
+                    match import_image_sequence(s, &path, bin) {
+                        Ok((id, frames, missing)) => {
+                            ids.push(id.0);
+                            image_sequences.push(json!({"item": id.0, "frames": frames, "missing": missing}));
+                        }
+                        Err(e) => errors.push(format!("{path}: {e}")),
+                    }
+                    continue;
+                }
+                // Media files through the host's reader (no whole-file read) when it has one.
+                let streamed = lumiere_codecbase_media::is_importable(std::path::Path::new(&path)) && s.services.reader(&path).is_some();
+                let read = if streamed { Ok(Vec::new()) } else { s.services.read_file(&path) };
+                match read {
+                    Ok(_) if streamed => match import_streamed(s, &path, bin) {
+                        Ok(id) => ids.push(id.0),
+                        Err(e) => errors.push(format!("{path}: {e}")),
+                    },
+                    Ok(b) if crate::captions::detect(&path, &b).is_some() => {
+                        let fmt = crate::captions::detect(&path, &b).expect("detected");
+                        match crate::captions::import(s, &path, &b, fmt, None) {
+                            Ok(r) => reports.push(r),
+                            Err(e) => errors.push(format!("{path}: {e}")),
+                        }
+                    }
+                    Ok(b) if crate::interchange::detect(&path, &b).is_some() => {
+                        let fmt = crate::interchange::detect(&path, &b).expect("detected");
+                        match crate::interchange::import(s, &path, &b, fmt) {
+                            Ok(r) => {
+                                sequences.extend(r["sequences"].as_array().cloned().unwrap_or_default());
+                                reports.push(r);
+                            }
+                            Err(e) => errors.push(format!("{path}: {e}")),
+                        }
+                    }
+                    Ok(b) => match import_bytes(s, &path, b.into(), bin) {
+                        Ok(id) => ids.push(id.0),
+                        Err(e) => errors.push(format!("{path}: {e}")),
+                    },
+                    Err(e) => errors.push(format!("{path}: {e}")),
+                }
+            }
+            if ids.is_empty() && sequences.is_empty() && reports.is_empty() && !errors.is_empty() {
+                return Err(EngineError::Other(errors.join("; ")));
+            }
+            // Project Settings ▸ Ingest: copy / transcode / create proxies
+            // (image sequences are many files: ingest copies and transcodes single files only)
+            let item_ids: Vec<ItemId> = ids.iter().filter(|i| !image_sequences.iter().any(|q| q["item"].as_u64() == Some(**i))).map(|i| ItemId(*i)).collect();
+            // Settings ▸ Media Analysis & Transcription ▸ Automatically transcribe clips
+            let ma = &s.prefs.media_analysis;
+            if ma.auto_transcribe
+                && ma.auto_transcribe_scope == "allImported"
+                && !ids.is_empty()
+                && (s.transcriber.is_some() || crate::transcript::speech_available())
+            {
+                let audio: Vec<u64> = ids.iter().copied().filter(|i| s.project.item(ItemId(*i)).is_some_and(|it| it.has_audio())).collect();
+                if !audio.is_empty()
+                    && let Err(e) = s.execute("transcript.generate", json!({"items": audio}))
+                {
+                    errors.push(format!("transcription: {e}"));
+                }
+            }
+            let ingest = match crate::proxies::ingest(s, &item_ids) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(format!("ingest: {e}"));
+                    Value::Null
+                }
+            };
+            let mut out = if !ingest.is_null() {
+                json!({"items": ids, "sequences": sequences, "documents": reports, "errors": errors, "ingest": ingest})
+            } else if reports.is_empty() {
+                json!({"items": ids, "errors": errors})
+            } else {
+                json!({"items": ids, "sequences": sequences, "documents": reports, "errors": errors})
+            };
+            if !image_sequences.is_empty() {
+                out["imageSequences"] = json!(image_sequences);
+            }
+            Ok(out)
+        }),
+        cmd!("file.exportInterchange", "Export Interchange", [], None, r#"{"format":"edl|xml|fcpxml|otio","path":str,"sequence":id?}"#, has_seq, |s, p| {
+            crate::interchange::export(s, p)
+        }),
+        cmd!("file.exportEdl", "EDL…", ["File", "Export"], None, r#"{"path":str}"#, has_seq, |s, p| {
+            let mut q = p.clone();
+            q["format"] = json!("edl");
+            crate::interchange::export(s, &q)
+        }),
+        cmd!("file.exportFcp7Xml", "Final Cut Pro XML…", ["File", "Export"], None, r#"{"path":str}"#, has_seq, |s, p| {
+            let mut q = p.clone();
+            q["format"] = json!("xml");
+            crate::interchange::export(s, &q)
+        }),
+        cmd!("file.exportFcpxml", "FCPXML…", ["File", "Export"], None, r#"{"path":str}"#, has_seq, |s, p| {
+            let mut q = p.clone();
+            q["format"] = json!("fcpxml");
+            crate::interchange::export(s, &q)
+        }),
+        cmd!("file.exportOtio", "OpenTimelineIO…", ["File", "Export"], None, r#"{"path":str}"#, has_seq, |s, p| {
+            let mut q = p.clone();
+            q["format"] = json!("otio");
+            crate::interchange::export(s, &q)
+        }),
+        cmd!(
+            "file.exportAaf",
+            "AAF…",
+            ["File", "Export"],
+            None,
+            r#"{"path":str,"sequence":id?,"mixdownVideo":bool?,"mixdownFormat":"mov|mxf"?,"breakoutToMono":bool?,"audio":"embedded|separate|linked"?,"audioFormat":"wav|aiff|mxf"?,"sampleRate":int?,"bitDepth":"16|24"?,"trimAudio":bool?,"handles":frames?,"renderAudioEffects":bool?,"smallSectors":bool?}"#,
+            has_seq,
+            |s, p| crate::aaf_omf::export_aaf(s, p)
+        ),
+        cmd!(
+            "file.exportOmf",
+            "OMF…",
+            ["File", "Export"],
+            None,
+            r#"{"path":str,"sequence":id?,"title":str?,"audio":"embedded|separate"?,"audioFormat":"wav|aiff"?,"sampleRate":int?,"bitDepth":"16|24"?,"trimAudio":bool?,"handles":frames?,"renderAudioEffects":bool?,"breakoutToMono":bool?}"#,
+            has_seq,
+            |s, p| crate::aaf_omf::export_omf(s, p)
+        ),
+        cmd!("file.importAaf", "Import AAF…", [], None, r#"{"path":str}"#, always, |s, p| crate::aaf_omf::import_document(s, p, "file.importAaf")),
+        cmd!("file.save", "Save", ["File"], Some("Cmd+S"), r#"{"path":str?}"#, always, |s, p| {
+            let path = str_p(p, "path").map(str::to_string).or_else(|| s.path.clone()).ok_or_else(|| bad("file.save", "no path (use Save As)"))?;
+            write_project(s, &path, true)
+        }),
+        cmd!("file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), r#"{"path":str}"#, always, |s, p| {
+            let path = str_p(p, "path").ok_or_else(|| bad("file.saveAs", "need `path`"))?.to_string();
+            write_project(s, &path, true)
+        }),
+        cmd!("file.saveCopy", "Save a Copy…", ["File"], Some("Cmd+Alt+S"), r#"{"path":str}"#, always, |s, p| {
+            let path = str_p(p, "path").ok_or_else(|| bad("file.saveCopy", "need `path`"))?.to_string();
+            write_project(s, &path, false)
+        }),
+        cmd!("file.revert", "Revert", ["File"], None, "{}", has_saved_path, |s, _| {
+            let path = s.path.clone().ok_or_else(|| bad("file.revert", "project was never saved"))?;
+            let keep = s.state.active_sequence;
+            let r = open_project(s, &path)?;
+            if let Some(k) = keep.filter(|k| s.project.sequence(*k).is_some()) {
+                s.state.active_sequence = Some(k);
+                s.state.open_sequences = vec![k];
+            }
+            Ok(r)
+        }),
+        cmd!("file.open", "Open Project…", ["File"], Some("Cmd+O"), r#"{"path":str}"#, always, |s, p| {
+            let path = str_p(p, "path").ok_or_else(|| bad("file.open", "need `path`"))?.to_string();
+            open_project(s, &path)
+        }),
+        cmd!("file.recover", "Recover Unsaved Changes…", ["File"], None, r#"{"id":str?}"#, has_recovery, |s, p| recover(s, str_p(p, "id"))),
+        cmd!("file.discardRecovery", "Discard Unsaved Changes", [], None, r#"{"id":str?,"all":bool?}"#, has_recovery, |s, p| {
+            let all = bool_p(p, "all").unwrap_or(false);
+            let id = str_p(p, "id").map(str::to_string);
+            let Some(per) = s.persistence.as_mut() else { return Ok(json!({"discarded": 0})) };
+            let mut n = 0;
+            let mut keep = Vec::new();
+            for (i, c) in std::mem::take(&mut per.candidates).into_iter().enumerate() {
+                let hit = all || id.as_deref().map_or(i == 0, |want| want == c.id);
+                if hit {
+                    crate::autosave::discard_candidate(&c).map_err(|e| EngineError::Other(e.to_string()))?;
+                    n += 1;
+                } else {
+                    keep.push(c);
+                }
+            }
+            per.candidates = keep;
+            if n == 0 {
+                return Err(bad("file.discardRecovery", "no such recovery session"));
+            }
+            Ok(json!({"discarded": n}))
+        }),
+        query!("file.recoveryList", "List Recoverable Sessions", "{}", |s, _| {
+            Ok(s.persistence.as_ref().map(|p| p.candidates_json()).unwrap_or_else(|| json!([])))
+        }),
+        cmd!("file.autoSaveNow", "Auto Save Now", [], None, "{}", always, |s, _| {
+            let per = s.persistence.as_ref().ok_or_else(|| EngineError::Other("auto-save is not running in this session".into()))?;
+            let r = per.auto_save_now().map_err(EngineError::Other)?;
+            s.poll_persistence();
+            Ok(json!({"path": r.map(|p| p.to_string_lossy().into_owned())}))
+        }),
+        query!("file.autoSaveStatus", "Auto Save Status", "{}", |s, _| {
+            let Some(per) = s.persistence.as_ref() else { return Ok(json!({"running": false, "prefs": s.prefs.auto_save})) };
+            Ok(json!({
+                "running": true,
+                "prefs": s.prefs.auto_save,
+                "dataDir": per.data_dir,
+                "sessionDir": per.session_dir,
+                "autoSaveDir": auto_save_dir(s),
+                "status": per.status,
+                "lastAutoSaveAt": per.status.last_auto_save_unix.map(|u| per.local_time(u)),
+                "lastJournalAt": per.status.last_journal_unix.map(|u| per.local_time(u)),
+                "recoverable": per.candidates.len(),
+            }))
+        }),
+        query!("file.listAutoSaves", "Browse Auto-Saves", "{}", |s, _| {
+            let dir = auto_save_dir(s);
+            let files = lumiere_codecbase_format::autosave::list_auto_saves(&dir, &auto_save_name(s));
+            Ok(json!({"dir": dir, "files": files.iter().rev().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>()}))
+        }),
+        query!("prefs.get", "Get Preferences", r#"{"key":str?}"#, |s, p| match str_p(p, "key") {
+            Some(k) => s.prefs.get(k).ok_or_else(|| bad("prefs.get", format!("unknown preference `{k}`"))),
+            None => Ok(json!({"values": s.prefs.to_value(), "keys": s.prefs.keys()})),
+        }),
+        cmd!("prefs.set", "Set Preferences", [], None, r#"{"key":str,"value":any}|{"values":{key:value}}"#, always, |s, p| {
+            let mut next = s.prefs.clone();
+            if let Some(k) = str_p(p, "key") {
+                next.set(k, p.get("value").cloned().ok_or_else(|| bad("prefs.set", "need `value`"))?).map_err(|e| bad("prefs.set", e))?;
+            }
+            if let Some(m) = p.get("values").and_then(Value::as_object) {
+                for (k, v) in m {
+                    next.set(k, v.clone()).map_err(|e| bad("prefs.set", e))?;
+                }
+            }
+            s.set_prefs(next).map_err(|e| EngineError::Other(format!("saving preferences: {e}")))?;
+            Ok(s.prefs.to_value())
+        }),
+        cmd!("prefs.reset", "Reset Preferences", [], None, r#"{"category":str?}"#, always, |s, p| {
+            let next = match str_p(p, "category") {
+                Some(c) => {
+                    let mut n = s.prefs.clone();
+                    n.reset_category(c).map_err(|e| bad("prefs.reset", e))?;
+                    n
+                }
+                None => Default::default(),
+            };
+            s.set_prefs(next).map_err(|e| EngineError::Other(format!("saving preferences: {e}")))?;
+            Ok(s.prefs.to_value())
+        }),
+        cmd!(
+            "file.exportMedia",
+            "Media…",
+            ["File", "Export"],
+            None,
+            r#"{"path":str,"preset":str?,"settings":ExportSettings?,"format":"h264|prores|dnxhr|mjpeg|mxf-op1a|mxf-opatom|png|tiff|bmp|gif|wav|aiff"?,"width":u32?,"height":u32?,"fps":f64?,"bitrateKbps":u32?,"bitrateMode":"cbr|vbr1Pass|vbr2Pass"?,"scale":f32=1,"audio":bool=true,"quality":0..100,"burnCaptions":bool=false,"captionSidecar":"srt|vtt"?,"loudnessLufs":f64?,"proresProfile":"proxy|lt|standard|hq"?,"dnxProfile":"lb|sq|hq|hqx"?,"mxfVideoCodec":"dnxhr|proRes|h264"?,"sequence":id?,"range":"entire|inOut|workArea|custom"?,"startSeconds":f64?,"endSeconds":f64?,"wait":bool=false}"#,
+            has_seq,
+            crate::export_tools::export_media
+        ),
+        query!("jobs.list", "List Jobs", "{}", |s, _| Ok(Value::Array(s.jobs.iter().map(crate::Job::to_json).collect()))),
+        query!("perf.stats", "Performance Statistics", "{}", |s, _| Ok(crate::perf::stats(s))),
+        cmd!("jobs.cancel", "Cancel Job", [], None, r#"{"job":id}"#, always, |s, p| {
+            let id = u64_p(p, "job").ok_or_else(|| bad("jobs.cancel", "need `job`"))?;
+            let j = s.jobs.iter().find(|j| j.id == id).ok_or_else(|| bad("jobs.cancel", "no such job"))?;
+            j.progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(Value::Null)
+        }),
+        // ================= Edit =================
+        cmd!("edit.undo", "Undo", ["Edit"], Some("Cmd+Z"), "{}", can_undo, |s, _| Ok(json!({"undone": s.undo()}))),
+        cmd!("edit.redo", "Redo", ["Edit"], Some("Cmd+Shift+Z"), "{}", can_redo, |s, _| Ok(json!({"redone": s.redo()}))),
+        cmd!("edit.cut", "Cut", ["Edit"], Some("Cmd+X"), "{}", has_selection, |s, _| {
+            copy_selection(s);
+            let sel = with_links(s, &s.state.selection.clone());
+            s.edit_sequence("Cut", |q, _, st| {
+                edit::delete_items(q, &sel);
+                st.selection.clear();
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("edit.copy", "Copy", ["Edit"], Some("Cmd+C"), "{}", has_selection, |s, _| {
+            copy_selection(s);
+            Ok(json!({"copied": s.state.clipboard.len()}))
+        }),
+        cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{}", has_clipboard, |s, _| paste(s, false)),
+        cmd!("edit.pasteInsert", "Paste Insert", ["Edit"], Some("Cmd+Shift+V"), "{}", has_clipboard, |s, _| paste(s, true)),
+        cmd!("edit.clear", "Clear", ["Edit"], Some("Backspace"), r#"{"clips":[id]?}"#, has_any_selection, |s, p| {
+            if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
+                let caps = s.state.caption_selection.clone();
+                return crate::captions::delete(s, &caps, false);
+            }
+            let sel = with_links(s, &clips_p(s, p));
+            s.edit_sequence("Clear", |q, _, st| {
+                edit::delete_items(q, &sel);
+                st.selection.clear();
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("edit.rippleDelete", "Ripple Delete", ["Edit"], Some("Shift+Delete"), r#"{"clips":[id]?}"#, has_any_selection, |s, p| {
+            if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
+                let caps = s.state.caption_selection.clone();
+                return crate::captions::delete(s, &caps, true);
+            }
+            let sel = with_links(s, &clips_p(s, p));
+            s.edit_sequence("Ripple Delete", |q, _, st| {
+                let mut spans: Vec<TimeRange> = sel.iter().filter_map(|c| q.find_item(*c).map(|(_, i)| i.range())).collect();
+                spans.sort_by_key(|r| (r.start, r.duration));
+                spans.dedup();
+                edit::ripple_delete_items(q, &sel)?;
+                if st.ripple_sequence_markers {
+                    for r in spans.iter().rev() {
+                        crate::sequence_tools::ripple_markers(&mut q.markers, r.end(), -r.duration);
+                    }
+                }
+                st.selection.clear();
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("edit.selectAll", "Select All", ["Edit"], Some("Cmd+A"), "{}", has_seq, |s, _| {
+            let all: Vec<ClipId> = s.active_sequence().map(|q| q.all_tracks().flat_map(|t| t.items.iter().map(|i| i.id)).collect()).unwrap_or_default();
+            s.state.selection = all;
+            Ok(json!({"selected": s.state.selection.len()}))
+        }),
+        cmd!("edit.deselectAll", "Deselect All", ["Edit"], Some("Cmd+Shift+A"), "{}", always, |s, _| {
+            s.state.selection.clear();
+            s.state.caption_selection.clear();
+            Ok(Value::Null)
+        }),
+        cmd!("edit.duplicate", "Duplicate", ["Edit"], Some("Cmd+Shift+/"), "{}", has_project_selection, |s, _| {
+            let sel = s.state.project_selection.clone();
+            let ids = s.edit("Duplicate", |p, st| {
+                let mut out = Vec::new();
+                for id in sel {
+                    if let Some(it) = p.item(id).cloned() {
+                        let nid = p.add_item(&format!("{} Copy", it.name), it.label, it.kind.clone(), None);
+                        out.push(nid);
+                    }
+                }
+                st.project_selection = out.clone();
+                Ok(out)
+            })?;
+            Ok(json!({"items": ids.iter().map(|i| i.0).collect::<Vec<_>>()}))
+        }),
+        cmd!("edit.label", "Label", [], None, r#"{"label":"Violet|Iris|…"}"#, always, |s, p| {
+            let l = str_p(p, "label").and_then(Label::from_name).ok_or_else(|| bad("edit.label", "unknown label"))?;
+            let clips = s.state.selection.clone();
+            let items = s.state.project_selection.clone();
+            let seq = s.state.active_sequence;
+            s.edit("Label", |pr, _| {
+                for i in &items {
+                    if let Some(it) = pr.item_mut(*i) {
+                        it.label = l;
+                    }
+                }
+                if let Some(q) = seq.and_then(|q| pr.sequence_mut(q)) {
+                    for c in &clips {
+                        if let Some((_, it)) = q.find_item_mut(*c) {
+                            it.label = l;
+                        }
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        // ================= Clip =================
+        cmd!("clip.rename", "Rename…", ["Clip"], None, r#"{"clip":id?,"item":id?,"name":str}"#, always, |s, p| {
+            let name = str_p(p, "name").ok_or_else(|| bad("clip.rename", "need `name`"))?.to_string();
+            let item = item_p(p, "item");
+            let clip = clip_p(p, "clip").or_else(|| s.state.selection.first().copied());
+            let seq = s.state.active_sequence;
+            s.edit("Rename", |pr, _| {
+                if let Some(i) = item {
+                    pr.item_mut(i).ok_or_else(|| bad("clip.rename", "no such item"))?.name = name;
+                } else if let (Some(c), Some(q)) = (clip, seq) {
+                    pr.sequence_mut(q).and_then(|q| q.find_item_mut(c)).ok_or_else(|| bad("clip.rename", "no such clip"))?.1.name = name;
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "clip.speedDuration",
+            "Speed/Duration…",
+            ["Clip"],
+            Some("Cmd+R"),
+            r#"{"clips":[id]?,"speed":percent=100,"reverse":bool,"ripple":bool,"interpolation":"frameSampling|frameBlending|opticalFlow"?}"#,
+            has_selection,
+            |s, p| {
+                let speed = f64_p(p, "speed").unwrap_or(100.0) / 100.0;
+                let reverse = bool_p(p, "reverse").unwrap_or(false);
+                let ripple = bool_p(p, "ripple").unwrap_or(false);
+                let interp = match str_p(p, "interpolation") {
+                    Some(m) => Some(lumiere_codecbase_project::TimeInterpolation::from_name(m).ok_or_else(|| bad("clip.speedDuration", "unknown interpolation"))?),
+                    None => None,
+                };
+                let sel = with_links(s, &clips_p(s, p));
+                s.edit_sequence("Speed/Duration", |q, ctx, _| {
+                    for c in &sel {
+                        edit::set_speed(q, *c, speed, reverse, ripple, ctx)?;
+                        if let (Some(m), Some((_, it))) = (interp, q.find_item_mut(*c)) {
+                            it.time_interpolation = m;
+                        }
+                    }
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        cmd!("clip.enable", "Enable", ["Clip"], Some("Shift+E"), r#"{"clips":[id]?}"#, has_selection, |s, p| {
+            let sel = with_links(s, &clips_p(s, p));
+            s.edit_sequence("Enable", |q, _, _| {
+                let target = !sel.iter().all(|c| q.find_item(*c).is_some_and(|(_, i)| i.enabled));
+                for c in &sel {
+                    if let Some((_, i)) = q.find_item_mut(*c) {
+                        i.enabled = target;
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("clip.link", "Link", ["Clip"], Some("Cmd+L"), r#"{"clips":[id]?}"#, has_selection, |s, p| {
+            let sel = clips_p(s, p);
+            let linked = sel.iter().all(|c| s.active_sequence().and_then(|q| q.find_item(*c)).is_some_and(|(_, i)| i.link.is_some()));
+            s.edit_sequence(if linked { "Unlink" } else { "Link" }, |q, ctx, _| {
+                let l = if linked { None } else { Some(ctx.alloc()) };
+                for c in &sel {
+                    if let Some((_, i)) = q.find_item_mut(*c) {
+                        i.link = l;
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(json!({"linked": !linked}))
+        }),
+        cmd!("clip.group", "Group", ["Clip"], Some("Cmd+G"), "{}", has_selection, |s, _| {
+            let sel = s.state.selection.clone();
+            s.edit_sequence("Group", |q, ctx, _| {
+                let g = ctx.alloc();
+                for c in &sel {
+                    if let Some((_, i)) = q.find_item_mut(*c) {
+                        i.group = Some(g);
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("clip.ungroup", "Ungroup", ["Clip"], Some("Cmd+Shift+G"), "{}", has_selection, |s, _| {
+            let sel = s.state.selection.clone();
+            s.edit_sequence("Ungroup", |q, _, _| {
+                for c in &sel {
+                    if let Some((_, i)) = q.find_item_mut(*c) {
+                        i.group = None;
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("clip.scaleToFrameSize", "Scale to Frame Size", ["Clip", "Video Options"], None, "{}", has_selection, |s, _| {
+            let sel = s.state.selection.clone();
+            s.edit_sequence("Scale to Frame Size", |q, _, _| {
+                for c in &sel {
+                    if let Some((_, i)) = q.find_item_mut(*c) {
+                        i.scale_to_frame = !i.scale_to_frame;
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "clip.audioGain",
+            "Audio Gain…",
+            ["Clip", "Audio Options"],
+            Some("G"),
+            r#"{"mode":"set|adjust|normalizeMax|normalizeAll"?,"db":f64,"relative":bool?}"#,
+            has_selection,
+            |s, p| crate::mixer::audio_gain(s, p)
+        ),
+        query!("clip.audioPeak", "Audio Clip Peak Amplitude", r#"{"clips":[id]?}"#, |s, p| crate::mixer::audio_peak(s, p)),
+        cmd!("clip.frameHold", "Add Frame Hold", ["Clip", "Video Options"], None, r#"{"clips":[id]?,"time":ticks?}"#, has_seq, |s, p| {
+            crate::clip_ops::add_frame_hold(s, p)
+        }),
+        cmd!("clip.nest", "Nest…", ["Clip"], None, r#"{"name":str}"#, has_selection, |s, p| nest(s, p)),
+        // ================= Sequence =================
+        cmd!("sequence.open", "Open in Timeline", [], None, r#"{"item":id}"#, always, |s, p| {
+            let id = item_p(p, "item").ok_or_else(|| bad("sequence.open", "need `item`"))?;
+            s.project.sequence(id).ok_or_else(|| bad("sequence.open", "not a sequence"))?;
+            s.state.active_sequence = Some(id);
+            if !s.state.open_sequences.contains(&id) {
+                s.state.open_sequences.push(id);
+            }
+            s.state.selection.clear();
+            s.events.push(crate::Event::OpenSequence(id));
+            Ok(Value::Null)
+        }),
+        cmd!("sequence.close", "Close Sequence", [], None, r#"{"item":id?}"#, has_seq, |s, p| {
+            let id = item_p(p, "item").or(s.state.active_sequence).ok_or(EngineError::NoSequence)?;
+            s.state.open_sequences.retain(|x| *x != id);
+            if s.state.active_sequence == Some(id) {
+                s.state.active_sequence = s.state.open_sequences.last().copied();
+            }
+            Ok(Value::Null)
+        }),
+        cmd!("sequence.addEdit", "Add Edit", ["Sequence"], Some("Cmd+K"), r#"{"time":ticks?}"#, has_seq, |s, p| {
+            let t = time_p(s, p, "").unwrap_or(s.playhead());
+            let tg = s.targeting().targeted;
+            let n = s.edit_sequence("Add Edit", |q, ctx, _| Ok(edit::razor(q, &tg, t, ctx)))?;
+            Ok(json!({"cuts": n.len()}))
+        }),
+        cmd!("sequence.addEditAllTracks", "Add Edit to All Tracks", ["Sequence"], Some("Cmd+Shift+K"), r#"{"time":ticks?}"#, has_seq, |s, p| {
+            let t = time_p(s, p, "").unwrap_or(s.playhead());
+            let n = s.edit_sequence("Add Edit to All Tracks", |q, ctx, _| {
+                let mut n = edit::razor(q, &[], t, ctx);
+                n.extend(edit::captions::split_captions_at(q, &[], t, ctx));
+                Ok(n)
+            })?;
+            Ok(json!({"cuts": n.len()}))
+        }),
+        cmd!("sequence.lift", "Lift", ["Sequence"], Some(";"), "{}", has_in_out, |s, _| {
+            let r = in_out_range(s)?;
+            let tg = s.targeting().targeted;
+            s.edit_sequence("Lift", |q, ctx, _| Ok(edit::lift(q, &tg, r, ctx)))?;
+            Ok(Value::Null)
+        }),
+        cmd!("sequence.extract", "Extract", ["Sequence"], Some("'"), "{}", has_in_out, |s, _| {
+            let r = in_out_range(s)?;
+            let tg = s.targeting().targeted;
+            s.edit_sequence("Extract", |q, ctx, st| {
+                edit::extract(q, &tg, r, ctx);
+                if st.ripple_sequence_markers {
+                    crate::sequence_tools::ripple_markers(&mut q.markers, r.end(), -r.duration);
+                }
+                q.mark_in = None;
+                q.mark_out = None;
+                q.split = Default::default();
+                Ok(())
+            })?;
+            s.set_playhead(r.start);
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "sequence.applyVideoTransition",
+            "Apply Video Transition",
+            ["Sequence"],
+            Some("Cmd+D"),
+            r#"{"clip":id?,"effect":"cross_dissolve|Cross Dissolve|…"?,"frames":i64?,"edge":"in"|"out"?,"params":{param:value}?,"reverse":bool?}"#,
+            has_seq,
+            |s, p| apply_transition(s, p, TrackKind::Video)
+        ),
+        cmd!(
+            "sequence.applyAudioTransition",
+            "Apply Audio Transition",
+            ["Sequence"],
+            Some("Cmd+Shift+D"),
+            r#"{"clip":id?,"effect":str?,"frames":i64?}"#,
+            has_seq,
+            |s, p| apply_transition(s, p, TrackKind::Audio)
+        ),
+        cmd!(
+            "sequence.setTransition",
+            "Edit Transition Settings",
+            [],
+            None,
+            r#"{"transition":id,"params":{param:value}?,"reverse":bool?,"reset":bool?}"#,
+            has_seq,
+            set_transition
+        ),
+        cmd!("sequence.closeGap", "Close Gap", ["Sequence"], None, r#"{"track":"V1"|id,"time":ticks}"#, has_seq, |s, p| {
+            let tr = track_p(s, p, "track").ok_or_else(|| bad("sequence.closeGap", "need `track`"))?;
+            let t = time_p(s, p, "").unwrap_or(s.playhead());
+            s.edit_sequence("Ripple Delete", |q, _, st| {
+                let before: Vec<(ClipId, Tick)> = q.track(tr).map(|x| x.items.iter().map(|i| (i.id, i.start)).collect()).unwrap_or_default();
+                edit::close_gap(q, tr, t)?;
+                if st.ripple_sequence_markers {
+                    // the gap ended where the first clip that moved started
+                    let moved = before
+                        .iter()
+                        .filter_map(|(id, old)| q.find_item(*id).filter(|(_, i)| i.start != *old).map(|(_, i)| (*old, *old - i.start)))
+                        .min_by_key(|m| m.0);
+                    if let Some((end, len)) = moved {
+                        crate::sequence_tools::ripple_markers(&mut q.markers, end, -len);
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("sequence.snap", "Snap in Timeline", ["Sequence"], Some("S"), r#"{"on":bool?}"#, always, |s, p| {
+            s.state.snapping = bool_p(p, "on").unwrap_or(!s.state.snapping);
+            Ok(json!({"snapping": s.state.snapping}))
+        }),
+        cmd!("sequence.linkedSelection", "Linked Selection", ["Sequence"], None, r#"{"on":bool?}"#, always, |s, p| {
+            s.state.linked_selection = bool_p(p, "on").unwrap_or(!s.state.linked_selection);
+            Ok(json!({"linkedSelection": s.state.linked_selection}))
+        }),
+        cmd!("sequence.addTracks", "Add Tracks…", ["Sequence"], None, r#"{"video":n=1,"audio":n=0}"#, has_seq, |s, p| {
+            let nv = u64_p(p, "video").unwrap_or(1) as usize;
+            let na = u64_p(p, "audio").unwrap_or(0) as usize;
+            s.edit_sequence("Add Tracks", |q, ctx, _| {
+                for _ in 0..nv {
+                    let n = q.video_tracks.len() + 1;
+                    q.video_tracks.push(lumiere_codecbase_project::Track::new(TrackId(ctx.alloc()), TrackKind::Video, format!("Video {n}")));
+                }
+                for _ in 0..na {
+                    let n = q.audio_tracks.len() + 1;
+                    q.audio_tracks.push(lumiere_codecbase_project::Track::new(TrackId(ctx.alloc()), TrackKind::Audio, format!("Audio {n}")));
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("sequence.deleteTrack", "Delete Track", [], None, r#"{"track":"V3"|id}"#, has_seq, |s, p| {
+            let tr = track_p(s, p, "track").ok_or_else(|| bad("sequence.deleteTrack", "need `track`"))?;
+            s.edit_sequence("Delete Track", |q, _, _| {
+                q.video_tracks.retain(|t| t.id != tr);
+                q.audio_tracks.retain(|t| t.id != tr);
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "sequence.settings",
+            "Sequence Settings…",
+            ["Sequence"],
+            None,
+            r#"{"width":u32?,"height":u32?,"fps":f64?,"name":str?,"sampleRate":u32?,"mix":"Stereo|Mono|5.1|Adaptive"?}"#,
+            has_seq,
+            |s, p| {
+                let id = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+                let mix = match str_p(p, "mix") {
+                    Some(m) => Some(
+                        crate::mixer::channels_from(m).ok_or_else(|| bad("sequence.settings", format!("unknown mix `{m}` (Stereo, Mono, 5.1, Adaptive)")))?,
+                    ),
+                    None => None,
+                };
+                let p = p.clone();
+                s.edit("Sequence Settings", |pr, _| {
+                    if let Some(n) = str_p(&p, "name") {
+                        pr.item_mut(id).expect("seq").name = n.to_string();
+                    }
+                    let q = pr.sequence_mut(id).ok_or(EngineError::NoSequence)?;
+                    if let Some(w) = u64_p(&p, "width") {
+                        q.settings.width = w as u32;
+                    }
+                    if let Some(h) = u64_p(&p, "height") {
+                        q.settings.height = h as u32;
+                    }
+                    if let Some(f) = f64_p(&p, "fps") {
+                        q.settings.frame_rate = FrameRate::from_f64(f);
+                    }
+                    if let Some(sr) = u64_p(&p, "sampleRate") {
+                        q.settings.sample_rate = sr as u32;
+                    }
+                    if let Some(m) = mix {
+                        q.settings.audio_master = m;
+                    }
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        cmd!("sequence.renderEffectsInToOut", "Render Effects In to Out", ["Sequence"], Some("Enter"), r#"{"wait":bool=false}"#, has_seq, |s, p| {
+            crate::previews::render(s, crate::previews::RenderMode::EffectsInToOut, p)
+        }),
+        cmd!("sequence.renderInToOut", "Render In to Out", ["Sequence"], None, r#"{"wait":bool=false}"#, has_seq, |s, p| {
+            crate::previews::render(s, crate::previews::RenderMode::InToOut, p)
+        }),
+        cmd!("sequence.renderSelection", "Render Selection", ["Sequence"], None, r#"{"wait":bool=false}"#, has_selection, |s, p| {
+            crate::previews::render(s, crate::previews::RenderMode::Selection, p)
+        }),
+        cmd!("sequence.renderAudio", "Render Audio", ["Sequence"], None, r#"{"wait":bool=false}"#, has_seq, |s, p| crate::previews::render_audio(s, p)),
+        cmd!("sequence.deleteRenderFiles", "Delete Render Files", ["Sequence"], None, "{}", has_previews, |s, _| crate::previews::delete(s, false)),
+        cmd!("sequence.deleteRenderFilesInToOut", "Delete Render Files In to Out", ["Sequence"], None, "{}", has_in_out, |s, _| {
+            crate::previews::delete(s, true)
+        }),
+        query!("sequence.renderBar", "Render Bar", "{}", |s, _| crate::previews::bar_json(s)),
+        cmd!("sequence.matchFrame", "Match Frame", ["Sequence"], Some("F"), "{}", has_seq, |s, _| {
+            let t = s.playhead();
+            let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+            let hit = seq.video_tracks.iter().rev().chain(seq.audio_tracks.iter()).find_map(|tr| tr.item_at(t).map(|i| (i.item, i.source_time_at(t))));
+            let (item, st) = hit.ok_or_else(|| EngineError::Other("no clip at the playhead".into()))?;
+            s.state.source_item = Some(item);
+            s.state.source_playhead = st;
+            s.events.push(crate::Event::OpenSource(item));
+            Ok(json!({"item": item.0}))
+        }),
+        // ================= Markers =================
+        cmd!("markers.markIn", "Mark In", ["Markers"], Some("I"), r#"{"time":ticks?,"target":"program|source"}"#, always, |s, p| mark(s, p, true)),
+        cmd!("markers.markOut", "Mark Out", ["Markers"], Some("O"), r#"{"time":ticks?,"target":"program|source"}"#, always, |s, p| mark(s, p, false)),
+        cmd!("markers.markClip", "Mark Clip", ["Markers"], Some("X"), "{}", has_seq, |s, _| {
+            let t = s.playhead();
+            let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+            let tg = s.targeting().targeted;
+            let r = seq
+                .all_tracks()
+                .filter(|tr| tg.contains(&tr.id))
+                .find_map(|tr| tr.item_at(t).map(|i| i.range()))
+                .ok_or_else(|| EngineError::Other("no clip at the playhead".into()))?;
+            let fd = s.sequence_rate().frame_duration();
+            s.edit_sequence("Mark Clip", |q, _, _| {
+                q.mark_in = Some(r.start);
+                q.mark_out = Some(r.end() - fd);
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("markers.markSelection", "Mark Selection", ["Markers"], Some("/"), "{}", has_selection, |s, _| {
+            let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+            let sel = s.state.selection.clone();
+            let items: Vec<_> = sel.iter().filter_map(|c| seq.find_item(*c).map(|(_, i)| i.range())).collect();
+            let a = items.iter().map(|r| r.start).min().unwrap_or_default();
+            let b = items.iter().map(|r| r.end()).max().unwrap_or_default();
+            let fd = s.sequence_rate().frame_duration();
+            s.edit_sequence("Mark Selection", |q, _, _| {
+                q.mark_in = Some(a);
+                q.mark_out = Some(b - fd);
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("markers.goToIn", "Go to In", ["Markers"], Some("Shift+I"), "{}", has_seq, |s, _| {
+            if let Some(i) = s.active_sequence().and_then(|q| q.mark_in) {
+                s.set_playhead(i);
+            }
+            Ok(Value::Null)
+        }),
+        cmd!("markers.goToOut", "Go to Out", ["Markers"], Some("Shift+O"), "{}", has_seq, |s, _| {
+            if let Some(o) = s.active_sequence().and_then(|q| q.mark_out) {
+                s.set_playhead(o);
+            }
+            Ok(Value::Null)
+        }),
+        cmd!("markers.clearIn", "Clear In", ["Markers"], Some("Cmd+Shift+I"), "{}", has_seq, |s, _| {
+            s.edit_sequence("Clear In", |q, _, _| {
+                q.mark_in = None;
+                q.split.video_in = None;
+                q.split.audio_in = None;
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("markers.clearOut", "Clear Out", ["Markers"], Some("Cmd+Shift+O"), "{}", has_seq, |s, _| {
+            s.edit_sequence("Clear Out", |q, _, _| {
+                q.mark_out = None;
+                q.split.video_out = None;
+                q.split.audio_out = None;
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("markers.clearInOut", "Clear In and Out", ["Markers"], Some("Cmd+Shift+X"), "{}", has_seq, |s, _| {
+            s.edit_sequence("Clear In and Out", |q, _, _| {
+                q.mark_in = None;
+                q.mark_out = None;
+                q.split = Default::default();
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "markers.add",
+            "Add Marker",
+            ["Markers"],
+            Some("M"),
+            r#"{"time":ticks?,"name":str?,"comment":str?,"color":label?,"durationFrames":i64?}"#,
+            has_seq,
+            |s, p| {
+                let (_seq, ph) = marker_list_mut(s)?;
+                let t = time_p(s, p, "").unwrap_or(ph);
+                let name = str_p(p, "name").unwrap_or("").to_string();
+                let comment = str_p(p, "comment").unwrap_or("").to_string();
+                let color = str_p(p, "color").and_then(Label::from_name).unwrap_or(Label::Green);
+                let dur = p.get("durationFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)).unwrap_or_default();
+                let id = s.edit_sequence("Add Marker", |q, ctx, _| {
+                    let id = MarkerId(ctx.alloc());
+                    q.markers.push(Marker { id, start: t, duration: dur, name, comment, kind: MarkerKind::Comment, color });
+                    q.markers.sort_by_key(|m| m.start);
+                    Ok(id)
+                })?;
+                Ok(json!({"marker": id.0}))
+            }
+        ),
+        cmd!("markers.goNext", "Go to Next Marker", ["Markers"], Some("Shift+M"), "{}", has_seq, |s, _| {
+            let t = s.playhead();
+            if let Some(m) = s.active_sequence().and_then(|q| q.markers.iter().map(|m| m.start).find(|m| *m > t)) {
+                s.set_playhead(m);
+            }
+            Ok(Value::Null)
+        }),
+        cmd!("markers.goPrev", "Go to Previous Marker", ["Markers"], Some("Cmd+Shift+M"), "{}", has_seq, |s, _| {
+            let t = s.playhead();
+            if let Some(m) = s.active_sequence().and_then(|q| q.markers.iter().rev().map(|m| m.start).find(|m| *m < t)) {
+                s.set_playhead(m);
+            }
+            Ok(Value::Null)
+        }),
+        cmd!("markers.clearCurrent", "Clear Selected Marker", ["Markers"], Some("Cmd+Alt+M"), "{}", has_seq, |s, _| {
+            let t = s.playhead();
+            s.edit_sequence("Clear Marker", |q, _, _| {
+                q.markers.retain(|m| m.start != t);
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("markers.clearAll", "Clear Markers", ["Markers"], Some("Cmd+Alt+Shift+M"), "{}", has_seq, |s, _| {
+            s.edit_sequence("Clear All Markers", |q, _, _| {
+                q.markers.clear();
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "markers.edit",
+            "Edit Marker…",
+            [],
+            None,
+            r#"{"marker":id,"name":str?,"comment":str?,"color":label?,"durationFrames":i64?}"#,
+            has_seq,
+            |s, p| {
+                let id = u64_p(p, "marker").map(MarkerId).ok_or_else(|| bad("markers.edit", "need `marker`"))?;
+                let rate = s.sequence_rate();
+                let p = p.clone();
+                s.edit_sequence("Edit Marker", |q, _, _| {
+                    let m = q.markers.iter_mut().find(|m| m.id == id).ok_or_else(|| bad("markers.edit", "no such marker"))?;
+                    if let Some(n) = str_p(&p, "name") {
+                        m.name = n.into();
+                    }
+                    if let Some(c) = str_p(&p, "comment") {
+                        m.comment = c.into();
+                    }
+                    if let Some(c) = str_p(&p, "color").and_then(Label::from_name) {
+                        m.color = c;
+                    }
+                    if let Some(f) = p.get("durationFrames").and_then(Value::as_i64) {
+                        m.duration = rate.tick_of(f);
+                    }
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        // ================= Playhead / navigation =================
+        cmd!("playhead.set", "Set Playhead", [], None, r#"{"time":ticks|"frame":i64|"seconds":f64|"timecode":str}"#, has_seq, |s, p| {
+            let t = time_p(s, p, "").ok_or_else(|| bad("playhead.set", "need time/frame/seconds/timecode"))?;
+            s.set_playhead(t);
+            Ok(json!({"time": s.playhead().0}))
+        }),
+        cmd!("playhead.step", "Step Frames", [], None, r#"{"frames":i64}"#, has_seq, |s, p| {
+            let n = p.get("frames").and_then(Value::as_i64).unwrap_or(1);
+            let r = s.sequence_rate();
+            let f = r.frame_at(s.playhead()) + n;
+            s.set_playhead(r.tick_of(f.max(0)));
+            Ok(json!({"frame": r.frame_at(s.playhead())}))
+        }),
+        cmd!("playhead.stepForward", "Step Forward One Frame", [], Some("Right"), "{}", has_seq, |s, _| s.execute("playhead.step", json!({"frames": 1}))),
+        cmd!("playhead.stepBack", "Step Back One Frame", [], Some("Left"), "{}", has_seq, |s, _| s.execute("playhead.step", json!({"frames": -1}))),
+        // Settings ▸ Playback ▸ Step forward/back many
+        cmd!("playhead.stepForward5", "Step Forward Five Frames", [], Some("Shift+Right"), "{}", has_seq, |s, _| {
+            let n = s.prefs.playback.step_many_frames as i64;
+            s.execute("playhead.step", json!({"frames": n}))
+        }),
+        cmd!("playhead.stepBack5", "Step Back Five Frames", [], Some("Shift+Left"), "{}", has_seq, |s, _| {
+            let n = s.prefs.playback.step_many_frames as i64;
+            s.execute("playhead.step", json!({"frames": -n}))
+        }),
+        // Up / Down: edit points on the targeted tracks (Shift+Up / Shift+Down: any track)
+        cmd!("playhead.nextEdit", "Go to Next Edit Point", [], Some("Down"), "{}", has_seq, |s, _| crate::keyboard::go_to_edit(s, true, false)),
+        cmd!("playhead.prevEdit", "Go to Previous Edit Point", [], Some("Up"), "{}", has_seq, |s, _| crate::keyboard::go_to_edit(s, false, false)),
+        cmd!("playhead.start", "Go to Sequence Start", [], Some("Home"), "{}", has_seq, |s, _| {
+            s.set_playhead(Tick::ZERO);
+            Ok(Value::Null)
+        }),
+        cmd!("playhead.end", "Go to Sequence End", [], Some("End"), "{}", has_seq, |s, _| {
+            let e = s.active_sequence().map(|q| q.duration()).unwrap_or_default();
+            s.set_playhead(e);
+            Ok(Value::Null)
+        }),
+        // ================= Source monitor =================
+        cmd!("source.open", "Open in Source Monitor", [], None, r#"{"item":id?}"#, always, |s, p| {
+            let id = item_p(p, "item")
+                .or(s.state.project_selection.first().copied())
+                .ok_or_else(|| bad("source.open", "need `item` (or a Project panel selection)"))?;
+            s.project.item(id).ok_or_else(|| bad("source.open", "no such item"))?;
+            s.state.source_item = Some(id);
+            s.state.source_playhead = Tick::ZERO;
+            s.events.push(crate::Event::OpenSource(id));
+            Ok(Value::Null)
+        }),
+        cmd!("source.setPlayhead", "Set Source Playhead", [], None, r#"{"time":ticks|"frame":i64|"seconds":f64}"#, always, |s, p| {
+            let item = s.state.source_item.ok_or_else(|| EngineError::Other("no source clip".into()))?;
+            let rate = s.project.item(item).map(|i| i.frame_rate()).unwrap_or_default();
+            let t = p
+                .get("time")
+                .and_then(Value::as_i64)
+                .map(Tick)
+                .or_else(|| p.get("frame").and_then(Value::as_i64).map(|f| rate.tick_of(f)))
+                .or_else(|| f64_p(p, "seconds").map(Tick::from_seconds_f64))
+                .unwrap_or_default();
+            let dur = s.project.item(item).map(|i| i.duration()).unwrap_or(Tick::MAX);
+            s.state.source_playhead = rate.snap(t.clamp(Tick::ZERO, (dur - rate.frame_duration()).max(Tick::ZERO)));
+            Ok(json!({"time": s.state.source_playhead.0}))
+        }),
+        cmd!("source.insert", "Insert", ["Clip"], Some(","), "{}", has_source, |s, _| edit_at_source(s, true)),
+        cmd!("source.overwrite", "Overwrite", ["Clip"], Some("."), "{}", has_source, |s, _| edit_at_source(s, false)),
+        // ================= Timeline gestures =================
+        cmd!(
+            "timeline.place",
+            "Place Clip",
+            [],
+            None,
+            r#"{"item":id,"track":"V1"|id?,"audioTrack":"A1"|id?,"time":ticks|"frame":i64|"seconds":f64,"insert":bool,"sourceIn":ticks?,"duration":ticks?}"#,
+            has_seq,
+            |s, p| {
+                let item = item_p(p, "item").ok_or_else(|| bad("timeline.place", "need `item`"))?;
+                let at = time_p(s, p, "").unwrap_or(s.playhead());
+                let tg = s.targeting();
+                let v = track_p(s, p, "track").or(tg.video_dest);
+                let a = track_p(s, p, "audioTrack").or(tg.audio_dest);
+                let pi = s.project.item(item).ok_or_else(|| bad("timeline.place", "no such item"))?;
+                let full = match &pi.kind {
+                    // Settings ▸ Timeline ▸ Still Image Default Duration
+                    ItemKind::Media(m)
+                        if matches!(m.info.kind, lumiere_codecbase_media::MediaKind::Still)
+                            || (matches!(m.info.kind, lumiere_codecbase_media::MediaKind::Synthetic) && m.info.duration.0 <= 0) =>
+                    {
+                        s.prefs.timeline.still_duration(s.sequence_rate())
+                    }
+                    _ => pi.duration(),
+                };
+                let (mi, mo) = match &pi.kind {
+                    ItemKind::Media(m) => (m.mark_in, m.mark_out.map(|o| o + pi.frame_rate().frame_duration())),
+                    ItemKind::Subclip { range, .. } => (Some(range.start), Some(range.end())),
+                    _ => (None, None),
+                };
+                let sin = p.get("sourceIn").and_then(Value::as_i64).map(Tick).or(mi).unwrap_or_default();
+                let dur = p.get("duration").and_then(Value::as_i64).map(Tick).unwrap_or_else(|| mo.unwrap_or(full) - sin);
+                let ids = place_item(s, item, TimeRange::new(sin, dur), at, v, a, bool_p(p, "insert").unwrap_or(false), "Place Clip", None)?;
+                Ok(json!({"clips": ids.iter().map(|c| c.0).collect::<Vec<_>>()}))
+            }
+        ),
+        cmd!("timeline.select", "Select Clips", [], None, r#"{"clips":[id],"add":bool,"toggle":bool}"#, has_seq, |s, p| {
+            let clips: Vec<ClipId> =
+                p.get("clips").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_u64().map(ClipId)).collect()).unwrap_or_default();
+            let clips = with_links(s, &clips);
+            // selecting clips leaves trim mode (Premiere: clip and edit point selections are exclusive)
+            s.state.edit_points.clear();
+            s.state.trim_shift = Default::default();
+            if bool_p(p, "toggle").unwrap_or(false) {
+                for c in clips {
+                    if let Some(i) = s.state.selection.iter().position(|x| *x == c) {
+                        s.state.selection.remove(i);
+                    } else {
+                        s.state.selection.push(c);
+                    }
+                }
+            } else if bool_p(p, "add").unwrap_or(false) {
+                for c in clips {
+                    if !s.state.selection.contains(&c) {
+                        s.state.selection.push(c);
+                    }
+                }
+            } else {
+                s.state.selection = clips;
+                s.state.caption_selection.clear();
+            }
+            Ok(json!({"selection": s.state.selection.iter().map(|c| c.0).collect::<Vec<_>>()}))
+        }),
+        cmd!("timeline.move", "Move Clips", [], None, r#"{"moves":[{"clip":id,"track":id|"V2","time":ticks}],"insert":bool}"#, has_seq, |s, p| {
+            let moves: Vec<(ClipId, TrackId, Tick)> = p
+                .get("moves")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|m| Some((clip_p(m, "clip")?, track_p(s, m, "track")?, Tick(m.get("time")?.as_i64()?)))).collect())
+                .unwrap_or_default();
+            if moves.is_empty() {
+                return Err(bad("timeline.move", "need `moves`"));
+            }
+            let ins = bool_p(p, "insert").unwrap_or(false);
+            s.edit_sequence(if ins { "Move (Insert)" } else { "Move" }, |q, ctx, _| Ok(edit::move_items(q, &moves, ins, ctx)?))?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "timeline.trim",
+            "Trim Edit",
+            [],
+            None,
+            r#"{"clip":id,"edge":"in|out","mode":"regular|ripple","delta":ticks|"deltaFrames":i64}"#,
+            has_seq,
+            |s, p| {
+                let c = clip_p(p, "clip").ok_or_else(|| bad("timeline.trim", "need `clip`"))?;
+                let edge = if str_p(p, "edge") == Some("in") { Edge::In } else { Edge::Out };
+                let mode = if str_p(p, "mode") == Some("ripple") { TrimMode::Ripple } else { TrimMode::Regular };
+                let d = p
+                    .get("delta")
+                    .and_then(Value::as_i64)
+                    .map(Tick)
+                    .or_else(|| p.get("deltaFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)))
+                    .unwrap_or_default();
+                let clips = with_links(s, &[c]);
+                let applied = s.edit_sequence(if mode == TrimMode::Ripple { "Ripple Trim" } else { "Trim" }, |q, ctx, st| {
+                    let before = q.find_item(c).map(|(_, i)| i.range());
+                    // clamp across all linked partners, then apply the common delta
+                    let mut dd = d;
+                    for c in &clips {
+                        let x = edit::clamp_trim(q, *c, edge, mode, dd, ctx)?;
+                        if x.abs() < dd.abs() {
+                            dd = x;
+                        }
+                    }
+                    if mode == TrimMode::Ripple {
+                        // the clip and its linked partners ripple as one edit
+                        let mut group = vec![c];
+                        group.extend(clips.iter().copied().filter(|o| *o != c));
+                        dd = edit::ripple_trim_group(q, &group, edge, dd, ctx)?;
+                        if st.ripple_sequence_markers
+                            && let Some(r) = before
+                        {
+                            let (from, shift) = match edge {
+                                Edge::In if dd > Tick::ZERO => (r.start + dd, -dd),
+                                Edge::In => (r.start, -dd),
+                                Edge::Out => (r.end(), dd),
+                            };
+                            crate::sequence_tools::ripple_markers(&mut q.markers, from, shift);
+                        }
+                    } else {
+                        for c in &clips {
+                            edit::trim(q, *c, edge, mode, dd, ctx)?;
+                        }
+                    }
+                    Ok(dd)
+                })?;
+                Ok(json!({"delta": applied.0}))
+            }
+        ),
+        // ================= Trim mode =================
+        cmd!("trim.selectEditPoint", "Select Edit Point", [], None, r#"{"clip":id,"edge":"in|out","kind":"trim|ripple|roll","add":bool?}"#, has_seq, |s, p| {
+            crate::trim::select(s, p)
+        }),
+        cmd!("trim.selectNearest", "Select Nearest Edit Point", [], None, r#"{"kind":"rippleIn|rippleOut|roll|trimIn|trimOut"}"#, has_seq, |s, p| {
+            crate::trim::select_nearest(s, p)
+        }),
+        cmd!("trim.edit", "Trim Edit", ["Sequence"], Some("Shift+T"), "{}", has_seq, |s, _| {
+            if s.state.edit_points.is_empty() {
+                crate::trim::select_nearest(s, &json!({"kind": "roll"}))
+            } else {
+                Ok(json!({"editPoints": s.state.edit_points}))
+            }
+        }),
+        cmd!("trim.clear", "Clear Edit Point Selection", [], None, "{}", has_edit_points, |s, _| {
+            s.state.edit_points.clear();
+            s.state.trim_shift = Default::default();
+            s.trim_play.around = None;
+            Ok(Value::Null)
+        }),
+        cmd!("trim.toggleType", "Toggle Trim Type", [], Some("Ctrl+T"), "{}", has_edit_points, |s, _| crate::trim::toggle_type(s)),
+        cmd!("trim.backward", "Trim Backward", [], Some("Alt+Left"), "{}", has_edit_points, |s, _| crate::trim::nudge(s, &json!({"frames": -1}))),
+        cmd!("trim.forward", "Trim Forward", [], Some("Alt+Right"), "{}", has_edit_points, |s, _| crate::trim::nudge(s, &json!({"frames": 1}))),
+        cmd!("trim.backwardMany", "Trim Backward Many", [], Some("Alt+Shift+Left"), "{}", has_edit_points, |s, _| {
+            let n = -(s.prefs.trim.large_trim_offset as i64);
+            crate::trim::nudge(s, &json!({"frames": n}))
+        }),
+        cmd!("trim.forwardMany", "Trim Forward Many", [], Some("Alt+Shift+Right"), "{}", has_edit_points, |s, _| {
+            let n = s.prefs.trim.large_trim_offset as i64;
+            crate::trim::nudge(s, &json!({"frames": n}))
+        }),
+        cmd!("trim.applyDefaultTransition", "Apply Default Transitions to Selection", ["Sequence"], None, "{}", has_edit_points, |s, _| {
+            crate::trim::apply_default_transitions(s)
+        }),
+        cmd!("trim.shuttle", "Dynamic Trim (Shuttle)", [], None, r#"{"direction":"forward|reverse","slow":bool?,"clock":seconds}"#, has_edit_points, |s, p| {
+            crate::trim::shuttle(s, p)
+        }),
+        cmd!("trim.shuttleStop", "Dynamic Trim Stop", [], None, r#"{"clock":seconds?}"#, has_seq, |s, p| crate::trim::stop(s, p)),
+        cmd!("trim.cancelDynamic", "Cancel Dynamic Trim", [], None, "{}", has_seq, |s, _| crate::trim::cancel(s)),
+        cmd!("trim.playAround", "Play Around Edit", [], None, r#"{"clock":seconds,"loop":bool=true,"toggle":bool?}"#, has_seq, |s, p| {
+            crate::trim::play_around(s, p)
+        }),
+        CommandSpec {
+            id: "trim.tick",
+            label: "Advance Trim Playback",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"clock":seconds}"#,
+            enabled: has_seq,
+            run: |s, p| crate::trim::tick(s, p.get("clock").and_then(Value::as_f64).unwrap_or(0.0)),
+            journal: false,
+        },
+        query!("trim.monitor", "Trim Monitor State", "{}", |s, _| Ok(crate::trim::monitor_info(s))),
+        cmd!("trim.nudge", "Trim by Frames", [], None, r#"{"frames":i64}"#, has_edit_points, |s, p| crate::trim::nudge(s, p)),
+        cmd!("trim.extendToPlayhead", "Extend Selected Edit to Playhead", [], Some("E"), "{}", has_edit_points, |s, _| { crate::trim::extend_to_playhead(s) }),
+        cmd!("trim.ripplePrevious", "Ripple Trim Previous Edit to Playhead", [], Some("Q"), "{}", has_seq, |s, _| crate::trim::to_playhead(
+            s,
+            &json!({"side": "previous", "ripple": true})
+        )),
+        cmd!("trim.rippleNext", "Ripple Trim Next Edit to Playhead", [], Some("W"), "{}", has_seq, |s, _| crate::trim::to_playhead(
+            s,
+            &json!({"side": "next", "ripple": true})
+        )),
+        cmd!("trim.previous", "Trim Previous Edit to Playhead", [], Some("Alt+Q"), "{}", has_seq, |s, _| crate::trim::to_playhead(
+            s,
+            &json!({"side": "previous", "ripple": false})
+        )),
+        cmd!("trim.next", "Trim Next Edit to Playhead", [], Some("Alt+W"), "{}", has_seq, |s, _| crate::trim::to_playhead(
+            s,
+            &json!({"side": "next", "ripple": false})
+        )),
+        cmd!("timeline.roll", "Rolling Edit", [], None, r#"{"left":id,"right":id,"delta":ticks|"deltaFrames":i64}"#, has_seq, |s, p| {
+            let (l, r) = (
+                clip_p(p, "left").ok_or_else(|| bad("timeline.roll", "need `left`"))?,
+                clip_p(p, "right").ok_or_else(|| bad("timeline.roll", "need `right`"))?,
+            );
+            let d = p
+                .get("delta")
+                .and_then(Value::as_i64)
+                .map(Tick)
+                .or_else(|| p.get("deltaFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)))
+                .unwrap_or_default();
+            let x = s.edit_sequence("Rolling Edit", |q, ctx, _| Ok(edit::roll(q, l, r, d, ctx)?))?;
+            Ok(json!({"delta": x.0}))
+        }),
+        cmd!("timeline.slip", "Slip", [], None, r#"{"clip":id,"delta":ticks|"deltaFrames":i64}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("timeline.slip", "need `clip`"))?;
+            let d = p
+                .get("delta")
+                .and_then(Value::as_i64)
+                .map(Tick)
+                .or_else(|| p.get("deltaFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)))
+                .unwrap_or_default();
+            let clips = with_links(s, &[c]);
+            s.edit_sequence("Slip", |q, ctx, _| {
+                for c in &clips {
+                    edit::slip(q, *c, d, ctx)?;
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("timeline.slide", "Slide", [], None, r#"{"clip":id,"delta":ticks|"deltaFrames":i64}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("timeline.slide", "need `clip`"))?;
+            let d = p
+                .get("delta")
+                .and_then(Value::as_i64)
+                .map(Tick)
+                .or_else(|| p.get("deltaFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)))
+                .unwrap_or_default();
+            s.edit_sequence("Slide", |q, ctx, _| Ok(edit::slide(q, c, d, ctx)?))?;
+            Ok(Value::Null)
+        }),
+        cmd!("timeline.rateStretch", "Rate Stretch", [], None, r#"{"clip":id,"edge":"in|out","delta":ticks}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("timeline.rateStretch", "need `clip`"))?;
+            let edge = if str_p(p, "edge") == Some("in") { Edge::In } else { Edge::Out };
+            let d = p
+                .get("delta")
+                .and_then(Value::as_i64)
+                .map(Tick)
+                .or_else(|| p.get("deltaFrames").and_then(Value::as_i64).map(|f| s.sequence_rate().tick_of(f)))
+                .unwrap_or_default();
+            let clips = with_links(s, &[c]);
+            let sp = s.edit_sequence("Rate Stretch", |q, ctx, _| {
+                let mut sp = 1.0;
+                for c in &clips {
+                    sp = edit::rate_stretch(q, *c, edge, d, ctx)?;
+                }
+                Ok(sp)
+            })?;
+            Ok(json!({"speed": sp}))
+        }),
+        cmd!("timeline.razor", "Razor", [], None, r#"{"time":ticks,"track":"V1"|id?,"clip":id?}"#, has_seq, |s, p| {
+            let t = time_p(s, p, "").unwrap_or(s.playhead());
+            let tr = track_p(s, p, "track");
+            let clip = clip_p(p, "clip");
+            let n = if let Some(c) = clip {
+                let clips = with_links(s, &[c]);
+                s.edit_sequence("Razor", |q, ctx, _| Ok(edit::razor_items(q, &clips, t, ctx)))?
+            } else {
+                let tracks: Vec<TrackId> = tr.into_iter().collect();
+                s.edit_sequence("Razor", |q, ctx, _| Ok(edit::razor(q, &tracks, t, ctx)))?
+            };
+            Ok(json!({"cuts": n.len()}))
+        }),
+        cmd!(
+            "timeline.setTrack",
+            "Track Settings",
+            [],
+            None,
+            r#"{"track":"V1"|id,"locked":bool?,"syncLock":bool?,"enabled":bool?,"muted":bool?,"solo":bool?,"name":str?,"volumeDb":f64?,"pan":f64?}"#,
+            has_seq,
+            |s, p| {
+                let tr = track_p(s, p, "track").ok_or_else(|| bad("timeline.setTrack", "need `track`"))?;
+                let p = p.clone();
+                s.edit_sequence("Track Settings", |q, _, _| {
+                    let t = q.track_mut(tr).ok_or(lumiere_codecbase_edit::EditError::NoTrack(tr))?;
+                    if let Some(v) = bool_p(&p, "locked") {
+                        t.locked = v;
+                    }
+                    if let Some(v) = bool_p(&p, "syncLock") {
+                        t.sync_lock = v;
+                    }
+                    if let Some(v) = bool_p(&p, "enabled") {
+                        t.enabled = v;
+                    }
+                    if let Some(v) = bool_p(&p, "muted") {
+                        t.muted = v;
+                    }
+                    if let Some(v) = bool_p(&p, "solo") {
+                        t.solo = v;
+                    }
+                    if let Some(v) = str_p(&p, "name") {
+                        t.name = v.to_string();
+                    }
+                    if let Some(v) = f64_p(&p, "volumeDb") {
+                        t.volume_db = v;
+                    }
+                    if let Some(v) = f64_p(&p, "pan") {
+                        t.pan = v.clamp(-100.0, 100.0);
+                    }
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        cmd!("timeline.setTargeting", "Track Targeting", [], None, r#"{"track":"V1"|id,"targeted":bool?,"sourcePatch":bool?}"#, has_seq, |s, p| {
+            let tr = track_p(s, p, "track").ok_or_else(|| bad("timeline.setTargeting", "need `track`"))?;
+            let seq_id = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+            let mut tg = s.targeting();
+            let is_video = s.active_sequence().is_some_and(|q| q.video_tracks.iter().any(|t| t.id == tr));
+            if let Some(on) = bool_p(p, "targeted") {
+                tg.targeted.retain(|t| *t != tr);
+                if on {
+                    tg.targeted.push(tr);
+                }
+            }
+            if let Some(on) = bool_p(p, "sourcePatch") {
+                let slot = if is_video { &mut tg.video_dest } else { &mut tg.audio_dest };
+                *slot = if on {
+                    Some(tr)
+                } else if *slot == Some(tr) {
+                    None
+                } else {
+                    *slot
+                };
+            }
+            s.state.targeting.insert(seq_id, tg);
+            Ok(Value::Null)
+        }),
+        // ================= Effects =================
+        cmd!("effects.apply", "Apply Effect", [], None, r#"{"clips":[id]?,"effect":"gaussian_blur|Gaussian Blur|…"}"#, has_seq, |s, p| {
+            let name = str_p(p, "effect").ok_or_else(|| bad("effects.apply", "need `effect`"))?;
+            let def = resolve_effect_name(s, p, name).ok_or_else(|| bad("effects.apply", format!("unknown effect `{name}`")))?;
+            if lumiere_codecbase_project::graphic::is_layer_id(def.id) {
+                return Err(bad("effects.apply", "graphic layers are added with graphics.newText / graphics.newShape"));
+            }
+            if matches!(def.kind, lumiere_codecbase_project::EffectKind::VideoTransition | lumiere_codecbase_project::EffectKind::AudioTransition) {
+                let mut q = p.clone();
+                q["effect"] = json!(def.id);
+                return apply_transition(s, &q, if def.kind == lumiere_codecbase_project::EffectKind::VideoTransition { TrackKind::Video } else { TrackKind::Audio });
+            }
+            let clips = clips_p(s, p);
+            if clips.is_empty() {
+                return Err(bad("effects.apply", "select clips first"));
+            }
+            let is_audio = def.kind == lumiere_codecbase_project::EffectKind::Audio;
+            let (fw, fh) = s.active_sequence().map(|q| (q.settings.width, q.settings.height)).unwrap_or((1920, 1080));
+            let label = format!("Apply {}", def.name);
+            s.edit_sequence(&label, |q, _, _| {
+                let mut n = 0;
+                for t in q.all_tracks_mut() {
+                    if (t.kind == TrackKind::Audio) != is_audio {
+                        continue;
+                    }
+                    for i in t.items.iter_mut().filter(|i| clips.contains(&i.id)) {
+                        let mut inst = def.instance();
+                        resolve_auto_points(&mut inst, (fw, fh), (fw, fh));
+                        // standard effects go before the intrinsic ones (render order)
+                        let pos = i.effects.iter().position(|e| e.def().is_some_and(|d| d.intrinsic)).unwrap_or(i.effects.len());
+                        let pos = if is_audio { i.effects.len() } else { pos };
+                        i.effects.insert(pos, inst);
+                        n += 1;
+                    }
+                }
+                Ok(n)
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("effects.remove", "Remove Effect", [], None, r#"{"clip":id,"index":n}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("effects.remove", "need `clip`"))?;
+            let idx = u64_p(p, "index").ok_or_else(|| bad("effects.remove", "need `index`"))? as usize;
+            s.edit_sequence("Remove Effect", |q, _, _| {
+                let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+                if it.effects.get(idx).and_then(|e| e.def()).is_some_and(|d| d.intrinsic) {
+                    return Err(EngineError::Other("intrinsic effects cannot be removed".into()));
+                }
+                if idx < it.effects.len() {
+                    it.effects.remove(idx);
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "effects.setParam",
+            "Set Effect Parameter",
+            [],
+            None,
+            r##"{"clip":id,"effect":"motion"|index,"param":str,"mask":n?,"value":num|[x,y]|"#rrggbb"|bool|path,"time":ticks?}"##,
+            has_seq,
+            |s, p| {
+                let c = clip_p(p, "clip").ok_or_else(|| bad("effects.setParam", "need `clip`"))?;
+                let pid = str_p(p, "param").ok_or_else(|| bad("effects.setParam", "need `param`"))?.to_string();
+                let val = p.get("value").cloned().ok_or_else(|| bad("effects.setParam", "need `value`"))?;
+                let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+                let ph = s.playhead();
+                let tl = time_p(s, p, "").unwrap_or(ph);
+                let pq = p.clone();
+                s.edit_sequence("Change Effect Parameter", |q, _, _| {
+                    let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+                    let mt = it.source_time_at(tl.clamp(it.start, it.end() - Tick(1)));
+                    let e = match &eff {
+                        Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
+                        Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
+                        _ => None,
+                    }
+                    .ok_or_else(|| bad("effects.setParam", "no such effect on clip"))?;
+                    if eff == json!("opacity") || eff == json!("motion") {
+                        e.enabled = true;
+                    }
+                    // instances saved before a parameter existed get it from the definition
+                    if !e.params.contains_key(&pid)
+                        && let Some(d) = e.def().and_then(|d| d.param(&pid))
+                    {
+                        e.params.insert(pid.clone(), lumiere_codecbase_project::Param::new(d.default.clone()));
+                    }
+                    let prm = crate::masks::target_param(e, &pq, &pid).ok_or_else(|| bad("effects.setParam", format!("no param `{pid}`")))?;
+                    let v = json_to_param(&prm.value, &val).ok_or_else(|| bad("effects.setParam", "value has the wrong type"))?;
+                    prm.set_at(mt, v);
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        cmd!("effects.toggleAnimation", "Toggle Animation", [], None, r#"{"clip":id,"effect":str|index,"param":str,"mask":n?}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("effects.toggleAnimation", "need `clip`"))?;
+            let pid = str_p(p, "param").ok_or_else(|| bad("effects.toggleAnimation", "need `param`"))?.to_string();
+            let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+            let ph = s.playhead();
+            s.edit_sequence("Toggle Animation", |q, _, _| {
+                let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+                let mt = it.source_time_at(ph.clamp(it.start, it.end() - Tick(1)));
+                let e = match &eff {
+                    Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
+                    Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
+                    _ => None,
+                }
+                .ok_or_else(|| bad("effects.toggleAnimation", "no such effect"))?;
+                crate::masks::target_param(e, p, &pid).ok_or_else(|| bad("effects.toggleAnimation", "no such param"))?.toggle_animation(mt);
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("effects.toggleEnabled", "Toggle Effect", [], None, r#"{"clip":id,"index":n}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("effects.toggleEnabled", "need `clip`"))?;
+            let idx = u64_p(p, "index").unwrap_or(0) as usize;
+            s.edit_sequence("Toggle Effect", |q, _, _| {
+                let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+                if let Some(e) = it.effects.get_mut(idx) {
+                    e.enabled = !e.enabled;
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!("effects.reset", "Reset Effect", [], None, r#"{"clip":id,"index":n}"#, has_seq, |s, p| {
+            let c = clip_p(p, "clip").ok_or_else(|| bad("effects.reset", "need `clip`"))?;
+            let idx = u64_p(p, "index").unwrap_or(0) as usize;
+            let (fw, fh) = s.active_sequence().map(|q| (q.settings.width, q.settings.height)).unwrap_or((1920, 1080));
+            s.edit_sequence("Reset Effect", |q, _, _| {
+                let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+                if let Some(e) = it.effects.get_mut(idx)
+                    && let Some(d) = e.def()
+                {
+                    let mut fresh = d.instance();
+                    resolve_auto_points(&mut fresh, (fw, fh), (fw, fh));
+                    *e = fresh;
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        cmd!(
+            "effects.addKeyframe",
+            "Add/Remove Keyframe",
+            [],
+            None,
+            r#"{"clip":id,"effect":str|index,"param":str,"mask":n?,"time":ticks?}"#,
+            has_seq,
+            |s, p| { keyframe_op(s, p, "add") }
+        ),
+        cmd!("effects.deleteKeyframe", "Delete Keyframe", [], None, r#"{"clip":id,"effect":str|index,"param":str,"mediaTime":ticks}"#, has_seq, |s, p| {
+            keyframe_op(s, p, "delete")
+        }),
+        cmd!(
+            "effects.moveKeyframe",
+            "Move Keyframe",
+            [],
+            None,
+            r#"{"clip":id,"effect":str|index,"param":str,"mediaTime":ticks,"to":ticks}"#,
+            has_seq,
+            |s, p| keyframe_op(s, p, "move")
+        ),
+        cmd!(
+            "effects.setInterpolation",
+            "Keyframe Interpolation",
+            [],
+            None,
+            r#"{"clip":id,"effect":str|index,"param":str,"mediaTime":ticks,"interpolation":"linear|bezier|autoBezier|continuousBezier|hold|easeIn|easeOut"}"#,
+            has_seq,
+            |s, p| keyframe_op(s, p, "interp")
+        ),
+        cmd!(
+            "effects.setKeyframe",
+            "Edit Keyframe",
+            [],
+            None,
+            r#"{"clip":id,"effect":str|index,"param":str,"mediaTime":ticks,"value":any?,"inInfluence":0..1?,"outInfluence":0..1?}"#,
+            has_seq,
+            |s, p| keyframe_op(s, p, "set")
+        ),
+        // ================= Project panel =================
+        cmd!("project.select", "Select Project Items", [], None, r#"{"items":[id]}"#, always, |s, p| {
+            s.state.project_selection =
+                p.get("items").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_u64().map(ItemId)).collect()).unwrap_or_default();
+            Ok(Value::Null)
+        }),
+        cmd!("project.delete", "Clear", [], Some("Delete"), r#"{"items":[id]?}"#, has_project_selection, |s, p| {
+            let items: Vec<ItemId> = p
+                .get("items")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_u64().map(ItemId)).collect())
+                .unwrap_or_else(|| s.state.project_selection.clone());
+            s.edit("Clear", |pr, st| {
+                for i in &items {
+                    pr.items.remove(i);
+                    pr.root.remove_item(*i);
+                }
+                // remove track items that referenced deleted media
+                let seq_ids: Vec<ItemId> = pr.sequences().map(|q| q.id).collect();
+                for sid in seq_ids {
+                    if let Some(q) = pr.sequence_mut(sid) {
+                        for t in q.all_tracks_mut() {
+                            t.items.retain(|x| !items.contains(&x.item));
+                            lumiere_codecbase_edit::remove_orphan_transitions(t);
+                        }
+                    }
+                }
+                st.project_selection.clear();
+                Ok(())
+            })?;
+            for i in &items {
+                s.media.remove(*i);
+            }
+            s.fix_state();
+            Ok(Value::Null)
+        }),
+        cmd!("project.moveToBin", "Move to Bin", [], None, r#"{"items":[id]?,"bin":binId|null}"#, always, |s, p| {
+            let items: Vec<ItemId> = match p.get("items").and_then(Value::as_array) {
+                Some(a) => a.iter().filter_map(|v| v.as_u64().map(ItemId)).collect(),
+                None => s.state.project_selection.clone(),
+            };
+            if items.is_empty() {
+                return Err(bad("project.moveToBin", "need `items` (or a Project panel selection)"));
+            }
+            let bin = u64_p(p, "bin").map(lumiere_codecbase_project::BinId);
+            let moved = s.edit("Move to Bin", |pr, _| pr.move_to_bin(&items, bin).ok_or_else(|| bad("project.moveToBin", "no such bin")))?;
+            Ok(json!({"moved": moved}))
+        }),
+        cmd!("project.setMarks", "Set Source In/Out", [], None, r#"{"item":id,"in":ticks?|null,"out":ticks?|null}"#, always, |s, p| {
+            let id = item_p(p, "item").or(s.state.source_item).ok_or_else(|| bad("project.setMarks", "need `item`"))?;
+            let p = p.clone();
+            s.edit("Mark", |pr, _| {
+                let it = pr.item_mut(id).ok_or_else(|| bad("project.setMarks", "no such item"))?;
+                // an ordinary In/Out replaces that side's split points
+                if p.get("in").is_some() {
+                    it.split.video_in = None;
+                    it.split.audio_in = None;
+                }
+                if p.get("out").is_some() {
+                    it.split.video_out = None;
+                    it.split.audio_out = None;
+                }
+                if let Some(m) = it.as_media_mut() {
+                    if let Some(v) = p.get("in") {
+                        m.mark_in = v.as_i64().map(Tick);
+                    }
+                    if let Some(v) = p.get("out") {
+                        m.mark_out = v.as_i64().map(Tick);
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(Value::Null)
+        }),
+        // ================= Queries =================
+        query!("command.list", "List Commands", "{}", |s, _| {
+            Ok(Value::Array(
+                command_specs()
+                    .iter()
+                    .map(|c| {
+                        let all: Vec<&str> = s.shortcuts.for_command(c.id).iter().map(|b| b.keys.as_str()).collect();
+                        json!({"id": c.id, "label": c.label, "menu": c.menu, "shortcut": s.shortcuts.primary(c.id), "shortcuts": all, "defaultShortcut": c.shortcut, "params": c.params, "enabled": (c.enabled)(s).is_ok()})
+                    })
+                    .collect(),
+            ))
+        }),
+        query!("project.inspect", "Inspect Project", "{}", |s, _| Ok(crate::commands::inspect_project(s))),
+        query!("sequence.inspect", "Inspect Sequence", r#"{"item":id?}"#, |s, p| {
+            let id = item_p(p, "item").or(s.state.active_sequence).ok_or(EngineError::NoSequence)?;
+            let q = s.project.sequence(id).ok_or(EngineError::NoSequence)?;
+            Ok(inspect_sequence(s, id, q))
+        }),
+        query!("state.inspect", "Inspect Editor State", "{}", |s, _| Ok(serde_json::to_value(&s.state).unwrap_or_default())),
+        query!(
+            "effects.list",
+            "List Effects",
+            r#"{"kind":"Video"|"Audio"|"VideoTransition"|"AudioTransition"?,"folder":"Video Transitions/Wipe"?,"detail":bool?}"#,
+            |_, p| Ok(list_effects(p))
+        ),
+        query!("history.list", "List History", "{}", |s, _| Ok(
+            json!({"undo": s.history.undo.iter().map(|h| &h.0).collect::<Vec<_>>(), "redo": s.history.redo.iter().map(|h| &h.0).collect::<Vec<_>>()})
+        )),
+    ];
+    crate::sequence_tools::splice(&mut v);
+    v.extend(crate::captions::commands());
+    v.extend(crate::settings::commands());
+    v.extend(crate::mixer::commands());
+    v.extend(crate::multicam::commands());
+    v.extend(crate::essential_sound::commands());
+    v.extend(crate::color::commands());
+    v.extend(crate::graphics::commands());
+    v.extend(crate::graphic_templates::commands());
+    v.extend(crate::shortcuts::commands());
+    v.extend(crate::relink::commands());
+    v.extend(crate::proxies::commands());
+    v.extend(crate::project_manager::commands());
+    v.extend(crate::masks::commands());
+    v.extend(crate::presets::commands());
+    v.extend(crate::export_tools::commands());
+    v.extend(crate::transcript::commands());
+    v.extend(crate::panels::commands());
+    v.extend(crate::scopes::commands());
+    v.extend(crate::remix::commands());
+    v.extend(crate::voiceover::commands());
+    v.extend(crate::keyboard::commands());
+    v.extend(crate::project_panel::commands());
+    v.extend(crate::media_browser::commands());
+    // Edit ▸ Label ▸ <colour>, Paste Attributes, subclips, Video / Audio Options, Replace With Clip…
+    // and their menu order
+    crate::clip_ops::apply_layout(&mut v);
+    // Search Bin, Find, Project Settings, Scene Edit Detection, Normalize Mix Track… (M3.11)
+    crate::project_tools::apply_layout(&mut v);
+    v.shrink_to_fit();
+    v
+}
+
+fn keyframe_op(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
+    let c = clip_p(p, "clip").ok_or_else(|| bad("keyframe", "need `clip`"))?;
+    let pid = str_p(p, "param").ok_or_else(|| bad("keyframe", "need `param`"))?.to_string();
+    let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+    let ph = time_p(s, p, "").unwrap_or(s.playhead());
+    let mtime = p.get("mediaTime").and_then(Value::as_i64).map(Tick);
+    let to = p.get("to").and_then(Value::as_i64).map(Tick);
+    let interp = str_p(p, "interpolation").map(str::to_string);
+    let label = match op {
+        "add" => "Add Keyframe",
+        "delete" => "Delete Keyframe",
+        "move" => "Move Keyframe",
+        "set" => "Edit Keyframe",
+        _ => "Keyframe Interpolation",
+    };
+    s.edit_sequence(label, |q, _, _| {
+        let (_, it) = q.find_item_mut(c).ok_or(lumiere_codecbase_edit::EditError::NoItem(c))?;
+        let mt_now = it.source_time_at(ph.clamp(it.start, it.end() - Tick(1)));
+        let e = match &eff {
+            Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
+            Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
+            _ => None,
+        }
+        .ok_or_else(|| bad("keyframe", "no such effect"))?;
+        let prm = crate::masks::target_param(e, p, &pid).ok_or_else(|| bad("keyframe", "no such param"))?;
+        match op {
+            "add" => {
+                // toggle: remove if a keyframe sits at the playhead, else add
+                if !prm.remove_keyframe_at(mt_now) {
+                    prm.add_keyframe(mt_now);
+                }
+            }
+            "delete" => {
+                prm.remove_keyframe_at(mtime.ok_or_else(|| bad("keyframe", "need `mediaTime`"))?);
+            }
+            "move" => {
+                let from = mtime.ok_or_else(|| bad("keyframe", "need `mediaTime`"))?;
+                let to = to.ok_or_else(|| bad("keyframe", "need `to`"))?;
+                if let Some(i) = prm.keyframes.iter().position(|k| k.time == from) {
+                    let mut k = prm.keyframes.remove(i);
+                    k.time = to;
+                    prm.keyframes.retain(|x| x.time != to);
+                    let at = prm.keyframes.partition_point(|x| x.time < to);
+                    prm.keyframes.insert(at, k);
+                }
+            }
+            "set" => {
+                let at = mtime.ok_or_else(|| bad("keyframe", "need `mediaTime`"))?;
+                let k = prm.keyframes.iter_mut().find(|k| k.time == at).ok_or_else(|| bad("keyframe", "no keyframe at that time"))?;
+                if let Some(v) = p.get("value") {
+                    k.value = json_to_param(&k.value, v).ok_or_else(|| bad("keyframe", "value has the wrong type"))?;
+                }
+                if let Some(x) = f64_p(p, "inInfluence") {
+                    k.in_influence = x.clamp(0.01, 1.0);
+                }
+                if let Some(x) = f64_p(p, "outInfluence") {
+                    k.out_influence = x.clamp(0.01, 1.0);
+                }
+            }
+            _ => {
+                let at = mtime.unwrap_or(mt_now);
+                let kind = match interp.as_deref().unwrap_or("linear").to_ascii_lowercase().as_str() {
+                    "bezier" => lumiere_codecbase_project::Interpolation::Bezier,
+                    "autobezier" => lumiere_codecbase_project::Interpolation::AutoBezier,
+                    "continuousbezier" => lumiere_codecbase_project::Interpolation::ContinuousBezier,
+                    "hold" => lumiere_codecbase_project::Interpolation::Hold,
+                    "easein" => lumiere_codecbase_project::Interpolation::EaseIn,
+                    "easeout" => lumiere_codecbase_project::Interpolation::EaseOut,
+                    _ => lumiere_codecbase_project::Interpolation::Linear,
+                };
+                let k = prm.keyframes.iter_mut().find(|k| k.time == at).ok_or_else(|| bad("keyframe", "no keyframe at that time"))?;
+                k.interp = kind;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
+fn in_out_range(s: &Session) -> Result<TimeRange> {
+    let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    let fd = q.settings.frame_rate.frame_duration();
+    let a = q.mark_in.unwrap_or(Tick::ZERO);
+    let b = q.mark_out.map(|o| o + fd).unwrap_or(q.duration());
+    if b <= a {
+        return Err(EngineError::Other("In point is after Out point".into()));
+    }
+    Ok(TimeRange::from_bounds(a, b))
+}
+
+fn mark(s: &mut Session, p: &Value, is_in: bool) -> Result<Value> {
+    let target_source = str_p(p, "target") == Some("source");
+    if target_source {
+        let item = s.state.source_item.ok_or_else(|| EngineError::Other("no source clip".into()))?;
+        let t = p.get("time").and_then(Value::as_i64).map(Tick).unwrap_or(s.state.source_playhead);
+        let key = if is_in { "in" } else { "out" };
+        return s.execute("project.setMarks", json!({"item": item.0, key: t.0}));
+    }
+    let t = time_p(s, p, "").unwrap_or(s.playhead());
+    s.edit_sequence(if is_in { "Mark In" } else { "Mark Out" }, |q, _, _| {
+        if is_in {
+            q.mark_in = Some(t);
+            q.split.video_in = None;
+            q.split.audio_in = None;
+            if q.mark_out.is_some_and(|o| o < t) {
+                q.mark_out = None;
+            }
+        } else {
+            q.mark_out = Some(t);
+            q.split.video_out = None;
+            q.split.audio_out = None;
+            if q.mark_in.is_some_and(|i| i > t) {
+                q.mark_in = None;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
+pub(crate) fn json_to_param(template: &ParamValue, v: &Value) -> Option<ParamValue> {
+    Some(match template {
+        ParamValue::Float(_) => ParamValue::Float(v.as_f64()?),
+        ParamValue::Vec2(_) => {
+            let a = v.as_array()?;
+            ParamValue::Vec2(lumiere_codecbase_geom::Vec2::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?))
+        }
+        ParamValue::Color(_) => match v {
+            Value::String(s) => ParamValue::Color(lumiere_codecbase_color::parse_hex(s)?),
+            Value::Array(a) => ParamValue::Color([
+                a.first()?.as_f64()? as f32,
+                a.get(1)?.as_f64()? as f32,
+                a.get(2)?.as_f64()? as f32,
+                a.get(3).and_then(Value::as_f64).unwrap_or(1.0) as f32,
+            ]),
+            _ => return None,
+        },
+        ParamValue::Bool(_) => ParamValue::Bool(v.as_bool()?),
+        ParamValue::Choice(_) => ParamValue::Choice(v.as_u64()? as u32),
+        ParamValue::Text(_) => ParamValue::Text(v.as_str()?.to_string()),
+        ParamValue::Path(_) => ParamValue::Path(crate::masks::path_from_json(v)?),
+        ParamValue::Curve(_) => {
+            ParamValue::Curve(v.as_array()?.iter().filter_map(|p| Some([p.get(0)?.as_f64()? as f32, p.get(1)?.as_f64()? as f32])).collect())
+        }
+    })
+}
+
+fn copy_selection(s: &mut Session) {
+    let Some(q) = s.active_sequence() else { return };
+    let sel = with_links(s, &s.state.selection);
+    let min = sel.iter().filter_map(|c| q.find_item(*c).map(|(_, i)| i.start)).min().unwrap_or_default();
+    let max = sel.iter().filter_map(|c| q.find_item(*c).map(|(_, i)| i.end())).max().unwrap_or_default();
+    // Copy Paste Includes Sequence Markers: the markers inside the copied span go along
+    let markers: Vec<Marker> = if s.state.copy_paste_sequence_markers {
+        q.markers.iter().filter(|m| m.start >= min && m.start < max).map(|m| Marker { start: m.start - min, ..m.clone() }).collect()
+    } else {
+        Vec::new()
+    };
+    let mut clip = Vec::new();
+    for (kind, tracks) in [(TrackKind::Video, &q.video_tracks), (TrackKind::Audio, &q.audio_tracks)] {
+        for (ti, t) in tracks.iter().enumerate() {
+            for i in t.items.iter().filter(|i| sel.contains(&i.id)) {
+                let mut c = i.clone();
+                c.start -= min;
+                clip.push((kind, ti, c));
+            }
+        }
+    }
+    s.state.clipboard = clip;
+    s.state.clipboard_markers = markers;
+}
+
+fn paste(s: &mut Session, insert: bool) -> Result<Value> {
+    let at = s.playhead();
+    let clip = s.state.clipboard.clone();
+    let markers = if s.state.copy_paste_sequence_markers { s.state.clipboard_markers.clone() } else { Vec::new() };
+    let end = s.edit_sequence(if insert { "Paste Insert" } else { "Paste" }, |q, ctx, st| {
+        let mut placements = Vec::new();
+        let mut links = std::collections::HashMap::new();
+        for (kind, ti, item) in clip {
+            let tracks = q.tracks(kind);
+            let Some(t) = tracks.get(ti).or(tracks.last()) else { continue };
+            let mut it = item.clone();
+            it.id = ClipId(ctx.alloc());
+            it.start += at;
+            if let Some(l) = it.link {
+                it.link = Some(*links.entry(l).or_insert_with(|| ctx.alloc()));
+            }
+            placements.push((t.id, it));
+        }
+        let end = placements.iter().map(|p| p.1.end()).max().unwrap_or(at);
+        let ids = if insert { edit::insert(q, placements, ctx)? } else { edit::overwrite(q, placements, ctx)? };
+        if insert && st.ripple_sequence_markers {
+            crate::sequence_tools::ripple_markers(&mut q.markers, at, end - at);
+        }
+        for m in &markers {
+            q.markers.push(Marker { id: MarkerId(ctx.alloc()), start: m.start + at, ..m.clone() });
+        }
+        q.markers.sort_by_key(|m| m.start);
+        st.selection = ids;
+        Ok(end)
+    })?;
+    s.set_playhead(end);
+    Ok(Value::Null)
+}
+
+fn nest(s: &mut Session, p: &Value) -> Result<Value> {
+    let seq_id = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+    let sel = with_links(s, &s.state.selection.clone());
+    let q = s.active_sequence().ok_or(EngineError::NoSequence)?.clone();
+    let name = str_p(p, "name").map(str::to_string).unwrap_or_else(|| "Nested Sequence 01".to_string());
+    let mut items: Vec<(TrackKind, usize, lumiere_codecbase_project::TrackItem)> = Vec::new();
+    for (k, ts) in [(TrackKind::Video, &q.video_tracks), (TrackKind::Audio, &q.audio_tracks)] {
+        for (ti, t) in ts.iter().enumerate() {
+            for i in t.items.iter().filter(|i| sel.contains(&i.id)) {
+                items.push((k, ti, i.clone()));
+            }
+        }
+    }
+    if items.is_empty() {
+        return Err(EngineError::Other("nothing selected".into()));
+    }
+    let start = items.iter().map(|i| i.2.start).min().unwrap_or_default();
+    let end = items.iter().map(|i| i.2.end()).max().unwrap_or_default();
+    let lowest_v = items.iter().filter(|i| i.0 == TrackKind::Video).map(|i| i.1).min();
+    let lowest_a = items.iter().filter(|i| i.0 == TrackKind::Audio).map(|i| i.1).min();
+    s.edit("Nest", |pr, st| {
+        let nid = pr.new_sequence(&name, q.settings.clone(), q.video_tracks.len(), q.audio_tracks.len(), None);
+        {
+            let nq = pr.sequence_mut(nid).expect("new");
+            for (k, ti, it) in &items {
+                let mut it = it.clone();
+                it.start -= start;
+                nq.tracks_mut(*k)[*ti].items.push(it);
+            }
+            for t in nq.all_tracks_mut() {
+                t.sort();
+            }
+        }
+        let rate = q.settings.frame_rate;
+        let mut v = pr.make_track_item(nid, TrackKind::Video, start, TimeRange::new(Tick::ZERO, end - start), rate).expect("item");
+        for e in &mut v.effects {
+            resolve_auto_points(e, (q.settings.width, q.settings.height), (q.settings.width, q.settings.height));
+        }
+        let a = pr.make_track_item(nid, TrackKind::Audio, start, TimeRange::new(Tick::ZERO, end - start), rate).expect("item");
+        let link = pr.alloc_id();
+        let seq = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
+        edit::delete_items(seq, &sel);
+        let mut ids = Vec::new();
+        if let Some(vi) = lowest_v {
+            let mut v = v;
+            v.link = lowest_a.map(|_| link);
+            ids.push(v.id);
+            let t = &mut seq.video_tracks[vi];
+            t.items.push(v);
+            t.sort();
+        }
+        if let Some(ai) = lowest_a {
+            let mut a = a;
+            a.link = lowest_v.map(|_| link);
+            ids.push(a.id);
+            let t = &mut seq.audio_tracks[ai];
+            t.items.push(a);
+            t.sort();
+        }
+        st.selection = ids;
+        Ok(nid)
+    })
+    .map(|n| json!({"sequence": n.0}))
+}
+
+/// `effects.list`: every effect definition with its Effects-panel folder (optionally filtered by
+/// kind or folder prefix); `detail` adds each parameter's label, type, default and choices.
+fn list_effects(p: &Value) -> Value {
+    let kind = str_p(p, "kind");
+    let folder = str_p(p, "folder");
+    let detail = p.get("detail").and_then(Value::as_bool).unwrap_or(false);
+    let out = lumiere_codecbase_project::effect_defs()
+        .iter()
+        .filter(|d| kind.is_none_or(|k| format!("{:?}", d.kind).eq_ignore_ascii_case(k)))
+        .filter(|d| folder.is_none_or(|f| d.category.join("/").starts_with(f)))
+        .map(|d| {
+            let mut v = json!({
+                "id": d.id,
+                "name": d.name,
+                "kind": format!("{:?}", d.kind),
+                "category": d.category,
+                "folder": d.category.get(1),
+                "path": d.category.join("/"),
+                "params": d.params.iter().map(|p| p.id).collect::<Vec<_>>(),
+                "badges": {"accelerated": d.accelerated, "float32": d.float32, "yuv": d.yuv},
+            });
+            if detail {
+                v["paramInfo"] = Value::Array(d.params.iter().map(param_info).collect());
+            }
+            v
+        })
+        .collect();
+    Value::Array(out)
+}
+
+fn param_info(p: &lumiere_codecbase_project::ParamDef) -> Value {
+    use lumiere_codecbase_project::ParamKind as K;
+    let mut j = json!({"id": p.id, "label": p.label, "animatable": p.animatable, "default": serde_json::to_value(&p.default).unwrap_or_default()});
+    let ty = match &p.kind {
+        K::Choice(opts) => {
+            j["options"] = json!(opts);
+            "choice"
+        }
+        K::Float { min, max, unit, .. } => {
+            j["min"] = json!(min);
+            j["max"] = json!(max);
+            j["unit"] = json!(unit);
+            "float"
+        }
+        K::Point => "point",
+        K::Color => "color",
+        K::Bool => "bool",
+        K::Angle => "angle",
+        K::Text => "text",
+        K::Curve { .. } => "curve",
+        K::Wheel => "wheel",
+        K::Path => "path",
+    };
+    j["type"] = json!(ty);
+    j
+}
+
+/// Set transition parameters from a JSON object (`{"direction": 1}` or `{"direction": "From East"}`,
+/// colours as `"#rrggbb"` or `[r,g,b]`, points as `[x,y]`). Floats are clamped to their range.
+fn set_transition_params(e: &mut lumiere_codecbase_project::EffectInstance, params: &Value, cmd: &str) -> Result<()> {
+    use lumiere_codecbase_project::{ParamKind as K, ParamValue as V};
+    let Some(obj) = params.as_object() else { return Err(bad(cmd, "`params` must be an object")) };
+    let def = e.def().ok_or_else(|| bad(cmd, "unknown transition"))?;
+    for (k, v) in obj {
+        let pd = def.param(k).ok_or_else(|| bad(cmd, format!("`{}` has no param `{k}`", def.name)))?;
+        let val = match (&pd.kind, v) {
+            (K::Choice(opts), Value::String(sv)) => {
+                V::Choice(opts.iter().position(|o| o.eq_ignore_ascii_case(sv)).ok_or_else(|| bad(cmd, format!("`{k}` must be one of {opts:?}")))? as u32)
+            }
+            _ => json_to_param(&pd.default, v).ok_or_else(|| bad(cmd, format!("`{k}`: value has the wrong type")))?,
+        };
+        let val = match (&pd.kind, val) {
+            (K::Choice(opts), V::Choice(c)) if c as usize >= opts.len() => return Err(bad(cmd, format!("`{k}` must be < {}", opts.len()))),
+            (K::Float { min, max, .. }, V::Float(f)) => V::Float(f.clamp(*min, *max)),
+            (_, v) => v,
+        };
+        match e.param_mut(k) {
+            Some(prm) => prm.value = val,
+            None => {
+                e.params.insert(k.clone(), lumiere_codecbase_project::Param::new(val));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `sequence.setTransition`: edit an applied transition's settings (Effect Controls).
+fn set_transition(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "sequence.setTransition";
+    let id = p.get("transition").and_then(Value::as_u64).ok_or_else(|| bad(CMD, "need `transition`"))?;
+    let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    let found = q.video_tracks.iter().chain(q.audio_tracks.iter()).find_map(|tr| tr.transitions.iter().find(|x| x.id.0 == id)).cloned();
+    let mut cur = found.ok_or_else(|| bad(CMD, format!("no transition {id}")))?;
+    if p.get("reset").and_then(Value::as_bool).unwrap_or(false)
+        && let Some(def) = cur.effect.def()
+    {
+        cur.effect = def.instance();
+    }
+    if let Some(params) = p.get("params") {
+        set_transition_params(&mut cur.effect, params, CMD)?;
+    }
+    if let Some(r) = p.get("reverse").and_then(Value::as_bool) {
+        cur.reverse = r;
+    }
+    let name = cur.effect.def().map_or("Transition", |d| d.name).to_string();
+    s.edit_sequence(&format!("Edit {name}"), |q, _, _| {
+        for tr in q.video_tracks.iter_mut().chain(q.audio_tracks.iter_mut()) {
+            if let Some(x) = tr.transitions.iter_mut().find(|x| x.id.0 == id) {
+                x.effect = cur.effect.clone();
+                x.reverse = cur.reverse;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(json!({"transition": id, "effect": cur.effect.effect, "reverse": cur.reverse}))
+}
+
+fn apply_transition(s: &mut Session, p: &Value, kind: TrackKind) -> Result<Value> {
+    let eff_id = str_p(p, "effect")
+        .map(str::to_string)
+        .unwrap_or_else(|| if kind == TrackKind::Video { s.state.default_video_transition.clone() } else { s.state.default_audio_transition.clone() });
+    let ekind = if kind == TrackKind::Video { lumiere_codecbase_project::EffectKind::VideoTransition } else { lumiere_codecbase_project::EffectKind::AudioTransition };
+    let def = lumiere_codecbase_project::vtransition::find_transition(&eff_id, ekind).ok_or_else(|| bad("transition", format!("unknown transition `{eff_id}`")))?;
+    let mut instance = def.instance();
+    if let Some(params) = p.get("params") {
+        set_transition_params(&mut instance, params, "transition")?;
+    }
+    let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+    let rate = s.sequence_rate();
+    // Settings ▸ Timeline ▸ Video / Audio Transition Default Duration
+    let dur = match p.get("frames").and_then(Value::as_i64) {
+        Some(frames) => rate.tick_of(frames),
+        None if kind == TrackKind::Video => s.prefs.timeline.video_transition_duration(rate),
+        None => s.prefs.timeline.audio_transition_duration(rate),
+    };
+    let t = s.playhead();
+    let clip = clip_p(p, "clip");
+    let edge = str_p(p, "edge").map(str::to_string);
+    let targeted = s.targeting().targeted;
+    let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    // Find (track, from, to, cut) at the playhead (nearest edit on targeted tracks) or at a clip edge.
+    let mut found = None;
+    for tr in q.tracks(kind).iter().filter(|tr| clip.is_some() || targeted.contains(&tr.id)) {
+        let items = &tr.items;
+        for (i, it) in items.iter().enumerate() {
+            if let Some(c) = clip
+                && it.id != c
+            {
+                continue;
+            }
+            let prev = i.checked_sub(1).map(|j| &items[j]).filter(|pv| pv.end() == it.start);
+            let next = items.get(i + 1).filter(|nx| nx.start == it.end());
+            let use_in = match edge.as_deref() {
+                Some("in") => true,
+                Some("out") => false,
+                _ => (t - it.start).abs() <= (t - it.end()).abs(),
+            };
+            if clip.is_none() && !(it.start == t || it.end() == t || (it.start - t).abs() < rate.tick_of(3) || (it.end() - t).abs() < rate.tick_of(3)) {
+                continue;
+            }
+            found = Some(if use_in { (tr.id, prev.map(|x| x.id), Some(it.id), it.start) } else { (tr.id, Some(it.id), next.map(|x| x.id), it.end()) });
+            break;
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    let (track, from, to, cut) = found.ok_or_else(|| EngineError::Other("no edit point at the playhead on targeted tracks".into()))?;
+    let start = if from.is_some() && to.is_some() {
+        cut - dur.mul_ratio(1, 2)
+    } else if to.is_some() {
+        cut
+    } else {
+        cut - dur
+    };
+    let tr = Transition { id: TransitionId(0), effect: instance, start: rate.snap(start), duration: dur, from, to, align: Default::default(), reverse };
+    let label = format!("Apply {}", def.name);
+    let id = s.edit_sequence(&label, |q, ctx, _| Ok(edit::add_transition(q, track, tr, ctx)?))?;
+    Ok(json!({"transition": id.0}))
+}
+
+/// JSON description of the project (bins, items) for agents.
+pub fn inspect_project(s: &Session) -> Value {
+    let p = &s.project;
+    fn bin(b: &lumiere_codecbase_project::Bin, p: &lumiere_codecbase_project::Project) -> Value {
+        json!({
+            "id": b.id.0,
+            "name": b.name,
+            "children": b.children.iter().map(|c| match c {
+                lumiere_codecbase_project::BinEntry::Item(i) => {
+                    let it = p.item(*i);
+                    json!({"item": i.0, "name": it.map(|x| x.name.clone()), "type": it.map(|x| x.type_label()), "duration": it.map(|x| x.duration().0), "label": it.map(|x| x.label.name())})
+                }
+                lumiere_codecbase_project::BinEntry::Bin(b) => bin(b, p),
+            }).collect::<Vec<_>>()
+        })
+    }
+    json!({
+        "name": p.name,
+        "path": s.path,
+        "dirty": s.is_dirty(),
+        "revision": s.revision,
+        "root": bin(&p.root, p),
+        "activeSequence": s.state.active_sequence.map(|i| i.0),
+        "sourceItem": s.state.source_item.map(|i| i.0),
+    })
+}
+
+pub fn inspect_sequence(s: &Session, id: ItemId, q: &lumiere_codecbase_project::Sequence) -> Value {
+    let rate = q.settings.frame_rate;
+    let tr = |t: &lumiere_codecbase_project::Track| {
+        json!({
+            "id": t.id.0, "name": t.name, "locked": t.locked, "syncLock": t.sync_lock, "enabled": t.enabled, "muted": t.muted, "solo": t.solo,
+            "items": t.items.iter().map(|i| json!({
+                "clip": i.id.0, "item": i.item.0, "name": i.name, "start": i.start.0, "duration": i.duration.0,
+                "startFrame": rate.frame_at(i.start), "durationFrames": rate.frame_at(i.duration), "sourceIn": i.source_in.0, "speed": i.speed,
+                "enabled": i.enabled, "link": i.link, "label": i.label.name(),
+                "effects": i.effects.iter().map(|e| json!({"effect": e.effect, "enabled": e.enabled, "masks": e.masks.len(), "params": e.params.iter().map(|(k, p)| (k.clone(), json!({"value": format!("{:?}", p.value), "keyframes": p.keyframes.len()}))).collect::<serde_json::Map<_, _>>()})).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "transitions": t.transitions.iter().map(|x| json!({"id": x.id.0, "effect": x.effect.effect, "start": x.start.0, "duration": x.duration.0, "from": x.from.map(|c| c.0), "to": x.to.map(|c| c.0), "reverse": x.reverse, "params": x.effect.params.iter().map(|(k, v)| (k.clone(), serde_json::to_value(&v.value).unwrap_or_default())).collect::<serde_json::Map<_, _>>()})).collect::<Vec<_>>(),
+        })
+    };
+    json!({
+        "id": id.0,
+        "name": s.project.item(id).map(|i| i.name.clone()),
+        "settings": q.settings,
+        "duration": q.duration().0,
+        "durationFrames": rate.frame_at(q.duration()),
+        "playhead": s.state.playheads.get(&id).map(|t| t.0),
+        "in": q.mark_in.map(|t| t.0),
+        "out": q.mark_out.map(|t| t.0),
+        "split": q.split,
+        "markers": q.markers.iter().map(|m| json!({"id": m.id.0, "start": m.start.0, "duration": m.duration.0, "kind": format!("{:?}", m.kind), "name": m.name, "color": m.color.name()})).collect::<Vec<_>>(),
+        "video": q.video_tracks.iter().map(tr).collect::<Vec<_>>(),
+        "audio": q.audio_tracks.iter().map(tr).collect::<Vec<_>>(),
+        "selection": s.state.selection.iter().map(|c| c.0).collect::<Vec<_>>(),
+    })
+}
+
+/// Seconds → ticks helper for callers.
+pub fn secs(s: f64) -> Tick {
+    Tick((s * TICKS_PER_SECOND as f64).round() as i64)
+}
+
+// ---------- project files ----------
+
+/// Serialize the project in the current schema and write it (atomically) to `path`. `adopt` =
+/// Save / Save As (the file becomes the project's path and the project is clean); otherwise Save a
+/// Copy. The first save over a file upgraded from an older schema keeps the original as
+/// `<name> (schema vN backup).lumedit`.
+/// A project is named after its file (as in Premiere): `/a/b/Trailer v2.lumedit` → `Trailer v2`.
+fn project_name_for(path: &str) -> Option<String> {
+    let stem = std::path::Path::new(path).file_stem()?.to_string_lossy().to_string();
+    (!stem.is_empty()).then_some(stem)
+}
+
+fn name_project(p: &mut lumiere_codecbase_project::Project, name: String) {
+    p.root.name.clone_from(&name);
+    p.name = name;
+}
+
+fn write_project(s: &mut Session, path: &str, adopt: bool) -> Result<Value> {
+    let t0 = web_time::Instant::now();
+    // Save As renames the project after its new file (not an edit: no undo step, not dirty).
+    if adopt
+        && let Some(name) = project_name_for(path)
+        && s.project.name != name
+    {
+        name_project(std::sync::Arc::make_mut(&mut s.project), name);
+    }
+    let bytes = lumiere_codecbase_format::encode(&s.project, false);
+    let mut backup = None;
+    if adopt && s.path.as_deref() == Some(path) && s.loaded_schema < lumiere_codecbase_format::SCHEMA_VERSION {
+        let b = schema_backup_path(path, s.loaded_schema);
+        if s.services.read_file(&b).is_err()
+            && let Ok(old) = s.services.read_file(path)
+        {
+            s.services.write_file(&b, &old).map_err(|e| EngineError::Other(format!("{b}: {e}")))?;
+            backup = Some(b);
+        }
+    }
+    s.services.write_file(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if adopt {
+        s.path = Some(path.to_string());
+        s.previews_follow_path();
+        s.note_recent_project();
+        s.saved_revision = s.revision;
+        s.loaded_schema = lumiere_codecbase_format::SCHEMA_VERSION;
+    }
+    Ok(json!({"path": path, "bytes": bytes.len(), "ms": t0.elapsed().as_secs_f64() * 1000.0, "backup": backup}))
+}
+
+fn schema_backup_path(path: &str, schema: u32) -> String {
+    let stem = path.strip_suffix(".lumedit").unwrap_or(path);
+    format!("{stem} (schema v{schema} backup).lumedit")
+}
+
+/// Make `proj` the session's project (fresh history, media pool and editor state).
+fn install_project(s: &mut Session, proj: lumiere_codecbase_project::Project, path: Option<String>, clean: bool) {
+    let proxies = s.media.use_proxies();
+    s.media = std::sync::Arc::new(crate::MediaPool::default());
+    s.media.set_use_proxies(proxies);
+    s.offline = Default::default();
+    let first = proj.sequences().next().map(|i| i.id);
+    s.project = std::sync::Arc::new(proj);
+    s.history = Default::default();
+    s.history.limit = 200;
+    s.state = crate::Session::default().state;
+    s.state.active_sequence = first;
+    s.state.open_sequences = first.into_iter().collect();
+    if let Some(p) = &path
+        && !cfg!(target_arch = "wasm32")
+    {
+        s.previews.set_dir(Some(crate::project_tools::previews_dir_for(&s.project, p)));
+    }
+    s.path = path;
+    s.revision += 1;
+    // A recovered project is unsaved: its saved revision is one that never existed.
+    s.saved_revision = if clean { s.revision } else { 0 };
+    s.loaded_schema = lumiere_codecbase_format::SCHEMA_VERSION;
+    s.events.push(crate::Event::ProjectChanged { revision: s.revision });
+}
+
+fn open_project(s: &mut Session, path: &str) -> Result<Value> {
+    let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let loaded = lumiere_codecbase_format::decode(&bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let (from, migrated) = (loaded.schema_version, loaded.migrated());
+    install_project(s, loaded.project, Some(path.to_string()), true);
+    s.note_recent_project();
+    s.loaded_schema = from;
+    if migrated {
+        s.toast(format!("Upgraded project from schema v{from} to v{}; the original is kept as a backup when you save", lumiere_codecbase_format::SCHEMA_VERSION));
+    }
+    let missing = crate::relink::on_open(s);
+    Ok(json!({"path": path, "schemaVersion": from, "migrated": migrated, "missingMedia": missing}))
+}
+
+/// Load a recovery candidate (newest when `id` is None) as the current, unsaved project.
+fn recover(s: &mut Session, id: Option<&str>) -> Result<Value> {
+    let per = s.persistence.as_ref().ok_or_else(|| EngineError::Other("recovery is not running".into()))?;
+    let idx = match id {
+        Some(id) => per.candidates.iter().position(|c| c.id == id).ok_or_else(|| bad("file.recover", format!("no recovery session `{id}`")))?,
+        None => 0,
+    };
+    let c = per.candidates[idx].clone();
+    let saved_at = per.local_time(c.meta.saved_unix);
+    let loaded = crate::autosave::load_candidate(&c).map_err(EngineError::Other)?;
+    install_project(s, loaded.project, c.meta.project_path.clone(), false);
+    crate::relink::on_open(s);
+    // Our own journal must hold the recovered state before the old one is deleted.
+    s.sync_persistence();
+    if let Some(per) = s.persistence.as_mut() {
+        per.flush();
+        per.candidates.remove(idx);
+    }
+    crate::autosave::discard_candidate(&c).map_err(|e| EngineError::Other(e.to_string()))?;
+    s.toast(format!("Recovered unsaved changes to {} from {saved_at}", c.meta.project_name));
+    Ok(json!({"id": c.id, "name": c.meta.project_name, "path": c.meta.project_path, "savedAt": saved_at, "revision": c.meta.revision}))
+}
+
+/// Where auto-saves of the current project go.
+fn auto_save_dir(s: &Session) -> std::path::PathBuf {
+    if let Some(d) = s.project.settings.scratch.auto_save.as_deref().filter(|d| !d.is_empty() && s.path.is_some()) {
+        return std::path::PathBuf::from(d);
+    }
+    match (&s.path, &s.persistence) {
+        (Some(p), _) => lumiere_codecbase_format::autosave::auto_save_dir(std::path::Path::new(p)),
+        (None, Some(per)) => per.data_dir.join(lumiere_codecbase_format::autosave::AUTO_SAVE_DIR),
+        (None, None) => std::path::PathBuf::from(lumiere_codecbase_format::autosave::AUTO_SAVE_DIR),
+    }
+}
+
+fn auto_save_name(s: &Session) -> String {
+    s.path.as_deref().and_then(|p| std::path::Path::new(p).file_stem()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.project.name.clone())
+}

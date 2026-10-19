@@ -1,0 +1,39 @@
+# Audiovisual studio
+
+Prospero owns two complete native modules: generation and editing. Both start OFF on each process start. Connecting MCP or listing tools does not construct a native app, open its database or resume jobs. Use the module controls or `studio_module_set` to activate one. `automatic=false` is the default; previous queued/running work is held until the person explicitly chooses to resume it. Switching a module off disconnects its owned responses, joins its work and closes its services before reporting OFF. Another module does not share that transition lock.
+
+The common home is `/`; the complete generation client is `/generation/` and the complete editing client is `/editing/`. Hash navigation remains inside each client. There are no iframes, retired-server proxies or executable dependencies on a second repository. The old generation API paths remain available while that module is ON. Editing retains its native API under `/editing/api/`, including project/media/preview/render/history/creative-engine tools. Model, codec, hardware and external generation-service prerequisites remain necessary for the corresponding functions.
+
+## Setup from source
+
+Use Python 3.13 and Node 22.13 or later. Install `requirements-lock.txt` into a local virtual environment, then run `python scripts/build_studio_assets.py` to build both clients and self-host Cinzel/Source Sans with their licences. `scripts/start.ps1` does these steps when needed; it does not compile Rust or install models. Native editing engines can be built explicitly with `python native/editing/build.py` (Cargo is required, new builds use two jobs). Install the Playwright Chromium runtime explicitly for HTML motion rendering with `python -m playwright install chromium`. Optional speech recognition and optical-flow analysis are in `pip install -e ".[editing-analysis]"`; these do not download model weights. ffmpeg/ffprobe are needed by media operations. No engine or model is installed by opening a catalogue.
+
+Run `python -m prosperos_hoard --no-browser` or the normal launcher. `--data-dir <isolated-directory>` is suitable for QA. The owner port remains 8815 by default. Source installation is the supported delivery here; a standalone wheel, installer or desktop redistribution has not been certified.
+
+## Projects, scenes and results
+
+The common project selector lists native generation projects/cuts only from enabled modules. Create/select an audiovisual project and choose an existing generated timeline; activate editing before transferring. The transfer calls the owned timeline importer directly and produces a real editing project, not a link-only placeholder. Production export uses that same internal handoff. Native project and timeline identifiers, exact source snapshots, target document revisions and transfer receipts are persisted in `studio-projects.sqlite3`. Existing revisions are retained; transferring a changed cut records a further revision. Editing can then use the complete native timeline, effects, subtitles, text editing, plans, preview/export and creative engines.
+
+Original assets are referenced by their existing paths. They are not copied, moved or deleted. An unavailable source is reported in the transfer result's `skipped` entries. The XML artifact is identified by its SHA-256 and served through the registered project receipt, including range requests. Common projects, revision snapshots and exported XML remain readable while both modules are OFF. Native editing/export formats remain available: `.lumotion`, `.lumedit`, `.lumiere-edit.project`, OTIO, FCP7 XML, EDL and the original subtitle/text formats. Generation's existing project, production, cast, recipe, graphics, voice and media features remain in its native client and tools.
+
+## API and MCP
+
+The static discovery contract has 168 tools: 94 generation, 68 editing and six common controls/project tools. Generation MCP schemas remain those of its original wrappers (including list arguments and image results); API schemas are maintained separately. The new common tools are `audiovisual_objects`, `studio_modules`, `studio_module_set`, `audiovisual_projects`, `studio_project_create` and `studio_project_transfer`. The generation tool named `studio_projects` keeps its original meaning. Writes retain reason/session/accountability semantics; module activation is not a draft-only action. Lost responses to editing/common writes report an uncertain outcome and require reading current state before repeating a write.
+
+The owner MCP token continues to live at `<owner-data>/mcp-token`. The common dispatcher substitutes the editing master token internally for calls authenticated with that owner master token. Existing per-agent token registries are preserved separately; native editing tokens are used through `/editing/api/agent/*`. Automatic migration or equivalence of old per-agent token registries is not implemented. Do not overwrite either token file during a data transition.
+
+## Global text and vision model
+
+All owned text/vision consumers use Faustus' authenticated configured global-model contract, approved as task938 revision1 (`1742c4e2`). A job pins `endpoint_id`, `model` and `connection_revision` once; every completion carries the matching expected values. Concurrent jobs have separate pins and the next job refreshes selection. Text never falls back to a local model, another server or an unconfigured default. A stale pin, unavailable descriptor, missing vision capability or truncated reply is reported as an error. Semantic JSON repair stays within the same pin; provider credentials stay inside Faustus. Image, audio and video services keep their native configuration.
+
+This requires the matching `/api/global-model` and `/api/global-model/v1/chat/completions` deployment in Faustus. At candidate preparation that deployment and live model QA were still pending coordination with the Faustus owner. The tests use inert HTTP responses and do not certify live inference. Old preferred-model settings remain stored for continuity but do not override the global text/vision selection.
+
+## Data transition (operator step, not performed here)
+
+Keep the existing Prospero data root and configuration unchanged. The editor's owned default is `<owner-data>/editing`. Stop and quiesce both old and new owners before moving any real data, and inventory open jobs, database WAL/SHM sidecars, externally referenced files, native project paths and identity/token/configuration files. The machine-readable inventory in `editing-origin/MIGRATION.json` records what must be preserved. Existing editing IDs, database contents, uploads, creative source/history files and exports must move together; do not create symlinks or duplicate production data. Absolute external media paths and historical links need operator verification rather than rewriting them blindly. No actual data migration, old-app retirement, alias installation or real-profile validation was performed in this task.
+
+## Verification boundaries
+
+The task receipt records synthetic API and real stdio MCP transfer/reopen/OFF checks, native tests and the two native Rust binary hashes. Headless HTML worker tests exercise their rendering runtime, but do not constitute visual approval of either client. Coordinator CUA, real-data continuity, deployment of the global-model contract, live models and optional hardware/model paths remain separate acceptance steps. Theseus is incomplete and paused and is outside this merger.
+
+The common home/module bar currently uses Spanish labels; both complete native clients retain their existing English/Spanish selection. Translation of the new common controls is pending visual review. The standalone editor preview comparison helper has been relocated but has not been run against the prefixed built client.

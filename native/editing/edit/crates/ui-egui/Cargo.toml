@@ -1,0 +1,47 @@
+[package]
+name = "lumiere-edit-ui-egui"
+description = "The Lumiere Edit egui frontend (swappable): panels, docking, timeline, monitors, control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-frame = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-edit = { workspace = true }
+lumiere-edit-render = { workspace = true }
+lumiere-edit-text = { workspace = true }
+lumiere-edit-audio-dsp = { workspace = true }
+lumiere-edit-engine = { workspace = true }
+lumiere-edit-gpu = { workspace = true }
+lumiere-edit-scopes = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+web-time = "1"
+# ArtCraft wordmark (PNG) for the About dialog and Home screen.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Thread/process CPU clocks for frame-job profiling (safe wrappers; see frames.rs).
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "time"] }
+
+[dev-dependencies]
+pollster = "0.4"
+lumiere-edit-codecs = { workspace = true }
+# the bench registers OS hardware decoders as the desktop app does (dev-dependency only: ui-egui
+# itself stays OS-independent and web-portable)
+lumiere-edit-platform = { workspace = true }
+lumiere-edit-interchange = { workspace = true }
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }

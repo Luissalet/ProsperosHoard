@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import os
 import logging
 import logging.handlers
@@ -14,7 +16,7 @@ import uvicorn
 from . import __version__
 from .hoard_link.atomic import write_text_atomic
 from .hoard_link.appconfig import load_dotenv
-from .api import create_app
+from .studio import create_app
 
 DEFAULT_PORT = 8815
 
@@ -50,42 +52,47 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     _setup_logging(data_dir)
 
-    if args.demo:
-        import json
-
-        from .devtools.fake_comfy import FakeComfyServer
-
-        fake = FakeComfyServer(data_dir / "fake_comfy")
-        # PROSPERO_DEMO_MOTION=1: the fake also lists the big video models (Wan 14B, VACE, Bernini-R...)
-        fake.motion_models = os.environ.get("PROSPERO_DEMO_MOTION", "").strip() == "1"
-        fake_port = fake.run_in_thread()
-        backend_json = data_dir / "backend.json"
-        raw = {}
-        if backend_json.is_file():
-            try:
-                raw = json.loads(backend_json.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                raw = {}
-        raw["comfy"] = {"url": f"http://127.0.0.1:{fake_port}"}
-        # demo LoRA training: a fake trainer, installing into the fake ComfyUI's loras folder
-        raw.setdefault("training", {"lora_dir": str(fake.lora_dir),
-                                    "trainers": [{"kind": "fake", "name": "demo trainer", "delay": 0.01}]})
-        fake.lora_dir.mkdir(parents=True, exist_ok=True)
-        write_text_atomic(backend_json, json.dumps(raw, indent=2))
-        print(f"[prosperos-hoard] demo mode: fake ComfyUI (procedural placeholder images) on 127.0.0.1:{fake_port}")
-
-    static_dir = repo_root / "frontend" / "dist"
-    app = create_app(data_dir, static_dir if static_dir.is_dir() else None, port=args.port, demo=args.demo)
+    app = create_app(data_dir, port=args.port, demo=args.demo)
 
     if args.demo:
         from .devtools.demo_seed import seed_demo_data
 
-        store = app.state.store
-        backend = app.state.backend
-        if store.list_projects(limit=1)["items"] == []:
-            print("[prosperos-hoard] seeding demo data...")
-            seed_demo_data(store, backend)
-            print("[prosperos-hoard] demo data ready")
+        # Seed only on explicit activation; the owner starts with both modules OFF.
+        original = app.studio.modules['generation'].factory
+        async def demo_factory(*values):
+            import json
+            from .devtools.fake_comfy import FakeComfyServer
+            fake = FakeComfyServer(data_dir / 'fake_comfy')
+            fake.motion_models = os.environ.get('PROSPERO_DEMO_MOTION','').strip() == '1'
+            port = await asyncio.to_thread(fake.run_in_thread)
+            path = data_dir / 'backend.json'
+            try:
+                config = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+                config['comfy'] = {'url':f'http://127.0.0.1:{port}'}
+                config.setdefault('training',{'lora_dir':str(fake.lora_dir),'trainers':[{'kind':'fake','name':'demo trainer','delay':.01}]})
+                fake.lora_dir.mkdir(parents=True,exist_ok=True)
+                write_text_atomic(path,json.dumps(config,indent=2))
+                native = await original(*values)
+                if not native.state.store.list_projects(limit=1)['items']:
+                    await asyncio.to_thread(seed_demo_data,native.state.store,native.state.backend)
+                lifespan = native.router.lifespan_context
+                @contextlib.asynccontextmanager
+                async def demo_lifespan(child):
+                    try:
+                        async with lifespan(child):
+                            yield
+                    finally:
+                        await asyncio.to_thread(fake.stop)
+                        if fake._thread:
+                            await asyncio.to_thread(fake._thread.join)
+                native.router.lifespan_context = demo_lifespan
+                return native
+            except BaseException:
+                await asyncio.to_thread(fake.stop)
+                if fake._thread:
+                    await asyncio.to_thread(fake._thread.join)
+                raise
+        app.studio.modules['generation'].factory = demo_factory
 
     print(f"[prosperos-hoard] Prospero's Hoard v{__version__} starting on http://127.0.0.1:{args.port}")
     if not args.no_browser:
@@ -94,10 +101,7 @@ def main() -> None:
         except Exception:
             pass
 
-    try:
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
-    finally:
-        app.state.shutdown()
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

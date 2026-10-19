@@ -148,7 +148,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
               <button className="btn xs icon sb-lock" disabled={running || acting} title={shot.locked ? t("sbUnlockHint") : t("sbLockHint")}
                 onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
               <button className="tile sb-tile" title={shot.prompt} onClick={() => setEditing({ shot })}>
-                {best ? <img src={`/api/assets/${best}/thumb`} alt="" loading="lazy" />
+                {best ? <img src={`/generation/api/assets/${best}/thumb`} alt="" loading="lazy" />
                   : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : shot.kind === "graphic" ? <Type size={22} /> : <Clapperboard size={22} />}</div>}
                 <div className="tile-badges">
                   <span className="pill badge-dark">{shot.key}</span>
@@ -224,7 +224,7 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
           <div key={x.asset_id} className={`sb-take${x.current ? " current" : ""}${pick.includes(x.asset_id) ? " picked" : ""}`}>
             <button type="button" className="tile" style={{ width: 112 }} onClick={() => app.openAsset(x.asset_id, all.map((y) => y.asset_id))}
               title={x.kind === "video" ? t("sbClip") : t("sbStill")}>
-              <img src={`/api/assets/${x.asset_id}/thumb`} alt="" />
+              <img src={`/generation/api/assets/${x.asset_id}/thumb`} alt="" />
               <span className="pill badge-dark sb-take-kind">{x.kind === "video" ? <Film size={10} /> : <Images size={10} />}{"quality" in x && x.quality === "draft" ? ` ${t("sbDraft")}` : ""}{"retake" in x && x.retake ? ` ${t("sbRetake")}` : ""}{"edit" in x && x.edit ? ` ${t("sbEdited")}` : ""}</span>
             </button>
             <label className="check small"><input type="checkbox" checked={pick.includes(x.asset_id)} onChange={() => toggle(x.asset_id)} />{t("sbCompare")}</label>
@@ -239,8 +239,8 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
             {pick.map((id) => (
               <div key={id} className="stack" style={{ gap: 6 }}>
                 {kindOf(id) === "video"
-                  ? <video src={`/api/assets/${id}/file`} controls autoPlay loop muted playsInline />
-                  : <img src={`/api/assets/${id}/file`} alt="" />}
+                  ? <video src={`/generation/api/assets/${id}/file`} controls autoPlay loop muted playsInline />
+                  : <img src={`/generation/api/assets/${id}/file`} alt="" />}
                 <button type="button" className="btn sm" disabled={disabled || busy || all.find((x) => x.asset_id === id)?.current}
                   onClick={() => { setCompare(false); use(id); }}><Check size={13} /> {t("sbTakeUse")}</button>
               </div>
@@ -448,7 +448,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
               {variants.map((id, i) => (
                 <div key={id} style={{ width: 120 }}><button type="button" className={`tile${i === best ? " selected" : ""}`} style={{ width: 120 }}
                   onClick={() => app.openAsset(id, variants)} aria-label={`${t("zoom")} ${i + 1}`}>
-                  <img src={`/api/assets/${id}/thumb`} alt="" />
+                  <img src={`/generation/api/assets/${id}/thumb`} alt="" />
                 </button><button className="btn sm" disabled={running || busy || (locked && !!shot?.locked)} onClick={() => setBest(i)}>{i === best ? t("sbTakeCurrent") : t("sbTakeUse")}</button></div>
               ))}
             </div>

@@ -1,0 +1,25 @@
+[package]
+name = "lumiere-edit-interchange"
+description = "Lumiere Edit interchange: CMX 3600 EDL, Final Cut Pro 7 XML (xmeml), FCPXML and OpenTimelineIO import/export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lumiere-edit-time = { workspace = true }
+lumiere-edit-geom = { workspace = true }
+lumiere-edit-color = { workspace = true }
+lumiere-edit-media = { workspace = true }
+lumiere-edit-project = { workspace = true }
+lumiere-edit-cfb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+roxmltree = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

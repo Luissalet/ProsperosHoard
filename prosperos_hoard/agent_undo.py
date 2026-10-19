@@ -588,6 +588,8 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_cast": {"capture": capture_cast, "track": track_cast, "undo": undo_cast},
     "studio_style_cards": {"capture": capture_style_card, "track": track_style_card, "undo": undo_style_card},
     "studio_production_shots": _PRODUCTION,
+    "studio_production_lyrics": _PRODUCTION,
+    "studio_production_cast": _PRODUCTION,
     "studio_graphic_shot": _PRODUCTION,
     "studio_production_segments": _PRODUCTION,
     "studio_production_settings": _PRODUCTION,

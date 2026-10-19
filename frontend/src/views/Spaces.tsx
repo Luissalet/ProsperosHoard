@@ -254,8 +254,8 @@ function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boole
     <button className={`sp-thumb nodrag${dim ? " dim" : ""}`} onClick={onClick} title={id} aria-label={`Preview ${port}`} draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/prospero-asset", id); e.dataTransfer.effectAllowed = "copy"; }}>
       {port === "audio" ? <div className="sp-thumb-icon"><AudioLines size={18} /></div>
-        : fallback && port === "video" ? <video src={`/api/assets/${id}/file`} muted preload="metadata" />
-          : <img src={fallback ? `/api/assets/${id}/file` : `/api/assets/${id}/thumb`} alt="" loading="lazy"
+        : fallback && port === "video" ? <video src={`/generation/api/assets/${id}/file`} muted preload="metadata" />
+          : <img src={fallback ? `/generation/api/assets/${id}/file` : `/generation/api/assets/${id}/thumb`} alt="" loading="lazy"
               onError={(e) => { if (!fallback) setFallback(true); else e.currentTarget.style.visibility = "hidden"; }} />}
     </button>
   );

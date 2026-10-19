@@ -382,7 +382,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
                     title={`${b.key} · ${clock(b.span.start)} – ${clock(b.span.end)}\n${shot.prompt}`}>
                     <div className="track-handle top" onPointerDown={(e) => startOp(e, b.key, "start")} />
                     <div className="track-block-body">
-                      {best ? <img src={`/api/assets/${best}/thumb`} alt="" draggable={false} /> : <div className="track-block-icon"><Clapperboard size={14} /></div>}
+                      {best ? <img src={`/generation/api/assets/${best}/thumb`} alt="" draggable={false} /> : <div className="track-block-icon"><Clapperboard size={14} /></div>}
                       <div className="track-block-text">
                         <div className="row" style={{ gap: 4 }}>
                           <span className="pill badge-dark">{b.key}</span>
@@ -423,7 +423,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
                     onDragEnd={() => setHover(null)}
                     onDoubleClick={() => setEditing({ shot: s })} title={s.prompt}>
                     <GripVertical size={12} className="muted" />
-                    {frames[s.key]?.best ? <img src={`/api/assets/${frames[s.key].best}/thumb`} alt="" draggable={false} /> : <div className="track-block-icon"><Clapperboard size={12} /></div>}
+                    {frames[s.key]?.best ? <img src={`/generation/api/assets/${frames[s.key].best}/thumb`} alt="" draggable={false} /> : <div className="track-block-icon"><Clapperboard size={12} /></div>}
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div className="row" style={{ gap: 4 }}>
                         <span className="pill badge-dark">{s.key}</span>

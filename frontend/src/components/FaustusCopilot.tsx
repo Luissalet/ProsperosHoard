@@ -34,7 +34,7 @@ export default function FaustusCopilot(props: Props) {
     let panel: Panel | undefined;
     async function mount() {
       try {
-        const response = await fetch('/api/copilot/info');
+        const response = await fetch('/generation/api/copilot/info');
         if (!response.ok) throw new Error(await response.text());
         const info = await response.json();
         await import(/* @vite-ignore */ info.panel_url);
@@ -59,7 +59,7 @@ export default function FaustusCopilot(props: Props) {
             if (type.startsWith('application/json')) envelope.body = JSON.parse(new TextDecoder().decode(bytes));
             else { envelope.content_type = type; envelope.raw_body = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')); }
           }
-          return fetch('/api/copilot/proxy', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope),signal:request.signal});
+          return fetch('/generation/api/copilot/proxy', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope),signal:request.signal});
         };
         panel.contextProvider = async () => {
           const {projectId, route, assetId, lang} = current.current;

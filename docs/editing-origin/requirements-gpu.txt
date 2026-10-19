@@ -1,0 +1,4 @@
+# NVIDIA libraries the speech model needs on the GPU when the CUDA toolkit is not installed system-wide
+# (pip install -r requirements-gpu.txt; the app adds their folders to the DLL search path on Windows).
+nvidia-cublas-cu12==12.9.1.4
+nvidia-cudnn-cu12==9.10.2.21
