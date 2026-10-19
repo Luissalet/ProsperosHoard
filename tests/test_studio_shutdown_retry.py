@@ -40,13 +40,15 @@ async def test_generation_retains_real_clients_after_failed_close(kind, tmp_path
         backend.reload()
         await asyncio.to_thread(backend._pool_client, 'http://synthetic.invalid')
     thread = backend.link.sync._thread
-    original = resource.aclose
+    # Inject into the owned transport, beyond HTTPX's early CLOSED state.
+    transport = client._transport
+    original = transport.aclose
     async def fail_twice():
         attempts.append('close')
         if len(attempts) < 3:
             raise OSError('Actual HTTP client remains open')
         await original()
-    monkeypatch.setattr(resource, 'aclose', fail_twice)
+    monkeypatch.setattr(transport, 'aclose', fail_twice)
     try:
         for count in (1, 2):
             with pytest.raises(OSError):
@@ -63,7 +65,7 @@ async def test_generation_retains_real_clients_after_failed_close(kind, tmp_path
         assert owner.app is None and owner.phase == 'off'
     finally:
         if owner.app is not None:
-            monkeypatch.setattr(resource, 'aclose', original)
+            monkeypatch.setattr(transport, 'aclose', original)
             await app.state.retry_shutdown()
 
 
