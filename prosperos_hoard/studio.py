@@ -15,6 +15,7 @@ from typing import Any
 from .studio_projects import Projects
 from .studio_contract import NAMES as HOST_TOOLS
 from .cancellation import join_tasks
+from .resources import generation_ui, app_icon
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = Path(__file__).with_name('studio_catalog.json')
@@ -26,7 +27,7 @@ def catalog():
 
 async def generation(root, port, demo, automatic):
     from .api import create_app
-    app = await asyncio.to_thread(create_app, root, ROOT / 'frontend' / 'dist', port, demo,
+    app = await asyncio.to_thread(create_app, root, generation_ui(), port, demo,
                                   resume_pending=automatic, url_prefix='/generation')
     return app
 
@@ -313,7 +314,7 @@ class Studio:
             font = filename.startswith('fonts/') and len(Path(filename).parts) == 2 and Path(filename).suffix in {'.woff2','.txt'}
             if filename not in {'ui.html', 'studio.js', 'studio.css', 'native.js', 'off.js', 'app-icon.png'} and not font:
                 return await self.json(send, {'error': 'not_found'}, 404)
-            file = ROOT / 'app-icon.png' if filename == 'app-icon.png' else Path(__file__).with_name('studio_ui') / filename
+            file = app_icon() if filename == 'app-icon.png' else Path(__file__).with_name('studio_ui') / filename
             from mimetypes import guess_type
             await send({'type': 'http.response.start', 'status': 200, 'headers': [(b'content-type', (guess_type(file)[0] or 'application/octet-stream').encode())]})
             return await send({'type': 'http.response.body', 'body': await asyncio.to_thread(file.read_bytes)})
@@ -396,7 +397,11 @@ class Studio:
 
     async def native(self, name, scope, receive, send, path):
         from .studio_response import NativeResponse
-        child = dict(scope, path=path, raw_path=path.encode(), root_path='/' + name)
+        # ASGI keeps the public path intact; routers subtract root_path. A
+        # stripped path plus a prefixed root makes nested StaticFiles mounts
+        # look for assets/assets instead of the packaged asset.
+        child_path = '/' + name + path
+        child = dict(scope, path=child_path, raw_path=child_path.encode(), root_path='/' + name)
         child['asgi'] = {**scope.get('asgi', {}), 'spec_version': '2.3'}
         await self.modules[name].request(child, receive, NativeResponse(send, name, self.port))
 

@@ -21,3 +21,5 @@ native/editing/**/target/
 native/editing/.build/
 prosperos_hoard/studio_ui/fonts/
 tasks/qa-data/
+build/
+dist/

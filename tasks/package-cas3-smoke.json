@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "wheel": "prosperos_hoard-0.1.0-py3-none-win_amd64.whl",
+  "wheel_sha256": "5daf9d68323d4573ae8919a1e6e461973caa7a721dafe4a5de5010044808f9d0",
+  "wheel_files": 477,
+  "wheel_bytes": 37919108,
+  "resource_manifest_files": 58,
+  "installed": "D:\\LocalAI\\worktrees\\prospero-fisiones929\\dist\\wheel-smoke-cas3-assets",
+  "synthetic_qa_retained": "D:\\LocalAI\\worktrees\\prospero-fisiones929\\dist\\qa-installed929-xm6n0z5g",
+  "cold_tools": 168,
+  "cold_sqlite_or_process_events": [],
+  "installed_stdio_mcp_cold_tools": 168,
+  "both_modules_on_off": true,
+  "checked_assets": [
+    "/",
+    "/editing/",
+    "/editing/api/copilot/launcher.js",
+    "/editing/assets/index-DRf9bkc0.css",
+    "/editing/assets/index-v6661q7-.js",
+    "/editing/manifest.webmanifest",
+    "/generation/",
+    "/generation/assets/index-C4tMBLv5.css",
+    "/generation/assets/index-CshETWfB.js",
+    "/generation/favicon-192.png",
+    "/generation/favicon.ico",
+    "/studio-assets/app-icon.png",
+    "/studio-assets/native.js",
+    "/studio-assets/studio.css",
+    "/studio-assets/studio.js"
+  ],
+  "native_tool_counts": {
+    "motion": 21,
+    "edit": 9
+  },
+  "installed_launcher_default_and_explicit_profile": true,
+  "native_project": {
+    "id": "f62caceea0c4479cb72ecd95470add0b",
+    "format": ".lumotion",
+    "bytes": 2410,
+    "sha256": "5f0e1d1fdb2b794dc340e3d72ebd3f71aa5aa23d2d1273147152049afdad47af",
+    "initial_sha256": "5f0e1d1fdb2b794dc340e3d72ebd3f71aa5aa23d2d1273147152049afdad47af",
+    "reopened": true
+  },
+  "gpu_model_render_browser_network_used": false,
+  "versions": {
+    "fastapi": "0.115.6",
+    "starlette": "0.41.3",
+    "pydantic": "2.10.4",
+    "httpx": "0.28.1"
+  }
+}
