@@ -241,8 +241,9 @@ class Backend:
             self._shutdown_clients = list({id(client): client for client in clients}.values())
         loop = link.sync._loop
         async def drain():
+            from .close_client import close_client
             while self._shutdown_clients:
-                await self._shutdown_clients[0].aclose()
+                await close_client(self._shutdown_clients[0])
                 self._shutdown_clients.pop(0)
         if loop is not None and loop.is_running():
             asyncio.run_coroutine_threadsafe(drain(), loop).result()
