@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from . import engine, motion_graphics as graphics, productions as prod, shorts, timeline
+from . import engine, figures, motion_graphics as graphics, productions as prod, shorts, timeline
 from .ids import new_id
 
 
@@ -58,6 +58,13 @@ def normalise_scenes(scenes, sources):
             raise shorts.ShortError("bad_source", f"Scene '{entry['id']}' cites an unknown source.")
         if entry.get("graphic"):
             entry["graphic"] = graphics.normalise_graphic(entry["graphic"])
+        if entry.get("figure") is not None:
+            try:
+                entry["figure"] = figures.validate(entry["figure"])
+            except (ValueError, TypeError, AttributeError) as error:
+                raise shorts.ShortError("bad_figure", f"Scene '{entry['id']}': {error}") from error
+            # A portable capture is independent of another profile's asset IDs.
+            entry.pop("asset_id", None)
         result.append(entry)
     return result
 
@@ -189,7 +196,8 @@ class ExplainerRun(shorts.ShortRun):
             if hasattr(self.progress, "check_cancel"):
                 self.progress.check_cancel()
             key, graphic = scene["id"], self._graphic(scene)
-            fingerprint = signature({"graphic": graphic, "asset_id": scene.get("asset_id"), "size": [width, height]})
+            figure = scene.get("figure")
+            fingerprint = signature({"figure": figure} if figure else {"graphic": graphic, "asset_id": scene.get("asset_id"), "size": [width, height]})
             aid = scene.get("asset_id") or cache.get(fingerprint)
             if scene.get("asset_id") and not prod._asset_ok(self.store, aid):
                 raise shorts.ShortError("missing_scene_asset", f"The linked figure for scene '{key}' is missing. Select a retained asset.")
@@ -197,12 +205,18 @@ class ExplainerRun(shorts.ShortRun):
                 aid = new_id("a")
                 dest = self.store.path_for_asset_file(aid, ".png")
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(graphics.still_png(graphic, width, height))
-                self.store.create_asset(project_id=self.project_id, kind="image", file_path=engine._rel(self.store, dest), mime="image/png", width=width, height=height,
-                                        asset_id=aid, source="generated", name=scene["title"], tags=["explainer", "page"], recipe={"operation": "explainer_page", "scene_id": key, "source_ids": scene["source_ids"], "graphic": graphic})
+                if figure:
+                    png, image_width, image_height = figures.preview(figure)
+                    recipe = {"operation": "explainer_figure", "figure": deepcopy(figure)}
+                else:
+                    png, image_width, image_height = graphics.still_png(graphic, width, height), width, height
+                    recipe = {"operation": "explainer_page", "scene_id": key, "source_ids": scene["source_ids"], "graphic": graphic}
+                dest.write_bytes(png)
+                self.store.create_asset(project_id=self.project_id, kind="image", file_path=engine._rel(self.store, dest), mime="image/png", width=image_width, height=image_height,
+                                        asset_id=aid, source="import" if figure else "generated", name=scene["title"], tags=["explainer", "figure" if figure else "page"], recipe=recipe)
                 cache[fingerprint] = aid
             asset = self.store.get_asset(aid)
-            entry["items"][key] = {"asset_id": aid, "kind": asset["kind"], "source": "asset" if scene.get("asset_id") else "graphic"}
+            entry["items"][key] = {"asset_id": aid, "kind": asset["kind"], "source": "figure" if figure else "asset" if scene.get("asset_id") else "graphic"}
             start = timing[index]["start_s"] if index else 0
             end = timing[index + 1]["start_s"] if index + 1 < len(timing) else self.state["done"]["narration"]["duration_s"] + shorts.TAIL_S
             entry["plan"].append({"key": key, "segment": index, "start_s": start, "duration_s": round(end - start, 3)})
@@ -213,10 +227,18 @@ class ExplainerRun(shorts.ShortRun):
         tracks = super().build_tracks(*args, **kwargs)
         scenes = self.spec["explainer"]["scenes"]
         for scene, clip in zip(scenes, tracks[0]["clips"]):
-            if not scene.get("asset_id"):
+            if scene.get("figure"):
+                clip.pop("ken_burns", None)
+            if not scene.get("asset_id") and not scene.get("figure"):
                 clip.pop("ken_burns", None)
                 clip.update(kind="graphic", graphic=graphics.normalise_graphic({**self._graphic(scene), "duration": clip["duration_s"]}), graphic_offset_s=0.0)
         return tracks
+
+    def _finishing(self):
+        finishing = super()._finishing()
+        if any(scene.get("figure") for scene in self.spec["explainer"]["scenes"]):
+            finishing.setdefault("framing", "fit")
+        return finishing
 
     def stage_report(self):
         super().stage_report()

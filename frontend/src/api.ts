@@ -972,7 +972,8 @@ export interface ShortScript {
 }
 
 export interface ExplainerSource { id: string; title: string; text: string; reference: string }
-export interface ExplainerScene { id: string; title: string; narration: string; body: string; source_ids: string[]; source_reviewed?: boolean; asset_id?: string; graphic?: Record<string, unknown> }
+export interface PortableFigure { format: "vitruvius.figure/1"; document_id: string; revision: number; title?: string; page_id?: string | null; state_id?: string | null; content: Record<string, unknown>; origin?: Record<string, string>; preview: { mime: "image/png"; data: string } }
+export interface ExplainerScene { id: string; title: string; narration: string; body: string; source_ids: string[]; source_reviewed?: boolean; asset_id?: string; graphic?: Record<string, unknown>; figure?: PortableFigure | null }
 export interface ExplainerProject { production: string; revision: number; sources: ExplainerSource[]; scenes: ExplainerScene[]; review_needed?: string[] }
 
 export interface ShortShot { key: string; segment: number; index: number; start_s: number; duration_s: number }
