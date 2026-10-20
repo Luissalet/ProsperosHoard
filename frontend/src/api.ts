@@ -1455,7 +1455,7 @@ export const api = {
   updateStyleCard: (id: string, body: StyleCardInput) => request<StyleCard>("PATCH", `/generation/api/style-presets/${id}`, { action: "update", ...body }),
   deleteStyleCard: (id: string) => request<{ deleted: string }>("DELETE", `/generation/api/style-presets/${id}`),
   changeShots: (slug: string, changes: Record<string, unknown>[], run = true) =>
-    request<{ changed: string[]; production: ProductionView }>("PATCH", `/generation/api/productions/${slug}/shots`, { changes, run }),
+    request<{ changed: string[]; production: ProductionView; job?: Job }>("PATCH", `/generation/api/productions/${slug}/shots`, { changes, run }),
   exportRecipe: (slug: string, name?: string) => request<RecipeSummary>("POST", `/generation/api/productions/${slug}/recipe`, { production: slug, name }),
   runQa: (slug: string, body: { stage?: string; dry_run?: boolean; keys?: string[] }) =>
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/generation/api/productions/${slug}/qa`, { production: slug, ...body }),

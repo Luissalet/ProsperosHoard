@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check, Type } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
@@ -7,6 +7,8 @@ import { LinkDownload } from "../components/LinkDownload";
 import { useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
 import { GraphicShotEditor } from "./GraphicShot";
+
+const ClipCanvas = lazy(() => import("../components/ClipCanvas").then(module => ({ default: module.ClipCanvas })));
 
 // the song sections a shot can illustrate (what the planner writes)
 export const SECTIONS = ["intro", "verse", "prechorus", "chorus", "bridge", "breakdown", "outro"];
@@ -109,6 +111,10 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
       onClick={() => setEditing({ after })}><Plus size={14} /></button>
   );
 
+  if (editing?.shot && editing.shot.kind !== "graphic") return <ShotEditor nodeEditor state={state}
+    shot={shots.find(shot => shot.key === editing.shot!.key) || editing.shot} running={running}
+    onPause={pause} onClose={() => setEditing(null)} onSaved={(stay) => { if (!stay) setEditing(null); onChanged(); app.refreshJobs(); }} />;
+
   return (
     <div className="card">
       <h2 className="row" style={{ gap: 8 }}>
@@ -147,7 +153,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
               {best && <button className="btn xs shot-preview-action" onClick={() => app.openAsset(clips[shot.key] || best)} title={t("zoom")}>{t("zoom")}</button>}
               <button className="btn xs icon sb-lock" disabled={running || acting} title={shot.locked ? t("sbUnlockHint") : t("sbLockHint")}
                 onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
-              <button className="tile sb-tile" title={shot.prompt} onClick={() => setEditing({ shot })}>
+              <button className="tile sb-tile" aria-label={`${t("sbShotN", { n: shot.key })} · ${lang === "es" ? "Abrir nodos" : "Open nodes"}`} onClick={() => setEditing({ shot })}>
                 {best ? <img src={`/generation/api/assets/${best}/thumb`} alt="" loading="lazy" />
                   : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : shot.kind === "graphic" ? <Type size={22} /> : <Clapperboard size={22} />}</div>}
                 <div className="tile-badges">
@@ -174,7 +180,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 </div>
               </button>
               {insertButton(shot.key)}
-              {best && <button className="btn sb-create-clip" onClick={() => app.go("generate", best)}><Film size={14} />{lang === "es" ? "Crear clip con este plano" : "Create clip from this shot"}</button>}
+              {best && <button className="btn sb-create-clip" onClick={() => setEditing({ shot })}><Film size={14} />{lang === "es" ? "Abrir nodos del plano" : "Open shot nodes"}</button>}
             </div>
           );
         })}
@@ -255,7 +261,7 @@ function TakesRow({ state, shotKey, disabled, onUsed }: { state: ProductionState
 
 type EditorProps = {
   state: ProductionState; shot?: ProductionShot; after?: string | null; running: boolean;
-  onPause: () => void; onClose: () => void; onSaved: () => void;
+  onPause: () => void; onClose: () => void; onSaved: (stay?: boolean) => void; nodeEditor?: boolean;
   initialSpan?: { start: number; end: number }; initialSection?: string;
 };
 
@@ -275,8 +281,9 @@ export function ShotEditor(props: EditorProps) {
     : <ImageShotEditor {...props} kindSwitch={switcher} />;
 }
 
-function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection, kindSwitch }: EditorProps & { kindSwitch?: ReactNode }) {
-  const { t } = useT();
+function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSaved, initialSpan, initialSection, kindSwitch, nodeEditor = false }: EditorProps & { kindSwitch?: ReactNode }) {
+  const { t, lang } = useT();
+  const es = lang === "es";
   const app = useApp();
   const isNew = !shot;
   const frames = (state.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
@@ -288,6 +295,8 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
   const [motionPrompt, setMotionPrompt] = useState(shot?.motion_prompt || "");
   const motionInputRef = useRef<HTMLInputElement>(null);
   const motionSlash = useSlashMenu(motionPrompt, setMotionPrompt, motionInputRef, { clips: true });
+  const motionAreaRef = useRef<HTMLTextAreaElement>(null);
+  const motionAreaSlash = useSlashMenu(motionPrompt, setMotionPrompt, motionAreaRef, { clips: true });
   const [lead, setLead] = useState(shot ? shot.lead : true);
   const [motion, setMotion] = useState<"still" | "move">(shot?.motion || "move");
   const [clip, setClip] = useState(shot ? shot.clips.length > 0 : true);
@@ -362,7 +371,32 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
     finally { setBusy(false); }
   };
 
+  const [nodeJob, setNodeJob] = useState<Job | null>(null);
+  const [nodeError, setNodeError] = useState("");
+  const dispatching = useRef(false);
+  const clipPending = (state.partial?.clips?.pending || {}) as Record<string, string>;
+  const framePending = (state.partial?.frames?.pending || {}) as Record<string, string>;
+  const pending = shot && (framePending[shot.key] || clipPending[shot.key] || Object.entries(clipPending).find(([key]) => key.startsWith(`${shot.key}v`))?.[1]);
+  const jobId = pending || (["running", "queued"].includes(state.status) ? state.job_id : null) || nodeJob?.id;
+  useEffect(() => {
+    if (!nodeEditor || !jobId) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const job = await api.job(jobId);
+        if (!alive) return;
+        setNodeJob(job); setNodeError("");
+        if (["done", "failed", "cancelled"].includes(job.state)) onSaved(true);
+        else timer = setTimeout(poll, 1800);
+      } catch (error) { if (alive) { setNodeError((error as Error).message); timer = setTimeout(poll, 5000); } }
+    };
+    poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [jobId, nodeEditor]);
+  const nodeActive = running || (nodeEditor && !!jobId && nodeJob?.id !== jobId) || !!nodeJob && ["queued", "waiting_gpu", "running"].includes(nodeJob.state);
   const save = async (run: boolean) => {
+    if (dispatching.current || nodeActive || busy || (nodeEditor && run && locked && !!shot?.locked)) return;
     if (!prompt.trim()) { app.toast(t("sbNeedPrompt"), "bad"); return; }
     let change: Record<string, unknown>;
     const extraChange: Record<string, unknown>[] = [];
@@ -396,21 +430,27 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
         change = Object.fromEntries(Object.entries(change).filter(([k]) => ["key", "section"].includes(k)));
       }
       if (locked !== !!shot!.locked) change.locked = locked;
-      if (Object.keys(change).length === 1) { onClose(); return; }
+      if (Object.keys(change).length === 1 && !run) { if (!nodeEditor) onClose(); return; }
     }
-    setBusy(true);
+    setBusy(true); dispatching.current = true; setNodeError("");
     try {
       const later = isNew && (castNames.length > 0 || extraChange.length > 0);
-      const sent = await api.changeShots(state.slug, [change], run && !later);
+      if (nodeEditor && run && !isNew && Object.keys(change).length === 1) {
+        await api.regenerateUnlocked(state.slug, output ? "clips" : "frames", [shot!.key], false);
+      }
+      const sent = Object.keys(change).length === 1 && run && !isNew
+        ? await api.continueProduction(state.slug)
+        : await api.changeShots(state.slug, [change], run && !later);
+      if (sent.job) setNodeJob(sent.job);
       // a new shot's own cast (and chaining) goes in a second change, once it has a key
       if (later) {
         const key = (sent as { changed?: string[] }).changed?.[0];
         if (key) await api.changeShots(state.slug, [{ key, ...(castNames.length ? { cast: castNames } : {}), ...Object.assign({}, ...extraChange) }], run);
       }
       app.toast(run ? t("sbSavedRun") : t("sbSaved"), "ok");
-      onSaved();
-    } catch (e) { app.toast((e as Error).message, "bad"); }
-    finally { setBusy(false); }
+      onSaved(nodeEditor); app.refreshJobs();
+    } catch (e) { setNodeError((e as Error).message); app.toast((e as Error).message, "bad"); }
+    finally { setBusy(false); dispatching.current = false; }
   };
   const remove = async () => {
     if (!shot || !window.confirm(t("sbDeleteConfirm", { n: shot.key }))) return;
@@ -420,21 +460,35 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
     finally { setBusy(false); }
   };
 
-  return (
-    <Modal title={isNew ? t("sbNewShot") : t("sbShotN", { n: shot!.key })} onClose={onClose} wide footer={running ? (
-      <>
-        <span className="hint grow">{t("sbPauseFirst")}</span>
-        {state.job_id && <button className="btn primary" onClick={onPause}><Pause size={14} /> {t("sbPause")}</button>}
-      </>
-    ) : (
-      <>
-        {!isNew && <button className="btn ghost" disabled={busy} onClick={remove}><Trash2 size={14} /> {t("sbDelete")}</button>}
-        <span className="grow" />
-        <button className="btn" disabled={busy} onClick={() => save(false)}>{t("sbSave")}</button>
-        <button className="btn primary" disabled={busy} onClick={() => save(true)}>{busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("sbSaveRun")}</button>
-      </>
-    )}>
-      {kindSwitch}
+  const promptEditor = <label className="field">{t("sbPrompt")}
+          <div className="slash-wrap">
+            <textarea ref={promptRef} rows={3} value={prompt} placeholder={t("sbPromptPh")}
+              onChange={(e) => { setPrompt(e.target.value); slash.update(e.target.value, e.target.selectionStart); }}
+              onKeyDown={(e) => { slash.onKeyDown(e); }} />
+            {slash.menu}
+          </div>
+          <span className="row" style={{ gap: 8 }}><span className="hint grow">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
+            <Enhance text={prompt} kind="image" onDone={setPrompt} className="btn xs" /></span>
+        </label>;
+  const motionEditor = motion === "move" && (
+          <label className="field">{t("sbMotionPrompt")}
+            <span className="slash-wrap" style={{ display: "block" }}>
+              {nodeEditor ? <textarea ref={motionAreaRef} value={motionPrompt} rows={3} placeholder={t("sbMotionPh")}
+                onChange={(e) => { setMotionPrompt(e.target.value); motionAreaSlash.update(e.target.value, e.target.selectionStart); }}
+                onKeyDown={(e) => motionAreaSlash.onKeyDown(e)} /> : <input ref={motionInputRef} value={motionPrompt} placeholder={t("sbMotionPh")} style={{ width: "100%" }}
+                onChange={(e) => { setMotionPrompt(e.target.value); motionSlash.update(e.target.value, e.target.selectionStart); }}
+                onKeyDown={(e) => { motionSlash.onKeyDown(e); }} />}
+              {nodeEditor ? motionAreaSlash.menu : motionSlash.menu}
+            </span>
+            <span className="row wrap" style={{ gap: 4, marginTop: 4 }}>
+              <span className="hint">{t("sbCamera")}</span>
+              {CAMERA.map((c) => (
+                <button key={c} type="button" className="btn sm ghost" onClick={() => setMotionPrompt((m) => (m.trim() ? `${m.trim().replace(/[.,;]$/, "")}, ` : "") + CAMERA_TEXT[c])}>{t(c)}</button>
+              ))}
+            </span>
+          </label>
+        );
+  const settings = <>      {kindSwitch}
       {!isNew && (
         <label className={`check sb-approve${locked ? " on" : ""}`} title={t("sbLockHint")}>
           <input type="checkbox" checked={locked} disabled={running || busy} onChange={(e) => setLocked(e.target.checked)} />
@@ -442,7 +496,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
           <span className="hint">{locked ? t("sbApprovedHint") : t("sbLockHint")}</span>
         </label>
       )}
-      {!isNew && <TakesRow state={state} shotKey={shot!.key} disabled={running || busy || (locked && !!shot?.locked)} onUsed={onSaved} />}
+      {!isNew && <TakesRow state={state} shotKey={shot!.key} disabled={running || busy || (locked && !!shot?.locked)} onUsed={() => onSaved(nodeEditor)} />}
         {variants.length > 0 && (
           <div className="field">{t("sbStillPick")}
             <div className="row wrap" style={{ gap: 6 }}>
@@ -456,16 +510,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
           </div>
         )}
       <fieldset disabled={running || busy || (locked && !!shot?.locked)} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
-        <label className="field">{t("sbPrompt")}
-          <div className="slash-wrap">
-            <textarea ref={promptRef} rows={3} value={prompt} placeholder={t("sbPromptPh")}
-              onChange={(e) => { setPrompt(e.target.value); slash.update(e.target.value, e.target.selectionStart); }}
-              onKeyDown={(e) => { slash.onKeyDown(e); }} />
-            {slash.menu}
-          </div>
-          <span className="row" style={{ gap: 8 }}><span className="hint grow">{lead ? t("sbPromptLeadHint") : t("sbPromptSceneHint")}</span>
-            <Enhance text={prompt} kind="image" onDone={setPrompt} className="btn xs" /></span>
-        </label>
+        {!nodeEditor && promptEditor}
         {elements.length > 0 && (
           <div className="row wrap" style={{ gap: 6, marginTop: -4 }}>
             <span className="muted small">{t("sbElements")}</span>
@@ -531,22 +576,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
             ))}
           </div>
         )}
-        {motion === "move" && (
-          <label className="field">{t("sbMotionPrompt")}
-            <span className="slash-wrap" style={{ display: "block" }}>
-              <input ref={motionInputRef} value={motionPrompt} placeholder={t("sbMotionPh")} style={{ width: "100%" }}
-                onChange={(e) => { setMotionPrompt(e.target.value); motionSlash.update(e.target.value, e.target.selectionStart); }}
-                onKeyDown={(e) => { motionSlash.onKeyDown(e); }} />
-              {motionSlash.menu}
-            </span>
-            <span className="row wrap" style={{ gap: 4, marginTop: 4 }}>
-              <span className="hint">{t("sbCamera")}</span>
-              {CAMERA.map((c) => (
-                <button key={c} type="button" className="btn sm ghost" onClick={() => setMotionPrompt((m) => (m.trim() ? `${m.trim().replace(/[.,;]$/, "")}, ` : "") + CAMERA_TEXT[c])}>{t(c)}</button>
-              ))}
-            </span>
-          </label>
-        )}
+        {!nodeEditor && motionEditor}
         {motion === "move" && (
           <div className="field">{t("sbMotionRef")}
             <span className="hint">{t("sbMotionRefHint")}</span>
@@ -642,7 +672,8 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
           <label className="check"><input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> {t("regenerateShot")}</label>
         )}
       </fieldset>
-      {motionPick === "library" && projectId && (
+</>;
+  const overlays = <>      {motionPick === "library" && projectId && (
         <AssetPicker projectId={projectId} kind="video" allProjects title={t("sbMotionRef")}
           onPick={(a) => { setMotionRef({ asset_id: a.id, start_s: 0, prompt: "" }); setMotionStart("0:00"); setMotionPick(null); }}
           onClose={() => setMotionPick(null)} />
@@ -651,6 +682,38 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
         <AssetPicker projectId={projectId} kind={picking} allProjects title={picking === "video" ? t("sbRefFromVideo") : t("sbRefPick")}
           onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => setPicking(null)} />
       )}
+</>;
+  const selectedFrame = variants[best] || entry.best;
+  const clipItems = (state.done?.clips?.items || {}) as Record<string, string>;
+  const output = shot && (clipItems[shot.key] || Object.entries(clipItems).find(([key]) => key.startsWith(`${shot.key}v`))?.[1]);
+  const frozen = running || busy || nodeActive || (locked && !!shot?.locked);
+  const stateLabel = nodeJob ? ({ queued: es ? "En cola" : "Queued", waiting_gpu: es ? "Esperando GPU" : "Waiting for GPU", running: es ? "Renderizando producción" : "Rendering production", done: state.status === "awaiting_review" ? (es ? "Producción en pausa para revisión" : "Production paused for review") : (es ? "Trabajo terminado" : "Job finished"), failed: es ? "El render ha fallado" : "Render failed", cancelled: es ? "Cancelado" : "Cancelled" })[nodeJob.state] : running ? (es ? "Producción en curso" : "Production running") : output ? (es ? "Clip del plano" : "Shot clip") : (es ? "Sin clip generado" : "No clip generated");
+  if (nodeEditor && shot) return <section className="shot-node-workspace" aria-label={es ? `Nodos del plano ${shot.key}` : `Shot ${shot.key} nodes`}>
+    <div className="clip-studio-heading"><button className="btn sm" disabled={busy} onClick={onClose}>{es ? "Volver al storyboard" : "Back to storyboard"}</button><h2>{t("sbShotN", { n: shot.key })}</h2><span className="hint">{state.name || state.slug}</span><span className="spacer" /><button className="btn" disabled={busy || nodeActive} onClick={() => save(false)}>{t("sbSave")}</button></div>
+    <p className="small muted">{es ? "Los cambios se guardan en este plano. Renderizar continúa la producción y puede completar otros planos pendientes." : "Changes belong to this shot. Rendering continues the production and may complete other pending shots."}</p>
+    {locked && !!shot.locked && <label className="check shot-node-lock"><input type="checkbox" checked={locked} disabled={running || busy} onChange={e => setLocked(e.target.checked)} /><Lock size={14} />{es ? "Plano aprobado. Desmarca para editar o renderizar." : "Approved shot. Uncheck to edit or render."}</label>}
+    <Suspense fallback={<p>{t("loading")}</p>}><ClipCanvas label={es ? "Nodos de generación del plano" : "Shot generation nodes"}
+      reference={<><h2>{es ? "Fotograma" : "Frame"}</h2><div className="shot-node-reference">{selectedFrame ? <button className="reference-preview" onClick={() => app.openAsset(selectedFrame)}><img src={fileUrl(selectedFrame)} alt={es ? "Fotograma del plano" : "Shot frame"} /></button> : <div className="shot-node-empty"><Images size={32} /><p>{es ? "Este plano aún no tiene fotograma." : "This shot has no frame yet."}</p></div>}<fieldset disabled={frozen}>{promptEditor}</fieldset></div></>}
+      guides={refs.map((ref, i) => ({ id: `shot-ref-${ref.asset_id}`, content: <><h2>{es ? `Referencia ${i+1}` : `Reference ${i+1}`}</h2><div className="shot-node-reference"><button className="reference-preview" onClick={() => app.openAsset(ref.asset_id)}><img src={fileUrl(ref.asset_id)} alt={ref.use || ""} /></button><p>{ref.use}</p></div></> })).concat(motionRef ? [{ id: "shot-motion", content: <><h2>{t("sbMotionRef")}</h2><video src={fileUrl(motionRef.asset_id)} controls preload="metadata" className="shot-node-guide" /></> }] : [])}
+      video={<><div className="clip-node-title"><Film size={16} /><strong>{es ? "Vídeo del plano" : "Shot video"}</strong></div><div className="clip-run-state" role="status" aria-live="polite"><strong>{stateLabel}{nodeJob?.state === "running" ? ` · ${Math.round(nodeJob.progress * 100)}%` : ""}</strong>{nodeJob?.message && nodeJob.message.trim().toLowerCase() !== nodeJob.state && <span>{nodeJob.message}</span>}{nodeError && <span role="alert">{nodeError}</span>}{nodeActive && <button className="btn sm" onClick={async () => { try { await api.cancelJob(nodeJob?.id || state.job_id!); onSaved(true); } catch (e) { setNodeError((e as Error).message); } }}>{t("sbPause")}</button>}</div><div className="clip-monitor">{output ? <video src={fileUrl(output)} controls preload="metadata" /> : selectedFrame ? <img src={fileUrl(selectedFrame)} alt={es ? "Fotograma de partida; todavía no es un clip" : "Start frame; not a generated clip"} /> : <div className="monitor-empty"><Film size={32} /><p>{es ? "El fotograma y el clip aparecerán aquí al renderizar." : "The frame and clip will appear here when rendered."}</p></div>}</div><div className="node-composer shot-node-composer"><fieldset disabled={frozen}>{motionEditor || <p>{es ? "Este plano usa una imagen fija. Puedes cambiarlo en Ajustes del plano." : "This shot uses a still image. Change it in Shot settings."}</p>}</fieldset><button className="btn primary generate-clip" disabled={frozen || !prompt.trim()} onClick={() => save(true)}>{busy ? <Loader2 size={16} className="spin" /> : <Film size={16} />}{selectedFrame ? t("sbSaveRun") : (es ? "Crear fotograma y renderizar" : "Create frame and render")}</button></div></>} /></Suspense>
+    <details className="shot-node-settings"><summary>{es ? "Ajustes del plano · referencias, tiempos y tomas" : "Shot settings · references, timing and takes"}</summary>{settings}<div className="row"><button className="btn ghost" disabled={busy || nodeActive} onClick={remove}><Trash2 size={14} />{t("sbDelete")}</button></div></details>
+    {overlays}
+  </section>;
+  return (
+    <Modal title={isNew ? t("sbNewShot") : t("sbShotN", { n: shot!.key })} onClose={onClose} wide footer={running ? (
+      <>
+        <span className="hint grow">{t("sbPauseFirst")}</span>
+        {state.job_id && <button className="btn primary" onClick={onPause}><Pause size={14} /> {t("sbPause")}</button>}
+      </>
+    ) : (
+      <>
+        {!isNew && <button className="btn ghost" disabled={busy} onClick={remove}><Trash2 size={14} /> {t("sbDelete")}</button>}
+        <span className="grow" />
+        <button className="btn" disabled={busy} onClick={() => save(false)}>{t("sbSave")}</button>
+        <button className="btn primary" disabled={busy} onClick={() => save(true)}>{busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("sbSaveRun")}</button>
+      </>
+    )}>
+{settings}{overlays}
     </Modal>
   );
 }
