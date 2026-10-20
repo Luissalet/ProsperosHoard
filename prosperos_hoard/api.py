@@ -424,6 +424,12 @@ class TimeLyricsBody(BaseModel):
     song_asset_id: str
     lyrics: str
     name: Optional[str] = None
+    method: str = "estimate"
+    lines: Optional[list[dict[str, Any]]] = None
+    preview: bool = False
+    production: Optional[str] = None
+    language: Optional[str] = None
+    model: str = "large-v3-turbo"
 
 
 class ComposeSongBody(BaseModel):
@@ -2767,8 +2773,32 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # ------------------------------------------------------------------ audio
     @app.post("/api/agent/studio_time_lyrics")
     def agent_time_lyrics(project: str, body: TimeLyricsBody):
+        from . import lyrics_sync
+
+        def run():
+            if body.production:
+                state = productions_mod.load_state(store.data_dir, body.production)
+                if state['project_id'] != project:
+                    raise engine.EngineError('wrong_project', 'The production belongs to a different project.')
+                return lyrics_sync.production_timing(store, body.production, method=body.method, lines=body.lines,
+                    preview=body.preview, song_asset_id=body.song_asset_id, text=body.lyrics,
+                    language=body.language, model=body.model)
+            if body.method == 'estimate':
+                if body.preview:
+                    raise engine.EngineError('bad_timing_method', 'Preview supports align or manual timing.')
+                return engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name)
+            return lyrics_sync.time_asset(store, project, body.song_asset_id, body.lyrics, name=body.name,
+                method=body.method, lines=body.lines, preview=body.preview, language=body.language, model=body.model)
         return agent("studio_time_lyrics", body.song_asset_id,
-                     lambda: engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name))
+                     run)
+
+    @app.post('/api/productions/{slug}/lyrics-timing')
+    def production_lyrics_timing(slug: str, body: TimeLyricsBody):
+        from . import lyrics_sync
+
+        return lyrics_sync.production_timing(store, slug, method=body.method, lines=body.lines,
+            preview=body.preview, song_asset_id=body.song_asset_id, text=body.lyrics,
+            language=body.language, model=body.model)
 
     def _with_lyric_sections(asset_id: str, analysis: dict[str, Any]) -> dict[str, Any]:
         """The song's sections from its own timed lyrics ([Verse], [Chorus]...)

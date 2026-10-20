@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { AudioLines, Clapperboard, GripVertical, Library, Loader2, Music, Pause, Pin, Play, Plus, RefreshCw, Upload, Wand2, X } from "lucide-react";
+import { AudioLines, Clapperboard, GripVertical, Library, Loader2, Music, Pause, Pin, Play, Plus, RefreshCw, Timer, Upload, Wand2, X } from "lucide-react";
 import { api, fileUrl, type Asset, type ProductionShot, type ProductionState, type TimedLine } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, Modal, useApp } from "../components/ui";
 import { LyricsModal, SECTIONS, ShotEditor, liveRun } from "./Storyboard";
+import { TextTiming } from '../components/TextTiming';
+import { rowsFromLyrics } from '../lyricTiming';
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const parseTime = (text: string): number | null => {
@@ -33,7 +35,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
  * each block saying which lyrics it plays over. Shots left out of the track
  * are placed by the cut by their section. */
 export function SongTrackCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT(), es = lang === 'es';
   const app = useApp();
   const timing = state.timing;
   const lines: TimedLine[] = timing?.lines || [];
@@ -51,6 +53,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
   const [anchor, setAnchor] = useState<number | null>(null);
   const [changing, setChanging] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [timingOpen, setTimingOpen] = useState(false);
   const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null; span?: Sel; section?: string; pinFromCut?: boolean } | null>(null);
   const [assignKey, setAssignKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -266,10 +269,16 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
         <p className="small">{((state.partial?.song?.song_asset_ids as string[] | undefined) || []).length ? t("trackPickTakeFirst")
           : t("trackNoSong")}{songInfo.tags ? ` · ${songInfo.tags}` : ""}</p>
       )}
+      {songId && hasLyrics && <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
+        <button className="btn primary" disabled={running || busy} onClick={() => { audio.current?.pause(); setTimingOpen(true); }}><Timer size={15} />{es ? 'Sincronizar letra' : 'Sync lyrics'}</button>
+        <span className="small muted">{timing?.text_timing
+          ? `${timing.text_timing.timed_lines}/${timing.text_timing.total_lines} ${es ? 'frases con tiempos · revisa las pendientes' : 'timed lines · review unfinished lines'}`
+          : (es ? 'Enlaza las palabras del audio o marca los tiempos a mano.' : 'Match the words in the audio or mark times by hand.')}</span>
+      </div>}
       {songId && !timing?.timed && hasLyrics && (
         <div className="row" style={{ gap: 8, marginBottom: 10 }}>
           <span className="small muted grow">{t("trackUntimed")}</span>
-          <button className="btn sm primary" disabled={busy || running} onClick={timeLyrics}>{busy ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />} {t("trackTimeNow")}</button>
+          <button className="btn sm" disabled={busy || running} onClick={timeLyrics}>{busy ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />} {es ? 'Estimar por compases' : 'Estimate by bars'}</button>
         </div>
       )}
       {songId && !hasLyrics && <p className="small muted">{t("trackNoLyrics")}</p>}
@@ -458,6 +467,15 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
       {changing && <SongChangeModal state={state} onClose={() => setChanging(false)} onChanged={() => { setChanging(false); onChanged(); }} />}
       {lyricsOpen && <LyricsModal state={state} running={running} onClose={() => setLyricsOpen(false)}
         onSaved={() => { setLyricsOpen(false); onChanged(); }} />}
+      {timingOpen && songId && <TextTiming title={es ? 'Sincronizar letra con la canción' : 'Sync lyrics to the song'}
+        audioId={songId} duration={duration} draftKey={`lyrics.${state.slug}`} disabled={running}
+        initialRows={rowsFromLyrics(songInfo.lyrics || '', timing?.text_timing?.lines || lines)} onClose={() => setTimingOpen(false)}
+        onAlign={() => api.linkProductionLyrics(state.slug, { song_asset_id: songId, lyrics: songInfo.lyrics || '', method: 'align', preview: true })}
+        onSave={async rows => {
+          await api.linkProductionLyrics(state.slug, { song_asset_id: songId, lyrics: songInfo.lyrics || '', method: 'manual',
+            lines: rows.map(row => ({ text: row.text, time_s: row.start_s, end_s: row.end_s, needs_review: row.needs_review })) });
+          onChanged(); app.toast(es ? 'Letra vinculada a la canción. Los tiempos están disponibles en la pista y el guion.' : 'Lyrics linked to the song. Timings are available in the track and script.', 'ok');
+        }} />}
     </div>
   );
 }

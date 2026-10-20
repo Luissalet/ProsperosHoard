@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { FileText, Plus, Save, Upload, Maximize2 } from "lucide-react";
+import { FileText, Plus, Save, Upload, Maximize2, Timer } from "lucide-react";
 import { api, type ProductionState, type ScriptSegment } from "../api";
 import { useT } from "../i18n";
 import { ConfirmButton, useApp } from "../components/ui";
 import { liveRun } from "./Storyboard";
+import { TextTiming } from "../components/TextTiming";
 
 const normal = (text: string) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
@@ -23,6 +24,8 @@ export function ScriptDesk({ state, onChanged, onStoryboard }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [importing, setImporting] = useState(saved.length === 0);
+  const [timingOpen, setTimingOpen] = useState(false);
+  const audioId = state.timing?.song_asset_id || state.done?.song?.song_asset_id as string | undefined;
   const running = liveRun(state, app.jobs);
   const shots = state.spec.shots || [];
   const signature = JSON.stringify(saved);
@@ -93,6 +96,7 @@ export function ScriptDesk({ state, onChanged, onStoryboard }: {
       </div></div>}
     {rows.length === 0 && !importing && <p className="muted">{es ? "No hay texto vinculado. El storyboard funciona por sí solo." : "No linked text. The storyboard works on its own."}</p>}
     {rows.length > 0 && <div className="script-toolbar"><span className="small muted">{rows.length} {es ? "fragmentos" : "segments"}</span>
+      <button className="btn sm" disabled={running || busy || !audioId || rows.some(row => !row.text.trim())} onClick={() => setTimingOpen(true)}><Timer size={15} />{es ? "Marcar tiempos escuchando" : "Time while listening"}</button>
       <button className="btn sm" disabled={running || busy || !state.timing?.lines?.length} onClick={align}>{es ? "Tomar tiempos de la letra" : "Use lyric timings"}</button>
       <span className="hint">{es ? "Vincular varios fragmentos a una toma une sus tiempos. Se rechazan solapamientos entre tomas." : "Multiple fragments on one shot use their combined range. Overlapping shot ranges are rejected."}</span></div>}
     <div>{rows.map((row) => {
@@ -117,5 +121,13 @@ export function ScriptDesk({ state, onChanged, onStoryboard }: {
     })}</div>
     <button className="btn" style={{ alignSelf: "start" }} disabled={running || busy} onClick={() => { setRows([...rows, { id: `seg_${Date.now()}`, text: "", start_s: null, end_s: null, shot_key: null }]); setDirty(true); }}><Plus size={15} />{es ? "Añadir fragmento" : "Add segment"}</button>
     {error && <div className="studio-error" role="alert">{error}</div>}
+    {timingOpen && audioId && <TextTiming title={es ? "Temporizar guion o letra" : "Time script or lyrics"}
+      audioId={audioId} duration={Number(state.timing?.duration_s || state.done?.song?.duration_s || 0)}
+      initialRows={rows} draftKey={`script.${state.slug}`} disabled={running} onClose={() => setTimingOpen(false)}
+      onSave={async timed => {
+        const segments = timed.map(row => ({ ...rows.find(source => source.id === row.id)!, start_s: row.start_s, end_s: row.end_s }));
+        const result = await api.setProductionSegments(state.slug, { segments });
+        setRows(result.segments); setDirty(false); onChanged();
+      }} />}
   </section>;
 }

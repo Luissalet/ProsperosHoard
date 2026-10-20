@@ -5259,7 +5259,7 @@
     },
     {
       "name": "studio_time_lyrics",
-      "description": "First-pass karaoke timing: lyrics with [Section] tags (the same text given to studio_compose)\nare timed to the song's bars - a line per bar in rap verses, two per bar in hooks, intros and\nbridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a\nlyrics asset (LRC with timed [Section] markers) for studio_timeline action=\"auto\"\nlyrics_asset_id=..., whose cut density then follows verse/chorus. An estimate from the structure,\nnot vocal detection: re-time by ear in Audio > Lyrics timing before a final render.\nReturns {id, lines, sections: [{label, energy, start_s, end_s}], note}.\n\nKeywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra",
+      "description": "Link supplied lyrics or script to audio. method=\"align\" recognizes heard words on the CPU\n(Whisper large-v3-turbo by default); preview=true returns candidate lines without saving.\nOriginal text is retained, repeated choruses keep their order, and unheard lines remain untimed.\nReview uncertain lines. method=\"manual\" saves lines [{text,time_s,end_s}] in original order,\nincluding {time_s:null,end_s:null} for unfinished lines. Explicit ends retain instrumental gaps.\nGive production=<slug> to link the result to its current song and lyrics, without generating or\nstarting a render. song_asset_id and lyrics must still match that production's current sources.\nAlignment/manual return {id?,lines,timed_lines,total_lines,complete,method,note}.\n\nLegacy default method=\"estimate\": lyrics with [Section] tags (the same text given to studio_compose)\nare timed to the song's bars - a line per bar in rap verses, two per bar in hooks, intros and\nbridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a\nlyrics asset (LRC with timed [Section] markers) for studio_timeline action=\"auto\"\nlyrics_asset_id=..., whose cut density then follows verse/chorus. An estimate from the structure,\nnot vocal detection: re-time by ear in Audio > Lyrics timing before a final render.\nReturns {id, lines, sections: [{label, energy, start_s, end_s}], note}.\n\nKeywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5285,6 +5285,60 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "method": {
+            "default": "estimate",
+            "title": "Method",
+            "type": "string"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lines"
+          },
+          "preview": {
+            "default": false,
+            "title": "Preview",
+            "type": "boolean"
+          },
+          "production": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Production"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Language"
+          },
+          "model": {
+            "default": "large-v3-turbo",
+            "title": "Model",
+            "type": "string"
           },
           "reason": {
             "type": "string",

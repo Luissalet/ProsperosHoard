@@ -912,8 +912,13 @@ export interface CastMember { asset_id: string; name: string; note?: string }
 export interface MotionRef { asset_id: string; start_s: number; prompt: string }
 
 export interface TimedLine { time_s: number; end_s: number | null; text: string; section: string | null }
+export interface TextTimingResult {
+  lines: { text: string; time_s: number | null; end_s: number | null; section?: string | null; needs_review?: boolean }[];
+  timed_lines: number; total_lines: number; complete: boolean; method: string; note?: string;
+}
 
 export interface ProductionTiming {
+  text_timing?: TextTimingResult;
   shots: Record<string, { start_s: number; duration_s: number; section: string | null }[]>;
   sections: { label: string; kind: string | null; start_s?: number; end_s?: number | null; lines: string[] }[];
   duration_s?: number;
@@ -1406,6 +1411,9 @@ export const api = {
     request<{ job: Job }>("POST", `/generation/api/projects/${pid}/compose`, body),
   timeProductionLyrics: (slug: string) =>
     request<{ lyrics_asset_id: string | null; lines: number }>("POST", `/generation/api/productions/${slug}/time-lyrics`),
+  linkProductionLyrics: (slug: string, body: { song_asset_id: string; lyrics: string; method: 'align' | 'manual'; preview?: boolean;
+    lines?: { text: string; time_s: number | null; end_s: number | null; needs_review?: boolean }[] }) =>
+    request<TextTimingResult>("POST", `/generation/api/productions/${slug}/lyrics-timing`, body),
   allAssets: (params: Record<string, string | number | boolean | undefined> = {}) =>
     request<Paged<Asset & { project_name?: string }>>("GET", `/generation/api/assets${q(params)}`),
   setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>

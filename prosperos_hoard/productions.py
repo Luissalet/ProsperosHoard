@@ -2617,7 +2617,7 @@ def shot_timing(data_dir: Path, store: Any, state: dict[str, Any]) -> dict[str, 
                 nxt = sung[i + 1]["time_s"] if i + 1 < len(sung) else None
                 sec = next((x for x in lyr["sections"] if x["start_s"] <= line["time_s"] + 0.06
                             and (x.get("end_s") is None or line["time_s"] < x["end_s"])), None)
-                ends = [v for v in (nxt, sec.get("end_s") if sec else None, total) if v is not None]
+                ends = [v for v in (line.get('end_s'), nxt, sec.get("end_s") if sec else None, total) if v is not None]
                 timed_lines.append({"time_s": round(line["time_s"], 2), "end_s": round(min(ends), 2) if ends else None,
                                     "text": line["text"], "section": sec["label"] if sec else None})
             for sec in lyr["sections"]:
@@ -2628,6 +2628,9 @@ def shot_timing(data_dir: Path, store: Any, state: dict[str, Any]) -> dict[str, 
                                         "end_s": end if end is not None else total, "lines": lines})
             out["lines"] = timed_lines
             out["timed"] = True
+            explicit = lyr.get('text_timing')
+            if explicit:
+                out['text_timing'] = explicit
             return out
         except Exception:  # noqa: BLE001
             pass

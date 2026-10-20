@@ -374,7 +374,7 @@ def lyrics_clips_from_lines(lines: list[dict[str, Any]], song_duration_s: float,
         if start >= song_duration_s:
             break
         nxt = ordered[idx + 1]["time_s"] if idx + 1 < len(ordered) else song_duration_s
-        end = min(song_duration_s, nxt, start + 8.0)
+        end = min(song_duration_s, nxt, float(line.get('end_s') or start + 8.0))
         if end - start < 0.2:
             continue
         clips.append({"text": line["text"].strip()[:300], "start_s": round(start, 3), "end_s": round(end, 3), "karaoke": karaoke})
@@ -393,7 +393,7 @@ def _lines_in_window(lyrics_lines: list[dict[str, Any]], start: float, end: floa
         if not start - _SECTION_EPS_S <= t < end - 0.05:
             continue
         nxt = float(ordered[i + 1]["time_s"]) if i + 1 < len(ordered) else end
-        last = min(end, nxt, t + 8.0)
+        last = min(end, nxt, float(line.get('end_s') or t + 8.0))
         first = max(0.0, t - start)
         if last - start - first < 0.2:
             continue
