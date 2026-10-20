@@ -28,7 +28,7 @@ export function ClipCanvas({ reference, guides, video, label }: {
   useEffect(() => {
     const wanted: ClipNode[] = [
       { id: "reference", type: "clipCard", position: { x: 0, y: 20 }, style: { width: 260 }, data: { source: true, content: reference } },
-      ...guides.map((guide, i): ClipNode => ({ id: guide.id, type: "clipCard", position: { x: 0, y: 420 + i * 360 }, style: { width: 260 }, data: { source: true, content: guide.content } })),
+      ...guides.map((guide, i): ClipNode => ({ id: guide.id, type: "clipCard", position: { x: 0, y: 560 + i * 540 }, style: { width: 260 }, data: { source: true, content: guide.content } })),
       { id: "video", type: "clipCard", position: { x: 370, y: 20 }, style: { width: 640 }, data: { content: video } },
     ];
     setNodes(previous => wanted.map(node => ({ ...node, dragHandle: ".clip-node-title, h2", position: previous.find(old => old.id === node.id)?.position || node.position })));

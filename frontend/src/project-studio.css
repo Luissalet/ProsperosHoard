@@ -1,3 +1,6 @@
+.main { min-width: 0; overflow-x: hidden; }
+.topbar { flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+.studio-tabs { align-self: center; min-height: 36px; }
 .project-dashboard { max-width: 1600px; margin: 0 auto; }
 .project-dashboard-head { display: flex; gap: 20px; align-items: center; padding: 10px 0 26px; border-bottom: 1px solid var(--border); }
 .project-dashboard-cover { position: relative; flex: none; }
