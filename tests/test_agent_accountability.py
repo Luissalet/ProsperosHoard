@@ -206,6 +206,31 @@ def test_an_import_is_undone_by_moving_the_asset_to_the_trash(agent, client):
 
 # ---------------------------------------------------------------- cast and style cards
 
+
+def test_lyric_timing_preview_is_noop_and_link_restores_production(agent):
+    from test_lyrics_sync_api import setup_song
+    state, body = setup_song(agent.store)
+    args = {**body, 'project': state['project_id'], 'production': state['slug']}
+    agent.ok('studio_time_lyrics', {**args, 'preview': True}, session='timing-preview')
+    assert not prod.load_state(agent.store.data_dir, state['slug'])['done'].get('lyrics')
+    preview_undo = agent.undone('timing-preview', confirm=True)
+    assert len(preview_undo['undone']) == 1 and preview_undo['complete']
+    made = agent.ok('studio_time_lyrics', args, session='timing-link')
+    assert prod.load_state(agent.store.data_dir, state['slug'])['done']['lyrics']['lyrics_asset_id'] == made['id']
+    done = agent.undone('timing-link', confirm=True)
+    assert len(done['undone']) == 1 and done['complete']
+    restored = prod.load_state(agent.store.data_dir, state['slug'])
+    assert restored['done'] == state['done'] and restored['spec'] == state['spec']
+
+
+def test_unbound_lyric_timing_creation_can_be_undone(agent):
+    from test_lyrics_sync_api import setup_song
+    state, body = setup_song(agent.store)
+    made = agent.ok('studio_time_lyrics', {**body, 'project': state['project_id']}, session='timing-asset')
+    done = agent.undone('timing-asset', confirm=True)
+    assert len(done['undone']) == 1 and done['complete']
+    assert any(row['id'] == made['id'] for row in agent.store.list_trash())
+
 def test_cast_delete_restore_update_and_groups_are_undone(agent):
     store = agent.store
     p = store.create_project("Cast")

@@ -672,8 +672,20 @@ def studio_import(project: str, path: str, kind: Optional[str] = None) -> dict[s
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Optional[str] = None) -> dict[str, Any]:
-    """First-pass karaoke timing: lyrics with [Section] tags (the same text given to studio_compose)
+def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Optional[str] = None,
+                       method: str = 'estimate', lines: Optional[list[dict[str, Any]]] = None,
+                       preview: bool = False, production: Optional[str] = None,
+                       language: Optional[str] = None, model: str = 'large-v3-turbo') -> dict[str, Any]:
+    """Link supplied lyrics or script to audio. method="align" recognizes heard words on the CPU
+    (Whisper large-v3-turbo by default); preview=true returns candidate lines without saving.
+    Original text is retained, repeated choruses keep their order, and unheard lines remain untimed.
+    Review uncertain lines. method="manual" saves lines [{text,time_s,end_s}] in original order,
+    including {time_s:null,end_s:null} for unfinished lines. Explicit ends retain instrumental gaps.
+    Give production=<slug> to link the result to its current song and lyrics, without generating or
+    starting a render. song_asset_id and lyrics must still match that production's current sources.
+    Alignment/manual return {id?,lines,timed_lines,total_lines,complete,method,note}.
+
+    Legacy default method="estimate": lyrics with [Section] tags (the same text given to studio_compose)
     are timed to the song's bars - a line per bar in rap verses, two per bar in hooks, intros and
     bridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a
     lyrics asset (LRC with timed [Section] markers) for studio_timeline action="auto"
@@ -684,7 +696,8 @@ def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Opti
     Keywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra
     """
     return _call("POST", "/api/agent/studio_time_lyrics", params={"project": project},
-                 json={"song_asset_id": song_asset_id, "lyrics": lyrics, "name": name})
+                 json={"song_asset_id": song_asset_id, "lyrics": lyrics, "name": name, 'method': method,
+                       'lines': lines, 'preview': preview, 'production': production, 'language': language, 'model': model})
 
 
 @tool(_ro(readOnlyHint=True))

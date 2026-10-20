@@ -578,12 +578,32 @@ def undo_production_create(ctx: Any, record: dict, dry_run: bool = False) -> dic
 
 _PRODUCTION = {"capture": capture_production, "track": track_production, "undo": undo_production}
 
+
+def capture_lyric_timing(ctx: Any, args: dict) -> dict:
+    if args.get('preview'):
+        return {'noop': True}
+    return capture_production(ctx, args) if args.get('production') else {'asset_create': True}
+
+
+def track_lyric_timing(args: dict, result: dict, ctx: Any = None) -> dict:
+    if args.get('preview'):
+        return {'objects': [], 'etag': ''}
+    return track_production(args, result, ctx) if args.get('production') else track_asset_create(args, result, ctx)
+
+
+def undo_lyric_timing(ctx: Any, record: dict, dry_run: bool = False) -> dict:
+    before = _before(record)
+    if _noop(before):
+        return {'unchanged': True}
+    return undo_production(ctx, record, dry_run) if before.get('slug') else undo_asset_create(ctx, record, dry_run)
+
 #: tool name -> the hooks to attach (``dataclasses.replace(tool, **HOOKS[name])``)
 HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_create_project": {"track": track_project_create, "undo": undo_project_create},
     "studio_delete_project": {"capture": capture_project_delete, "track": track_project_delete, "undo": undo_project_delete},
     "studio_delete_assets": {"capture": capture_asset_delete, "track": track_asset_delete, "undo": undo_asset_delete},
     "studio_import": {"track": track_asset_create, "undo": undo_asset_create},
+    "studio_time_lyrics": {"capture": capture_lyric_timing, "track": track_lyric_timing, "undo": undo_lyric_timing},
     "studio_trash": {"capture": capture_trash, "track": track_trash, "undo": undo_trash},
     "studio_cast": {"capture": capture_cast, "track": track_cast, "undo": undo_cast},
     "studio_style_cards": {"capture": capture_style_card, "track": track_style_card, "undo": undo_style_card},

@@ -1,0 +1,22 @@
+.text-timing { display: grid; gap: 14px; outline: none; }
+.text-timing:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.text-timing p { margin: 0; line-height: 1.55; }
+.timing-player { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: -18px; z-index: 3; padding: 12px 0; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+.timing-player audio { flex: 1; min-width: 180px; height: 36px; }
+.timing-player label { display: flex; align-items: center; gap: 6px; }
+.timing-actions kbd { font: inherit; opacity: .75; }
+.timing-lines { display: grid; }
+.timing-line { display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px; align-items: center; gap: 10px; padding: 12px 8px; border-bottom: 1px solid var(--border); }
+.timing-line.current { background: var(--accent-soft); }
+.timing-line-text { display: flex; align-items: center; gap: 10px; text-align: left; border: 0; background: none; color: var(--text); line-height: 1.55; padding: 4px; cursor: pointer; min-width: 0; }
+.timing-line-text > span:nth-child(2) { flex: 1; overflow-wrap: anywhere; }
+.timing-line-number { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 20px; }
+.timing-line label { display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
+.timing-line input { width: 100%; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .timing-line { grid-template-columns: 1fr 1fr; }
+  .timing-line-text { grid-column: 1 / -1; flex-wrap: wrap; }
+  .timing-line-text > span:nth-child(2) { flex-basis: 70%; }
+  .timing-player { gap: 8px; }
+  .timing-player audio { flex-basis: 100%; }
+}

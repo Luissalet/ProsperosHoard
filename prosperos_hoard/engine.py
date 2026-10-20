@@ -2536,7 +2536,13 @@ def read_lyrics(store: Store, asset_id: str) -> dict[str, Any]:
     for sec in sections:
         if sec["end_s"] == float("inf"):
             sec["end_s"] = None  # "until the end of the song" - resolved against the song's duration
-    return {"asset_id": asset_id, "text": text, "lines": sung, "sections": sections}
+    from .lyrics_sync import stored_timing
+
+    explicit = stored_timing(asset, text)
+    if explicit:
+        sung = [row for row in explicit['lines'] if row.get('time_s') is not None]
+    return {"asset_id": asset_id, "text": text, "lines": sung, "sections": sections,
+            **({'text_timing': explicit} if explicit else {})}
 
 
 def time_lyrics(store: Store, project_id: str, song_asset_id: str, lyrics: str, name: Optional[str] = None) -> dict[str, Any]:
