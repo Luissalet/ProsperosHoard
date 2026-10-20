@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AudioLines, FileText, Film, Heart, Star, Type, X } from "lucide-react";
 import { api, thumbUrl, type Asset, type Job } from "../api";
+import { closeOpenSlashMenus, dialogOwnsEscape } from "../escapePriority";
 import { useT, type MessageKey } from "../i18n";
 import { assetName, kindName } from "../messages";
 
@@ -157,7 +158,16 @@ export function useDialog(ref: { current: HTMLElement | null }, onClose: () => v
       if (modalStack.at(-1) !== me) return;
       const ignore = behavior.current.ignoreSelector;
       if (event.key !== 'Tab' && ignore && event.composedPath().some(node => node instanceof HTMLElement && node.closest(ignore))) return;
-      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close.current(); }
+      if (event.key === "Escape") {
+        // Slash owns Escape while open, even if focus left the textarea.
+        if (!dialogOwnsEscape(ref.current)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          closeOpenSlashMenus();
+          return;
+        }
+        event.preventDefault(); event.stopImmediatePropagation(); close.current();
+      }
       if (behavior.current.trapFocus === false) return;
       if (event.key !== "Tab" || !ref.current) return;
       const companions = behavior.current.companionSelector;
