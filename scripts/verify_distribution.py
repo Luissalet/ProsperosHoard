@@ -23,6 +23,7 @@ def main():
     target, wheel = args.installed.resolve(), args.wheel.resolve()
     if args.receipt.exists():
         raise FileExistsError('Use a fresh receipt name')
+    args.receipt.parent.mkdir(parents=True, exist_ok=True)
     assert not (Path.cwd() / 'prosperos_hoard').exists(), 'Run from outside the source tree'
     sys.path.insert(0, str(target))
     from prosperos_hoard.resources import generation_ui, app_icon, editing_engine, installed
@@ -53,12 +54,12 @@ def main():
             cold_events.append(event)
     sys.addaudithook(audit)
     # Retain synthetic receipts/state for review; never remove a live worker cwd.
-    with nullcontext(tempfile.mkdtemp(prefix='qa-installed929-',dir=target.parent)) as temporary:
+    with nullcontext(tempfile.mkdtemp(prefix='qa-installed929-',dir=args.receipt.parent)) as temporary:
         private = Path(temporary)
         os.environ.update({'HOARD_HOME':str(private/'hoard-home'), 'HOARD_EVENTS':'0',
             'HOARD_HUB_AUTOSTART':'0', 'PROSPERO_GPU_LEASE':'0', 'HOARD_COPILOT':'0'})
         cold = Studio(private/'not-created', port=64839)
-        assert not cold.root.exists() and len(cold.tools) == 168 and not cold_events
+        assert not cold.root.exists() and len(cold.tools) == 170 and not cold_events
         assert 'prosperos_hoard.api' not in sys.modules and 'prosperos_hoard.editing.main' not in sys.modules
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
@@ -89,7 +90,7 @@ server.main()
                 async with ClientSession(reader,writer) as session:
                     await session.initialize()
                     actual = (await session.list_tools()).tools
-                    assert len(actual) == 168 and {tool.name for tool in actual} == set(cold.tools)
+                    assert len(actual) == 170 and {tool.name for tool in actual} == set(cold.tools)
         asyncio.run(discover())
         assert not (private/'cold-mcp').exists()
         assert json.loads(mcp_audit.read_text(encoding='utf-8')) == {'events':[],'native_imports':[]}
@@ -130,7 +131,7 @@ server.main()
                 assert response.status_code == 200, (url, response.status_code, response.text[:200])
                 return response
             assert all(not m['enabled'] for m in get('/api/studio/modules').json()['modules'])
-            assert len(get('/api/agent/tools').json()['tools']) == 168
+            assert len(get('/api/agent/tools').json()['tools']) == 170
             Links().feed(get('/').text)
             for module in ('generation', 'editing'):
                 response = client.put('/api/studio/modules/'+module,json={'enabled':True,'automatic':False})
@@ -177,8 +178,8 @@ server.main()
                 assert Path(location).resolve().is_relative_to(target), (name,location)
         receipt = {'status':'PASS','wheel':wheel.name,'wheel_sha256':hashlib.sha256(wheel.read_bytes()).hexdigest(),
             'wheel_files':len(names),'wheel_bytes':wheel.stat().st_size,'resource_manifest_files':len(manifest['files']),
-            'installed':str(target),'synthetic_qa_retained':str(private),'cold_tools':168,'cold_sqlite_or_process_events':[],
-            'installed_stdio_mcp_cold_tools':168,
+            'installed':str(target),'synthetic_qa_retained':str(private),'cold_tools':170,'cold_sqlite_or_process_events':[],
+            'installed_stdio_mcp_cold_tools':170,
             'both_modules_on_off':True,'checked_assets':sorted(set(checked)), 'native_tool_counts':tools,
             'installed_launcher_default_and_explicit_profile':True,
             'native_project':native_receipt,'gpu_model_render_browser_network_used':False,
