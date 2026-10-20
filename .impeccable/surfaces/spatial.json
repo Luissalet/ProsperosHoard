@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-20T10:46:40.469Z",
+  "generatedAt": "2026-10-20T11:01:53.6916406Z",
   "title": "Design System: Prospero — Image composition",
   "extensions": {
     "scope": {
@@ -47,11 +47,11 @@
     "typographyMeta": {
       "heading": {
         "displayName": "Inherited serif page heading",
-        "purpose": "Shared page-head specificity retains 30px and the hoard serif stack, led by Cinzel."
+        "purpose": "Shared page-head retains 30px; final captures and font audit confirm loaded Cinzel 700, one desktop line and two mobile lines without clipping."
       },
       "body": {
         "displayName": "Working sans",
-        "purpose": "Current studio.css declares Source Sans 3; root Space Grotesk description remains historical."
+        "purpose": "Final captures and font audit confirm loaded Source Sans 3 400/700 and body family Source Sans 3; root Space Grotesk description remains historical."
       },
       "box": {
         "displayName": "Literal content label",
@@ -141,7 +141,7 @@
       ],
       "canvasResize": "Retains item coordinates; invalid boxes require correction before save.",
       "referenceImage": "Retained asset ID; cover within item rectangle; no media embedding in JSON.",
-      "undoRedo": "Local document history including completed drags; saved-source identity is separate.",
+      "undoRedo": "Local document history including completed drags; saved-source identity is separate. Undo and Redo clear compiled output when replacing the document; recompilation displays instructions for the restored state.",
       "actions": [
         "Ver instrucciones",
         "Formato MOSS",
@@ -164,29 +164,45 @@
     },
     "evidence": {
       "directory": "D:/LocalAI/research-inbox/spatial953",
+      "documentationErratum": {
+        "capturedUiSourceCommit": "b4b047b",
+        "laterFunctionalDelta": "After submission-1 CHANGES: Undo and Redo clear compiled output when replacing the document. Captured layout remains applicable.",
+        "reason": "Earlier captures had fallback heading lettering before complete standard studio-asset preparation; final captures supersede their typography evidence.",
+        "assetPreparationReported": "build_studio_assets.py supplied four WOFF2 files and licenses as ignored generated assets.",
+        "modelScopeChanged": false
+      },
+      "fontAudit": {
+        "file": "font-audit-final.json",
+        "loaded": ["Cinzel 700", "Source Sans 3 400", "Source Sans 3 700"],
+        "bodyFamily": "Source Sans 3, sans-serif",
+        "failedRequests": [],
+        "httpErrorResponses": [],
+        "fontUrlsHttp200": "Verified by parent; separate from font-audit fields.",
+        "unusedUnloadedFaces": "Not loading failures."
+      },
       "openedCaptures": [
         {
-          "file": "spatial953-desktop.png",
+          "file": "spatial953-final-desktop.png",
           "viewport": "1440x1000",
           "region": "Internal content pane at top"
         },
         {
-          "file": "spatial953-mobile.png",
+          "file": "spatial953-final-mobile.png",
           "viewport": "390x844",
           "region": "Internal content pane at top"
         },
         {
-          "file": "spatial953-mobile-inspector.png",
+          "file": "spatial953-final-mobile-inspector.png",
           "viewport": "390x844",
           "region": "Internal content pane scrolled to inspector"
         },
         {
-          "file": "spatial953-desktop-actions.png",
+          "file": "spatial953-final-desktop-actions.png",
           "viewport": "1440x1000",
           "region": "Internal content pane scrolled to lower inspector, actions and compiled output"
         },
         {
-          "file": "spatial953-mobile-actions.png",
+          "file": "spatial953-final-mobile-actions.png",
           "viewport": "390x844",
           "region": "Internal content pane scrolled to actions and compiled output"
         }
@@ -195,7 +211,7 @@
         "file": "finish-review953.txt",
         "disposition": "ship",
         "materialFixes": [],
-        "scope": "Visual surface across five supplied captures only; excludes FaustusCopilot, execution and model quality."
+        "scope": "Visual surface across five final captures at source b4b047b; supersedes fallback-font evidence and earlier verdict. Excludes FaustusCopilot, execution and model quality."
       },
       "nativeReceipt": "qa-native-results.json",
       "browserReceipt": "qa-browser-results.json",
@@ -215,6 +231,13 @@
         "generationButton": "native demo only"
       },
       "suppliedTests": {
+        "fullSuiteBeforeHistoryCorrection": {
+          "file": "suite-r2.log",
+          "sourceCommit": "b4b047b",
+          "passed": 1076,
+          "skipped": 4,
+          "durationSeconds": 669.90
+        },
         "spatial": {
           "file": "tests-r1.log",
           "passed": 8
@@ -226,13 +249,28 @@
         "frontendBuild": {
           "file": "frontend-build-r2.log",
           "result": "pass"
+        },
+        "historyOutputCorrection": {
+          "trigger": "Independent submission-1 CHANGES: compiled instructions remained stale after Undo or Redo.",
+          "sourceChange": "Both history handlers now setOutput(\"\") when changing the document.",
+          "buildFile": "frontend-build-r4.log",
+          "buildResult": "pass",
+          "browser": "Real Edge",
+          "browserScript": "qa-history-output.py",
+          "receipts": ["history-output-r2.json", "history-output-r2.log"],
+          "compileUndoInvalidates": true,
+          "compileRedoInvalidates": true,
+          "recompiledResultExact": true,
+          "jsErrors": [],
+          "reviewStatus": "Author-side correction evidence; no new independent functional approval claimed.",
+          "scope": "Later correction, separate from the prior full suite and the visual finish review; captured layout is unchanged."
         }
       },
       "detector": {
         "file": "detector953.json",
         "findings": []
       },
-      "documenterActivity": "Read source, receipts, test logs and finish review; opened all five supplied captures. No apps, servers, models, live chat, new captures or test reruns."
+      "documenterActivity": "Initial source/receipt/log pass followed by documentation/evidence errata: read fresh full finish review and font audit, opened all five final captures, then inspected the later Undo/Redo source correction, build log, full-suite log and Edge history-output receipts. The documenter changed only the two scoped documentation files; no apps, servers, models, live chat, new captures or test reruns."
     },
     "limits": [
       "Dark-theme viewport evidence only; light theme inherited from source.",
