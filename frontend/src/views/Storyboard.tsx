@@ -317,7 +317,11 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
   const cast = state.spec.cast || [];
   const [motionStart, setMotionStart] = useState(shot?.motion_ref ? clock(shot.motion_ref.start_s) : "0:00");
   const [motionPick, setMotionPick] = useState<null | "library" | "link">(null);
-  const [best, setBest] = useState(Math.max(0, variants.indexOf(entry.best || "")));
+  const [framePick, setFramePick] = useState<{ id: string; baseline?: string } | null>(null);
+  const selectedFrame = framePick && framePick.baseline === entry.best && variants.includes(framePick.id)
+    ? framePick.id : entry.best || variants[0];
+  const best = Math.max(0, variants.indexOf(selectedFrame || ""));
+  const setBest = (index: number) => setFramePick({ id: variants[index], baseline: entry.best });
   const [regenerate, setRegenerate] = useState(false);
   const [locked, setLocked] = useState(!!shot?.locked);
   const [continueFrom, setContinueFrom] = useState(shot?.continue_from || "");
@@ -687,7 +691,6 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
           onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => setPicking(null)} />
       )}
 </>;
-  const selectedFrame = variants[best] || entry.best;
   const clipItems = (state.done?.clips?.items || {}) as Record<string, string>;
   const output = shot && (clipItems[shot.key] || Object.entries(clipItems).find(([key]) => key.startsWith(`${shot.key}v`))?.[1]);
   const frozen = running || busy || nodeActive || (locked && !!shot?.locked);
