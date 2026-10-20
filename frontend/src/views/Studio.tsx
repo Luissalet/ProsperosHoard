@@ -71,6 +71,10 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
   const [completed, setCompleted] = useState<Asset | null>(null);
   const [completedJob, setCompletedJob] = useState<string | null>(typeof draft.completedJob === "string" ? draft.completedJob : null);
   const [latestJob, setLatestJob] = useState<Job | null>(null);
+  const [recoveringJob, setRecoveringJob] = useState(() => Array.isArray(draft.jobs) && draft.jobs.some(id => typeof id === "string"));
+  const [jobReadError, setJobReadError] = useState("");
+  const [jobRetry, setJobRetry] = useState(0);
+  const [guideSlots, setGuideSlots] = useState({ drive: false, end: false });
   const [selected, setSelected] = useState<string | null>(null);
   const [compare, setCompare] = useState(false);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
@@ -108,17 +112,17 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
       try {
         const job = await api.job(lastJobId);
         if (!alive) return;
-        setLatestJob(job);
+        setLatestJob(job); setRecoveringJob(false); setJobReadError("");
         if (job.state === "done") {
           const id = job.outputs?.asset_ids?.[0] || job.outputs?.asset_id;
           if (id) { const asset = await api.asset(id); if (alive) { setCompleted(asset); if (draft.completedJob !== job.id || !draft.selected) setSelected(asset.id); setCompletedJob(job.id); } }
           app.bump();
         } else if (!["failed", "cancelled"].includes(job.state)) timer = setTimeout(poll, 1800);
-      } catch (err) { if (alive) { setError((err as Error).message); timer = setTimeout(poll, 5000); } }
+      } catch (err) { if (alive) { setJobReadError((err as Error).message); timer = setTimeout(poll, 5000); } }
     };
     poll();
     return () => { alive = false; clearTimeout(timer); };
-  }, [lastJobId]);
+  }, [lastJobId, jobRetry]);
   const inFlight = !!latestJob && ["queued", "waiting_gpu", "running"].includes(latestJob.state);
   const jobLabel = latestJob ? ({ queued: es ? "En cola" : "Queued", waiting_gpu: es ? "Esperando GPU" : "Waiting for GPU", running: es ? "Generando clip" : "Generating clip", done: latestJob.outputs?.asset_ids?.[0] || latestJob.outputs?.asset_id ? (es ? "Clip generado" : "Clip generated") : (es ? "Terminado sin resultado" : "Finished without output"), failed: es ? "La generación ha fallado" : "Generation failed", cancelled: es ? "Cancelado" : "Cancelled" })[latestJob.state] : "";
   const take = items.find((a) => a.id === selected) || null;
@@ -138,7 +142,7 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
     finally { setBusy(false); }
   };
   const queue = async () => {
-    if (!start || !motion.trim() || busy || inFlight) return;
+    if (!hydrated || recoveringJob || !start || !motion.trim() || busy || inFlight) return;
     setBusy(true); setError("");
     try {
       const prompt = [motion.trim(), CAMERAS.find((c) => c[0] === camera)?.[2], "Preserve the subject's identity, clothing and background throughout the shot."].join(" ");
@@ -150,7 +154,7 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
         ? await api.generate(pid, { prompt, template: "wan22_flf2v", reference_asset_id: start.id, end_asset_id: end.id,
             template_params: { seconds }, seed: body.seed, count: 1 })
         : await api.animate(start.id, body);
-      setLatestJob(result.job);
+      setLatestJob(result.job); setCompleted(null); setJobReadError("");
       setJobIds((ids) => [result.job.id, ...ids].slice(0, 24));
       app.refreshJobs();
       app.toast(es ? "Toma en cola. Puedes seguir preparando referencias." : "Take queued. You can keep preparing references.", "ok");
@@ -174,6 +178,10 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
         <label className="btn sm ghost upload-label"><Upload size={14} />{es ? "Subir" : "Upload"}<input type="file" hidden accept={key === "drive" ? "video/*" : "image/*"} onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0], key); e.target.value = ""; }} /></label></div>
     </div>
   );
+  const recoveryPanel = (recoveringJob || jobReadError) && <div className="clip-run-state" role="status" aria-live="polite">
+    <strong>{recoveringJob ? (es ? "Recuperando el estado del trabajo…" : "Recovering job status…") : (es ? "No se pudo actualizar el trabajo" : "Could not update job status")}</strong>
+    {jobReadError && <><span>{jobReadError}</span><button className="btn sm" onClick={() => setJobRetry(value => value + 1)}>{es ? "Reintentar estado" : "Retry status"}</button></>}
+  </div>;
   const statusPanel = latestJob && <div className={`clip-run-state ${latestJob.state}`} role="status" aria-live="polite">
     <strong>{jobLabel}{latestJob.state === "running" ? ` · ${Math.round(latestJob.progress * 100)}%` : ""}</strong>
     {inFlight && <Progress value={latestJob.progress} waiting={latestJob.state !== "running"} />}
@@ -206,7 +214,7 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
       
       <label className="field">{es ? "¿Qué hace el sujeto?" : "What does the subject do?"}
         <textarea rows={4} value={motion} placeholder={es ? "Da dos pasos, gira y abre los brazos. El abrigo se mueve con el giro…" : "Takes two steps, turns and opens their arms. The coat moves with the turn…"} onChange={(e) => setMotion(e.target.value)} /></label>
-      <button className="btn primary generate-clip" disabled={!start || !motion.trim() || busy || inFlight || (!!end && !!drive)} onClick={queue}><Film size={17} />{busy ? (es ? "Preparando…" : "Preparing…") : (inFlight ? jobLabel : (es ? "Generar clip" : "Generate clip"))}<ArrowRight size={17} /></button>
+      <button className="btn primary generate-clip" disabled={!hydrated || recoveringJob || !start || !motion.trim() || busy || inFlight || (!!end && !!drive)} onClick={queue}><Film size={17} />{recoveringJob ? (es ? "Recuperando…" : "Recovering…") : busy ? (es ? "Preparando…" : "Preparing…") : (inFlight ? jobLabel : (es ? "Generar clip" : "Generate clip"))}<ArrowRight size={17} /></button>
       <div className="motion-suggestions">{[["Bailar", "Dance", "The subject takes two quick steps, spins fully and opens both arms; the clothing responds naturally to the continuous movement."], ["Caminar", "Walk", "The subject walks forward continuously, taking several natural steps, with visible arm and leg movement."]].map(([esLabel, enLabel, text]) =>
         <button key={enLabel} className="btn xs" onClick={() => setMotion(text)}>{es ? esLabel : enLabel}</button>)}</div>
       <div className="shot-controls"><label className="field">{es ? "Cámara" : "Camera"}<select value={camera} onChange={(e) => setCamera(e.target.value)}>{CAMERAS.map((c, i) => <option key={c[0]} value={c[0]}>{es ? c[1] : CAMERA_EN[i]}</option>)}</select></label>
@@ -227,12 +235,12 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
       <span className="hint">{es ? "Referencias → vídeo. Arrastra los nodos para organizar el lienzo." : "References → video. Drag nodes to arrange the canvas."}</span>
       <button className="btn sm" onClick={() => app.go("overview")}>{es ? "Volver al proyecto" : "Back to project"}</button></div>
     <Suspense fallback={<p>{t("loading")}</p>}><ClipCanvas label={es ? "Lienzo de generación de clips" : "Clip generation canvas"}
-      reference={<><h2>{es ? "Referencia" : "Reference"}</h2>{slot("start", start, es ? "Imagen de partida" : "Start image")}<div className="clip-add-guides"><button className="btn sm ghost" onClick={onImage}>{es ? "Crear la imagen con varias referencias" : "Create an image with multiple references"}<ArrowRight size={14} /></button><button className="btn sm" onClick={() => setPicker("drive")}><Plus size={14} />{es ? "Guía de movimiento" : "Motion guide"}</button><button className="btn sm" onClick={() => setPicker("end")}><Plus size={14} />{es ? "Fotograma final" : "End frame"}</button></div></>}
+      reference={<><h2>{es ? "Referencia" : "Reference"}</h2>{slot("start", start, es ? "Imagen de partida" : "Start image")}<div className="clip-add-guides"><button className="btn sm ghost" onClick={onImage}>{es ? "Crear la imagen con varias referencias" : "Create an image with multiple references"}<ArrowRight size={14} /></button><button className="btn sm" onClick={() => setGuideSlots(slots => ({ ...slots, drive: true }))}><Plus size={14} />{es ? "Guía de movimiento" : "Motion guide"}</button><button className="btn sm" onClick={() => setGuideSlots(slots => ({ ...slots, end: true }))}><Plus size={14} />{es ? "Fotograma final" : "End frame"}</button></div></>}
       guides={[
-        ...(drive ? [{ id: "motion-guide", content: <><h2>{es ? "Movimiento" : "Motion"}</h2>{slot("drive", drive, es ? "Vídeo de movimiento" : "Motion video")}<label className="field clip-guide-start">{es ? "Desde el segundo" : "Start at second"}<input type="number" min={0} step={0.1} value={driveStart} onChange={event => setDriveStart(Number(event.target.value))} /></label></> }] : []),
-        ...(end ? [{ id: "end-frame", content: <><h2>{es ? "Fotograma final" : "End frame"}</h2>{slot("end", end, es ? "Imagen de llegada" : "End image")}</> }] : []),
+        ...(drive || guideSlots.drive ? [{ id: "motion-guide", content: <><h2>{es ? "Movimiento" : "Motion"}</h2>{slot("drive", drive, es ? "Vídeo de movimiento" : "Motion video")}<label className="field clip-guide-start">{es ? "Desde el segundo" : "Start at second"}<input type="number" min={0} step={0.1} value={driveStart} onChange={event => setDriveStart(Number(event.target.value))} /></label></> }] : []),
+        ...(end || guideSlots.end ? [{ id: "end-frame", content: <><h2>{es ? "Fotograma final" : "End frame"}</h2>{slot("end", end, es ? "Imagen de llegada" : "End image")}</> }] : []),
       ]}
-      video={<><div className="clip-node-title"><Film size={17} /><strong>{es ? "Vídeo" : "Video"}</strong><span>{drive ? "Wan Animate" : end ? "Wan 14B · FLF" : engine === "wan" ? "Wan 5B" : engine === "svd" ? "SVD" : "Wan 14B"}</span></div>{statusPanel}{preview}{composer}</>} /></Suspense>
+        video={<><div className="clip-node-title"><Film size={17} /><strong>{es ? "Vídeo" : "Video"}</strong><span>{drive ? "Wan Animate" : end ? "Wan 14B · FLF" : engine === "wan" ? "Wan 5B" : engine === "svd" ? "SVD" : "Wan 14B"}</span></div>{recoveryPanel}{statusPanel}{preview}{composer}</>} /></Suspense>
     <section className="take-desk clip-take-history">
       {recent.error && <div className="studio-error" role="alert">{recent.error}<button className="btn" onClick={recent.reload}>{es ? "Reintentar" : "Retry"}</button></div>}
       {items.length > 0 && <><h2 className="take-heading">{es ? "Tomas del proyecto" : "Project takes"}<span className="muted small">{items.length}</span></h2>
