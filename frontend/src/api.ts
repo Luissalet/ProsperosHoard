@@ -4,6 +4,10 @@ import { errorText } from "./messages";
 
 export type Kind = "image" | "video" | "audio" | "lyrics" | "font" | "layout";
 
+export interface SpatialItem { id: string; kind: "object" | "text"; caption: string; text?: string; box: [number, number, number, number]; reference_asset_id?: string; fill?: string; colour?: string }
+export interface SpatialDocument { format: "prospero.composition/1"; width: number; height: number; caption: string; items: SpatialItem[] }
+export interface SpatialSource { id: string; project_id: string; name: string; parent_id: string | null; document: SpatialDocument }
+
 export interface Recipe {
   operation?: string;
   backend?: string;
@@ -1256,6 +1260,12 @@ export const api = {
   createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/generation/api/projects/${pid}/lyrics`, { text, name }),
 
   templates: () => request<{ items: DesignTemplate[] }>("GET", "/generation/api/design/templates"),
+  spatialList: (project: string, offset = 0) => request<Paged<Asset>>("POST", "/generation/api/spatial", { action: "list", project, offset }),
+  spatialGet: (asset_id: string) => request<SpatialSource>("POST", "/generation/api/spatial", { action: "get", asset_id }),
+  spatialSave: (project: string, name: string, document: SpatialDocument, parent_id: string | null) =>
+    request<SpatialSource>("POST", "/generation/api/spatial", { action: "save", project, name, document, parent_id }),
+  spatialCompile: (document: SpatialDocument, target: string) => request<{ prompt: string; notes: string[] }>("POST", "/generation/api/spatial", { action: "compile", document, target }),
+  spatialPreview: (asset_id: string) => request<{ source_id: string; asset: Asset }>("POST", "/generation/api/spatial", { action: "preview", asset_id }),
   preview: (template: string, fields: Record<string, string>, variant: string | null) =>
     request<Blob>("POST", "/generation/api/design/preview", { template, fields, variant }),
   design: (pid: string, template: string, fields: Record<string, string>, variant: string | null, print: boolean) =>

@@ -459,8 +459,12 @@ def studio_generate_image(
     characters: Optional[list[str]] = None, use_adapters: bool = True, prefer_adapter: bool = False,
     model: Optional[str] = None, camera: Optional[dict[str, str]] = None, end_asset_id: Optional[str] = None,
     audio_asset_id: Optional[str] = None, audio_start_s: Optional[float] = None, audio_seconds: Optional[float] = None,
+    composition_asset_id: Optional[str] = None,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
+    composition_asset_id takes an immutable layout saved with studio_spatial: its boxes, exact texts,
+    canvas dimensions and ordered references join the prompt, and the generated recipe retains the
+    source id. Inspect the output: a placement request is not guaranteed model adherence.
     Mention cast members as @Name ("@Iris Volt on a rooftop"): their prompt fragment and negatives are
     inlined, and use_character_reference=true also uses the first mentioned character's canonical image
     as the img2img reference. Mentioned places and objects (studio_cast kind location/prop) with a
@@ -520,6 +524,7 @@ def studio_generate_image(
         "checkpoint": checkpoint, "consistent": consistent, "characters": characters,
         "use_adapters": use_adapters, "prefer_adapter": prefer_adapter, "camera": camera, "end_asset_id": end_asset_id,
         "audio_asset_id": audio_asset_id, "audio_start_s": audio_start_s, "audio_seconds": audio_seconds,
+        "composition_asset_id": composition_asset_id,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)
@@ -695,6 +700,25 @@ def studio_analyze_audio(asset_id: str) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------- design
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_spatial(action: str = "get", project: Optional[str] = None, asset_id: Optional[str] = None,
+                   document: Optional[dict[str, Any]] = None, name: str = "Composición",
+                   target: str = "caption", parent_id: Optional[str] = None, offset: int = 0) -> dict[str, Any]:
+    """Edit image composition sources without an LLM/GPU. action list(project), get(asset_id),
+    save(project,document,name,parent_id?), compile(document or asset_id,target=caption|moss),
+    preview(asset_id) retains a diagrammatic PNG. Saves create immutable layout assets, preserving
+    the previous source. list returns has_more/next_offset; pass the next offset for older sources.
+    document {format:'prospero.composition/1',width,height,caption,items:[
+    {id,kind:'object'|'text',caption,text?,box:[x,y,width,height],reference_asset_id?,fill?,colour?}]}.
+    Pixels start at top left. Object IDs survive edits; all boxes must fit the canvas. get returns
+    full editable JSON; export that source before sharing a flattened image. MOSS compilation uses
+    centered yxyx boxes, but does not install its model or encode reference-image conditioning.
+    Generate from a saved source with studio_generate_image(composition_asset_id=...,prompt=...).
+    Keywords: spatial composition, image layout, bounding boxes, text placement, composicion espacial, cajas, disposicion, texto en imagen
+    """
+    return _call("POST", "/api/agent/studio_spatial", json={"action": action, "project": project,
+                 "asset_id": asset_id, "document": document, "name": name, "target": target, "parent_id": parent_id, "offset": offset})
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_design(

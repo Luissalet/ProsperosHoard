@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Route } from './ui';
+import type { SpatialDocument } from '../api';
 import '../copilot.css';
 
 const faustusMark = new URL('../assets/faustus-mark.svg', import.meta.url).href;
@@ -21,7 +22,13 @@ export default function FaustusCopilot(props: Props) {
   const [error, setError] = useState('');
   const container = useRef<HTMLDivElement>(null);
   const current = useRef(props);
+  const spatial = useRef<{ source_id: string | null; selected_id: string; document: SpatialDocument } | null>(null);
   current.current = props;
+  useEffect(() => {
+    const receive = (event: Event) => { spatial.current = (event as CustomEvent).detail; };
+    window.addEventListener('prospero:spatial-context', receive);
+    return () => window.removeEventListener('prospero:spatial-context', receive);
+  }, []);
   useEffect(() => {
     const show = () => setOpen(true);
     window.addEventListener('prospero:copilot-open', show);
@@ -65,10 +72,11 @@ export default function FaustusCopilot(props: Props) {
           const {projectId, route, assetId, lang} = current.current;
           const project = projectId ? await api.project(projectId) : null;
           const selection = window.getSelection()?.toString();
+          const composition = spatial.current;
           return {origin:{app_id:info.app_id,app_name:info.app_name,data_space_id:info.data_space_id,surface:'editor',tool_server_id:info.tool_server_id},
             ...(project ? {project:{external_project_id:project.id,title:project.name}} : {}),
-            active_objects: assetId ? [{kind:'asset',object_id:assetId}] : route.arg ? [{kind:route.section,object_id:route.arg}] : [],
-            selection:selection ? {kind:'text',text:selection} : null,
+            active_objects: composition?.source_id ? [{kind:'asset',object_id:composition.source_id}] : assetId ? [{kind:'asset',object_id:assetId}] : route.arg ? [{kind:route.section,object_id:route.arg}] : [],
+            selection: composition ? {kind:'text',text:JSON.stringify({source_id:composition.source_id,selected_id:composition.selected_id,composition:composition.document})} : selection ? {kind:'text',text:selection} : null,
             view:{section:route.section,object_id:route.arg,locale:lang}};
         };
         const key = 'prospero-faustus-' + info.data_space_id + '-' + (props.projectId || 'app');
