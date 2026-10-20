@@ -960,3 +960,8 @@ The vendored copy is maintained by HoardLink’s sync script. Windows validation
 `studio_outpaint` expands an existing image onto a larger canvas and creates a traced mask, then submits the existing inpaint job through the normal queue. The original asset remains unchanged; generated pixels, including VAE reconstruction, must be reviewed. Use a multiple-of-eight size no smaller than the source, up to 4096 px, and normalized anchors. The library lightbox offers +50% expansion after entering an edit prompt.
 
 The seventh TTS adapter connects to an already-running local [Yovoice](https://github.com/leemysw/yovoice) audio.cpp service. Set `YOVOICE_URL` to a loopback HTTP origin with port, `YOVOICE_MODEL` to an installed model ID and `YOVOICE_API_TOKEN` (32+ characters) or `YOVOICE_TOKEN_FILE`. `studio_voices` checks real runtime/model readiness. Synthesis uses PUT job IDs, polling, cancellation and WAV validation. Options differ by model family; the server catalogue is authoritative. No model is downloaded automatically and CPU/Vulkan/CUDA support depends on that runtime and model. Model-weight licenses are separate. HTTP protocol tests do not prove audio quality on an installed model.
+
+
+## Native connections
+
+Former MCP and Hub identities can use the incorporated cold compatibility adapters without the retired repositories. See [native connections](docs/NATIVE-CONNECTIONS.md). Modules still require explicit activation.
