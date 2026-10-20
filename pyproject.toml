@@ -27,7 +27,7 @@ dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
 ]
-editing-analysis = ["faster-whisper==1.2.1", "opencv-python-headless==4.13.0.92"]
+editing-analysis = ["faster-whisper==1.2.1", "av==18.1.0", "opencv-python-headless==4.13.0.92"]
 
 [project.scripts]
 prosperos-hoard = "prosperos_hoard.__main__:main"
