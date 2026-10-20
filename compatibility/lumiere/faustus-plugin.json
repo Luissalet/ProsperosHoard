@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "id": "lumiere",
+  "name": "Lumiere's Hoard \u00b7 Prospero's Hoard",
+  "purpose": "A local video editor: media library with proxies, a multitrack timeline (cuts, ripple edits, speed and speed curves, nested sequences, shape masks, transitions, titles, picture-in-picture, keyframes, effects, multicam synced by sound), text-based editing on word-level transcripts with speaker separation, automatic tools (silence and filler-word removal, scene cuts, vertical reframing that follows faces, captions, cuts on the beat, highlights of long videos read by the local model, background music picking, b-roll suggestions, loudness matching, stabilization), project templates with slots, edit plans written from plain language, translated subtitles, several formats in one export and frame-exact ffmpeg renders with GPU encoding, for people and for assistants over MCP. Editable HTML motion compositions with exact-time PNG review, source revisions and silent H.264 export into the ordinary timeline.",
+  "capabilities": [
+    "video-editing",
+    "multitrack-timeline",
+    "media-library",
+    "proxies",
+    "ripple-edit",
+    "speed-ramp",
+    "speed-curves",
+    "nested-sequences",
+    "shape-masks",
+    "transitions",
+    "titles",
+    "picture-in-picture",
+    "keyframes",
+    "color-effects",
+    "audio-effects",
+    "text-based-editing",
+    "transcription",
+    "word-timestamps",
+    "filler-word-removal",
+    "silence-removal",
+    "jump-cuts",
+    "scene-detection",
+    "auto-reframe",
+    "vertical-video",
+    "captions",
+    "burned-subtitles",
+    "srt-export",
+    "beat-sync",
+    "highlights",
+    "shorts-from-long-video",
+    "loudness-normalization",
+    "audio-ducking",
+    "stabilization",
+    "freeze-frame",
+    "natural-language-edit-plans",
+    "undo-history",
+    "gpu-encoding",
+    "lossless-cut",
+    "gif-export",
+    "audio-export",
+    "edl-export",
+    "frame-snapshot",
+    "timeline-contact-sheet",
+    "timecoded-review",
+    "portable-review-report",
+    "multicam",
+    "audio-sync",
+    "speaker-diarization",
+    "project-templates",
+    "music-picker",
+    "b-roll-suggestions",
+    "subtitle-translation",
+    "multi-format-export",
+    "webgl-preview",
+    "face-detection",
+    "model-highlights",
+    "timeline-import",
+    "fcp7-xml-import",
+    "edl-import",
+    "family-job-events",
+    "hub-notifications",
+    "html-motion-compositions",
+    "html-motion-starters",
+    "exact-time-html-frames",
+    "editable-motion-revisions",
+    "html-to-video",
+    "incorporated-compositor",
+    "incorporated-editing-engine",
+    "saved-native-compositions",
+    "native-source-snapshots",
+    "html-motion-storyboard",
+    "multi-frame-visual-review"
+  ],
+  "placeholders": [
+    "COMPAT_DIR",
+    "PROSPERO_DIR",
+    "OWNER_URL",
+    "APP_URL",
+    "TOKEN_FILE",
+    "DATA_DIR",
+    "PYTHON"
+  ],
+  "defaults": {
+    "PROSPERO_DIR": "{COMPAT_DIR}/../..",
+    "OWNER_URL": "http://127.0.0.1:8815",
+    "APP_URL": "{OWNER_URL}/compat/editing",
+    "TOKEN_FILE": "{PROSPERO_DIR}/data/mcp-token",
+    "DATA_DIR": "{PROSPERO_DIR}/data/editing",
+    "PYTHON": "{PROSPERO_DIR}/.venv/Scripts/python.exe"
+  },
+  "app": {
+    "url_default": "{APP_URL}",
+    "ui_url": null,
+    "health": {
+      "path": "/api/health",
+      "expect": {
+        "service": "prosperos-hoard"
+      }
+    }
+  },
+  "mcp": {
+    "transport": "stdio",
+    "command": "{PYTHON}",
+    "args": [
+      "-I",
+      "-m",
+      "prosperos_hoard.compat_mcp",
+      "--module",
+      "editing"
+    ],
+    "env": {
+      "PROSPERO_URL": "{OWNER_URL}",
+      "PROSPERO_TOKEN_FILE": "{TOKEN_FILE}"
+    }
+  },
+  "x-family": {
+    "standalone": false,
+    "agent_contract": true,
+    "absorbed_by": {
+      "id": "prospero",
+      "module": "editing",
+      "standalone": false,
+      "repository": "https://github.com/Luissalet/ProsperosHoard"
+    }
+  },
+  "notes": "Capabilities and native data belong to Prospero's Hoard. Modules are enabled explicitly in the owner."
+}
