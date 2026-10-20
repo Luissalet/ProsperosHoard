@@ -29,6 +29,28 @@ def test_unheard_line_is_retained_without_fabricated_timestamps():
     assert out['lines'][1]['time_s'] is None and out['lines'][1]['end_s'] is None
 
 
+def test_imperfect_first_chorus_does_not_take_the_cleaner_second_occurrence():
+    chorus = ['Silver lights fill the sky', 'Rising sparks reflect the glow', 'Dancers turn beneath the stars']
+    bridge = 'Quiet streets surround an empty theater tonight'
+    text = '\n'.join([*chorus, bridge, *chorus])
+    phrases = [(3, chorus[0]), (6, 'rising spark reflects a glow'),
+               (9, 'dancers turn under some stars'), (15, bridge), (25, 'unexpected applause'),
+               (30, chorus[0]), (33, chorus[1]), (36, chorus[2])]
+    transcript = heard([(word, at + i * .25, at + i * .25 + .2)
+                        for at, phrase in phrases for i, word in enumerate(phrase.lower().split())])
+    rows = sync.align_words(text, transcript, 40)['lines']
+    assert rows[0]['time_s'] == 3 and rows[3]['time_s'] == 15
+    assert [row['time_s'] for row in rows[4:]] == [30, 33, 36]
+    assert rows[1]['time_s'] is None  # uncertain words stay available for manual timing
+
+
+def test_matching_words_separated_by_a_long_gap_never_form_one_verse():
+    words = [('silver', 3, 3.2), ('lights', 3.2, 3.5), ('fill', 4, 4.2),
+             ('the', 65, 65.2), ('sky', 65.2, 65.5)]
+    row = sync.align_words('Silver lights fill the sky', heard(words), 70)['lines'][0]
+    assert row['time_s'] is None and row['end_s'] is None and row['needs_review']
+
+
 def test_empty_or_invalid_word_times_never_become_alignment():
     for transcript in ({}, heard([('hello', math.nan, 2), ('world', 3, 2)])):
         assert sync.align_words('Hello world', transcript, 5)['timed_lines'] == 0
