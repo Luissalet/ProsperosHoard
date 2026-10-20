@@ -1,0 +1,21 @@
+.spatial-editor { margin-top:24px; }
+.spatial-controls { border:0; padding:0; margin:0; min-width:0; }
+.spatial-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin:18px 0; }
+.spatial-toolbar .field { margin:0; min-width:180px; }
+.spatial-workbench { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:24px; align-items:start; }
+.spatial-artboard { position:relative; width:100%; background:#fff; overflow:hidden; isolation:isolate; }
+.spatial-box { position:absolute; display:flex; align-items:center; justify-content:center; padding:8px; border:1px solid #798b98; border-radius:0; white-space:pre-wrap; overflow:hidden; touch-action:none; cursor:move; font:inherit; line-height:1.25; }
+.spatial-box.selected { outline:3px solid var(--accent); outline-offset:-3px; }
+.spatial-box:focus-visible { outline:3px solid var(--accent); outline-offset:-3px; }
+.spatial-box img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; }
+.spatial-box span { position:relative; overflow-wrap:anywhere; }
+.spatial-box img + span { background:#fffffff0; color:#172c3e; padding:4px; }
+.spatial-empty { position:absolute; top:42%; width:100%; text-align:center; padding:24px; color:#435667; }
+.spatial-numbers { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.spatial-numbers input { width:100%; font-variant-numeric:tabular-nums; }
+.spatial-inspector { min-width:0; }
+.spatial-import { position:relative; cursor:pointer; }
+.spatial-import input { position:absolute; inset:0; opacity:0; width:100%; cursor:pointer; }
+.spatial-import:focus-within { outline:2px solid var(--accent); outline-offset:3px; }
+.spatial-source { overflow-wrap:anywhere; }
+@media(max-width:900px) { .spatial-workbench { grid-template-columns:minmax(0,1fr); } .spatial-inspector { margin-top:8px; } }

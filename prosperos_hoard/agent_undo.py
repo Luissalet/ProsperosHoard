@@ -604,6 +604,7 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
 #: (studio_cancel_job, the services), the ones that send to other apps (production_export_lumiere, cast_import_character) and
 #: the ones that redo work already made (regenerate, promote, continue, QA).
 DRAFT_SAFE = frozenset({
+    "studio_spatial",
     "studio_explainer",
     "studio_create_project", "studio_import", "studio_generate_image", "studio_edit_image", "studio_outpaint", "studio_animate",
     "studio_compose", "studio_voice", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_render",

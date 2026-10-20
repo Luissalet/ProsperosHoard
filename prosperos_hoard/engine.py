@@ -2043,6 +2043,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         end_asset_id=params.get("end_asset_id"), use_vocals=params.get("use_vocals", True) is not False,
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
+                      **({"composition_asset_id": params["composition_asset_id"]} if params.get("composition_asset_id") else {}),
                       "image_engine": engine_name or "custom"},
         name=params.get("prompt") or params["positive_prompt"],
     )
