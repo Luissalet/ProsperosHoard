@@ -120,16 +120,30 @@ Current CSS declares Source Sans 3 for the working sans and Cinzel for headings;
 the older root description of Space Grotesk is not current surface evidence.
 This pass does not repair root metadata or close inherited Studio comp gates.
 
-The documenter opened all five captures in
-`D:/LocalAI/research-inbox/spatial953/`: `spatial953-desktop.png`,
-`spatial953-mobile.png`, `spatial953-mobile-inspector.png`,
-`spatial953-desktop-actions.png` and `spatial953-mobile-actions.png`.
+The documenter opened all five final captures in
+`D:/LocalAI/research-inbox/spatial953/`: `spatial953-final-desktop.png`,
+`spatial953-final-mobile.png`, `spatial953-final-mobile-inspector.png`,
+`spatial953-final-desktop-actions.png` and `spatial953-final-mobile-actions.png`.
 Desktop viewports are 1440×1000; mobile viewports are 390×844. The inspector and
 action captures show named scrolled regions of the internal content pane,
 not full-page coverage. `finish-review953.txt` returns **ship**, with no material
 fixes within these five captured views. It explicitly excludes FaustusCopilot,
 functional execution, model quality and whole-product certification. Empty,
 loading, error and focus states were not part of that captured sample.
+
+This documentation/evidence erratum follows source commit `b4b047b` and the
+subsequent history-output correction described below. The standard
+`build_studio_assets.py` preparation supplied four
+WOFF2 files and their licenses as ignored generated assets. Earlier QA captures
+had fallback heading lettering because that preparation was incomplete; they
+remain historical files and do not establish final typography. The fresh full
+`finish-review953.txt` supersedes that earlier evidence and verdict with **ship**
+for the five final views. `font-audit-final.json` confirms Cinzel 700 and Source
+Sans 3 400/700 loaded, body family Source Sans 3, zero failed requests and zero
+HTTP error responses. The parent also verified font URLs returned HTTP 200.
+Unused faces marked unloaded are not loading failures. The correction changes
+history-output invalidation, without changing the captured layout or demo-only
+model scope; the final captures and scoped visual ship remain applicable.
 
 The supplied `qa-native-results.json` records retained sources, an edited copy,
 compilation, schematic CPU preview and a generated recipe retaining the source
@@ -138,6 +152,15 @@ keyboard movement, drag/undo, export/reopen, a context snapshot, no browser erro
 and no desktop/mobile overflow. Generation used the native demo backend solely
 to verify transport. Supplied logs report eight spatial tests, then 40 area tests
 passing and frontend build passing; the one-time detector result is `[]`.
+`suite-r2.log` records the full suite on `b4b047b`: 1,076 passed and four skipped
+in 669.90 seconds. After independent CHANGES on submission 1, Undo and Redo now
+clear compiled output whenever they replace the document, preventing instructions
+from the previous document from remaining visible. The later
+`frontend-build-r4.log` passes, and the real Edge acceptance receipt
+`history-output-r2.json` / `.log` reports compile→undo and compile→redo both
+invalidating the panel, exact recompilation and zero JavaScript errors. These
+are author-side checks of the correction, separate from the earlier full suite
+and the visual finish review; no new independent functional approval is claimed.
 This documentation pass inspected source, receipts, logs and captures; it ran
 no apps, models, live chat or tests. There is no real-model adherence or artistic
 quality result, nor a live Faustus conversation check. No new shipping raster
@@ -187,9 +210,11 @@ shared theme accent for application actions, focus and box selection.
 
 ## Typography
 
-The page heading uses the inherited serif stack through the shared page-head
-rule. Body, labels, canvas text and controls inherit the current Source Sans 3
-working type. Canvas text has the tighter line-height in the frontmatter,
+The final captures show loaded Cinzel 700 through the shared page-head rule;
+the heading fits one desktop line and two mobile lines without clipping. Body,
+labels, canvas text and controls use the loaded Source Sans 3 working type,
+corroborated by `font-audit-final.json`. Canvas text has the tighter line-height
+in the frontmatter,
 preserves explicit line breaks and wraps long tokens within its box. Numeric
 fields use tabular numerals. The surface adds no display font or new type scale.
 Literal canvas text is editable content, not typographic proof of what an image
@@ -255,6 +280,8 @@ keyboard arrows move by one pixel and Shift+arrow by ten, clamped to the canvas.
 Selection is also available from the inspector's element selector. Shared local
 undo/redo includes document edits and completed drags. Empty documents display
 an invitation to add an object or text; this state is source-inspected only.
+Undo and Redo also clear compiled output when changing the document; compile
+again to display instructions for the restored state.
 
 ### Inspector and references
 
