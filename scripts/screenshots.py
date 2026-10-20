@@ -72,22 +72,26 @@ def main() -> int:
     try:
         for _ in range(240):
             try:
-                if _json(f"{base}/api/health")["status"] == "ok":
+                if _json(f"{base}/api/health").get("service") == "prosperos-hoard":
                     break
             except OSError:
                 time.sleep(0.5)
         else:
             raise SystemExit("the demo app did not start; see " + str(data / "app.log"))
-        pid = _json(f"{base}/api/projects")["items"][0]["id"]
+        request = urllib.request.Request(f"{base}/api/studio/modules/generation", data=b'{"enabled":true,"automatic":false}',
+                                         headers={"Content-Type": "application/json"}, method="PUT")
+        with urllib.request.urlopen(request, timeout=60) as response:
+            response.read()
+        pid = _json(f"{base}/generation/api/projects")["items"][0]["id"]
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(channel="msedge", headless=True)
             ctx = browser.new_context(viewport={"width": 1440, "height": 900}, device_scale_factor=1, locale="en-US",
                                       color_scheme="dark")
             page = ctx.new_page()
 
             # 1. Generate: @mentions expanded into the exact final prompt
-            page.goto(f"{base}/#/p/{pid}/generate")
+            page.goto(f"{base}/generation/#/p/{pid}/generate")
             page.get_by_role("button", name="Image", exact=True).click()
             page.wait_for_selector(".results-grid .tile")
             page.fill("textarea", "@Iris Volt and @Mika Frost backstage before the show, confetti in the air")
@@ -97,14 +101,14 @@ def main() -> int:
             page.screenshot(path=str(OUT_DIR / "01-generate.png"))
 
             # 2. Timeline: the beat-synced cut with lyrics and the rendered preview
-            page.goto(f"{base}/#/p/{pid}/timeline")
+            page.goto(f"{base}/generation/#/p/{pid}/timeline")
             page.wait_for_selector(".clip-block")
             page.locator(".clip-block").nth(6).click()
             page.wait_for_timeout(1500)
             page.screenshot(path=str(OUT_DIR / "02-timeline.png"))
 
             # 3. Library lightbox on the photocard set, with its recipe
-            page.goto(f"{base}/#/p/{pid}/library")
+            page.goto(f"{base}/generation/#/p/{pid}/library")
             page.wait_for_selector(".masonry .tile")
             page.fill("#library-search", "photocard set")
             page.wait_for_timeout(900)
@@ -115,7 +119,7 @@ def main() -> int:
             page.click(".lightbox-tools button:has-text('Close')")
 
             # 4. Audio: tempo, beats and A/B/A sections of the demo song
-            page.goto(f"{base}/#/p/{pid}/audio")
+            page.goto(f"{base}/generation/#/p/{pid}/audio")
             page.wait_for_selector(".wave-wrap canvas")
             page.wait_for_timeout(1500)
             page.screenshot(path=str(OUT_DIR / "04-audio.png"))

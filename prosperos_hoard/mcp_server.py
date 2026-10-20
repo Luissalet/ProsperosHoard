@@ -1124,6 +1124,28 @@ def studio_production_create(name: str, spec: dict[str, Any], settings: Optional
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def studio_explainer(action: str = "get", production: Optional[str] = None, name: str = "Vídeo explicativo", topic: str = "",
+                     sources: Optional[list[dict[str, Any]]] = None, scenes: Optional[list[dict[str, Any]]] = None,
+                     options: Optional[dict[str, Any]] = None, voice: Optional[dict[str, Any]] = None,
+                     settings: Optional[dict[str, Any]] = None, project: Optional[str] = None, run: bool = False,
+                     base_revision: Optional[int] = None, bundle: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Create, read, edit or import a source-linked explanatory video using native scenes, voice and montage.
+
+    sources: [{id,title,text,reference}], with retained explicit references. scenes: [{id,title,narration,body,
+    source_ids,asset_id?,graphic?}]. Reorder by supplying the scene list. Edits reuse unchanged sentence audio
+    and scene pages. A changed source marks dependent scenes for review without imposing an approval gate.
+    options uses the narrated production's language/voice/music/timeline. run starts/resumes native jobs;
+    false saves the editable project. Read the resulting production with studio_production.
+    action=import accepts bundle from the production's explainer.json export; base_revision protects edits
+    made from an older read. Source references are retained text, not implicitly fetched documents.
+    Keywords: explainer, storyboard, sources, scenes, explanatory video, vídeo explicativo, fuentes, escenas, guion
+    """
+    return _call("POST", "/api/agent/studio_explainer", json={"action": action, "production": production, "name": name,
+                 "topic": topic, "sources": sources, "scenes": scenes, "options": options or {}, "voice": voice,
+                 "settings": settings, "project": project, "run": run, "base_revision": base_revision, "bundle": bundle})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = None, name: Optional[str] = None,
                         options: Optional[dict[str, Any]] = None, settings: Optional[dict[str, Any]] = None,
                         count: int = 1, project: Optional[str] = None) -> dict[str, Any]:

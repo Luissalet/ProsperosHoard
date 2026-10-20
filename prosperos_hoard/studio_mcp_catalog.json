@@ -3387,6 +3387,169 @@
       }
     },
     {
+      "name": "studio_explainer",
+      "description": "Create, read, edit or import a source-linked explanatory video using native scenes, voice and montage.\n\nsources: [{id,title,text,reference}], with retained explicit references. scenes: [{id,title,narration,body,\nsource_ids,asset_id?,graphic?}]. Reorder by supplying the scene list. Edits reuse unchanged sentence audio\nand scene pages. A changed source marks dependent scenes for review without imposing an approval gate.\noptions uses the narrated production's language/voice/music/timeline. run starts/resumes native jobs;\nfalse saves the editable project. Read the resulting production with studio_production.\naction=import accepts bundle from the production's explainer.json export; base_revision protects edits\nmade from an older read. Source references are retained text, not implicitly fetched documents.\nKeywords: explainer, storyboard, sources, scenes, explanatory video, vídeo explicativo, fuentes, escenas, guion\n",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "default": "get",
+            "title": "Action",
+            "type": "string"
+          },
+          "production": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Production"
+          },
+          "name": {
+            "default": "Vídeo explicativo",
+            "title": "Name",
+            "type": "string"
+          },
+          "topic": {
+            "default": "",
+            "title": "Topic",
+            "type": "string"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sources"
+          },
+          "scenes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scenes"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Voice"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Settings"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project"
+          },
+          "run": {
+            "default": false,
+            "title": "Run",
+            "type": "boolean"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Revision"
+          },
+          "bundle": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bundle"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "title": "studio_explainerArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "studio_short_create",
       "description": "Narrated short from a topic or a script: voice-over, captions, music, pictures / crear un short narrado.\n\nGive a topic (the family's language model writes the script: hook, 5-9 segments, title, description,\nhashtags) or your own script (plain text, or {\"title\", \"segments\": [{\"text\", \"visual\", \"query\"}]}).\nThe production voices it, times every word, picks the pictures (stock footage from Pexels/Pixabay when a\nkey is set, else generated stills; `visuals.source` auto|stock|generate|mix), mixes a music bed that ducks\nunder the voice (-14 LUFS), burns word-highlighted captions and renders. options (all optional):\n{\"language\": \"es\"|\"en\"|..., \"duration_s\": 45, \"tone\": \"...\", \"seed\": 0, \"engine\": \"auto\",\n\"continuity_notes\": [\"Keep the recurring narrator dry and curious\"], \"use_project_memory\": true\n(reuse creative decisions from up to three earlier shorts in the same project),\n\"voice\": {\"voice_id\": \"voice_...\"} (a voice-studio voice) or {\"backend\": \"piper\", \"voice_id\": \"es_ES-davefx-medium\", \"speed\": 1.05},\n\"visuals\": {\"source\": \"auto\", \"shot_s\": 3, \"clips\": 0 (stills to animate with Wan), \"look\": \"...\", \"stock_kind\": \"video\"|\"image\"},\n\"music\": {\"mode\": \"none\"|\"compose\"|\"asset\"|\"library\", \"tags\": \"...\", \"asset_id\": \"...\", \"volume_db\": -16, \"duck\": \"normal\"},\n\"captions\": {\"style\": \"bold\"|\"default\"|\"horror\"|\"none\", \"max_words\": 3},\n\"timeline\": {\"aspects\": [\"9:16\"], \"qualities\": [\"preview\"], \"transitions\": \"cut\"|\"crossfade\", \"finishing\": {...}}}.\nsettings: {\"script_review\": true} pauses after the script (read it, change it with studio_production_script,\nthen studio_production_continue). count 2-8 makes variants (other seeds: other footage and script).\nPoll with studio_production; when done it holds the render ids and `publish` (title, description,\nhashtags and the stock credits to paste).\n\nKeywords: short video, tiktok, reels, youtube shorts, faceless video, narrated video, topic to video, voice over,\nsubtitles, video corto, short narrado, guion, locucion, subtitulos, video vertical\n",
       "inputSchema": {

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T09:30:19Z",
+  "title": "Design System: Prospero — Explainers",
+  "extensions": {
+    "scope": {
+      "surface": "explainers",
+      "mode": "Operate",
+      "task": 961,
+      "document": "docs/design/explainers.md",
+      "inherits": "DESIGN.md",
+      "visualAuthority": "Inherited production workbench; scoped local extension",
+      "targets": [
+        "frontend/src/views/Explainer.tsx",
+        "frontend/src/views/Shorts.tsx",
+        "frontend/src/views/Productions.tsx"
+      ],
+      "rootCompGatesChanged": false,
+      "rootMetadataRepaired": false
+    },
+    "typographyMeta": {
+      "heading": { "displayName": "Inherited serif card heading", "purpose": "Scenes and sources heading; current studio.css declares Cinzel." },
+      "body": { "displayName": "Current working sans", "purpose": "Current studio.css declares Source Sans 3; this surface record does not refresh the older root typography description." },
+      "label": { "displayName": "Field label", "purpose": "Explicit bilingual labels for editable values." },
+      "button": { "displayName": "Compact action", "purpose": "Shared production actions." }
+    },
+    "shadows": [
+      { "name": "resting-panel", "value": "none", "purpose": "Flat shared editor card; thin dividers carry structure." },
+      { "name": "field-focus", "value": "0 0 0 3px var(--accent-soft)", "purpose": "Existing field focus ring alongside the magenta border." }
+    ],
+    "motion": [
+      { "name": "button-feedback", "value": "background 0.12s, border-color 0.12s, transform 0.05s", "purpose": "Inherited shared button feedback; active translates down 1px." },
+      { "name": "form-entrance", "value": "none", "purpose": "No added animation of scene form contents. Existing job-status progress remains in the production header." }
+    ],
+    "breakpoints": [
+      { "name": "shared-mobile", "value": "700px", "purpose": "Voice grid becomes one column; inherited shell uses Tools trigger and wraps header/pipeline." }
+    ],
+    "behavior": {
+      "entry": "New explainer adds an explanatory-mode entry beside existing video and short actions.",
+      "creationDefaults": { "aspect": "16:9", "music": "none" },
+      "sceneFields": ["title", "narration", "body", "asset_id", "source_ids", "source_reviewed"],
+      "sourceFields": ["title", "reference", "text"],
+      "sourceDisclosureInitiallyOpen": false,
+      "sceneDisclosuresInitiallyOpenWhen": "scene count < 4",
+      "voiceSpeed": { "min": 0.5, "max": 2, "step": 0.05 },
+      "imageCatalogueLimit": 200,
+      "lastSceneDeletionDisabled": true,
+      "boundaryMovesDisabled": true,
+      "localDraftRetainedWhenNewRevisionArrives": true,
+      "saveIncludesBaseRevision": true,
+      "unchangedVoiceOmittedFromEdit": true,
+      "dirtyExport": "Save first; download editable JSON only after successful save.",
+      "srtVisibleWhen": "Narration and report are done.",
+      "messages": { "apiError": "alert", "newerRevisionWithDirtyDraft": "alert", "changedSourceSceneIds": "status" },
+      "catalogueFailure": "Caught without a dedicated retry message in this component."
+    },
+    "evidence": {
+      "directory": "D:/LocalAI/research-inbox/expansiones-fusiones-20261020",
+      "openedCaptures": [
+        { "file": "explainer961-desktop.png", "viewport": "1440x1000", "region": "Internal content pane at top" },
+        { "file": "explainer961-mobile.png", "viewport": "390x844", "region": "Internal content pane at top" },
+        { "file": "explainer961-desktop-editor.png", "viewport": "1440x1000", "region": "Internal content pane scrolled to editor" },
+        { "file": "explainer961-mobile-editor.png", "viewport": "390x844", "region": "Internal content pane scrolled to editor" }
+      ],
+      "review": { "file": "finish-review961.txt", "disposition": "ship", "materialFixes": [] },
+      "nativeReceipt": "qa961-native-results.json",
+      "browserReceipt": "qa961-browser-results.json",
+      "nativeReported": { "mcpTools": 169, "renderDurationSeconds": 70.019, "unchangedPagesRetained": true, "oldSentenceAssetsRetained": true, "browserPendingHistoricalValue": true },
+      "browserReported": { "draftExport": true, "reopenScene": true, "nativeProduceButton": true, "errors": [], "desktopOverflow": false, "mobileOverflow": false },
+      "authorReportedAreaTestsPassed": 49,
+      "detectorFile": "detector961.json",
+      "suppliedDetectorFindings": [],
+      "documenterActivity": "Source, supplied receipts and four captures inspected; no apps, test reruns or new captures."
+    },
+    "limits": [
+      "Synthetic three-scene acceptance with local Piper CPU; no scientific-accuracy claim.",
+      "LLM planning quality and universal production reliability untested.",
+      "Word timings in the supplied voice run were estimated.",
+      "No comprehensive concurrent-state, all-theme or accessibility certification.",
+      "Dark viewport evidence; light theme remains inherited source behavior.",
+      "Scoped ship disposition does not close old Studio comp gates.",
+      "Separate later browser receipt does not rewrite historical native browser_pending."
+    ]
+  },
+  "components": [
+    {
+      "name": "Save scenes",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shared primary action; disabled when clean or busy.",
+      "html": "<button class=\"ds-save\">Guardar escenas</button>",
+      "css": ".ds-save{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:var(--accent-ink);font:600 13px var(--font,sans-serif);white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-save:hover{background:var(--accent-2);border-color:var(--accent-2)}.ds-save:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-save:active{transform:translateY(1px)}.ds-save:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Save and produce",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Shared secondary action; saves and starts production, disabled when busy or running.",
+      "html": "<button class=\"ds-produce\">Guardar y producir</button>",
+      "css": ".ds-produce{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font:500 13px var(--font,sans-serif);white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-produce:hover{background:var(--surface-2);border-color:var(--border-strong)}.ds-produce:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-produce:active{transform:translateY(1px)}.ds-produce:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Narration field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Labelled, vertically resizable narration control; on-screen text remains a separate field.",
+      "html": "<label class=\"ds-field\">Narración<textarea rows=\"4\">Este ejemplo utiliza datos inventados para explicar un proceso.</textarea></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:var(--text-2);font:12.5px var(--font,sans-serif)}.ds-field textarea{min-width:0;max-width:100%;min-height:70px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);color:var(--text);font:14px/1.5 var(--font,sans-serif);resize:vertical;caret-color:var(--accent)}.ds-field textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.ds-field textarea::selection{background:var(--accent);color:var(--accent-ink)}"
+    },
+    {
+      "name": "Scene and source panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat shared card with the inherited serif heading and compact explanation.",
+      "html": "<section class=\"ds-panel\" aria-label=\"Vídeo explicativo\"><h2>Escenas y fuentes</h2><p>Cada escena conserva su narración, figura y fuentes. Al corregirla se reutilizan las voces y páginas que no cambian.</p></section>",
+      "css": ".ds-panel{display:flex;flex-direction:column;gap:12px;min-width:0;padding:18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:none;font:14px/1.45 var(--font,sans-serif)}.ds-panel h2{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-family:Cinzel,serif;font-size:15px;font-weight:600;letter-spacing:-.005em}.ds-panel p{font-size:12px;color:var(--muted)}"
+    },
+    {
+      "name": "Scene disclosure",
+      "kind": "custom",
+      "description": "Native disclosure with ordered scene title; open by default for fewer than four scenes.",
+      "html": "<details class=\"ds-scene\" open><summary>1. Un almacén sintético</summary><label class=\"ds-scene-field\">Título de la escena<input value=\"Un almacén sintético\"></label></details>",
+      "css": ".ds-scene{color:var(--text);font:14px/1.45 var(--font,sans-serif)}.ds-scene summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-scene-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:var(--text-2);font-size:12.5px}.ds-scene-field input{min-width:0;max-width:100%;padding:7px 10px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);color:var(--text);font:14px var(--font,sans-serif);caret-color:var(--accent)}.ds-scene-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}"
+    },
+    {
+      "name": "Scene source association",
+      "kind": "custom",
+      "description": "Native fieldset/legend and source checkbox; separate source-reviewed acknowledgement appears for associated scenes.",
+      "html": "<fieldset class=\"ds-sources\"><legend>Fuentes de esta escena</legend><label><input type=\"checkbox\" checked>Datos sintéticos del ejercicio</label></fieldset>",
+      "css": ".ds-sources{min-width:0;color:var(--text);font:14px/1.45 var(--font,sans-serif)}.ds-sources label{display:flex;align-items:center;gap:10px}.ds-sources input{accent-color:var(--accent);width:15px;height:15px}.ds-sources input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Shot Review Bench",
+    "overview": "This is the built Explainers surface for task #961, an **Operate** extension of Prospero's existing production workbench. Production identity, pipeline and current job action precede the scene editor. The editor groups narration, on-screen text, a library figure and source associations so one scene can be corrected and produced again while unchanged page and sentence-audio assets are reused.\n\nThe surface inherits the plum ground, magenta actions, dragon-and-wand identity and shared cards, fields and buttons. It does not establish a replacement visual world. `PRODUCT.md` and root `DESIGN.md` remain incumbent context; this scoped record does not close the old Studio comp gates or repair root metadata. Source is authoritative for the current cascade: `studio.css` now declares Source Sans 3 body type and Cinzel headings, both imported by `App.tsx`; the older root document's Space Grotesk body description is not repeated as built truth here.",
+    "keyCharacteristics": [
+      "Production state stays above editable scene content.",
+      "Native disclosures keep sources and repeated scenes manageable.",
+      "Explicit save, produce and editable-project export actions retain the working context.",
+      "Responsive shared controls preserve the same scene fields at narrow widths."
+    ],
+    "rules": [
+      { "name": "The Inherited Accent Rule", "body": "Use the shared action and focus variables for this editor; source checkboxes and native field focus already use them.", "section": "colors" },
+      { "name": "The Working Copy Rule", "body": "Preserve explicit field labels and short action names in Spanish and English; narration and on-screen copy remain separately editable.", "section": "typography" },
+      { "name": "The Scene Identity Rule", "body": "Preserve scene/source IDs while editing and moving existing content; use returned revisions and retained assets as the evidence for selective reproduction.", "section": "components" }
+    ],
+    "dos": [
+      "Do keep production state ahead of the scene editor and preserve existing short/video entry points.",
+      "Do retain the shared theme roles, native disclosures, labelled fields and wrapping action rows.",
+      "Do preserve local edits when a newer revision appears and show the conflict warning.",
+      "Do save a dirty draft before exporting its editable project.",
+      "Do verify selective reproduction with unchanged page and sentence-audio asset identities."
+    ],
+    "donts": [
+      "Don't promote this surface composition into a global Studio template.",
+      "Don't add form entrance motion or a replacement visual identity to this scoped editor.",
+      "Don't describe the synthetic render as proof of LLM planning, scientific accuracy or universal reliability.",
+      "Don't treat these viewport captures or the scoped ship disposition as closure of inherited Studio comp gates."
+    ]
+  }
+}

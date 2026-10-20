@@ -929,6 +929,7 @@ export interface SongChange {
 }
 
 export interface ProductionView extends ProductionSummary {
+  explainer?: ExplainerProject;
   stages?: Record<string, "done" | "partial" | "pending">;
   title?: string;
   topic?: string | null;
@@ -960,6 +961,10 @@ export interface ShortScript {
   source?: string;
   segments: ShortSegment[];
 }
+
+export interface ExplainerSource { id: string; title: string; text: string; reference: string }
+export interface ExplainerScene { id: string; title: string; narration: string; body: string; source_ids: string[]; source_reviewed?: boolean; asset_id?: string; graphic?: Record<string, unknown> }
+export interface ExplainerProject { production: string; revision: number; sources: ExplainerSource[]; scenes: ExplainerScene[]; review_needed?: string[] }
 
 export interface ShortShot { key: string; segment: number; index: number; start_s: number; duration_s: number }
 
@@ -1444,6 +1449,7 @@ export const api = {
   createShort: (body: { name?: string; topic?: string; script?: unknown; options?: Record<string, unknown>;
                         settings?: Record<string, unknown>; count?: number; project?: string }) =>
     request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/generation/api/shorts", body),
+  explainer: (body: Record<string, unknown>) => request<{ production: ProductionView; explainer: ExplainerProject; job?: Job }>("POST", "/generation/api/explainers", body),
   shortScript: (slug: string, script?: unknown, run = true) =>
     request<{ production?: ProductionView; job?: Job; script?: ShortScript }>("PUT", `/generation/api/productions/${slug}/script`, { production: slug, script, run }),
   stockStatus: () => request<StockStatus>("GET", "/generation/api/backend/stock"),
