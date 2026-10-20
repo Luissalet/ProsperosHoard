@@ -68,6 +68,26 @@ def test_alignment_preview_never_writes_and_preserves_missing_text(client, monke
     assert app.state.store.list_assets(state['project_id'], kind='lyrics')['items'] == []
 
 
+def test_continue_keeps_saved_partial_timing_instead_of_estimating_it_again(client, monkeypatch):
+    c, app, _ = client
+    store = app.state.store
+    state, body = setup_song(store)
+    response = c.post(f"/api/productions/{state['slug']}/lyrics-timing", json=body)
+    assert response.status_code == 200 and response.json()['complete'] is False
+    saved = prod.load_state(store.data_dir, state['slug'])
+    saved['stages'] = ['lyrics']
+    prod.save_state(store.data_dir, saved)
+    def unexpected_estimate(*args, **kwargs):
+        pytest.fail('Continuing must not replace explicitly saved partial timings with an estimate.')
+    monkeypatch.setattr(engine, 'time_lyrics', unexpected_estimate)
+    assert prod.Run(store, None, state['slug'], lambda *args: None).run()['status'] == 'done'
+    continued = prod.load_state(store.data_dir, state['slug'])['done']['lyrics']
+    assert continued['lyrics_asset_id'] == response.json()['id']
+    assert continued['timing_complete'] is False
+    rows = engine.read_lyrics(store, continued['lyrics_asset_id'])['text_timing']['lines']
+    assert rows[0]['end_s'] == 4.25 and rows[1]['time_s'] is None and rows[2]['time_s'] == 12.5
+
+
 def test_changed_source_and_overlaps_rejected_without_state_write(client):
     c, app, _ = client
     state, body = setup_song(app.state.store)
