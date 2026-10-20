@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-20T09:30:19Z",
+  "generatedAt": "2026-10-20T09:50:37Z",
   "title": "Design System: Prospero — Explainers",
   "extensions": {
     "scope": {
@@ -49,8 +49,14 @@
       "localDraftRetainedWhenNewRevisionArrives": true,
       "saveIncludesBaseRevision": true,
       "unchangedVoiceOmittedFromEdit": true,
+      "voicePayloadSentWhen": "Only after an explicit local voice-field edit, tracked separately from scene/source edits.",
+      "externalVoiceRefresh": "Voice ID and speed synchronize while no local voice edit is pending, including with a text-only draft. Explicit local voice edits are retained until successful save.",
+      "textOnlySavePreservesExternalVoice": "Voice is omitted from the edit request; no stale control-to-server comparison creates a voice edit.",
       "dirtyExport": "Save first; download editable JSON only after successful save.",
+      "savePendingControls": "Borderless fieldset disables descendant form controls while busy to prevent typing from being replaced by the saved response; controls re-enable when the request settles. Native disclosure summaries and links are not disabled by fieldset semantics.",
+      "savePendingEditableExport": "Editable-project export prevents its click while busy; no download starts from that click.",
       "srtVisibleWhen": "Narration and report are done.",
+      "srtUnavailableResponse": "Controlled HTTP 404 when the file is absent or narration/report are not done; unknown export extensions also return 404. Invalidated subtitles are not served as current.",
       "messages": { "apiError": "alert", "newerRevisionWithDirtyDraft": "alert", "changedSourceSceneIds": "status" },
       "catalogueFailure": "Caught without a dedicated retry message in this component."
     },
@@ -70,7 +76,27 @@
       "authorReportedAreaTestsPassed": 49,
       "detectorFile": "detector961.json",
       "suppliedDetectorFindings": [],
-      "documenterActivity": "Source, supplied receipts and four captures inspected; no apps, test reruns or new captures."
+      "documenterActivity": "Source, supplied receipts and four captures inspected; no apps, test reruns or new captures.",
+      "functionalCorrection": {
+        "commit": "933cafa5a0871784321431355f437d05c4a64cf7",
+        "packet": "submit961-r2.txt",
+        "sourceInspected": ["frontend/src/views/Explainer.tsx", "prosperos_hoard/api.py", "tests/test_explainers.py"],
+        "priorIndependentFindings": ["External voice refresh overwritten by text-only save", "Unavailable SRT export returned 500 due to missing HTTPException import"],
+        "authorReportedAreaTestsPassed": 24,
+        "authorReportedFrontendBuild": "pass",
+        "nativeVoiceRegressionReceipt": "qa961-voice-r2-results.json",
+        "nativeVoiceRegressionReported": { "externalVoiceRetainedAfterTextEdit": true, "explicitLocalVoiceEditSaved": true, "invalidatedSrt": 404, "unknownExtension": 404 },
+        "independentSubmission2Receipt": "review-r961/r2/verify.json",
+        "independentSubmission2Reported": { "externalSpeedAndUiSpeed": 1.3, "textOnlySaveRetainsSpeed": 1.3, "explicitLocalVoiceSave": true, "localVoiceConflictRetainsDraft": true, "draftSrt": 404, "currentSrt": 200, "invalidatedSrt": 404, "unknownExtension": 404, "desktopOverflow": false, "mobileOverflow": false, "jsErrors": [] },
+        "reviewerReportedAreaTestsPassed": 24,
+        "reviewerReportedOwnChecksPassed": 3,
+        "reviewerReportedFrontendBuild": "pass",
+        "subsequentWorkingTreeDelta": "After 933cafa: temporary disabled fieldset while busy and separate editable-export click guard. Source-inspected; new submission/review still pending at this refresh.",
+        "subsequentDeltaAuthorEvidence": ["qa961-voice-r2b.log", "prospero-r2b-build.log"],
+        "globalR2Suite": "Still running at this documentation refresh; no final pass claimed.",
+        "layoutChanged": false,
+        "scopeOfEarlierShip": "Earlier finish-review961.txt ship remains a visual-scope disposition; it is not approval of this later functional correction."
+      }
     },
     "limits": [
       "Synthetic three-scene acceptance with local Piper CPU; no scientific-accuracy claim.",
@@ -79,7 +105,9 @@
       "No comprehensive concurrent-state, all-theme or accessibility certification.",
       "Dark viewport evidence; light theme remains inherited source behavior.",
       "Scoped ship disposition does not close old Studio comp gates.",
-      "Separate later browser receipt does not rewrite historical native browser_pending."
+      "Separate later browser receipt does not rewrite historical native browser_pending.",
+      "Native author and independent submission-2 receipts verify the voice/SRT correction against their described cases; the subsequent busy-fieldset delta still needs its own submission/review.",
+      "Global R2 suite was still running at this documentation refresh; no final pass claimed."
     ]
   },
   "components": [
