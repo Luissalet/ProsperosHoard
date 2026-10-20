@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-05T11:37:13.002282+00:00",
+  "generatedAt": "2026-10-20T23:25:56.369749+00:00",
   "title": "Design System: Prospero's Hoard",
   "extensions": {
     "colorMeta": {
@@ -638,19 +638,19 @@
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "Actual inherited page-head H1 cascade; family depends on installed fonts, not a verified Cinzel webfont."
+        "purpose": "Inherited serif page-head H1; Cinzel is bundled in current App.tsx, with the recorded fallback stack retained."
       },
       "headline": {
         "displayName": "Headline",
-        "purpose": "Observed working-interface type role."
+        "purpose": "Generic Cinzel/serif H1; project dashboard headings locally override with the working sans."
       },
       "composer-title": {
         "displayName": "Composer Title",
-        "purpose": "Observed working-interface type role."
+        "purpose": "Clip-studio working-sans heading, 22px and 600 weight."
       },
       "section-title": {
         "displayName": "Section Title",
-        "purpose": "Observed working-interface type role."
+        "purpose": "Generic serif H2; project dashboard sections locally use the working sans."
       },
       "card-title": {
         "displayName": "Card Title",
@@ -738,6 +738,14 @@
       {
         "name": "picker-stack",
         "value": "760px"
+      },
+      {
+        "name": "project-dashboard-compact",
+        "value": "1100px"
+      },
+      {
+        "name": "project-dashboard-and-clip-stack",
+        "value": "800px"
       }
     ],
     "focus": {
@@ -749,10 +757,13 @@
     "provenance": {
       "sourceOrder": [
         "styles.css imports hoard-theme.css original Prospero palette selected by html data-hoard-app",
-        "studio.css maps dark roles and declares final light palette"
+        "studio.css maps dark roles and declares final light palette",
+        "project-studio.css supplies local dashboard, inline cast, clip canvas and production disclosure overrides"
       ],
       "bundledFonts": [
         "Space Grotesk Variable",
+        "Cinzel",
+        "Source Sans 3",
         "JetBrains Mono Variable"
       ],
       "legacySerif": "frontend/src/styles.css .page-head h1 has greater specificity than studio.css h1",
@@ -764,8 +775,20 @@
         "D:/LocalAI/qa/prospero-redesign-20261005/brand-monitor-mobile-dark.png",
         "D:/LocalAI/qa/prospero-redesign-20261005/deep-reference-mobile-after.png",
         "D:/LocalAI/qa/prospero-redesign-20261005/deep-storyboard-track-mobile-after.png",
-        "D:/LocalAI/qa/prospero-redesign-20261005/deep-engine-loading-after.png"
-      ]
+        "D:/LocalAI/qa/prospero-redesign-20261005/deep-engine-loading-after.png",
+        ".impeccable/review/dashboard-desktop.png",
+        ".impeccable/review/dashboard-light.png",
+        ".impeccable/review/dashboard-mobile.png",
+        ".impeccable/review/dashboard-user-1883.png",
+        ".impeccable/review/clip-desktop.png",
+        ".impeccable/review/clip-mobile.png",
+        ".impeccable/review/clip-mobile-controls.png",
+        ".impeccable/review/clip-user-1883.png",
+        ".impeccable/review/clip-guides.png",
+        ".impeccable/review/cast-inline.png",
+        ".impeccable/review/storyboard-user-1883.png"
+      ],
+      "workingFont": "studio.css --font: \"Source Sans 3\", sans-serif; imported Space Grotesk is not the active working-font token"
     },
     "reviewScope": {
       "studio": "F1–F4 resolved; scoped ship only. Formal plates open and later gates pending.",
@@ -777,7 +800,8 @@
       "deepCorrective": "Corrective scope passed with no unresolved material UI findings in the reviewed sample; FORM seed binding resolved. Formal disposition remains fix due to inherited open reproduction/type limits. Documenter inspected sources and two mobile captures; other user tests and 746 passed/3 skipped are parent-reported.",
       "deepReviewSource": "D:/LocalAI/qa/prospero-redesign-20261005/deep-review.md",
       "asynchronousUserChecks": "Parent reports isolated-proxy slow-to-fast out-of-order library responses cannot replace current results, and 503 error/re-check recovery returns 15 tiles with 0 alerts. These prove the tested interleavings only; independent picker checks remain underway.",
-      "engineStatusCorrection": "EngineBar/i18n source and initial-loading capture inspected. Parent reports delayed/503/retry/recovered manual checks, new frontend build and repository screenshot checks. Full 746-pass/3-skip suite was before this final status-label patch. Specific reviewer continuation pending; formal disposition fix and inherited open gates unchanged."
+      "engineStatusCorrection": "EngineBar/i18n source and initial-loading capture inspected. Parent reports delayed/503/retry/recovered manual checks, new frontend build and repository screenshot checks. Full 746-pass/3-skip suite was before this final status-label patch. Specific reviewer continuation pending; formal disposition fix and inherited open gates unchanged.",
+      "projectDashboardClips": "finish-review requested mobile-help and redundant raw-state copy fixes; finish-verdict resolves both at 6e350ac and returns scoped ship. Historical October 5 gates unchanged; no exact-comp, model-quality or whole-product certification."
     },
     "surfaceEvidence": {
       "studio": {
@@ -788,7 +812,8 @@
         "imageMonitor": "Absolute inset-0 full-bounds image with contain, max-width/height 100% and overflow-hidden stage; comparison clamp(220px,45dvh,420px).",
         "generationFields": "minmax(0,1fr), zero field minimum width, inputs width/max-width 100%; optional negative prompt stays within panel.",
         "headerTelemetry": "Closed summary retains all reported GPU VRAM percentages/bars plus aggregate GB. Only host/compute details hide <=1100px; full-width row <=700px.",
-        "formSeed": "Existing 26f04583 now explicitly bound in FORM in direction.md; no reroll and no global layout inference."
+        "formSeed": "Existing 26f04583 now explicitly bound in FORM in direction.md; no reroll and no global layout inference.",
+        "scope": "Historical October 5 video composition; the current video entry uses projectDashboardClips below. Image-generation evidence remains scoped to its original pass."
       },
       "spaces": {
         "brief": ".impeccable/surfaces/spaces.md",
@@ -807,17 +832,34 @@
         "compactLabels": "Waveform labels require measured fit; full legend retained. Rail labels do not wrap and have 2px horizontal padding.",
         "exports": "Production export and canvas-download action rows wrap.",
         "engineStatus": "Initial unanswered request uses Loading/Cargando, not Off; request failure uses status unavailable/estado no disponible with error alert and Re-check. Retry disabled while checking. A completed response retains existing running/down/starting labels and actions; subsequent refresh shows last known service state unless error overrides it."
+      },
+      "projectDashboardClips": {
+        "brief": ".impeccable/surfaces/project-dashboard-clips.md",
+        "authority": "User-pinned reference-to-video topology, code-led local extension within the existing world; no new identity or approved exact comp.",
+        "dashboard": "max-width 1600px; compact identity/cover/resource links; direct Create clip/New music video; project production cards/recent assets main column, inline cast/project tools side column.",
+        "inlineCast": "Create/edit character and group form stays in dashboard; 48px portrait/icon, reference picker or member checkboxes; saving/disabled/error/cancel states; full Cast route remains reachable.",
+        "desktop": "Reference node 260px at left, video node 640px at right; optional guides below reference; supplied magenta edges; headings drag, pan/zoom controls; canvas max(680px,100dvh -190px).",
+        "mobile": "<=800px replaces graph with reference/guides/video stack, no dragging; helper text matches stack. Dashboard main precedes side column; cast can follow recent assets.",
+        "videoNode": "State, contained 210px desktop/220px mobile preview, motion prompt and Generate together; 122px action column; camera/duration, Advanced engine/seed preserved.",
+        "jobTruth": "Monitor selection is separate from latest job. Loading/queued/waiting_gpu/running/progress/failed/cancelled/done-with-output/done-without-output and retry/cancel recovery exist in code; static captures show selected take and corrected cancellation copy, not every transition.",
+        "guides": "Motion and end-frame slots can both be shown as source nodes; generation rejects simultaneous selected motion/end guides.",
+        "productionEntry": "Edit video opens corresponding production. Storyboard Create clip from this shot preselects its frame. Generated clip is a project asset, with no automatic binding to the production shot.",
+        "preservedTools": "Library/upload/drop/remove/enlarge, camera/duration/engine/seed, comparison/download/take selection, free-form Spaces, production stages/quality/history/text links remain accessible.",
+        "themes": "Dark desktop/mobile and dashboard light captures inspected; no comprehensive clip-light or whole-product approval."
       }
     },
     "notCanonized": [
       "Legacy uppercase panel/nav labels are not promoted into new kicker/eyebrow patterns.",
-      "The inherited serif heading stack is recorded accurately; no unverified Cinzel loading claim.",
+      "The current Cinzel import and inherited serif headings are recorded; this does not approve the historical TYPE difference.",
       "User-positioned graph overlaps and small overview text are not typography or spacing prescriptions.",
       "Open comp gates and absent QUALITY BAR evidence are not converted into a quality claim.",
       "Superseded copper branding is not a palette option; orange semantic data and project media are not brand highlights.",
       "The internal 600px SongTrack width is local editing geometry, not a global minimum screen width; hidden waveform text retains its full legend.",
       "Inherited serif page headings remain a formal TYPE discrepancy; the recorded source stack is not approval of that difference from the selected comp.",
-      "An unanswered or failed backend status request is not evidence that the backend is off."
+      "An unanswered or failed backend status request is not evidence that the backend is off.",
+      "Dashboard columns and desktop reference-to-video geometry are local to their surface, not global templates.",
+      "A selected prior take is not evidence that a queued, failed or cancelled job generated an output.",
+      "Creating a clip from a storyboard reference does not automatically assign it to that production shot."
     ],
     "brandIdentity": {
       "instruction": "Original dragon-and-wand icon and magenta/pink highlights pinned by user; prior delegated copper palette superseded.",
@@ -834,6 +876,37 @@
         "receipt": "D:\\LocalAI\\qa\\prospero-redesign-20261005\\flow-validation.json",
         "independentReview": "not performed for this extension",
         "formalGates": "inherited open; no new closure"
+      },
+      "projectDashboardClips": {
+        "review": "D:/LocalAI/research-inbox/prospero-dashboard1084/finish-review.md",
+        "verdict": "D:/LocalAI/research-inbox/prospero-dashboard1084/finish-verdict.md",
+        "correctionCommit": "6e350ac",
+        "sourceFiles": [
+          "frontend/src/App.tsx",
+          "frontend/src/project-studio.css",
+          "frontend/src/studio.css",
+          "frontend/src/views/Overview.tsx",
+          "frontend/src/views/Studio.tsx",
+          "frontend/src/views/Productions.tsx",
+          "frontend/src/views/Storyboard.tsx",
+          "frontend/src/components/ClipCanvas.tsx",
+          "frontend/src/components/ProjectCast.tsx"
+        ],
+        "captures": [
+          ".impeccable/review/dashboard-desktop.png",
+          ".impeccable/review/dashboard-light.png",
+          ".impeccable/review/dashboard-mobile.png",
+          ".impeccable/review/dashboard-user-1883.png",
+          ".impeccable/review/clip-desktop.png",
+          ".impeccable/review/clip-mobile.png",
+          ".impeccable/review/clip-mobile-controls.png",
+          ".impeccable/review/clip-user-1883.png",
+          ".impeccable/review/clip-guides.png",
+          ".impeccable/review/cast-inline.png",
+          ".impeccable/review/storyboard-user-1883.png"
+        ],
+        "captureNotes": "cast-inline and clip-mobile-controls use declared scroll; clip-guides uses Fit View; synthetic demo media establish interaction/layout only.",
+        "formalGates": "User-pinned local composition; no new comp round and no closure of inherited October 5 gates."
       }
     }
   },
@@ -844,7 +917,7 @@
       "refersTo": "button-primary",
       "description": "Shared working action and its actual interaction states.",
       "html": "<button class=\"ds-btn-primary\">Generate clip</button>",
-      "css": ".ds-btn-primary{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;background:var(--accent,#e65db6);color:var(--accent-ink,#1b1318);border-color:var(--accent,#e65db6);font-weight:600;}.ds-btn-primary:hover{background:var(--accent-2,#eb80c6);border-color:var(--accent-2,#eb80c6);}.ds-btn-primary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:disabled{opacity:.45;cursor:default}"
+      "css": ".ds-btn-primary{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;background:var(--accent,#e65db6);color:var(--accent-ink,#1b1318);border-color:var(--accent,#e65db6);font-weight:600;}.ds-btn-primary:hover{background:var(--accent-2,#eb80c6);border-color:var(--accent-2,#eb80c6);}.ds-btn-primary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:disabled{opacity:.45;cursor:default}"
     },
     {
       "name": "Secondary Button",
@@ -852,7 +925,7 @@
       "refersTo": "button-secondary",
       "description": "Shared working action and its actual interaction states.",
       "html": "<button class=\"ds-btn-secondary\">Choose</button>",
-      "css": ".ds-btn-secondary{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-btn-secondary:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664);}.ds-btn-secondary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-secondary:active{transform:translateY(1px)}.ds-btn-secondary:disabled{opacity:.45;cursor:default}"
+      "css": ".ds-btn-secondary{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-btn-secondary:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664);}.ds-btn-secondary:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-secondary:active{transform:translateY(1px)}.ds-btn-secondary:disabled{opacity:.45;cursor:default}"
     },
     {
       "name": "Ghost Button",
@@ -860,7 +933,7 @@
       "refersTo": "button-ghost",
       "description": "Shared working action and its actual interaction states.",
       "html": "<button class=\"ds-btn-ghost\">Enlarge</button>",
-      "css": ".ds-btn-ghost{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;border-color:transparent;color:var(--text-2,#beb4ba);}.ds-btn-ghost:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8);}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-ghost:active{transform:translateY(1px)}.ds-btn-ghost:disabled{opacity:.45;cursor:default}"
+      "css": ".ds-btn-ghost{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;border-color:transparent;color:var(--text-2,#beb4ba);}.ds-btn-ghost:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8);}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-btn-ghost:active{transform:translateY(1px)}.ds-btn-ghost:disabled{opacity:.45;cursor:default}"
     },
     {
       "name": "Text Field",
@@ -868,7 +941,7 @@
       "refersTo": "input",
       "description": "Surface field with the source border/ring focus treatment.",
       "html": "<label class=\"ds-field\">What does the subject do?<input class=\"ds-input\" type=\"text\" value=\"The dancer turns toward the camera\"></label>",
-      "css": ".ds-field{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:flex;flex-direction:column;gap:5px;color:var(--text-2,#beb4ba);font-size:12.5px}.ds-input{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border-strong,#6c5664);border-radius:9px;padding:7px 10px;min-width:0;max-width:100%;font-size:14px;line-height:1.45;outline:none}.ds-input:focus{border-color:var(--accent,#e65db6);box-shadow:0 0 0 3px var(--accent-soft,rgba(230, 93, 182, 0.14))}"
+      "css": ".ds-field{font-family:var(--font,\"Source Sans 3\",sans-serif);display:flex;flex-direction:column;gap:5px;color:var(--text-2,#beb4ba);font-size:12.5px}.ds-input{font-family:var(--font,\"Source Sans 3\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border-strong,#6c5664);border-radius:9px;padding:7px 10px;min-width:0;max-width:100%;font-size:14px;line-height:1.45;outline:none}.ds-input:focus{border-color:var(--accent,#e65db6);box-shadow:0 0 0 3px var(--accent-soft,rgba(230, 93, 182, 0.14))}"
     },
     {
       "name": "Selected Rail Item",
@@ -876,7 +949,7 @@
       "refersTo": "rail-item-selected",
       "description": "Compact navigation with icon, readable label and selected magenta wash.",
       "html": "<button class=\"ds-rail\" aria-current=\"page\"><svg width=\"21\" height=\"21\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"15\" y=\"15\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M6 9v9h9\"/></svg><span>Spaces</span></button>",
-      "css": ".ds-rail{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;width:72px;min-height:65px;padding:8px 2px;border:0;border-radius:6px;background:var(--accent-soft,rgba(230, 93, 182, 0.14));color:var(--accent,#e65db6);cursor:pointer}.ds-rail span{font-size:10px;white-space:nowrap;overflow-wrap:normal}.ds-rail:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8)}.ds-rail:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}"
+      "css": ".ds-rail{font-family:var(--font,\"Source Sans 3\",sans-serif);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;width:72px;min-height:65px;padding:8px 2px;border:0;border-radius:6px;background:var(--accent-soft,rgba(230, 93, 182, 0.14));color:var(--accent,#e65db6);cursor:pointer}.ds-rail span{font-size:10px;white-space:nowrap;overflow-wrap:normal}.ds-rail:hover{background:var(--surface-2,#31242c);color:var(--text,#ece1e8)}.ds-rail:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}"
     },
     {
       "name": "Status Pill",
@@ -884,7 +957,7 @@
       "refersTo": "pill",
       "description": "Informational status tag; not a clickable control.",
       "html": "<span class=\"ds-pill\">Selected</span>",
-      "css": ".ds-pill{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:550;background:var(--surface-3,#392a34);color:var(--text-2,#beb4ba);white-space:nowrap}"
+      "css": ".ds-pill{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:550;background:var(--surface-3,#392a34);color:var(--text-2,#beb4ba);white-space:nowrap}"
     },
     {
       "name": "Working Card",
@@ -892,7 +965,7 @@
       "refersTo": "card",
       "description": "Flat shared panel with compact title and a real action.",
       "html": "<section class=\"ds-card\"><h2>Project takes</h2><p>Inspect a take before using it.</p><button class=\"ds-card-action\">View in monitor</button></section>",
-      "css": ".ds-card{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border,#44343e);border-radius:var(--radius,12px);padding:18px;min-width:0;box-shadow:none}.ds-card h2{font-size:15px;font-weight:600;letter-spacing:-.005em;margin:0 0 12px}.ds-card p{font-size:14px;line-height:1.45;color:var(--text-2,#beb4ba)}.ds-card-action{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-card-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-card-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-card-action:active{transform:translateY(1px)}"
+      "css": ".ds-card{font-family:var(--font,\"Source Sans 3\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border,#44343e);border-radius:var(--radius,12px);padding:18px;min-width:0;box-shadow:none}.ds-card h2{font-size:15px;font-weight:600;letter-spacing:-.005em;margin:0 0 12px}.ds-card p{font-size:14px;line-height:1.45;color:var(--text-2,#beb4ba)}.ds-card-action{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;}.ds-card-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-card-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-card-action:active{transform:translateY(1px)}"
     },
     {
       "name": "Selected Graph Node",
@@ -900,7 +973,7 @@
       "refersTo": "node-selected",
       "description": "Flat selected node material with named header, typed port and generation action.",
       "html": "<section class=\"ds-node\"><header><strong>Perform the movement</strong><span>Done</span></header><div class=\"ds-port\"><i></i>start</div><div class=\"ds-node-body\"><p>The person dances energetically.</p><button class=\"ds-node-action\">Generate</button></div></section>",
-      "css": ".ds-node{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);width:300px;background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--accent,#e65db6);border-radius:12px;box-shadow:none;outline:2px solid var(--accent,#e65db6);outline-offset:3px;font-size:12.5px}.ds-node header{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border,#44343e)}.ds-node strong{font-size:14px;font-weight:600}.ds-node header span{font-size:10.5px;color:var(--ok,#5bbf86)}.ds-port{display:flex;gap:4px;align-items:center;min-height:25px;padding:1px 12px;font-size:11px;color:#b48cf0}.ds-port i{width:8px;height:8px;border-radius:50%;background:#b48cf0}.ds-node-body{padding:12px}.ds-node-body p{font-size:13px;line-height:1.5}.ds-node-action{font-family:var(--font,\"Space Grotesk Variable\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;color:var(--accent,#e65db6)}.ds-node-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-node-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-node-action:active{transform:translateY(1px)}"
+      "css": ".ds-node{font-family:var(--font,\"Source Sans 3\",sans-serif);width:300px;background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--accent,#e65db6);border-radius:12px;box-shadow:none;outline:2px solid var(--accent,#e65db6);outline-offset:3px;font-size:12.5px}.ds-node header{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border,#44343e)}.ds-node strong{font-size:14px;font-weight:600}.ds-node header span{font-size:10.5px;color:var(--ok,#5bbf86)}.ds-port{display:flex;gap:4px;align-items:center;min-height:25px;padding:1px 12px;font-size:11px;color:#b48cf0}.ds-port i{width:8px;height:8px;border-radius:50%;background:#b48cf0}.ds-node-body{padding:12px}.ds-node-body p{font-size:13px;line-height:1.5}.ds-node-action{font-family:var(--font,\"Source Sans 3\",sans-serif);display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--radius-sm,6px);border:1px solid var(--border,#44343e);background:transparent;color:var(--text,#ece1e8);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s;color:var(--accent,#e65db6)}.ds-node-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-node-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px;}.ds-node-action:active{transform:translateY(1px)}"
     },
     {
       "name": "Header VRAM Summary",
@@ -908,7 +981,7 @@
       "refersTo": "vitals-summary",
       "description": "Closed summary with per-card bars and aggregate GB; sample readings illustrate a capture, not live telemetry.",
       "html": "<button class=\"ds-vitals\" aria-expanded=\"false\" aria-label=\"GPU memory details\"><span class=\"ds-gpus\"><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G0 <strong>10%</strong></span><span class=\"ds-tank\"><span style=\"width:10%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G1 <strong>46%</strong></span><span class=\"ds-tank\"><span style=\"width:46%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G2 <strong>0%</strong></span><span class=\"ds-tank\"><span style=\"width:0%\"></span></span></span><span class=\"ds-gpu\"><span class=\"ds-gpu-label\">G3 <strong>0%</strong></span><span class=\"ds-tank\"><span style=\"width:0%\"></span></span></span></span><span class=\"ds-total\">8.6<span>/60 GB</span></span></button>",
-      "css": ".ds-vitals{display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--border,#44343e);border-radius:6px;background:var(--surface-2,#31242c);color:var(--text,#ece1e8);font-family:var(--font,\"Space Grotesk Variable\",sans-serif);font-size:11px;cursor:pointer}.ds-vitals:hover{border-color:var(--border-strong,#6c5664)}.ds-vitals:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-gpus{display:flex;gap:7px}.ds-gpu{display:flex;flex-direction:column;gap:3px;min-width:46px}.ds-gpu-label{display:flex;justify-content:space-between;gap:4px;font:10px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-tank{display:block;width:100%;height:5px;border-radius:3px;background:color-mix(in srgb,var(--muted,#a69ba2) 25%,transparent);overflow:hidden}.ds-tank>span{display:block;height:100%;background:var(--ok,#5bbf86)}.ds-total{font:12px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-total>span{color:var(--muted,#a69ba2)}"
+      "css": ".ds-vitals{display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--border,#44343e);border-radius:6px;background:var(--surface-2,#31242c);color:var(--text,#ece1e8);font-family:var(--font,\"Source Sans 3\",sans-serif);font-size:11px;cursor:pointer}.ds-vitals:hover{border-color:var(--border-strong,#6c5664)}.ds-vitals:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-gpus{display:flex;gap:7px}.ds-gpu{display:flex;flex-direction:column;gap:3px;min-width:46px}.ds-gpu-label{display:flex;justify-content:space-between;gap:4px;font:10px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-tank{display:block;width:100%;height:5px;border-radius:3px;background:color-mix(in srgb,var(--muted,#a69ba2) 25%,transparent);overflow:hidden}.ds-tank>span{display:block;height:100%;background:var(--ok,#5bbf86)}.ds-total{font:12px var(--mono,\"JetBrains Mono Variable\",monospace)}.ds-total>span{color:var(--muted,#a69ba2)}"
     },
     {
       "name": "Scrollable Working Table",
@@ -916,12 +989,28 @@
       "refersTo": "table-scroll",
       "description": "Named keyboard-focusable region keeps wide working tables within the available panel.",
       "html": "<div class=\"ds-table-scroll\" role=\"region\" aria-label=\"Scrollable jobs table\" tabindex=\"0\"><table class=\"ds-table\"><thead><tr><th>Job</th><th>State</th><th>Backend</th><th>Action</th></tr></thead><tbody><tr><td>Reference image generation</td><td>Done</td><td>Local ComfyUI</td><td><button class=\"ds-table-action\">Open result</button></td></tr></tbody></table></div>",
-      "css": ".ds-table-scroll{width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;color:var(--text,#ece1e8);font-family:var(--font,\"Space Grotesk Variable\",sans-serif)}.ds-table-scroll:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:-2px}.ds-table{width:100%;border-collapse:collapse;font-size:13px}.ds-table th{text-align:left;color:var(--muted,#a69ba2);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;padding:8px 10px;border-bottom:1px solid var(--border,#44343e)}.ds-table td{padding:10px;border-bottom:1px solid var(--border,#44343e);vertical-align:top;overflow-wrap:anywhere}.ds-table tr:hover td{background:var(--surface-2,#31242c)}.ds-table-action{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border,#44343e);border-radius:6px;background:transparent;color:var(--text,#ece1e8);font:500 13px var(--font,\"Space Grotesk Variable\",sans-serif);cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s}.ds-table-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-table-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-table-action:active{transform:translateY(1px)}"
+      "css": ".ds-table-scroll{width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;color:var(--text,#ece1e8);font-family:var(--font,\"Source Sans 3\",sans-serif)}.ds-table-scroll:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:-2px}.ds-table{width:100%;border-collapse:collapse;font-size:13px}.ds-table th{text-align:left;color:var(--muted,#a69ba2);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;padding:8px 10px;border-bottom:1px solid var(--border,#44343e)}.ds-table td{padding:10px;border-bottom:1px solid var(--border,#44343e);vertical-align:top;overflow-wrap:anywhere}.ds-table tr:hover td{background:var(--surface-2,#31242c)}.ds-table-action{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border,#44343e);border-radius:6px;background:transparent;color:var(--text,#ece1e8);font:500 13px var(--font,\"Source Sans 3\",sans-serif);cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,transform .05s}.ds-table-action:hover{background:var(--surface-2,#31242c);border-color:var(--border-strong,#6c5664)}.ds-table-action:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-table-action:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Clip Job State",
+      "kind": "custom",
+      "refersTo": "clip-node",
+      "description": "Localized cancellation and recovery inside the video node; static sample of the implemented state panel.",
+      "html": "<section class=\"ds-clip-node\"><header>Vídeo</header><div class=\"ds-clip-state\" role=\"status\"><strong>Cancelado</strong><span>Puedes ajustar el prompt y volver a generar desde este nodo.</span></div></section>",
+      "css": ".ds-clip-node{font-family:var(--font,\"Source Sans 3\",sans-serif);background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border-strong,#6c5664);border-radius:12px}.ds-clip-node header{padding:12px 16px;font-size:14px;font-weight:600}.ds-clip-state{padding:10px 16px;display:grid;gap:7px;border-top:1px solid var(--border,#44343e);background:var(--surface-2,#31242c);font-size:13px}"
+    },
+    {
+      "name": "Inline Cast Editor",
+      "kind": "custom",
+      "refersTo": "inline-cast-editor",
+      "description": "Dashboard character editor with native name/description fields and project save action.",
+      "html": "<form class=\"ds-cast-editor\"><h3>Nuevo personaje</h3><label>Nombre<input required></label><label>Aspecto y descripción<textarea rows=\"3\"></textarea></label><button type=\"button\">Guardar en el proyecto</button></form>",
+      "css": ".ds-cast-editor{font-family:var(--font,\"Source Sans 3\",sans-serif);padding:18px;background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border,#44343e);border-radius:10px;display:grid;gap:12px}.ds-cast-editor h3{font-size:16px;font-weight:600;margin:0}.ds-cast-editor label{display:grid;gap:5px;color:var(--text-2,#beb4ba);font-size:12.5px}.ds-cast-editor input,.ds-cast-editor textarea{font-family:inherit;background:var(--surface,#251a22);color:var(--text,#ece1e8);border:1px solid var(--border-strong,#6c5664);border-radius:9px;padding:7px 10px;min-width:0;max-width:100%;font-size:14px}.ds-cast-editor input:focus,.ds-cast-editor textarea:focus{outline:none;border-color:var(--accent,#e65db6);box-shadow:0 0 0 3px var(--accent-soft,rgba(230,93,182,.14))}.ds-cast-editor button{font-family:inherit;justify-self:start;height:36px;padding:0 14px;border:1px solid var(--accent,#e65db6);border-radius:6px;background:var(--accent,#e65db6);color:var(--accent-ink,#1b1318);font-size:13px;font-weight:600;cursor:pointer}.ds-cast-editor button:hover{background:var(--accent-2,#eb80c6);border-color:var(--accent-2,#eb80c6)}.ds-cast-editor button:focus-visible{outline:2px solid var(--accent,#e65db6);outline-offset:3px}.ds-cast-editor button:active{transform:translateY(1px)}"
     }
   ],
   "narrative": {
     "northStar": "The Shot Review Bench",
-    "overview": "The Shot Review Bench places real images, clips and references on a quiet dark-plum ground. Pale pink-white text and magenta controls establish a practical, concentrated workspace. The original dragon-and-wand icon and magenta/pink brand family are explicitly pinned by the user; media come from project assets.\n\nThe built system combines flat tonal panels, thin dividers and compact controls. Space Grotesk carries the working interface and JetBrains Mono carries machine values. Legacy serif page headings still survive in the cascade; this record preserves that fact instead of describing an entirely sans interface. Light mode uses pale lilac surfaces and the original pink action.",
+    "overview": "The Shot Review Bench places real images, clips and references on a quiet dark-plum ground. Pale pink-white text and magenta controls establish a practical, concentrated workspace. The original dragon-and-wand icon and magenta/pink brand family are explicitly pinned by the user; media come from project assets.\n\nThe built system combines flat tonal panels, thin dividers and compact controls. Source Sans 3 carries the working interface and JetBrains Mono carries machine values. Legacy serif page headings still survive in the cascade; this record preserves that fact instead of describing an entirely sans interface. Light mode uses pale lilac surfaces and the original pink action.",
     "keyCharacteristics": [
       "Real project media occupy the inspection surfaces.",
       "Magenta identifies actions and selection; status and typed data retain their separate colors.",
@@ -957,7 +1046,8 @@
       "Do preserve full media frames in inspection views with object-fit: contain and bounded intrinsic sizes.",
       "Do contain table and editing-track overflow locally while wrapping surrounding actions.",
       "Do distinguish loading, failed requests and filtered-empty results before enabling a selection.",
-      "Do distinguish an unanswered engine check and unavailable status from a completed backend-down response."
+      "Do distinguish an unanswered engine check and unavailable status from a completed backend-down response.",
+      "Do keep the tracked generation state distinct from a previously selected project take."
     ],
     "donts": [
       "Don't use orange/copper for brand actions, focus or selection.",
@@ -966,7 +1056,8 @@
       "Don't turn the Studio column widths, Spaces starter graph or surface-specific focus behavior into a mandatory layout for every route.",
       "Don't remove tools, node types or advanced operations to make a screen look simpler.",
       "Don't describe review verdicts as exact-comp approval or whole-product certification.",
-      "Don't treat stale picker responses or a filtered-empty library as valid completed selection."
+      "Don't treat stale picker responses or a filtered-empty library as valid completed selection.",
+      "Don't imply that creating a project clip automatically assigns it to a production shot."
     ]
   }
 }

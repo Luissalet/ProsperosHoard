@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+Selecting a project opens its dashboard: enter a video directly, create or edit characters and groups in place, or choose **Create clip**. The clip studio connects reference nodes to a video node containing the preview, motion prompt and generation action, with job recovery, queue/progress, cancellation and the actual result. Optional motion/end-frame guides accept uploads or library assets. Mobile uses full-size stacked controls. Generated clips remain project assets; entering from a storyboard frame does not automatically replace that production shot. [Workflow](docs/PROJECT-STUDIO.md).
+
 Explanatory videos: **Generation → Productions → New explainer** edits scenes, source references, narration and figures on the existing production pipeline. Scenes can import `.vfigure` diagrams with their PNG, full source, revision and captured page/state, retained in the exported project for another profile. Native `studio_explainer` creates/reads/edits/imports the same source through MCP. Unchanged sentence audio/pages are reused; output includes MP4, SRT and editable JSON with voice/timeline options. [Workflow and tested limits](docs/EXPLAINERS.md).
 
 Image composition: **Generation → Design → Image composition** edits object/text boxes, exact words and image references before generation. Native `studio_spatial` retains immutable editable sources, compiles captions or MOSS layout JSON and renders schematic PNG previews; `studio_generate_image` keeps the selected source id in the generated recipe. Compilation and demo transport do not establish model adherence. [Source format and limits](docs/SPATIAL.md).

@@ -52,41 +52,41 @@ typography:
     lineHeight: 1.25
     letterSpacing: "0.005em"
   headline:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Cinzel, serif"
     fontSize: "24px"
     fontWeight: 700
     lineHeight: 1.25
-    letterSpacing: "-0.025em"
+    letterSpacing: "0.005em"
   composer-title:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Source Sans 3, sans-serif"
     fontSize: "22px"
-    fontWeight: 700
-    lineHeight: 1.25
-    letterSpacing: "-0.025em"
+    fontWeight: 600
+    lineHeight: "normal"
+    letterSpacing: "0.005em"
   section-title:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Cinzel, serif"
     fontSize: "18px"
     fontWeight: 700
     lineHeight: 1.45
-    letterSpacing: "-0.025em"
+    letterSpacing: "0.005em"
   card-title:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Cinzel, serif"
     fontSize: "15px"
     fontWeight: 600
     lineHeight: 1.45
     letterSpacing: "-0.005em"
   body:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Source Sans 3, sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.45
   button:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Source Sans 3, sans-serif"
     fontSize: "13px"
     fontWeight: 500
     lineHeight: 1.45
   label:
-    fontFamily: "Space Grotesk Variable, sans-serif"
+    fontFamily: "Source Sans 3, sans-serif"
     fontSize: "12.5px"
     fontWeight: 400
     lineHeight: 1.45
@@ -172,6 +172,15 @@ components:
   table-scroll:
     backgroundColor: "transparent"
     width: "100%"
+  clip-node:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.surface}"
+  inline-cast-editor:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.composer}"
+    padding: "18px"
 ---
 
 # Design System: Prospero's Hoard
@@ -182,7 +191,7 @@ components:
 
 The Shot Review Bench places real images, clips and references on a quiet dark-plum ground. Pale pink-white text and magenta controls establish a practical, concentrated workspace. The original dragon-and-wand icon and magenta/pink brand family are explicitly pinned by the user; media come from project assets.
 
-The built system combines flat tonal panels, thin dividers and compact controls. Space Grotesk carries the working interface and JetBrains Mono carries machine values. Legacy serif page headings still survive in the cascade; this record preserves that fact instead of describing an entirely sans interface. Light mode uses pale lilac surfaces and the original pink action.
+The built system combines flat tonal panels, thin dividers and compact controls. Source Sans 3 carries the working interface and JetBrains Mono carries machine values. Legacy serif page headings still survive in the cascade; this record preserves that fact instead of describing an entirely sans interface. Light mode uses pale lilac surfaces and the original pink action.
 
 **Key Characteristics:**
 - Real project media occupy the inspection surfaces.
@@ -190,9 +199,11 @@ The built system combines flat tonal panels, thin dividers and compact controls.
 - Flat panels and thin dividers organize dense working controls.
 - Compact sans working type coexists with inherited serif page headings.
 
-This is a scan of the built interface on 5 October 2026. Normative token values above follow the final cascade: `App.tsx` loads the variable fonts, then `styles.css`, then `studio.css`. The shared `hoard-theme.css` supplies the restored original Prospero dark palette and legacy serif stack. The final `studio.css` maps its dark roles to those `--hoard-*` tokens and supplies the light palette; the current light muted-text token is a legibility adjustment. Surface mode and strategy remain in `.impeccable/direction.md` and `.impeccable/surfaces/spaces.md`; their compositions are not global requirements.
+The shared system was scanned on 5 October 2026 and extended from the built project dashboard/clip interface on 21 October 2026. Normative token values above follow the current cascade: `App.tsx` loads bundled fonts, then `styles.css`, `studio.css` and `project-studio.css`. The shared `hoard-theme.css` supplies the restored original Prospero dark palette and legacy serif stack. The final `studio.css` maps its dark roles to those `--hoard-*` tokens and supplies the light palette; the current light muted-text token is a legibility adjustment. Surface mode and strategy remain in `.impeccable/direction.md`, `.impeccable/surfaces/spaces.md` and `.impeccable/surfaces/project-dashboard-clips.md`; their compositions are not global requirements.
 
 The supplied final reviews ship the Studio F1–F4 corrections and the Spaces mobile-focus F1 correction at those scopes. Studio's formal plates/hero workflow remains open/pending in `.impeccable/build/state.json`; no exact-comp pass or whole-product approval is asserted. The Spaces reviewer had no Operate QUALITY BAR card. Subsequent brand/monitor captures show populated Spanish image generation in both themes at desktop/mobile widths, plus comparison and intermediate-width states. These support the specific palette, header and media-fit observations, without establishing comprehensive light-theme or whole-product approval.
+
+The 21 October dashboard/clip extension follows the user's reference-to-video topology within the established world. Its supplied finish review requested two copy corrections; the continuation at `6e350ac` resolves both and returns scoped ship. This does not close the historical October 5 composition/type gates or certify generation quality. The documenter read the current sources and opened all eleven extension captures; demonstration media establish interaction/layout evidence only.
 
 ## Colors
 
@@ -221,15 +232,15 @@ Success, warning/gold, failure and information retain their `ok`, `warn`, `bad` 
 
 ## Typography
 
-**Working font:** Space Grotesk Variable, sans-serif. **Machine-value font:** JetBrains Mono Variable, monospace. Both are bundled through `@fontsource-variable` imports.
+**Working font:** Source Sans 3, sans-serif, bundled through `@fontsource/source-sans-3`. **Machine-value font:** JetBrains Mono Variable, monospace, bundled through `@fontsource-variable/jetbrains-mono`.
 
-**Inherited page-heading stack:** Cinzel, Iowan Old Style, Charter, Georgia, Liberation Serif, Noto Serif, Times New Roman, serif. The inspected frontend does not import Cinzel as a webfont, so the first installed family wins. Record the complete source stack rather than assuming Cinzel pixels. The shared Source Sans 3 and non-variable JetBrains Mono stacks remain declared upstream, but `--font` and `--mono` are superseded by `studio.css` and are not the current body defaults.
+**Inherited page-heading stack:** Cinzel, Iowan Old Style, Charter, Georgia, Liberation Serif, Noto Serif, Times New Roman, serif. The current `App.tsx` imports `@fontsource/cinzel`; `studio.css` assigns Cinzel to generic headings and the brand name, and preserves Source Sans 3 as `--font`. Space Grotesk Variable is still imported but is not the working-font token. The project dashboard and clip headings explicitly use `--font`, while the production/storyboard keeps inherited serif headings.
 
 The hierarchy is compact and task-oriented, with heavier titles and quiet labels. It is not a single geometric sans display system: the more specific legacy page-heading selector overrides the later bare heading rule. Spaces' list H1 visibly uses that serif appearance.
 
 - **Page heading / display:** inherited serif stack, 30px, 700, line-height 1.25, letter-spacing 0.005em. This actual cascade exception survives on page-head H1 elements.
-- **Generic H1 / headline:** 24px, 700, line-height 1.25, letter-spacing −0.025em; composer H1 is 22px.
-- **Section:** generic H2 is 18px, 700; working card titles are 15px, 600 with −0.005em tracking. Inherited body line-height is 1.45 except where source overrides it.
+- **Generic H1 / headline:** Cinzel/serif, 24px, 700, line-height 1.25 and 0.005em tracking. The project title explicitly uses the working sans at 26px (22px at ≤800px); the clip heading uses the working sans at 22px and 600 weight.
+- **Section:** generic H2 is Cinzel/serif at 18px, 700; dashboard section headings override it with the working sans at 18px. Shared card titles are 15px, 600 with −0.005em tracking. Inherited body line-height is 1.45 except where source overrides it.
 - **Body:** 14px, 400, line-height 1.45. Textareas use 1.5; supporting explanatory copy commonly uses 1.6–1.7.
 - **Controls:** buttons are 13px, 500; primary buttons use 600. Field labels and base node copy are 12.5px. Supporting metadata and ports commonly range from 10px to 12px.
 - **Machine values:** 12.5px mono for code and the mono utility, with local 10.5–12px variants for IDs, timing and key/value metadata.
@@ -247,6 +258,10 @@ Cards, fields and form controls allow their intrinsic width to shrink: panels/fi
 **The Local Overflow Rule.** Keep wide tables and editing tracks inside their own focusable or scrollable regions; let the surrounding panel shrink and let controls wrap without losing actions.
 
 Shared inspection overlays use a flexible media region and a 320px information region, becoming a stacked view below 700px. Media controls wrap and the information region continues to scroll. Empty, busy and error states occupy the same working flow.
+
+The project dashboard is centered with a 1600px maximum width. Its compact identity row uses an 88px cover, brief/resource links and direct Create clip/New music video actions. Below it, project videos and recent assets occupy the main column; cast and project tools occupy the side column. The grid uses 1.7fr/minimum-300px tracks and a 36px gap; at ≤1100px it uses 1fr/minimum-280px tracks with a 24px gap and a full-width action row. At ≤800px it stacks main content before the side column, reduces the cover to 66px and lets the two main actions share available width. Cast may therefore sit below recent assets on mobile. These are local dashboard measurements.
+
+On desktop, the clip canvas is a bounded dotted workspace, at least 680px tall or `100dvh - 190px`, with a 260px reference node at left and a 640px video node at right. Additional motion/end guides sit below the reference and connect to the video. Nodes drag by their headings; pan and zoom controls remain available. Connections are supplied by the interface, not user-wired. At ≤800px the graph is replaced with a vertical reference/guides/video stack (18px outer gap, 14px reference gap); it has no draggable nodes and uses matching mobile help. The video node retains preview, prompt and generation together. The prompt and Generate action share a row with a 122px action column, followed by camera/duration and Advanced.
 
 ## Elevation & Depth
 
@@ -314,6 +329,24 @@ The SongTrack layout has a shrinkable main region and a 250px auxiliary region, 
 
 Nodes are named, flat bordered panels with typed ports, direct media uploads, optional reference roles, generation/actions and versioned outputs. The searchable palette pairs each icon with a label and description. Selected nodes combine the magenta border with an offset outline. Fifteen node types remain available. Mobile node focus preserves the editing scale and permits panning; the existing Spaces brief owns this surface-specific strategy rather than a global layout requirement.
 
+### Project dashboard / Inline cast
+
+Project videos use actionable production cards with cover, title, status, stage/progress and an explicit Edit video label. They open the corresponding production directly. Resource counts are compact links to library, audio and timeline. The cover opens its asset in the viewer; a separate pencil chooses a replacement. The brief editor stays in the dashboard and exposes saving/error/cancel controls. Videos and recent assets have independent error/retry handling.
+
+Cast rows pair a 48px canonical portrait or existing users icon with name and role/member count. Character and Group actions open the same inline editor used by their rows; there is no required cast modal or route change. The editor uses a surface fill, thin border, 10px corners and 18px inset. It contains name, description/concept, character-reference picker or group-member checkboxes, plus Save to project and Cancel. Busy state disables edits and actions; save failures remain inline. Manage cast still opens the full tool.
+
+### Clip canvas / Generation state
+
+A simple reference-to-video workspace extends the existing graph vocabulary without replacing the free-form Spaces editor. The desktop nodes are flat, with strong borders, 12px corners, 12px magenta handles and 2px magenta connections. The dotted ground belongs to the actual canvas. The reference offers library choice, upload/drop, remove and one-click enlargement; motion and end-frame guides appear as additional source nodes when requested. Both optional slots may be shown; a take can use a motion video or an end frame, with simultaneous selection disabled.
+
+The video node groups its engine label, live job state, contained preview, prompt and Generate clip action. Its monitor is 210px tall on desktop and 220px at ≤800px. A vertical output remains fully visible with black letterboxing. Camera and 3/4/5-second duration controls remain visible; engine and seed live under Advanced. Comparison, enlargement, download, the project take strip and the return to project remain available. Take selection has a separate pressed control and explicit Selected text; clicking a thumbnail opens inspection.
+
+State text follows the tracked job: recovering, queued, waiting for GPU, generating with progress, failed, cancelled, generated or finished without output. Recovery/read errors offer retry, in-flight jobs offer cancellation, and failed/cancelled jobs explain how to regenerate. Redundant raw status tokens are suppressed while substantive messages remain. If a previous selected take is shown during a new job, the state explains that it is an earlier take. Completion loads the asset ID returned by that job; a project video alone never proves that the current job produced it. Generation creates a project asset; entering from a storyboard frame preselects that reference and does not automatically bind the resulting clip back to a production shot.
+
+### Production / Storyboard entry
+
+The production keeps its main next-step action and storyboard/preview/text-and-takes access. Production process and the quality/history tools use native disclosures, with a return to project inside More tools. Storyboard shot cards retain insertion, inspection and editing; a shot with a chosen frame adds Create clip from this shot. This opens the clip studio with that frame as reference. Existing production stages and shot-linking operations remain in the production workflow.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -324,6 +357,7 @@ Nodes are named, flat bordered panels with typed ports, direct media uploads, op
 - Do contain table and editing-track overflow locally while wrapping surrounding actions.
 - Do distinguish loading, failed requests and filtered-empty results before enabling a selection.
 - Do distinguish an unanswered engine check and unavailable status from a completed backend-down response.
+- Do keep the tracked generation state distinct from a previously selected project take.
 
 ### Don't:
 - Don't use orange/copper for brand actions, focus or selection.
@@ -333,6 +367,7 @@ Nodes are named, flat bordered panels with typed ports, direct media uploads, op
 - Don't remove tools, node types or advanced operations to make a screen look simpler.
 - Don't describe review verdicts as exact-comp approval or whole-product certification.
 - Don't treat stale picker responses or a filtered-empty library as valid completed selection.
+- Don't imply that creating a project clip automatically assigns it to a production shot.
 
 Evidence: `frontend/src/studio.css`, `styles.css`, `hoard-theme.css`, `App.tsx`, `views/Studio.tsx`, `views/Spaces.tsx`, `components/ui.tsx` and `components/Lightbox.tsx`; final Studio desktop/mobile/user captures, Spaces list-desktop/mobile captures and `D:/LocalAI/qa/prospero-redesign-20261005/brand-monitor-{desktop-dark,desktop-light,mobile-dark,mobile-light,compare-dark,medium,mobile-results}.png`. Desktop-light and mobile-dark brand captures were opened for this refresh. Reviews: `.impeccable/review/finish-review.md` and `.impeccable/review/spaces-finish-review.md`. Source values remain authoritative when no rendered theme/state was reviewed.
 
@@ -363,3 +398,6 @@ the choreography remains approximate. The primary app was reloaded while idle,
 preserving four active projects and five productions. See
 `docs/PROSPERO_SPACES_CONTINUITY_QA_2026-10-05.md`. This extension has no new
 independent review or formal composition/type gate closure.
+
+
+Extension evidence (21 October 2026): `frontend/src/App.tsx`, `project-studio.css`, `studio.css`, `views/Overview.tsx`, `views/Studio.tsx`, `views/Productions.tsx`, `views/Storyboard.tsx`, `components/ClipCanvas.tsx` and `components/ProjectCast.tsx`; surface brief `.impeccable/surfaces/project-dashboard-clips.md`. Opened captures under `.impeccable/review/`: `dashboard-desktop.png`, `dashboard-light.png`, `dashboard-mobile.png`, `dashboard-user-1883.png`, `clip-desktop.png`, `clip-mobile.png`, `clip-mobile-controls.png`, `clip-user-1883.png`, `clip-guides.png`, `cast-inline.png` and `storyboard-user-1883.png`. The cast/editor and mobile-control captures use declared scroll positions; the guides capture uses Fit View. Finish evidence: `D:/LocalAI/research-inbox/prospero-dashboard1084/finish-review.md` and `finish-verdict.md`, with both copy findings resolved at `6e350ac`. Static captures do not certify transient motion, all job transitions or real model quality. Historical evidence above remains scoped to its original pass.
