@@ -52,10 +52,16 @@
   ],
   "placeholders": [
     "PROSPERO_DIR",
-    "APP_URL"
+    "APP_URL",
+    "TOKEN_FILE",
+    "DATA_DIR",
+    "PYTHON"
   ],
   "defaults": {
-    "APP_URL": "http://127.0.0.1:8815"
+    "APP_URL": "http://127.0.0.1:8815",
+    "DATA_DIR": "{PROSPERO_DIR}/data",
+    "TOKEN_FILE": "{PROSPERO_DIR}/data/mcp-token",
+    "PYTHON": "{PROSPERO_DIR}/.venv/Scripts/python.exe"
   },
   "app": {
     "url_default": "http://127.0.0.1:8815",
@@ -76,27 +82,38 @@
     },
     "launch_hint": {
       "kind": "process",
-      "executable": "{PROSPERO_DIR}/.venv/Scripts/python.exe",
+      "executable": "{PYTHON}",
       "argv": [
+        "-I",
         "-m",
         "prosperos_hoard",
-        "--no-browser"
+        "--no-browser",
+        "--data-dir",
+        "{DATA_DIR}"
       ],
       "cwd": "{PROSPERO_DIR}",
       "readiness": {
         "url": "{APP_URL}/api/health",
         "timeout_s": 30
+      },
+      "env": {
+        "PROSPERO_DATA_DIR": "{DATA_DIR}",
+        "PROSPERO_TOKEN_FILE": "{TOKEN_FILE}"
       }
     }
   },
   "mcp": {
     "transport": "stdio",
-    "command": "{PROSPERO_DIR}/.venv/Scripts/python.exe",
+    "command": "{PYTHON}",
     "args": [
-      "{PROSPERO_DIR}/prosperos_hoard/mcp_server.py"
+      "-I",
+      "-m",
+      "prosperos_hoard.mcp_server"
     ],
     "env": {
-      "PROSPERO_URL": "{APP_URL}"
+      "PROSPERO_URL": "{APP_URL}",
+      "PROSPERO_DATA_DIR": "{DATA_DIR}",
+      "PROSPERO_TOKEN_FILE": "{TOKEN_FILE}"
     },
     "optional_env": [
       "YOVOICE_URL",
