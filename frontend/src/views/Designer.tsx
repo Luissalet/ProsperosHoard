@@ -4,6 +4,7 @@ import { api, thumbUrl, type DesignTemplate } from "../api";
 import { useT } from "../i18n";
 import { fieldHint, fieldName, variantName } from "../messages";
 import { AssetPicker, useApp, useAsync, useDebounced } from "../components/ui";
+import { SpatialView } from "./Spatial";
 
 const LABELS: Record<string, Record<string, string>> = {
   en: {
@@ -17,6 +18,15 @@ const LABELS: Record<string, Record<string, string>> = {
 };
 
 export function DesignerView() {
+  const { lang } = useT();
+  const [mode, setMode] = useState("templates");
+  return <><div className="segmented" aria-label={lang === "es" ? "Modo de diseño" : "Design mode"}>
+    <button className={mode === "templates" ? "on" : ""} onClick={() => setMode("templates")}>{lang === "es" ? "Plantillas" : "Templates"}</button>
+    <button className={mode === "spatial" ? "on" : ""} onClick={() => setMode("spatial")}>{lang === "es" ? "Composición de imagen" : "Image composition"}</button>
+  </div>{mode === "spatial" ? <SpatialView /> : <TemplateDesignerView />}</>;
+}
+
+function TemplateDesignerView() {
   const { t, lang } = useT();
   const app = useApp();
   const pid = app.projectId!;

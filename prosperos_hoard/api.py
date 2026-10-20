@@ -41,6 +41,7 @@ from . import motion_graphics as mg
 from . import productions as productions_mod
 from . import cinema
 from . import spaces as spaces_mod
+from . import spatial
 from . import qa as qa_mod
 from . import recipes as recipes_mod
 from . import shorts as shorts_mod
@@ -288,6 +289,7 @@ class ComposePromptBody(BaseModel):
 
 class GenerateImageBody(BaseModel):
     prompt: str
+    composition_asset_id: Optional[str] = None
     style: Optional[str] = None
     negative: Optional[str] = None
     aspect: Optional[str] = None
@@ -596,6 +598,17 @@ class ShortScriptBody(BaseModel):
     production: Optional[str] = None
     script: Optional[Any] = None
     run: bool = True
+
+
+class SpatialBody(BaseModel):
+    action: str = "get"
+    project: str | None = None
+    asset_id: str | None = None
+    document: dict[str, Any] | None = None
+    name: str = "Composición"
+    target: str = "caption"
+    parent_id: str | None = None
+    offset: int = 0
 
 
 class ExplainerBody(BaseModel):
@@ -1112,6 +1125,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     def op_generate(project: str, body: GenerateImageBody) -> dict[str, Any]:
         proj = store.get_project(project)
+        composition = None
+        if body.composition_asset_id:
+            composition = spatial.load(store, body.composition_asset_id)
+            compiled = spatial.compile_prompt(composition["document"])
+            refs = list(dict.fromkeys(compiled["reference_asset_ids"] + (body.reference_asset_ids or []) + ([body.reference_asset_id] if body.reference_asset_id else [])))
+            # Numbered references in the compiled caption must retain their order.
+            body = body.model_copy(update={"prompt": "\n".join(x for x in (compiled["prompt"], body.prompt) if x),
+                                           "width": composition["document"]["width"], "height": composition["document"]["height"],
+                                           "reference_asset_ids": refs, "reference_asset_id": refs[0] if refs else None})
         if body.camera:
             is_clip = any(k in (body.template or "") for k in ("wan", "svd", "clip", "animate", "s2v"))
             terms = cinema.camera_prompt(body.camera, video=is_clip)
@@ -1246,6 +1268,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             "matched_characters": composed["matched_characters"],
             **({"matched_elements": composed["matched_elements"]} if composed.get("matched_elements") else {}),
             **({"loras": adapters["loras"]} if adapters["loras"] else {}),
+            **({"composition_asset_id": body.composition_asset_id} if composition else {}),
         }
         if body.audio_asset_id:
             if store.get_asset(body.audio_asset_id)["kind"] not in ("audio", "video"):
@@ -2794,6 +2817,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return engine.create_lyrics(store, project_id, _lyrics_text(body), body.name)
 
     # --------------------------------------------------------------- design
+    @app.post("/api/agent/studio_spatial")
+    def agent_spatial(body: SpatialBody):
+        return agent("studio_spatial", body.asset_id or body.name,
+                     lambda: spatial.dispatch(store, **body.model_dump()))
+
+    @app.post("/api/spatial")
+    def ui_spatial(body: SpatialBody):
+        return spatial.dispatch(store, **body.model_dump())
+
     @app.post("/api/agent/studio_design")
     def agent_design(project: str, body: DesignBody):
         return agent("studio_design", body.template, lambda: engine.asset_view(op_design(project, body)))
