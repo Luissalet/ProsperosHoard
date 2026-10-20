@@ -21,6 +21,7 @@ export function TextTiming({ title, audioId, duration: initialDuration, initialR
     catch { return initialRows; }
   });
   const [cursor, setCursor] = useState(0), [armed, setArmed] = useState(false);
+  const [sequence, setSequence] = useState(false);
   const [playing, setPlaying] = useState(false), [now, setNow] = useState(0), [duration, setDuration] = useState(initialDuration);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [dirty, setDirty] = useState(false);
   const audio = useRef<HTMLAudioElement>(null), surface = useRef<HTMLDivElement>(null);
@@ -34,8 +35,9 @@ export function TextTiming({ title, audioId, duration: initialDuration, initialR
   const mark = () => {
     if (!audio.current || !armed || busy || disabled) return;
     try {
-      const result = stampNext(rows, cursor, audio.current.currentTime);
+      const result = stampNext(rows, cursor, audio.current.currentTime, sequence);
       setRows(result.rows); setCursor(result.next); setDirty(true); setError('');
+      setSequence(true);
       if (result.finished) { setArmed(false); audio.current.pause(); }
     } catch { setError(es ? 'La siguiente marca debe ir después del inicio de la frase anterior.' : 'The next mark must follow the preceding line start.'); }
   };
@@ -58,7 +60,7 @@ export function TextTiming({ title, audioId, duration: initialDuration, initialR
         return { ...row, start_s: match.time_s, end_s: match.end_s, needs_review: match.needs_review };
       });
       setRows(aligned);
-      setDirty(true); setCursor(0);
+      setDirty(true); setCursor(0); setSequence(false);
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };
@@ -110,9 +112,11 @@ export function TextTiming({ title, audioId, duration: initialDuration, initialR
       {busy && <p role="status" className="small muted">{es ? 'Procesando. La letra y el audio originales se conservan.' : 'Processing. The original text and audio are retained.'}</p>}
       <div className="timing-lines" role="list">
         {rows.map((row, index) => <div key={row.id} className={`timing-line${index === cursor ? ' current' : ''}`} role="listitem">
-          <button className="timing-line-text" disabled={busy || disabled} onClick={() => { setCursor(index); setArmed(false); audio.current?.pause(); if (audio.current && row.start_s != null) audio.current.currentTime = row.start_s; }}>
+          <button className="timing-line-text" disabled={busy || disabled} onClick={() => { setCursor(index); setSequence(false); setArmed(false); audio.current?.pause(); if (audio.current && row.start_s != null) audio.current.currentTime = row.start_s; }}>
             <span className="timing-line-number">{index + 1}</span><span>{row.section && <span className="small muted">{row.section} · </span>}{row.text}</span>
-            {row.start_s == null ? <span className="pill warn">{es ? 'Sin tiempo' : 'Untimed'}</span> : row.needs_review ? <span className="pill warn">{es ? 'Revisar' : 'Review'}</span> : <Check size={14} />}
+            {row.start_s == null || row.end_s == null ? <span className="pill warn">{row.start_s == null && row.end_s == null
+              ? (es ? 'Sin tiempo' : 'Untimed') : row.start_s == null ? (es ? 'Falta inicio' : 'Start missing') : (es ? 'Falta fin' : 'End missing')}</span>
+              : row.needs_review ? <span className="pill warn">{es ? 'Revisar' : 'Review'}</span> : <Check size={14} />}
           </button>
           <label>{es ? 'Inicio · s' : 'Start · s'}<input aria-label={`${es ? 'Inicio frase' : 'Line start'} ${index + 1}`} type="number" min="0" step="0.01" value={row.start_s ?? ''} disabled={busy || disabled}
             onChange={e => change(index, { start_s: e.target.value === '' ? null : Number(e.target.value) })} /></label>

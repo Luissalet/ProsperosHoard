@@ -104,3 +104,11 @@ def test_agent_api_can_link_manual_timing_to_production(client):
     assert response.status_code == 200, response.text
     assert prod.load_state(app.state.store.data_dir, state['slug'])['done']['lyrics']['lyrics_asset_id'] == response.json()['id']
 
+
+def test_script_marks_cannot_be_saved_against_a_changed_song(client):
+    c, app, _ = client
+    state, body = setup_song(app.state.store)
+    response = c.put(f"/api/productions/{state['slug']}/segments", json={'text': 'A quiet street', 'source_song_asset_id': 'a_old_song'})
+    assert response.status_code >= 400
+    assert not prod.load_state(app.state.store.data_dir, state['slug'])['spec'].get('script_segments')
+

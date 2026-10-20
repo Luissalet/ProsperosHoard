@@ -21,3 +21,10 @@ test('blank intervals stay untimed and invalid edits are identified before savin
   assert.deepEqual(timingIssue([{...rows[0],start_s:1,end_s:3},{...rows[1],start_s:2,end_s:4}],10),{index:1,kind:'overlap'});
   assert.throws(()=>stampNext([{...rows[0],start_s:2,end_s:null}],1,1));
 });
+test('retiming a selected line preserves the preceding line and its instrumental gap', () => {
+  const rows = rowsFromLyrics('One\nTwo\nThree', [{text:'One',time_s:1,end_s:2},{text:'Two',time_s:5,end_s:6},{text:'Three',time_s:9,end_s:10}]);
+  const mark = stampNext(rows,1,5.5,false);
+  assert.deepEqual([mark.rows[0].start_s,mark.rows[0].end_s],[1,2]);
+  const following = stampNext(mark.rows,2,7);
+  assert.deepEqual([following.rows[1].start_s,following.rows[1].end_s],[5.5,7]);
+});

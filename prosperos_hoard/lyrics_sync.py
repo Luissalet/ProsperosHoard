@@ -178,7 +178,8 @@ def time_asset(store: Any, project_id: str, song_asset_id: str, text: str, *,
     return save_asset(store, project_id, text, result, name=name)
 
 
-def save_asset(store: Any, project_id: str, text: str, result: dict[str, Any], *, name: str | None = None) -> dict[str, Any]:
+def save_asset(store: Any, project_id: str, text: str, result: dict[str, Any], *, name: str | None = None,
+               production_before: dict[str, Any] | None = None) -> dict[str, Any]:
     """Retain partial rows and exact ends alongside a portable LRC export."""
     import hashlib
     from . import engine
@@ -190,6 +191,7 @@ def save_asset(store: Any, project_id: str, text: str, result: dict[str, Any], *
     asset = engine.create_lyrics(store, project_id, lrc, name or 'Linked lyrics', recipe={
         'operation': 'time_lyrics', 'backend': 'local', 'method': result['method'],
         'input_asset_ids': [result['song_asset_id']], 'derived_from': result['song_asset_id'],
+        **({'production_timing_before': production_before} if production_before else {}),
         'text_timing': {**result, 'original_text': text,
                         'lrc_sha256': hashlib.sha256(lrc.encode('utf-8')).hexdigest()}})
     return {**result, 'id': asset['id'], 'preview': False}
@@ -207,7 +209,7 @@ def stored_timing(asset: dict[str, Any], lrc: str) -> dict[str, Any] | None:
 
 def production_timing(store: Any, slug: str, *, method: str = 'align', lines: list[dict[str, Any]] | None = None,
                       preview: bool = False, song_asset_id: str | None = None, text: str | None = None,
-                      language: str | None = None, model: str = 'large-v3-turbo') -> dict[str, Any]:
+                      language: str | None = None, model: str = 'large-v3-turbo', capture_undo: bool = False) -> dict[str, Any]:
     """Listen outside the production lock; bind only to unchanged source text/audio."""
     from . import productions as prod
 
@@ -232,7 +234,12 @@ def production_timing(store: Any, slug: str, *, method: str = 'align', lines: li
         latest_text = str(((state.get('spec') or {}).get('song') or {}).get('lyrics') or '')
         if latest_id != current_id or latest_text != current_text or prod.is_running(state, store.data_dir):
             raise prod.ProductionError('timing_source_changed', 'The text, audio or production changed during alignment. Reopen the editor.')
-        result = save_asset(store, project_id, current_text, result, name=f"{state.get('name') or slug} - linked lyrics")
+        before = None
+        if capture_undo and result['timed_lines']:
+            from .agent_undo import capture_production_state
+            before = capture_production_state(store, state)
+        result = save_asset(store, project_id, current_text, result, name=f"{state.get('name') or slug} - linked lyrics",
+                            production_before=before)
         state.setdefault('done', {})['lyrics'] = {'lyrics_asset_id': result['id'], 'source': result['method'],
             'lines': result['timed_lines'], 'total_lines': result['total_lines'], 'complete': result['complete']}
         for stage in ('animatic', 'timeline', 'report'):

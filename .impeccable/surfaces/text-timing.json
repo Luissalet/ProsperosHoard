@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "title": "Design System: Prospero — Text timing",
+  "extensions": {
+    "scope": {"surface": "text-timing", "mode": "Operate", "task": 1057, "document": "docs/design/text-timing.md", "inherits": "DESIGN.md", "visualAuthority": "Existing production workbench; local extension", "rootCompGatesChanged": false, "shippingRasterAssetsAdded": false},
+    "surfaceBrief": {
+      "audience": "Prospero users timing existing lyrics or script segments against production audio.",
+      "job": "Listen, mark line boundaries, correct times and explicitly save their link.",
+      "direction": "Inherit the established plum workbench, magenta actions and shared modal controls.",
+      "firstViewport": "Instructions, audio and clock, marking actions, line list; save and progress remain in the shared modal footer.",
+      "signatureInteraction": "Space starts successive lines and closes the preceding line; one final mark closes the last.",
+      "constraints": ["Retain original text and captured audio identity.", "Expose incomplete bounds and review states.", "Keep wholly untimed rows available.", "Use explicit saving after manual edits or alignment preview."],
+      "unresolvedDecisions": []
+    },
+    "breakpoints": [{"name": "timing-stack", "value": "600px", "purpose": "Text spans the row above paired timing inputs; audio occupies its own row."}],
+    "behavior": {
+      "entries": ["SongTrack: Sync lyrics", "ScriptDesk: Time while listening"],
+      "space": "Armed editor only; ignores repeats and native control targets.",
+      "lineSelection": "Pause, seek to known start and reset sequential remarking.",
+      "states": ["Untimed", "Start missing", "End missing", "Review", "Complete pair"],
+      "saveValidation": "Skip wholly untimed rows; reject incomplete bounds, invalid ranges and overlaps.",
+      "draft": "sessionStorage by context and audio ID; matching line-text signature required; cleared after successful save.",
+      "capturedContext": "Audio ID and rows are captured on opening; callbacks use the captured source."
+    },
+    "evidence": {"directory": "D:/LocalAI/research-inbox/prospero-lyrics1057", "openedCaptures": ["timing-desktop.png", "timing-mobile.png"], "observedCorrection": "Partially timed second line displays End missing in both captures.", "review": {"disposition": "ship", "scope": "Incomplete timing badge correction"}},
+    "limits": ["Dark-theme capture evidence only.", "No alignment-quality or model-quality claim.", "No whole-product approval or root comp-gate closure."]
+  },
+  "components": [],
+  "narrative": {"northStar": "The Shot Review Bench", "overview": "Listen, mark, correct and explicitly save linked timings."}
+}

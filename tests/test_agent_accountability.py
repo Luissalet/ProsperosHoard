@@ -231,6 +231,22 @@ def test_unbound_lyric_timing_creation_can_be_undone(agent):
     assert len(done['undone']) == 1 and done['complete']
     assert any(row['id'] == made['id'] for row in agent.store.list_trash())
 
+
+def test_timing_undo_preserves_a_human_edit_made_during_recognition(agent, monkeypatch):
+    from test_lyrics_sync_api import setup_song
+    from prosperos_hoard import lyrics_sync
+    state, body = setup_song(agent.store)
+    def recognize(*args, **kwargs):
+        prod.update_shots(agent.store.data_dir, state['slug'], [{'key': '1', 'prompt': 'Human edit made during recognition'}])
+        return {'segments': [{'words': [{'word': 'A quiet street', 'start_s': 2, 'end_s': 4}]}]}
+    monkeypatch.setattr(lyrics_sync, 'transcribe_words', recognize)
+    agent.ok('studio_time_lyrics', {**body, 'project': state['project_id'], 'production': state['slug'], 'method': 'align'}, session='timing-concurrent')
+    done = agent.undone('timing-concurrent', confirm=True)
+    assert done['complete']
+    restored = prod.load_state(agent.store.data_dir, state['slug'])
+    assert restored['spec']['shots'][0]['prompt'] == 'Human edit made during recognition'
+    assert not restored['done'].get('lyrics')
+
 def test_cast_delete_restore_update_and_groups_are_undone(agent):
     store = agent.store
     p = store.create_project("Cast")

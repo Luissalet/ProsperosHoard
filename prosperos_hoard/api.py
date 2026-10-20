@@ -655,6 +655,7 @@ class StockKeysBody(BaseModel):
 class ProductionSegmentsBody(BaseModel):
     text: Optional[str] = None
     segments: Optional[list[dict[str, Any]]] = None
+    source_song_asset_id: Optional[str] = None
 
 
 class ProductionLyricsBody(BaseModel):
@@ -2782,7 +2783,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     raise engine.EngineError('wrong_project', 'The production belongs to a different project.')
                 return lyrics_sync.production_timing(store, body.production, method=body.method, lines=body.lines,
                     preview=body.preview, song_asset_id=body.song_asset_id, text=body.lyrics,
-                    language=body.language, model=body.model)
+                    language=body.language, model=body.model, capture_undo=True)
             if body.method == 'estimate':
                 if body.preview:
                     raise engine.EngineError('bad_timing_method', 'Preview supports align or manual timing.')
@@ -3967,12 +3968,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.put("/api/productions/{slug}/segments")
     def production_segments(slug: str, body: ProductionSegmentsBody):
-        return productions_mod.set_script_segments(store.data_dir, slug, text=body.text, segments=body.segments)
+        return productions_mod.set_script_segments(store.data_dir, slug, text=body.text, segments=body.segments,
+                                                  source_song_asset_id=body.source_song_asset_id)
 
     @app.post("/api/agent/studio_production_segments")
     def agent_production_segments(production: str, body: ProductionSegmentsBody):
         def run():
-            result = productions_mod.set_script_segments(store.data_dir, production, text=body.text, segments=body.segments)
+            result = productions_mod.set_script_segments(store.data_dir, production, text=body.text, segments=body.segments,
+                                                         source_song_asset_id=body.source_song_asset_id)
             return {"production": result["slug"], "count": len(result["segments"]),
                     "timed": result["timed"], "retimed": result["retimed"]}
         return agent("studio_production_segments", production, run)

@@ -1386,7 +1386,7 @@ export const api = {
     request<{ production: ProductionView; job: Job }>("POST", `/generation/api/productions/${slug}/continue${take ? `?take=${take}` : ""}`),
   setProductionLyrics: (slug: string, lyrics: string, run = false) =>
       request<{ status: string }>("PUT", `/generation/api/productions/${slug}/lyrics`, { lyrics, run }),
-  setProductionSegments: (slug: string, body: { text?: string; segments?: ScriptSegment[] }) =>
+  setProductionSegments: (slug: string, body: { text?: string; segments?: ScriptSegment[]; source_song_asset_id?: string }) =>
     request<{ slug: string; segments: ScriptSegment[]; retimed: string[]; timed: number }>("PUT", `/generation/api/productions/${slug}/segments`, body),
   setProductionSong: (slug: string, body: SongChange) =>
     request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(

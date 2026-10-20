@@ -53,7 +53,7 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
   const [anchor, setAnchor] = useState<number | null>(null);
   const [changing, setChanging] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
-  const [timingOpen, setTimingOpen] = useState(false);
+  const [timingEditor, setTimingEditor] = useState<{ slug: string; audioId: string; text: string; duration: number; rows: ReturnType<typeof rowsFromLyrics> } | null>(null);
   const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null; span?: Sel; section?: string; pinFromCut?: boolean } | null>(null);
   const [assignKey, setAssignKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -270,7 +270,10 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
           : t("trackNoSong")}{songInfo.tags ? ` · ${songInfo.tags}` : ""}</p>
       )}
       {songId && hasLyrics && <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
-        <button className="btn primary" disabled={running || busy} onClick={() => { audio.current?.pause(); setTimingOpen(true); }}><Timer size={15} />{es ? 'Sincronizar letra' : 'Sync lyrics'}</button>
+        <button className="btn primary" disabled={running || busy} onClick={() => {
+          audio.current?.pause(); setTimingEditor({ slug: state.slug, audioId: songId, text: songInfo.lyrics || '', duration,
+            rows: rowsFromLyrics(songInfo.lyrics || '', timing?.text_timing?.lines || lines) });
+        }}><Timer size={15} />{es ? 'Sincronizar letra' : 'Sync lyrics'}</button>
         <span className="small muted">{timing?.text_timing
           ? `${timing.text_timing.timed_lines}/${timing.text_timing.total_lines} ${es ? 'frases con tiempos · revisa las pendientes' : 'timed lines · review unfinished lines'}`
           : (es ? 'Enlaza las palabras del audio o marca los tiempos a mano.' : 'Match the words in the audio or mark times by hand.')}</span>
@@ -467,12 +470,12 @@ export function SongTrackCard({ state, onChanged }: { state: ProductionState; on
       {changing && <SongChangeModal state={state} onClose={() => setChanging(false)} onChanged={() => { setChanging(false); onChanged(); }} />}
       {lyricsOpen && <LyricsModal state={state} running={running} onClose={() => setLyricsOpen(false)}
         onSaved={() => { setLyricsOpen(false); onChanged(); }} />}
-      {timingOpen && songId && <TextTiming title={es ? 'Sincronizar letra con la canción' : 'Sync lyrics to the song'}
-        audioId={songId} duration={duration} draftKey={`lyrics.${state.slug}`} disabled={running}
-        initialRows={rowsFromLyrics(songInfo.lyrics || '', timing?.text_timing?.lines || lines)} onClose={() => setTimingOpen(false)}
-        onAlign={() => api.linkProductionLyrics(state.slug, { song_asset_id: songId, lyrics: songInfo.lyrics || '', method: 'align', preview: true })}
+      {timingEditor && timingEditor.slug === state.slug && <TextTiming title={es ? 'Sincronizar letra con la canción' : 'Sync lyrics to the song'}
+        audioId={timingEditor.audioId} duration={timingEditor.duration} draftKey={`lyrics.${state.slug}`} disabled={running}
+        initialRows={timingEditor.rows} onClose={() => setTimingEditor(null)}
+        onAlign={() => api.linkProductionLyrics(timingEditor.slug, { song_asset_id: timingEditor.audioId, lyrics: timingEditor.text, method: 'align', preview: true })}
         onSave={async rows => {
-          await api.linkProductionLyrics(state.slug, { song_asset_id: songId, lyrics: songInfo.lyrics || '', method: 'manual',
+          await api.linkProductionLyrics(timingEditor.slug, { song_asset_id: timingEditor.audioId, lyrics: timingEditor.text, method: 'manual',
             lines: rows.map(row => ({ text: row.text, time_s: row.start_s, end_s: row.end_s, needs_review: row.needs_review })) });
           onChanged(); app.toast(es ? 'Letra vinculada a la canción. Los tiempos están disponibles en la pista y el guion.' : 'Lyrics linked to the song. Timings are available in the track and script.', 'ok');
         }} />}

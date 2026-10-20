@@ -21,10 +21,10 @@ export function rowsFromLyrics(text: string, timed: { text: string; time_s: numb
 }
 
 /** Each tap starts the next line; the final tap ends the last one. */
-export function stampNext(rows: TimingRow[], index: number, time: number): { rows: TimingRow[]; next: number; finished: boolean } {
+export function stampNext(rows: TimingRow[], index: number, time: number, closePrevious = true): { rows: TimingRow[]; next: number; finished: boolean } {
   if (!Number.isFinite(time) || time < 0 || index < 0 || index > rows.length || !rows.length) throw new Error('Invalid timing mark');
   const next = rows.map(row => ({ ...row }));
-  if (index > 0) {
+  if (index > 0 && closePrevious) {
     const previous = next[index - 1];
     if (previous.start_s != null && time <= previous.start_s) throw new Error('The next mark must be after the preceding line starts');
     previous.end_s = Math.round(time * 1000) / 1000;
