@@ -60,6 +60,38 @@ def normalize_timings(text: str, rows: list[dict[str, Any]], duration: float) ->
     return result
 
 
+def _word_matches(wanted: list[str], heard: list[str]) -> dict[int, int]:
+    # Global edit alignment keeps an imperfect first chorus before a cleaner
+    # repeat; choosing the longest matching block can skip the entire verse.
+    if len(wanted) * len(heard) > 2_000_000:
+        return {block.a + offset: block.b + offset
+                for block in SequenceMatcher(None, wanted, heard, autojunk=False).get_matching_blocks()
+                for offset in range(block.size)}
+    previous = list(range(len(heard) + 1))
+    trace = [bytearray(len(heard) + 1)]
+    for i, word in enumerate(wanted, 1):
+        current, directions = [i], bytearray(len(heard) + 1)
+        for j, other in enumerate(heard, 1):
+            choices = (previous[j - 1] + (word != other), previous[j] + 1, current[j - 1] + 1)
+            direction = min(range(3), key=choices.__getitem__)
+            current.append(choices[direction])
+            directions[j] = direction
+        trace.append(directions)
+        previous = current
+    matches, i, j = {}, len(wanted), len(heard)
+    while i and j:
+        direction = trace[i][j]
+        if direction == 0:
+            if wanted[i - 1] == heard[j - 1]:
+                matches[i - 1] = j - 1
+            i, j = i - 1, j - 1
+        elif direction == 1:
+            i -= 1
+        else:
+            j -= 1
+    return matches
+
+
 def align_words(text: str, transcript: dict[str, Any], duration: float) -> dict[str, Any]:
     """Match monotonically; missing words remain visible and untimed."""
     lines = text_lines(text)
@@ -81,10 +113,7 @@ def align_words(text: str, transcript: dict[str, Any], duration: float) -> dict[
             for token in tokens(str(word.get('word') or word.get('text') or '')):
                 heard.append(token)
                 clock.append((start, min(end, duration)))
-    matches = {}
-    for block in SequenceMatcher(None, wanted, heard, autojunk=False).get_matching_blocks():
-        for offset in range(block.size):
-            matches[block.a + offset] = block.b + offset
+    matches = _word_matches(wanted, heard)
     rows = []
     previous_end = 0.0
     for line, indices in zip(lines, line_tokens):
@@ -94,7 +123,11 @@ def align_words(text: str, transcript: dict[str, Any], duration: float) -> dict[
         if found and ratio >= .65 and found[0] - indices[0] <= 2 and indices[-1] - found[-1] <= 2:
             candidate_start = clock[matches[found[0]]][0]
             candidate_end = clock[matches[found[-1]]][1]
-            if candidate_start >= previous_end - .02 and candidate_end > candidate_start:
+            gaps = [clock[matches[b]][0] - clock[matches[a]][1] for a, b in zip(found, found[1:])]
+            # A few matching words across different occurrences are not a line.
+            # Leave ambiguous long spans available for explicit human timing.
+            coherent = max(gaps, default=0) <= 5 and candidate_end - candidate_start <= max(12, len(indices) * 2)
+            if coherent and candidate_start >= previous_end - .02 and candidate_end > candidate_start:
                 start, end = round(candidate_start, 3), round(candidate_end, 3)
                 previous_end = end
         rows.append({**line, 'time_s': start, 'end_s': end, 'match_ratio': round(ratio, 3),
