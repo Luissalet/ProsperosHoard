@@ -13,6 +13,8 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
   const [assets, setAssets] = useState<{ id: string; name?: string | null }[]>([]);
   const currentVoice = (state.spec.voice || {}) as { voice_id?: string; speed?: number };
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([]), [voice, setVoice] = useState(currentVoice.voice_id || ""), [speed, setSpeed] = useState(currentVoice.speed || 1);
+  const [voiceDirty, setVoiceDirty] = useState(false);
+  useEffect(() => { if (!voiceDirty) { setVoice(currentVoice.voice_id || ""); setSpeed(currentVoice.speed || 1); } }, [currentVoice.voice_id, currentVoice.speed, voiceDirty]);
   useEffect(() => { api.voices().then(r => setVoices(r.items)).catch(() => undefined); }, []);
   useEffect(() => { if (state.project_id) api.assets(state.project_id, { kind: "image", limit: 200 }).then(r => setAssets(r.items)).catch(() => undefined); }, [state.project_id]);
   useEffect(() => { if (!dirty) setDraft(structuredClone(incoming)); }, [state.slug, incoming.revision]);
@@ -21,7 +23,7 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
   const move = (index: number, direction: number) => change(next => { const [item] = next.scenes.splice(index, 1); next.scenes.splice(index + direction, 0, item); });
   const save = async (run: boolean) => {
     setBusy(true); setError("");
-    try { const voiceChanged = voice !== (currentVoice.voice_id || "") || speed !== (currentVoice.speed || 1); const next = await api.explainer({ action: "edit", production: state.slug, base_revision: draft.revision, scenes: draft.scenes, sources: draft.sources, ...(voiceChanged ? { voice: { ...(voice ? { voice_id: voice } : {}), ...(voice.startsWith("voice_") ? {} : { backend: "piper" }), speed } } : {}), run }); setDraft(next.explainer); setDirty(false); app.refreshJobs(); onChanged(); return next.explainer; }
+    try { const next = await api.explainer({ action: "edit", production: state.slug, base_revision: draft.revision, scenes: draft.scenes, sources: draft.sources, ...(voiceDirty ? { voice: { ...(voice ? { voice_id: voice } : {}), ...(voice.startsWith("voice_") ? {} : { backend: "piper" }), speed } } : {}), run }); setDraft(next.explainer); setDirty(false); setVoiceDirty(false); app.refreshJobs(); onChanged(); return next.explainer; }
     catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
   };
@@ -33,7 +35,7 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
   return <section className="card stack" aria-label={es ? "Vídeo explicativo" : "Explanatory video"}>
     <h2>{es ? "Escenas y fuentes" : "Scenes and sources"}</h2>
     <p className="small muted">{es ? "Cada escena conserva su narración, figura y fuentes. Al corregirla se reutilizan las voces y páginas que no cambian." : "Each scene retains narration, figures and sources. Corrections reuse unchanged voices and pages."}</p>
-    <div className="grid-2"><label className="field">{es ? "Voz de narración" : "Narration voice"}<select value={voice} onChange={event => { setVoice(event.target.value); setDirty(true); }}><option value="">{es ? "Predeterminada del idioma" : "Language default"}</option>{voice && !voices.some(v => v.id === voice) && <option value={voice}>{es ? "Voz actual" : "Current voice"}</option>}{voices.map(v => <option value={v.id} key={v.id}>{v.label}</option>)}</select></label><label className="field">{es ? "Velocidad de la voz" : "Voice speed"}<input type="number" min="0.5" max="2" step="0.05" value={speed} onChange={event => { setSpeed(Number(event.target.value)); setDirty(true); }}/></label></div>
+    <div className="grid-2"><label className="field">{es ? "Voz de narración" : "Narration voice"}<select value={voice} onChange={event => { setVoice(event.target.value); setVoiceDirty(true); setDirty(true); }}><option value="">{es ? "Predeterminada del idioma" : "Language default"}</option>{voice && !voices.some(v => v.id === voice) && <option value={voice}>{es ? "Voz actual" : "Current voice"}</option>}{voices.map(v => <option value={v.id} key={v.id}>{v.label}</option>)}</select></label><label className="field">{es ? "Velocidad de la voz" : "Voice speed"}<input type="number" min="0.5" max="2" step="0.05" value={speed} onChange={event => { setSpeed(Number(event.target.value)); setVoiceDirty(true); setDirty(true); }}/></label></div>
     {error && <p role="alert">{error}</p>}
     {dirty && incoming.revision !== draft.revision && <p role="alert">{es ? "Hay una revisión más reciente. Tu borrador se conserva." : "A newer revision is available. Your draft is retained."}</p>}
     {!!state.view.explainer?.review_needed?.length && <p role="status">{es ? "Fuentes modificadas; revisar escenas: " : "Changed sources; check scenes: "}{state.view.explainer.review_needed.join(", ")}</p>}

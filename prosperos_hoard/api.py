@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 import httpx
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
