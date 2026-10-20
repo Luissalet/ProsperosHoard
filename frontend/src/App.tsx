@@ -9,6 +9,7 @@ import "@fontsource/source-sans-3";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 import "./studio.css";
+import "./project-studio.css";
 import { api, type Job, type Project } from "./api";
 import { I18nContext, detectLang, makeT, type Lang, type MessageKey } from "./i18n";
 import { AppContext, type Route, useToasts } from "./components/ui";
@@ -170,9 +171,8 @@ export default function App() {
 
   const setProject = useCallback((id: string | null) => {
     if (!id) { window.location.hash = "#/projects"; return; }
-    const section = PROJECT_IDS.has(route.section) ? route.section : "overview";
-    window.location.hash = `#/p/${id}/${section}`;
-  }, [route.section]);
+    window.location.hash = `#/p/${id}/overview`;
+  }, []);
 
   // global shortcuts: G generate, / search (Library handles focus), Esc handled by overlays
   useEffect(() => {
@@ -212,7 +212,7 @@ export default function App() {
   else if (section === "video") view = <ProductionsView key={`${projectId}/${route.arg || ""}`} projectId={projectId!} />;
   else if (section === "spaces") view = <Suspense fallback={null}><SpacesView key={projectId} /></Suspense>;
   else if (section === "cast") view = <CastView key={projectId} />;
-  else if (section === "generate") view = <StudioView key={projectId} />;
+  else if (section === "generate") view = <StudioView key={`${projectId}/${route.arg || ""}`} />;
   else if (section === "library") view = <LibraryView key={projectId} />;
   else if (section === "designer") view = <DesignerView key={projectId} />;
   else if (section === "audio") view = <AudioView key={projectId} />;
@@ -298,7 +298,7 @@ export default function App() {
                 <option value="">{t("noProject")}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
-                {[["generate", lang === "es" ? "Crear" : "Create"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
+                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", lang === "es" ? "Crear" : "Create"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
                   <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
               </nav>
               <div className="spacer" />
