@@ -28,11 +28,13 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
     finally { setBusy(false); }
   };
   const exportDraft = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (busy) { event.preventDefault(); return; }
     if (!dirty) return;
     event.preventDefault(); const current = await save(false);
     if (current) { const link = document.createElement("a"); link.href = `/generation/api/productions/${state.slug}/explainer.json`; link.download = ""; document.body.append(link); link.click(); link.remove(); }
   };
   return <section className="card stack" aria-label={es ? "Vídeo explicativo" : "Explanatory video"}>
+    <fieldset className="stack" disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
     <h2>{es ? "Escenas y fuentes" : "Scenes and sources"}</h2>
     <p className="small muted">{es ? "Cada escena conserva su narración, figura y fuentes. Al corregirla se reutilizan las voces y páginas que no cambian." : "Each scene retains narration, figures and sources. Corrections reuse unchanged voices and pages."}</p>
     <div className="grid-2"><label className="field">{es ? "Voz de narración" : "Narration voice"}<select value={voice} onChange={event => { setVoice(event.target.value); setVoiceDirty(true); setDirty(true); }}><option value="">{es ? "Predeterminada del idioma" : "Language default"}</option>{voice && !voices.some(v => v.id === voice) && <option value={voice}>{es ? "Voz actual" : "Current voice"}</option>}{voices.map(v => <option value={v.id} key={v.id}>{v.label}</option>)}</select></label><label className="field">{es ? "Velocidad de la voz" : "Voice speed"}<input type="number" min="0.5" max="2" step="0.05" value={speed} onChange={event => { setSpeed(Number(event.target.value)); setVoiceDirty(true); setDirty(true); }}/></label></div>
@@ -59,5 +61,6 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
       </div>
     </details>)}
     <div className="row wrap"><button className="btn" onClick={() => change(next => { next.scenes.push({ id: crypto.randomUUID(), title: es ? "Nueva escena" : "New scene", narration: "", body: "", source_ids: [] }); })}>{es ? "Añadir escena" : "Add scene"}</button><button className="btn primary" disabled={busy || !dirty} onClick={() => save(false)}>{es ? "Guardar escenas" : "Save scenes"}</button><button className="btn" disabled={busy || running} onClick={() => save(true)}>{es ? "Guardar y producir" : "Save and produce"}</button><a className="btn" href={`/generation/api/productions/${state.slug}/explainer.json`} onClick={exportDraft} download>{dirty ? (es ? "Guardar y exportar proyecto" : "Save and export project") : (es ? "Proyecto editable" : "Editable project")}</a>{!!state.done.narration && !!state.done.report && <a className="btn" href={`/generation/api/productions/${state.slug}/explainer.srt`} download>SRT</a>}</div>
+    </fieldset>
   </section>;
 }
