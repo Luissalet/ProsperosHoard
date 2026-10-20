@@ -1,8 +1,19 @@
 import { useEffect, useState } from "react";
-import { api, type ExplainerProject, type ExplainerScene, type ProductionState } from "../api";
+import { api, type ExplainerProject, type ExplainerScene, type PortableFigure, type ProductionState } from "../api";
 import { useT } from "../i18n";
 import { useApp } from "../components/ui";
 import { liveRun } from "./Storyboard";
+
+function originLink(value?: string) {
+  try { const url = new URL(value || ""); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : undefined; }
+  catch { return undefined; }
+}
+
+function downloadFigure(figure: PortableFigure) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(figure, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a"); link.href = url; link.download = `${figure.document_id}-r${figure.revision}.vfigure`;
+  document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export function ExplainerScenes({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
   const { lang } = useT(), app = useApp();
@@ -20,6 +31,15 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
   useEffect(() => { if (!dirty) setDraft(structuredClone(incoming)); }, [state.slug, incoming.revision]);
   const change = (fn: (next: ExplainerProject) => void) => { setDraft(previous => { const next = structuredClone(previous); fn(next); return next; }); setDirty(true); };
   const sceneChange = (index: number, values: Partial<ExplainerScene>) => change(next => { Object.assign(next.scenes[index], values); });
+  const importFigure = async (id: string, file: File) => {
+    setBusy(true); setError("");
+    try {
+      const figure = JSON.parse(await file.text()) as PortableFigure;
+      if (figure.format !== "vitruvius.figure/1" || figure.preview?.mime !== "image/png" || typeof figure.preview.data !== "string" || !figure.content) throw new Error(es ? "Elige un archivo .vfigure con su fuente y captura PNG." : "Choose a .vfigure file with its source and PNG capture.");
+      change(next => { const scene = next.scenes.find(item => item.id === id); if (scene) { scene.figure = figure; delete scene.asset_id; } });
+    } catch (failure) { setError((failure as Error).message); }
+    finally { setBusy(false); }
+  };
   const move = (index: number, direction: number) => change(next => { const [item] = next.scenes.splice(index, 1); next.scenes.splice(index + direction, 0, item); });
   const save = async (run: boolean) => {
     setBusy(true); setError("");
@@ -54,7 +74,14 @@ export function ExplainerScenes({ state, onChanged }: { state: ProductionState; 
         <label className="field">{es ? "Título de la escena" : "Scene title"}<input value={scene.title} onChange={event => sceneChange(index, { title: event.target.value })}/></label>
         <label className="field">{es ? "Narración" : "Narration"}<textarea aria-label={es ? "Narración" : "Narration"} rows={4} value={scene.narration} onChange={event => sceneChange(index, { narration: event.target.value })}/></label>
         <label className="field">{es ? "Texto en pantalla" : "On-screen text"}<textarea aria-label={es ? "Texto en pantalla" : "On-screen text"} rows={2} value={scene.body} onChange={event => sceneChange(index, { body: event.target.value })}/></label>
-        <label className="field">{es ? "Figura de la biblioteca" : "Library figure"}<select value={scene.asset_id || ""} onChange={event => sceneChange(index, { asset_id: event.target.value || undefined })}><option value="">{es ? "Página de texto animado" : "Animated text page"}</option>{assets.map(asset => <option value={asset.id} key={asset.id}>{asset.name || asset.id}</option>)}</select></label>
+        <label className="field">{es ? "Figura de la biblioteca" : "Library figure"}<select value={scene.figure ? "portable" : scene.asset_id || ""} onChange={event => sceneChange(index, { asset_id: event.target.value || undefined, figure: null })}>{scene.figure && <option value="portable">{es ? "Figura importada con su fuente" : "Imported figure with source"}</option>}<option value="">{es ? "Página de texto animado" : "Animated text page"}</option>{assets.map(asset => <option value={asset.id} key={asset.id}>{asset.name || asset.id}</option>)}</select></label>
+        <label className="field">{es ? "Importar o sustituir figura (.vfigure)" : "Import or replace figure (.vfigure)"}<input type="file" accept=".vfigure,application/json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFigure(scene.id, file); }}/></label>
+        {scene.figure && <figure style={{ margin: 0 }} className="stack">
+          <img src={`data:image/png;base64,${scene.figure.preview.data}`} alt={scene.figure.title || scene.title} style={{ width: "100%", maxHeight: 240, objectFit: "contain" }}/>
+          <figcaption className="small">{scene.figure.title || scene.title} · {es ? "Revisión" : "Revision"} {scene.figure.revision}{scene.figure.page_id ? ` · ${es ? "Página" : "Page"} ${scene.figure.page_id}` : ""}{scene.figure.state_id ? ` · ${es ? "Estado" : "State"} ${scene.figure.state_id}` : ""}</figcaption>
+          <div className="row wrap"><button className="btn" onClick={() => downloadFigure(scene.figure!)}>{es ? "Descargar figura y fuente" : "Download figure and source"}</button>{originLink(scene.figure.origin?.editor_url) && <a className="btn" href={originLink(scene.figure.origin?.editor_url)} target="_blank" rel="noreferrer">{es ? "Abrir diagrama de origen" : "Open source diagram"}</a>}</div>
+          <p className="small muted">{es ? "Se conserva esta captura y su fuente. Para usar otra revisión o estado, importa la nueva figura." : "This capture and its source are retained. Import a new figure to use another revision or state."}</p>
+        </figure>}
         <fieldset><legend>{es ? "Fuentes de esta escena" : "Scene sources"}</legend>{draft.sources.map(source => <label className="row" key={source.id}><input type="checkbox" checked={scene.source_ids.includes(source.id)} onChange={event => sceneChange(index, { source_ids: event.target.checked ? [...scene.source_ids, source.id] : scene.source_ids.filter(id => id !== source.id) })}/>{source.title}</label>)}</fieldset>
         {!!scene.source_ids.length && <label className="row"><input type="checkbox" checked={!!scene.source_reviewed} onChange={event => sceneChange(index, { source_reviewed: event.target.checked })}/>{es ? "He comprobado esta escena con sus fuentes" : "I checked this scene against its sources"}</label>}
         <div className="row wrap"><button className="btn" disabled={!index} onClick={() => move(index, -1)}>{es ? "Subir" : "Move up"}</button><button className="btn" disabled={index === draft.scenes.length - 1} onClick={() => move(index, 1)}>{es ? "Bajar" : "Move down"}</button><button className="btn" disabled={draft.scenes.length < 2} onClick={() => change(next => { next.scenes.splice(index, 1); })}>{es ? "Eliminar escena" : "Delete scene"}</button></div>
