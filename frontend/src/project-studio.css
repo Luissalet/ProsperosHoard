@@ -16,7 +16,7 @@
 .shot-node-composer .field > .row { display: flex; }
 .shot-node-composer .slash-wrap input { min-height: 60px; }
 .shot-node-composer textarea { width: 100%; }
-.shot-node-composer > .generate-clip { height: auto; min-height: 48px; padding: 10px 12px; line-height: 1.4; align-self: start; }
+.node-composer.shot-node-composer > .generate-clip { height: auto; min-height: 48px; padding: 10px 12px; line-height: 1.4; align-self: start; }
 .shot-node-guide { width: 100%; }
 .shot-node-lock { margin: 12px 0; }
 .shot-node-settings { margin: 20px 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
