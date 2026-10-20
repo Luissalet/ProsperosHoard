@@ -343,6 +343,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
   const [tab, setTab] = useState<Tab | null>(null);
+  const [shotOpen, setShotOpen] = useState(false);
   const [canvasBusy, setCanvasBusy] = useState(false);
   const [lumiereBusy, setLumiereBusy] = useState(false);
   const active = data ? liveRun(data, app.jobs) : false;
@@ -405,7 +406,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
 
   return (
     <div className="stack">
-      <div className="card prod-head">
+      {!shotOpen && <div className="card prod-head">
         <div className="row wrap" style={{ gap: 8 }}>
           <button className="btn sm ghost" onClick={onBack}><ArrowLeft size={14} /> {t("prodBack")}</button>
           <h2 className="grow" style={{ margin: 0 }}><Clapperboard size={17} /> {data.name || slug} <StatusPill status={view.status} pending={awaitsContinue(view.status, slug, data.job_id, app.jobs)} /></h2>
@@ -424,19 +425,19 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
         {data.recipe && <p className="small muted" style={{ margin: "6px 0 0" }}>{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
         {view.stages && <details className="production-process"><summary>{lang === "es" ? "Proceso de producción" : "Production process"}{active ? ` · ${t("stateRunning")}` : ""}</summary><PipelineStepper state={data} active={active} onPick={(s) => setTab(STAGE_TAB[s] || "storyboard")} /></details>}
         <NextStep state={data} active={active} onChanged={changed} setTab={setTab} />
-      </div>
+      </div>}
       {isShort ? <ShortDetail state={data} onChanged={changed} /> : (
         <>
-          <div className="tabs-bar">
+          {!shotOpen && <div className="tabs-bar">
             {tabs.filter(([k]) => k !== "qa" && k !== "history").map(([k, label]) => (
               <button key={k} className={current === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>
             ))}
             <details className="production-tools"><summary>{lang === "es" ? "Más herramientas" : "More tools"}</summary><div>{tabs.filter(([k]) => k === "qa" || k === "history").map(([k, label]) => <button key={k} className={current === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}<button onClick={() => app.go("overview")}>{lang === "es" ? "Volver al proyecto" : "Back to project"}</button></div></details>
-          </div>
+          </div>}
           {current === "storyboard" && (
             <>
-              {!legacy && (data.spec.shots || []).length > 0 && <StoryboardCard state={data} onChanged={changed} />}
-              {!legacy && <SongTrackCard state={data} onChanged={changed} />}
+              {!legacy && (data.spec.shots || []).length > 0 && <StoryboardCard state={data} onChanged={changed} onNodeEditor={(open) => { setShotOpen(open); if (open) setTab("storyboard"); }} />}
+              {!legacy && !shotOpen && <SongTrackCard state={data} onChanged={changed} />}
             </>
           )}
           {current === "script" && !legacy && <ScriptDesk state={data} onChanged={changed} onStoryboard={() => setTab("storyboard")} />}

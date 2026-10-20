@@ -51,7 +51,7 @@ function sectionMatches(label: string, kind: string | null, section?: string) {
 /** The shot list of a production as an editable storyboard: each shot with
  * its still, its place in the song and its render progress; click to edit,
  * + to add one in between. */
-export function StoryboardCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
+export function StoryboardCard({ state, onChanged, onNodeEditor }: { state: ProductionState; onChanged: () => void; onNodeEditor?: (open: boolean) => void }) {
   const { t, lang } = useT();
   const app = useApp();
   const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null } | null>(null);
@@ -59,6 +59,8 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
   const [castOpen, setCastOpen] = useState(false);
   const castCount = (state.spec.cast || []).length;
   const shots = state.spec.shots || [];
+  const openShot = (shot: ProductionShot) => { setEditing({ shot }); onNodeEditor?.(shot.kind !== "graphic"); };
+  const closeShot = () => { setEditing(null); onNodeEditor?.(false); };
   const frames = (state.done?.frames?.items || {}) as Record<string, { best?: string; variants?: string[] }>;
   const clips = (state.done?.clips?.items || {}) as Record<string, string>;
   const pendingFrames = (state.partial?.frames?.pending || {}) as Record<string, string>;
@@ -113,7 +115,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
 
   if (editing?.shot && editing.shot.kind !== "graphic") return <ShotEditor nodeEditor state={state}
     shot={shots.find(shot => shot.key === editing.shot!.key) || editing.shot} running={running}
-    onPause={pause} onClose={() => setEditing(null)} onSaved={(stay) => { if (!stay) setEditing(null); onChanged(); app.refreshJobs(); }} />;
+    onPause={pause} onClose={closeShot} onSaved={(stay) => { if (!stay) closeShot(); onChanged(); app.refreshJobs(); }} />;
 
   return (
     <div className="card">
@@ -153,7 +155,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
               {best && <button className="btn xs shot-preview-action" onClick={() => app.openAsset(clips[shot.key] || best)} title={t("zoom")}>{t("zoom")}</button>}
               <button className="btn xs icon sb-lock" disabled={running || acting} title={shot.locked ? t("sbUnlockHint") : t("sbLockHint")}
                 onClick={() => toggleLock(shot)}>{shot.locked ? <Lock size={12} /> : <Unlock size={12} />}</button>
-              <button className="tile sb-tile" aria-label={`${t("sbShotN", { n: shot.key })} · ${lang === "es" ? "Abrir nodos" : "Open nodes"}`} onClick={() => setEditing({ shot })}>
+              <button className="tile sb-tile" aria-label={`${t("sbShotN", { n: shot.key })} · ${lang === "es" ? "Abrir nodos" : "Open nodes"}`} onClick={() => openShot(shot)}>
                 {best ? <img src={`/generation/api/assets/${best}/thumb`} alt="" loading="lazy" />
                   : <div className="media-icon">{st?.busy ? <Loader2 size={22} className="spin" /> : shot.kind === "graphic" ? <Type size={22} /> : <Clapperboard size={22} />}</div>}
                 <div className="tile-badges">
@@ -180,7 +182,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 </div>
               </button>
               {insertButton(shot.key)}
-              {best && <button className="btn sb-create-clip" onClick={() => setEditing({ shot })}><Film size={14} />{lang === "es" ? "Abrir nodos del plano" : "Open shot nodes"}</button>}
+              {best && <button className="btn sb-create-clip" onClick={() => openShot(shot)}><Film size={14} />{lang === "es" ? "Abrir nodos del plano" : "Open shot nodes"}</button>}
             </div>
           );
         })}
@@ -372,6 +374,8 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
   };
 
   const [nodeJob, setNodeJob] = useState<Job | null>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  useEffect(() => { if (nodeEditor) workspaceRef.current?.scrollIntoView({ block: "start" }); }, [nodeEditor]);
   const [nodeError, setNodeError] = useState("");
   const dispatching = useRef(false);
   const clipPending = (state.partial?.clips?.pending || {}) as Record<string, string>;
@@ -435,8 +439,8 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
     setBusy(true); dispatching.current = true; setNodeError("");
     try {
       const later = isNew && (castNames.length > 0 || extraChange.length > 0);
-      if (nodeEditor && run && !isNew && Object.keys(change).length === 1) {
-        await api.regenerateUnlocked(state.slug, output ? "clips" : "frames", [shot!.key], false);
+      if (nodeEditor && run && !isNew && output && state.status !== "awaiting_review" && Object.keys(change).length === 1) {
+        await api.regenerateUnlocked(state.slug, "clips", [shot!.key], false);
       }
       const sent = Object.keys(change).length === 1 && run && !isNew
         ? await api.continueProduction(state.slug)
@@ -688,7 +692,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
   const output = shot && (clipItems[shot.key] || Object.entries(clipItems).find(([key]) => key.startsWith(`${shot.key}v`))?.[1]);
   const frozen = running || busy || nodeActive || (locked && !!shot?.locked);
   const stateLabel = nodeJob ? ({ queued: es ? "En cola" : "Queued", waiting_gpu: es ? "Esperando GPU" : "Waiting for GPU", running: es ? "Renderizando producción" : "Rendering production", done: state.status === "awaiting_review" ? (es ? "Producción en pausa para revisión" : "Production paused for review") : (es ? "Trabajo terminado" : "Job finished"), failed: es ? "El render ha fallado" : "Render failed", cancelled: es ? "Cancelado" : "Cancelled" })[nodeJob.state] : running ? (es ? "Producción en curso" : "Production running") : output ? (es ? "Clip del plano" : "Shot clip") : (es ? "Sin clip generado" : "No clip generated");
-  if (nodeEditor && shot) return <section className="shot-node-workspace" aria-label={es ? `Nodos del plano ${shot.key}` : `Shot ${shot.key} nodes`}>
+  if (nodeEditor && shot) return <section ref={workspaceRef} className="shot-node-workspace" aria-label={es ? `Nodos del plano ${shot.key}` : `Shot ${shot.key} nodes`}>
     <div className="clip-studio-heading"><button className="btn sm" disabled={busy} onClick={onClose}>{es ? "Volver al storyboard" : "Back to storyboard"}</button><h2>{t("sbShotN", { n: shot.key })}</h2><span className="hint">{state.name || state.slug}</span><span className="spacer" /><button className="btn" disabled={busy || nodeActive} onClick={() => save(false)}>{t("sbSave")}</button></div>
     <p className="small muted">{es ? "Los cambios se guardan en este plano. Renderizar continúa la producción y puede completar otros planos pendientes." : "Changes belong to this shot. Rendering continues the production and may complete other pending shots."}</p>
     {locked && !!shot.locked && <label className="check shot-node-lock"><input type="checkbox" checked={locked} disabled={running || busy} onChange={e => setLocked(e.target.checked)} /><Lock size={14} />{es ? "Plano aprobado. Desmarca para editar o renderizar." : "Approved shot. Uncheck to edit or render."}</label>}
