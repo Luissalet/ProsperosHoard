@@ -1,137 +1,54 @@
 import { useState } from "react";
-import { CheckCircle2, Circle, Clapperboard, Image as ImageIcon, Pencil } from "lucide-react";
-import { api, fileUrl, thumbUrl } from "../api";
-import { useT, type MessageKey } from "../i18n";
+import { Clapperboard, Image as ImageIcon, Pencil, Plus, ArrowRight, Film } from "lucide-react";
+import { api, fileUrl } from "../api";
+import { useT } from "../i18n";
 import { AssetPicker, AssetTile, useApp, useAsync } from "../components/ui";
+import { ProjectCast } from "../components/ProjectCast";
 import { ProductionCard } from "./Productions";
 import { VideoModal } from "./VideoModal";
 
 export function OverviewView() {
   const { t, lang } = useT();
-  const app = useApp();
-  const pid = app.projectId!;
+  const es = lang === "es", app = useApp(), pid = app.projectId!;
   const project = useAsync(() => api.project(pid), [pid, app.dataVersion]);
   const recent = useAsync(() => api.assets(pid, { limit: 12 }), [pid, app.dataVersion]);
-  const cast = useAsync(() => api.characters(pid), [pid, app.dataVersion]);
-  const timelines = useAsync(() => api.timelines(pid), [pid, app.dataVersion]);
-  const productions = useAsync(() => api.productions(), [app.dataVersion]);
-  const [newVideo, setNewVideo] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [pickCover, setPickCover] = useState(false);
-  const [brief, setBrief] = useState("");
-
+  const productions = useAsync(() => api.productions(), [pid, app.dataVersion]);
+  const [newVideo, setNewVideo] = useState(false), [editing, setEditing] = useState(false), [pickCover, setPickCover] = useState(false);
+  const [brief, setBrief] = useState(""), [saving, setSaving] = useState(false), [error, setError] = useState("");
   const p = project.data;
+  if (project.error) return <div role="alert">{project.error}<button className="btn" onClick={project.reload}>{es ? "Reintentar" : "Retry"}</button></div>;
   if (!p) return <p className="muted">{t("loading")}</p>;
-  const c = p.counts;
-  const chars = cast.data?.items || [];
-  const renders = (recent.data?.items || []).filter((a) => a.kind === "video" && a.source === "rendered");
-  const videos = (productions.data?.items || []).filter((x) => x.project_id === pid);
-  const steps: [MessageKey, boolean, string][] = [
-    ["stepVideo", videos.some((x) => x.status === "done"), "video"],
-    ["stepCast", c.characters > 0, "cast"],
-    ["stepGenerate", chars.length > 0 && chars.every((x) => x.canonical_asset_id), "generate"],
-    ["stepCards", (recent.data?.items || []).some((a) => a.source === "rendered" && a.kind === "image"), "designer"],
-    ["stepSong", c.audio > 0, "audio"],
-    ["stepCut", (timelines.data?.items || []).length > 0 && renders.length > 0, "timeline"],
-  ];
-
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <h1>{p.name}</h1>
-          {!editing && <p>{p.brief}</p>}
-        </div>
-        <div className="actions">
-          {!editing && <button className="btn sm ghost" onClick={() => { setBrief(p.brief || ""); setEditing(true); }}><Pencil size={14} /> {t("editBrief")}</button>}
-        </div>
-      </div>
-      {editing && (
-        <div className="card stack" style={{ marginBottom: 18 }}>
-          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} />
-          <div className="row">
-            <button className="btn primary sm" onClick={async () => { await api.updateProject(pid, { brief }); setEditing(false); project.reload(); }}>{t("save")}</button>
-            <button className="btn ghost sm" onClick={() => setEditing(false)}>{t("cancel")}</button>
-          </div>
-        </div>
-      )}
-      <div className="overview-grid">
-        <div className="stack">
-          <div className="card cover-card" style={{ padding: 12 }}>
-            {(p.cover_asset_id || p.auto_cover_asset_id) ? (
-              <img className="cover-img" src={fileUrl((p.cover_asset_id || p.auto_cover_asset_id)!)} alt={t("overviewCover")}
-                onClick={() => app.openAsset((p.cover_asset_id || p.auto_cover_asset_id)!)} style={{ cursor: "zoom-in" }} />
-            ) : <div className="cover-img" style={{ background: "linear-gradient(135deg, var(--accent-soft), var(--gold-soft))" }} />}
-            <button className="btn sm cover-pick" onClick={() => setPickCover(true)}><ImageIcon size={13} /> {t("overviewPickCover")}</button>
-            {pickCover && <AssetPicker projectId={pid} kind="image" title={t("overviewPickCover")} onClose={() => setPickCover(false)}
-              onPick={async (a) => { setPickCover(false); await api.updateProject(pid, { cover_asset_id: a.id }); project.reload(); app.bump(); }} />}
-          </div>
-          <div className="card">
-            <h2>{lang === "es" ? "¿Qué quieres crear?" : "What would you like to create?"}</h2>
-            <p className="hint">{lang === "es" ? "Empieza con una idea o una referencia. El reparto y el guion son opcionales." : "Start with an idea or a reference. Cast and scripts are optional."}</p>
-            <button className="btn primary" onClick={() => app.go("generate")}>{lang === "es" ? "Crear imagen o vídeo" : "Create an image or video"}</button>
-            <details style={{ marginTop: 16 }}><summary>{lang === "es" ? "Preparar una producción completa" : "Prepare a full production"}</summary><ul className="steps">
-              {steps.map(([key, done, section]) => (
-                <li key={key} className={done ? "done" : ""} onClick={() => app.go(section)} style={{ cursor: "pointer" }}>
-                  {done ? <CheckCircle2 size={17} /> : <Circle size={17} />} {t(key)}
-                </li>
-              ))}
-            </ul></details>
-          </div>
-        </div>
-        <div className="stack">
-          <div className="stat-row">
-            <div className="stat"><b>{c.images}</b><span>{t("statImages")}</span></div>
-            <div className="stat"><b>{c.videos}</b><span>{t("statVideos")}</span></div>
-            <div className="stat"><b>{c.characters}</b><span>{t("navCast")}</span></div>
-            <div className="stat"><b>{c.timelines}</b><span>{t("navTimeline")}</span></div>
-          </div>
-          <div className="card">
-            <h2><Clapperboard size={16} /> {t("videoTitle")}
-              <div className="card-actions">
-                {videos.length > 0 && <button className="btn sm ghost" onClick={() => app.go("video")}>{t("open")}</button>}
-                <button className="btn sm primary" onClick={() => setNewVideo(true)}>{t("newVideo")}</button>
-              </div>
-            </h2>
-            {videos.length === 0 ? <p className="small muted" style={{ margin: 0 }}>{t("overviewNoVideos")}</p> : (
-              <div className="prod-grid compact">
-                {videos.slice(0, 4).map((x) => <ProductionCard key={x.slug} p={x} compact onOpen={() => app.go("video", x.slug)} />)}
-              </div>
-            )}
-          </div>
-          <div className="card">
-            <h2>{t("overviewCast")} <div className="card-actions"><button className="btn sm ghost" onClick={() => app.go("cast")}>{t("open")}</button></div></h2>
-            <div className="row wrap" style={{ gap: 14 }}>
-              {chars.map((ch) => (
-                <button key={ch.id} className="row" style={{ background: "none", border: 0, cursor: "pointer", gap: 10, padding: 0 }}
-                  onClick={() => ch.canonical_asset_id && app.openAsset(ch.canonical_asset_id)}>
-                  {ch.canonical_asset_id
-                    ? <img src={thumbUrl({ id: ch.canonical_asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: `2px solid ${ch.palette[0] || "var(--accent)"}` }} />
-                    : <span style={{ width: 44, height: 44, borderRadius: "50%", background: ch.palette[0] || "var(--surface-3)" }} />}
-                  <span style={{ textAlign: "left" }}><strong>{ch.name}</strong><br /><span className="muted small">{ch.role}</span></span>
-                </button>
-              ))}
-            </div>
-          </div>
-          {renders[0] && (
-            <div className="card">
-              <h2>{t("renderReady")}</h2>
-              <div className="video-frame" style={{ maxWidth: 250 }}>
-                <video src={fileUrl(renders[0].id)} controls muted loop preload="metadata" poster={thumbUrl(renders[0])} />
-              </div>
-            </div>
-          )}
-          <div className="card">
-            <h2>{t("overviewRecent")} <div className="card-actions"><button className="btn sm ghost" onClick={() => app.go("library")}>{t("open")}</button></div></h2>
-            <div className="thumb-grid">
-              {(recent.data?.items || []).map((a) => (
-                <AssetTile key={a.id} asset={a} square onClick={() => app.openAsset(a.id, recent.data!.items.map((x) => x.id))} />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      {newVideo && <VideoModal projectId={pid} onClose={() => setNewVideo(false)} onStarted={(slug) => { setNewVideo(false); app.go("video", slug); }} />}
-    </>
-  );
+  const videos = (productions.data?.items || []).filter(video => video.project_id === pid);
+  const cover = p.cover_asset_id || p.auto_cover_asset_id;
+  const saveBrief = async () => {
+    setSaving(true); setError("");
+    try { await api.updateProject(pid, { brief }); setEditing(false); app.bump(); }
+    catch (err) { setError((err as Error).message); }
+    finally { setSaving(false); }
+  };
+  return <div className="project-dashboard">
+    <header className="project-dashboard-head">
+      <div className="project-dashboard-cover"><button className="project-cover-preview" onClick={() => cover ? app.openAsset(cover) : setPickCover(true)} aria-label={t("overviewCover")}>
+        {cover ? <img src={fileUrl(cover)} alt="" /> : <ImageIcon size={28} />}</button><button className="btn sm icon ghost" onClick={() => setPickCover(true)} aria-label={t("overviewPickCover")}><Pencil size={13} /></button></div>
+      <div className="project-dashboard-identity"><h1>{p.name}</h1><p>{p.brief}</p><div className="project-resource-links">
+        <button onClick={() => app.go("library")}>{p.counts.images} {t("statImages")}</button><button onClick={() => app.go("library")}>{p.counts.videos} {es ? "clips y vídeos" : "clips and videos"}</button><button onClick={() => app.go("audio")}>{p.counts.audio} {es ? "audios" : "audio files"}</button><button onClick={() => app.go("timeline")}>{p.counts.timelines} {es ? "montajes" : "edits"}</button><button onClick={() => { setBrief(p.brief || ""); setEditing(!editing); }}><Pencil size={12} />{t("editBrief")}</button></div></div>
+      <div className="project-dashboard-actions"><button className="btn primary" onClick={() => app.go("generate", "clip")}><Film size={17} />{es ? "Crear clip" : "Create clip"}</button><button className="btn" onClick={() => setNewVideo(true)}><Plus size={16} />{t("newVideo")}</button></div>
+    </header>
+    {editing && <section className="dashboard-brief-editor"><label className="field">{t("brief")}<textarea value={brief} rows={3} disabled={saving} onChange={event => setBrief(event.target.value)} /></label>{error && <p role="alert" className="err-text">{error}</p>}<div className="row"><button className="btn primary" disabled={saving} onClick={saveBrief}>{t("save")}</button><button className="btn ghost" disabled={saving} onClick={() => setEditing(false)}>{t("cancel")}</button></div></section>}
+    <div className="project-dashboard-columns"><div className="project-dashboard-work">
+      <section className="dashboard-section project-videos"><div className="dashboard-section-head"><h2><Clapperboard size={18} />{es ? "Vídeos del proyecto" : "Project videos"}</h2><span className="spacer" /><button className="btn sm ghost" onClick={() => app.go("video")}>{es ? "Todos los vídeos" : "All videos"}<ArrowRight size={14} /></button></div>
+        {productions.error && <p role="alert">{productions.error}<button className="btn sm" onClick={productions.reload}>{es ? "Reintentar" : "Retry"}</button></p>}
+        {productions.loading && !productions.data ? <div className="dashboard-loading" aria-label={t("loading")} /> : videos.length ? <div className="dashboard-video-list">{videos.slice(0, 6).map(video => <ProductionCard key={video.slug} p={video} onOpen={() => app.go("video", video.slug)} />)}</div> : <div className="dashboard-empty"><p>{es ? "Crea un videoclip para organizar sus planos, canción y montaje." : "Create a music video to organize its shots, song and edit."}</p><button className="btn" onClick={() => setNewVideo(true)}><Plus size={15} />{t("newVideo")}</button></div>}
+      </section>
+      <section className="dashboard-section"><div className="dashboard-section-head"><h2>{t("overviewRecent")}</h2><span className="spacer" /><button className="btn sm ghost" onClick={() => app.go("library")}>{es ? "Ver biblioteca" : "View library"}<ArrowRight size={14} /></button></div>
+        {recent.error && <p role="alert">{recent.error}<button className="btn sm" onClick={recent.reload}>{es ? "Reintentar" : "Retry"}</button></p>}
+        <div className="dashboard-recent">{(recent.data?.items || []).map(asset => <AssetTile key={asset.id} asset={asset} square onClick={() => app.openAsset(asset.id, recent.data!.items.map(item => item.id))} />)}</div>
+        {!recent.loading && !recent.data?.items.length && <p className="hint">{es ? "Las imágenes, clips y audios que crees aparecerán aquí." : "Images, clips and audio you create will appear here."}</p>}
+      </section>
+    </div><aside className="project-dashboard-side"><ProjectCast />
+      <section className="dashboard-section"><h2>{es ? "Crear en este proyecto" : "Create in this project"}</h2><div className="dashboard-shortcuts"><button className="btn" onClick={() => app.go("generate", "clip")}><Film size={16} />{es ? "Estudio de clips" : "Clip studio"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("spaces")}>{es ? "Lienzos y nodos" : "Canvases and nodes"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("audio")}>{es ? "Canción, letra y voz" : "Song, lyrics and voice"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("designer")}>{t("navDesigner")}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("timeline")}>{t("navTimeline")}<ArrowRight size={15} /></button></div></section>
+    </aside></div>
+    {pickCover && <AssetPicker projectId={pid} kind="image" title={t("overviewPickCover")} onClose={() => setPickCover(false)} onPick={async asset => { try { await api.updateProject(pid, { cover_asset_id: asset.id }); setPickCover(false); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); } }} />}
+    {newVideo && <VideoModal projectId={pid} onClose={() => setNewVideo(false)} onStarted={slug => { setNewVideo(false); app.go("video", slug); }} />}
+  </div>;
 }

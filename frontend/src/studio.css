@@ -157,6 +157,8 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 .sb-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; overflow: visible; }
 .sb-strip > .sb-insert { display: none; }
 .sb-item { width: 100%; min-width: 0; position: relative; }
+.sb-item { display: block; }
+.sb-create-clip { width: 100%; margin-top: 6px; justify-content: center; }
 .sb-tile { width: 100%; }
 .sb-tile img { height: 150px; width: 100%; object-fit: cover; }
 .sb-tile .tile-meta { white-space: normal; }

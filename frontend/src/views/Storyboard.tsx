@@ -50,7 +50,7 @@ function sectionMatches(label: string, kind: string | null, section?: string) {
  * its still, its place in the song and its render progress; click to edit,
  * + to add one in between. */
 export function StoryboardCard({ state, onChanged }: { state: ProductionState; onChanged: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const [editing, setEditing] = useState<{ shot?: ProductionShot; after?: string | null } | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
@@ -174,6 +174,7 @@ export function StoryboardCard({ state, onChanged }: { state: ProductionState; o
                 </div>
               </button>
               {insertButton(shot.key)}
+              {best && <button className="btn sb-create-clip" onClick={() => app.go("generate", best)}><Film size={14} />{lang === "es" ? "Crear clip con este plano" : "Create clip from this shot"}</button>}
             </div>
           );
         })}

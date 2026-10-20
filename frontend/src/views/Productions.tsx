@@ -422,15 +422,16 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
         </div>
         {legacy && <p className="small muted">{t("legacyNote")}</p>}
         {data.recipe && <p className="small muted" style={{ margin: "6px 0 0" }}>{t("fromRecipe", { name: data.recipe.name })} · {data.recipe.cast.lead}</p>}
-        {view.stages && <PipelineStepper state={data} active={active} onPick={(s) => setTab(STAGE_TAB[s] || "storyboard")} />}
+        {view.stages && <details className="production-process"><summary>{lang === "es" ? "Proceso de producción" : "Production process"}{active ? ` · ${t("stateRunning")}` : ""}</summary><PipelineStepper state={data} active={active} onPick={(s) => setTab(STAGE_TAB[s] || "storyboard")} /></details>}
         <NextStep state={data} active={active} onChanged={changed} setTab={setTab} />
       </div>
       {isShort ? <ShortDetail state={data} onChanged={changed} /> : (
         <>
           <div className="tabs-bar">
-            {tabs.map(([k, label]) => (
+            {tabs.filter(([k]) => k !== "qa" && k !== "history").map(([k, label]) => (
               <button key={k} className={current === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>
             ))}
+            <details className="production-tools"><summary>{lang === "es" ? "Más herramientas" : "More tools"}</summary><div>{tabs.filter(([k]) => k === "qa" || k === "history").map(([k, label]) => <button key={k} className={current === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}<button onClick={() => app.go("overview")}>{lang === "es" ? "Volver al proyecto" : "Back to project"}</button></div></details>
           </div>
           {current === "storyboard" && (
             <>
@@ -786,6 +787,7 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
             <span className={`small ellipsis ${p.status === "awaiting_review" ? "gold-text" : p.status === "failed" ? "err-text" : "muted"}`}>{cardHint()}</span>
           </>
         )}
+        <span className="prod-open-label">{lang === "es" ? "Editar vídeo →" : "Edit video →"}</span>
       </div>
     </button>
   );
