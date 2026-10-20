@@ -4,6 +4,7 @@
 // into the prompt. The guide is fetched once and shared.
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from "react";
 import { api, type CinemaEntry, type CinemaGuide } from "../api";
+import { registerSlashCloser } from "../escapePriority";
 import { useT } from "../i18n";
 import { CinemaArt } from "./CinemaArt";
 
@@ -73,6 +74,27 @@ export function useSlashMenu(value: string, setValue: (v: string) => void, ref: 
   }, [st, guide, lang]);
 
   const close = useCallback(() => setSt(null), []);
+
+  // Dialog Escape must close the menu even when focus left the field.
+  useEffect(() => {
+    if (!st) return;
+    return registerSlashCloser(() => setSt(null));
+  }, [st]);
+
+  // Leaving the prompt field dismisses the menu (clicks inside .slash-wrap keep it).
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !st) return;
+    // Event (not FocusEvent): ref is Input|TextArea union; addEventListener falls back to EventListener.
+    const onBlur = (event: Event) => {
+      const wrap = el.closest(".slash-wrap");
+      const next = (event as FocusEvent).relatedTarget;
+      if (wrap && next instanceof Node && wrap.contains(next)) return;
+      setSt(null);
+    };
+    el.addEventListener("blur", onBlur);
+    return () => el.removeEventListener("blur", onBlur);
+  }, [st, ref]);
 
   const pick = useCallback((row: Row) => {
     if (!st) return;
