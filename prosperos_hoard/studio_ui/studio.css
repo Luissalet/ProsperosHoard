@@ -3,15 +3,15 @@
 @font-face{font-family:'Source Sans 3';font-weight:400;src:url('/studio-assets/fonts/source-sans-3-latin-400-normal.woff2') format('woff2');font-display:swap}
 @font-face{font-family:'Source Sans 3';font-weight:700;src:url('/studio-assets/fonts/source-sans-3-latin-700-normal.woff2') format('woff2');font-display:swap}
 :root{color-scheme:dark;--bg:#1d141a;--panel:#251a22;--text:#ece1e8;--muted:#beb4ba;--border:#6c5664;--action:#e65db6;font-family:'Source Sans 3','Source Sans Pro',sans-serif;color:var(--text);background:var(--bg)}
-body.studio-home{margin:0} .studio-home header,.studio-home main{max-width:1180px;margin:auto;padding:24px}
+body.studio-home{margin:0;color:var(--text);background:var(--bg)} .studio-home header,.studio-home main{max-width:1180px;margin:auto;padding:24px}
 .studio-home header{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border)}.studio-home header img{width:44px;height:44px}
 .studio-home h1{font:700 28px Cinzel,Georgia,serif;margin:0}.studio-home h2{font-size:22px;margin:0 0 12px}.studio-home section{margin-bottom:36px}.studio-home p{color:var(--muted);max-width:70ch;line-height:1.5}
 .studio-home button,.studio-home input,.studio-home select{font:inherit;color:inherit;border:1px solid var(--border);border-radius:6px;padding:9px 12px;background:var(--panel)}
-.studio-home button{cursor:pointer}.studio-home button:hover{border-color:var(--action)}.studio-home a{color:var(--action);text-underline-offset:3px}.studio-home :focus-visible{outline:2px solid var(--action);outline-offset:3px}.studio-home button:disabled{opacity:.55;cursor:wait}
+.studio-home button{cursor:pointer}.studio-home button:hover{border-color:var(--action)}.studio-home input[type=checkbox]{accent-color:var(--action)}.studio-home a{color:var(--action);text-underline-offset:3px}.studio-home :focus-visible{outline:2px solid var(--action);outline-offset:3px}.studio-home button:disabled{opacity:.7;cursor:wait}
 #modules>div{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:15px 0;border-bottom:1px solid var(--border)}#modules strong{min-width:110px}#modules label{color:var(--muted)}
 #new-project{display:flex;align-items:end;gap:12px;flex-wrap:wrap}#new-project label{display:grid;gap:6px}.studio-work{display:grid;grid-template-columns:240px 1fr;gap:30px;margin-top:24px}#projects button{display:block;width:100%;text-align:left;margin-bottom:8px}#project li{margin:12px 0;overflow-wrap:anywhere}#project code{font-size:12px}#project form{display:grid;gap:12px;margin:20px 0}#error{color:#ffaca4}
 .studio-owner{box-sizing:border-box;height:48px;display:flex;gap:24px;align-items:center;padding:0 16px;background:#251a22;color:#ece1e8;border-bottom:1px solid #6c5664;font:14px 'Source Sans 3','Source Sans Pro',sans-serif}.studio-owner a{display:flex;gap:8px;align-items:center;color:inherit;text-decoration:none}.studio-owner img{width:24px;height:24px}.studio-owner a:focus-visible{outline:2px solid #e65db6;outline-offset:3px}
 body:has(.studio-owner)>#root{height:calc(100dvh - 48px)}::selection{background:#e65db6;color:#1b1318}
 body:has(.studio-owner)>#root .app{height:calc(100dvh - 48px)}
-@media(prefers-color-scheme:light){.studio-home{--bg:#f6f2f8;--panel:#fff;--text:#1c1422;--muted:#4a3f55;--border:#9b8397;--action:#b8215a;color-scheme:light}}
+/* Keep the launcher in its declared dark palette. Generation and editing own their theme controls. */
 @media(max-width:700px){.studio-work{grid-template-columns:1fr}.studio-owner{gap:12px;font-size:12px;padding:0 8px}.studio-home header,.studio-home main{padding:18px}.studio-home h1{font-size:23px}.studio-owner a:first-child{font-size:0}.studio-owner a:first-child img{min-width:24px}}
