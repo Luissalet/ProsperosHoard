@@ -124,6 +124,7 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
     return () => { alive = false; clearTimeout(timer); };
   }, [lastJobId, jobRetry]);
   const inFlight = !!latestJob && ["queued", "waiting_gpu", "running"].includes(latestJob.state);
+  const jobMessage = latestJob?.message && latestJob.message.trim().toLowerCase() !== latestJob.state ? latestJob.message : "";
   const jobLabel = latestJob ? ({ queued: es ? "En cola" : "Queued", waiting_gpu: es ? "Esperando GPU" : "Waiting for GPU", running: es ? "Generando clip" : "Generating clip", done: latestJob.outputs?.asset_ids?.[0] || latestJob.outputs?.asset_id ? (es ? "Clip generado" : "Clip generated") : (es ? "Terminado sin resultado" : "Finished without output"), failed: es ? "La generación ha fallado" : "Generation failed", cancelled: es ? "Cancelado" : "Cancelled" })[latestJob.state] : "";
   const take = items.find((a) => a.id === selected) || null;
   const comparison = take ? [take, ...items.filter((a) => a.id !== take.id)].slice(0, 2) : [];
@@ -185,7 +186,7 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
   const statusPanel = latestJob && <div className={`clip-run-state ${latestJob.state}`} role="status" aria-live="polite">
     <strong>{jobLabel}{latestJob.state === "running" ? ` · ${Math.round(latestJob.progress * 100)}%` : ""}</strong>
     {inFlight && <Progress value={latestJob.progress} waiting={latestJob.state !== "running"} />}
-    <span>{latestJob.state === "failed" ? latestJob.message || latestJob.log_excerpt : latestJob.message === "done" ? "" : latestJob.message}</span>
+    <span>{latestJob.state === "failed" ? jobMessage || latestJob.log_excerpt : jobMessage}</span>
     {inFlight && <button className="btn sm" onClick={async () => { try { await api.cancelJob(latestJob.id); app.refreshJobs(); } catch (err) { setError((err as Error).message); } }}>{es ? "Cancelar generación" : "Cancel generation"}</button>}
     {latestJob.state === "done" && !completed && <span>{latestJob.outputs?.asset_ids?.[0] || latestJob.outputs?.asset_id ? (es ? "Cargando el resultado…" : "Loading the result…") : (es ? "El trabajo terminó sin devolver un vídeo. Abre el trabajo para revisar el motivo." : "The job finished without returning a video. Open the job to inspect the reason.")}</span>}
     {["failed", "cancelled"].includes(latestJob.state) && <span>{es ? "Puedes ajustar el prompt y volver a generar desde este nodo." : "Adjust the prompt and generate again from this node."}</span>}
@@ -232,7 +233,8 @@ function VideoStudio({ initial, onImage }: { initial: Asset | null; onImage: () 
     </section>;
   return <div className="node-video-studio">
     <div className="clip-studio-heading"><h1>{es ? "Estudio de clips" : "Clip studio"}</h1>
-      <span className="hint">{es ? "Referencias → vídeo. Arrastra los nodos para organizar el lienzo." : "References → video. Drag nodes to arrange the canvas."}</span>
+      <span className="hint clip-desktop-help">{es ? "Referencias → vídeo. Arrastra los nodos para organizar el lienzo." : "References → video. Drag nodes to arrange the canvas."}</span>
+      <span className="hint clip-mobile-help">{es ? "Elige una referencia, describe el movimiento y genera el clip." : "Choose a reference, describe the motion and generate the clip."}</span>
       <button className="btn sm" onClick={() => app.go("overview")}>{es ? "Volver al proyecto" : "Back to project"}</button></div>
     <Suspense fallback={<p>{t("loading")}</p>}><ClipCanvas label={es ? "Lienzo de generación de clips" : "Clip generation canvas"}
       reference={<><h2>{es ? "Referencia" : "Reference"}</h2>{slot("start", start, es ? "Imagen de partida" : "Start image")}<div className="clip-add-guides"><button className="btn sm ghost" onClick={onImage}>{es ? "Crear la imagen con varias referencias" : "Create an image with multiple references"}<ArrowRight size={14} /></button><button className="btn sm" onClick={() => setGuideSlots(slots => ({ ...slots, drive: true }))}><Plus size={14} />{es ? "Guía de movimiento" : "Motion guide"}</button><button className="btn sm" onClick={() => setGuideSlots(slots => ({ ...slots, end: true }))}><Plus size={14} />{es ? "Fotograma final" : "End frame"}</button></div></>}
