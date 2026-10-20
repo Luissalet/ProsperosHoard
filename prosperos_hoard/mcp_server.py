@@ -1169,7 +1169,10 @@ def studio_explainer(action: str = "get", production: Optional[str] = None, name
     """Create, read, edit or import a source-linked explanatory video using native scenes, voice and montage.
 
     sources: [{id,title,text,reference}], with retained explicit references. scenes: [{id,title,narration,body,
-    source_ids,asset_id?,graphic?}]. Reorder by supplying the scene list. Edits reuse unchanged sentence audio
+    source_ids,asset_id?,graphic?,figure?}]. figure is a complete vitruvius.figure/1 capture with PNG,
+    native source, revision and optional page_id/state_id; it takes precedence over asset_id. Captures are
+    retained in explainer.json and restored on import without requiring the old profile's image library.
+    Reorder by supplying the scene list. Edits reuse unchanged sentence audio
     and scene pages. A changed source marks dependent scenes for review without imposing an approval gate.
     options uses the narrated production's language/voice/music/timeline. run starts/resumes native jobs;
     false saves the editable project. Read the resulting production with studio_production.

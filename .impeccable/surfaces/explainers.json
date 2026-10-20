@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-20T09:50:37Z",
+  "generatedAt": "2026-10-20T16:29:15Z",
   "title": "Design System: Prospero — Explainers",
   "extensions": {
     "scope": {
@@ -13,36 +13,91 @@
       "targets": [
         "frontend/src/views/Explainer.tsx",
         "frontend/src/views/Shorts.tsx",
-        "frontend/src/views/Productions.tsx"
+        "frontend/src/views/Productions.tsx",
+        "frontend/src/api.ts",
+        "prosperos_hoard/explainers.py",
+        "prosperos_hoard/figures.py"
       ],
       "rootCompGatesChanged": false,
-      "rootMetadataRepaired": false
+      "rootMetadataRepaired": false,
+      "expansionTask": 1056
     },
     "typographyMeta": {
-      "heading": { "displayName": "Inherited serif card heading", "purpose": "Scenes and sources heading; current studio.css declares Cinzel." },
-      "body": { "displayName": "Current working sans", "purpose": "Current studio.css declares Source Sans 3; this surface record does not refresh the older root typography description." },
-      "label": { "displayName": "Field label", "purpose": "Explicit bilingual labels for editable values." },
-      "button": { "displayName": "Compact action", "purpose": "Shared production actions." }
+      "heading": {
+        "displayName": "Inherited serif card heading",
+        "purpose": "Scenes and sources heading; current studio.css declares Cinzel."
+      },
+      "body": {
+        "displayName": "Current working sans",
+        "purpose": "Current studio.css declares Source Sans 3; this surface record does not refresh the older root typography description."
+      },
+      "label": {
+        "displayName": "Field label",
+        "purpose": "Explicit bilingual labels for editable values."
+      },
+      "button": {
+        "displayName": "Compact action",
+        "purpose": "Shared production actions."
+      }
     },
     "shadows": [
-      { "name": "resting-panel", "value": "none", "purpose": "Flat shared editor card; thin dividers carry structure." },
-      { "name": "field-focus", "value": "0 0 0 3px var(--accent-soft)", "purpose": "Existing field focus ring alongside the magenta border." }
+      {
+        "name": "resting-panel",
+        "value": "none",
+        "purpose": "Flat shared editor card; thin dividers carry structure."
+      },
+      {
+        "name": "field-focus",
+        "value": "0 0 0 3px var(--accent-soft)",
+        "purpose": "Existing field focus ring alongside the magenta border."
+      }
     ],
     "motion": [
-      { "name": "button-feedback", "value": "background 0.12s, border-color 0.12s, transform 0.05s", "purpose": "Inherited shared button feedback; active translates down 1px." },
-      { "name": "form-entrance", "value": "none", "purpose": "No added animation of scene form contents. Existing job-status progress remains in the production header." }
+      {
+        "name": "button-feedback",
+        "value": "background 0.12s, border-color 0.12s, transform 0.05s",
+        "purpose": "Inherited shared button feedback; active translates down 1px."
+      },
+      {
+        "name": "form-entrance",
+        "value": "none",
+        "purpose": "No added animation of scene form contents. Existing job-status progress remains in the production header."
+      }
     ],
     "breakpoints": [
-      { "name": "shared-mobile", "value": "700px", "purpose": "Voice grid becomes one column; inherited shell uses Tools trigger and wraps header/pipeline." }
+      {
+        "name": "shared-mobile",
+        "value": "700px",
+        "purpose": "Voice grid becomes one column; inherited shell uses Tools trigger and wraps header/pipeline."
+      }
     ],
     "behavior": {
       "entry": "New explainer adds an explanatory-mode entry beside existing video and short actions.",
-      "creationDefaults": { "aspect": "16:9", "music": "none" },
-      "sceneFields": ["title", "narration", "body", "asset_id", "source_ids", "source_reviewed"],
-      "sourceFields": ["title", "reference", "text"],
+      "creationDefaults": {
+        "aspect": "16:9",
+        "music": "none"
+      },
+      "sceneFields": [
+        "title",
+        "narration",
+        "body",
+        "asset_id",
+        "source_ids",
+        "source_reviewed",
+        "figure"
+      ],
+      "sourceFields": [
+        "title",
+        "reference",
+        "text"
+      ],
       "sourceDisclosureInitiallyOpen": false,
       "sceneDisclosuresInitiallyOpenWhen": "scene count < 4",
-      "voiceSpeed": { "min": 0.5, "max": 2, "step": 0.05 },
+      "voiceSpeed": {
+        "min": 0.5,
+        "max": 2,
+        "step": 0.05
+      },
       "imageCatalogueLimit": 200,
       "lastSceneDeletionDisabled": true,
       "boundaryMovesDisabled": true,
@@ -57,22 +112,116 @@
       "savePendingEditableExport": "Editable-project export prevents its click while busy; no download starts from that click.",
       "srtVisibleWhen": "Narration and report are done.",
       "srtUnavailableResponse": "Controlled HTTP 404 when the file is absent or narration/report are not done; unknown export extensions also return 404. Invalidated subtitles are not served as current.",
-      "messages": { "apiError": "alert", "newerRevisionWithDirtyDraft": "alert", "changedSourceSceneIds": "status" },
-      "catalogueFailure": "Caught without a dedicated retry message in this component."
+      "messages": {
+        "apiError": "alert",
+        "newerRevisionWithDirtyDraft": "alert",
+        "changedSourceSceneIds": "status"
+      },
+      "catalogueFailure": "Caught without a dedicated retry message in this component.",
+      "portableFigure": {
+        "format": "vitruvius.figure/1",
+        "import": "Labelled .vfigure/JSON input reads into the latest draft by stable scene ID and clears asset_id; invalid local parse/basic validation retains the draft and shows an alert.",
+        "busyRead": "Existing disabled fieldset protects pending edits while the file is read; functional state update applies the imported figure to the latest draft.",
+        "localValidation": [
+          "format",
+          "PNG mime/data declaration",
+          "source content"
+        ],
+        "saveValidation": [
+          "document identity",
+          "positive revision",
+          "native diagram source",
+          "selected page or isometric state",
+          "valid PNG",
+          "HTTP(S) origin links without credentials"
+        ],
+        "retained": [
+          "complete native source",
+          "PNG capture",
+          "revision",
+          "page_id or state_id",
+          "optional source fields"
+        ],
+        "selector": "Imported figure has an explicit selected option. Choosing an image-library asset or animated text page clears figure.",
+        "compactPreviewMaxHeight": "240px",
+        "compactImageButtonHeight": "auto",
+        "caption": "Retained title, revision and selected page or state follow the PNG.",
+        "download": "Download figure and source serializes the complete local object as document_id-rREVISION.vfigure.",
+        "origin": "Explicit editor_url link only when valid HTTP(S) without credentials; no fetch, implicit synchronization or origin startup.",
+        "replacement": "Import a new figure to change its retained revision or state.",
+        "projectExport": "Editable project retains the complete figure; reimport into another profile is independent of prior asset_id.",
+        "production": "Materialize exact retained PNG as a native image; recipe retains complete figure, whole-figure page signature distinguishes states even with identical PNG pixels, sentence voice cache stays separate.",
+        "framing": "No automatic Ken Burns for portable captures; fit is the default when a figure exists unless framing is explicit."
+      },
+      "figureInspector": {
+        "openers": [
+          "retained PNG native button",
+          "Enlarge figure native button"
+        ],
+        "availableBeforeSave": true,
+        "requiresAssetId": false,
+        "requiresOriginConnection": false,
+        "dialog": "Shared useDialog layer/keyboard ownership, focus containment, Escape close and return to connected opener; labelled modal with aria-modal.",
+        "initialScale": "actual size",
+        "controls": [
+          "Close",
+          "Fit",
+          "Actual size",
+          "Zoom 2×"
+        ],
+        "scaleState": "aria-pressed on scale buttons",
+        "fit": "Capture max width and height are 100% of available inspection region.",
+        "zoom2x": "Twice natural PNG width.",
+        "pan": "Labelled, focusable native overflow:auto region supports pointer and keyboard scrolling.",
+        "draft": "Inspection and closure retain pending scene content."
+      }
     },
     "evidence": {
       "directory": "D:/LocalAI/research-inbox/expansiones-fusiones-20261020",
       "openedCaptures": [
-        { "file": "explainer961-desktop.png", "viewport": "1440x1000", "region": "Internal content pane at top" },
-        { "file": "explainer961-mobile.png", "viewport": "390x844", "region": "Internal content pane at top" },
-        { "file": "explainer961-desktop-editor.png", "viewport": "1440x1000", "region": "Internal content pane scrolled to editor" },
-        { "file": "explainer961-mobile-editor.png", "viewport": "390x844", "region": "Internal content pane scrolled to editor" }
+        {
+          "file": "explainer961-desktop.png",
+          "viewport": "1440x1000",
+          "region": "Internal content pane at top"
+        },
+        {
+          "file": "explainer961-mobile.png",
+          "viewport": "390x844",
+          "region": "Internal content pane at top"
+        },
+        {
+          "file": "explainer961-desktop-editor.png",
+          "viewport": "1440x1000",
+          "region": "Internal content pane scrolled to editor"
+        },
+        {
+          "file": "explainer961-mobile-editor.png",
+          "viewport": "390x844",
+          "region": "Internal content pane scrolled to editor"
+        }
       ],
-      "review": { "file": "finish-review961.txt", "disposition": "ship", "materialFixes": [] },
+      "review": {
+        "file": "finish-review961.txt",
+        "disposition": "ship",
+        "materialFixes": []
+      },
       "nativeReceipt": "qa961-native-results.json",
       "browserReceipt": "qa961-browser-results.json",
-      "nativeReported": { "mcpTools": 169, "renderDurationSeconds": 70.019, "unchangedPagesRetained": true, "oldSentenceAssetsRetained": true, "browserPendingHistoricalValue": true },
-      "browserReported": { "draftExport": true, "reopenScene": true, "nativeProduceButton": true, "errors": [], "desktopOverflow": false, "mobileOverflow": false },
+      "nativeReported": {
+        "mcpTools": 169,
+        "renderDurationSeconds": 70.019,
+        "unchangedPagesRetained": true,
+        "oldSentenceAssetsRetained": true,
+        "browserPendingHistoricalValue": true
+      },
+      "browserReported": {
+        "draftExport": true,
+        "reopenScene": true,
+        "nativeProduceButton": true,
+        "errors": [],
+        "desktopOverflow": false,
+        "mobileOverflow": false
+      },
       "authorReportedAreaTestsPassed": 49,
       "detectorFile": "detector961.json",
       "suppliedDetectorFindings": [],
@@ -80,22 +229,148 @@
       "functionalCorrection": {
         "commit": "933cafa5a0871784321431355f437d05c4a64cf7",
         "packet": "submit961-r2.txt",
-        "sourceInspected": ["frontend/src/views/Explainer.tsx", "prosperos_hoard/api.py", "tests/test_explainers.py"],
-        "priorIndependentFindings": ["External voice refresh overwritten by text-only save", "Unavailable SRT export returned 500 due to missing HTTPException import"],
+        "sourceInspected": [
+          "frontend/src/views/Explainer.tsx",
+          "prosperos_hoard/api.py",
+          "tests/test_explainers.py"
+        ],
+        "priorIndependentFindings": [
+          "External voice refresh overwritten by text-only save",
+          "Unavailable SRT export returned 500 due to missing HTTPException import"
+        ],
         "authorReportedAreaTestsPassed": 24,
         "authorReportedFrontendBuild": "pass",
         "nativeVoiceRegressionReceipt": "qa961-voice-r2-results.json",
-        "nativeVoiceRegressionReported": { "externalVoiceRetainedAfterTextEdit": true, "explicitLocalVoiceEditSaved": true, "invalidatedSrt": 404, "unknownExtension": 404 },
+        "nativeVoiceRegressionReported": {
+          "externalVoiceRetainedAfterTextEdit": true,
+          "explicitLocalVoiceEditSaved": true,
+          "invalidatedSrt": 404,
+          "unknownExtension": 404
+        },
         "independentSubmission2Receipt": "review-r961/r2/verify.json",
-        "independentSubmission2Reported": { "externalSpeedAndUiSpeed": 1.3, "textOnlySaveRetainsSpeed": 1.3, "explicitLocalVoiceSave": true, "localVoiceConflictRetainsDraft": true, "draftSrt": 404, "currentSrt": 200, "invalidatedSrt": 404, "unknownExtension": 404, "desktopOverflow": false, "mobileOverflow": false, "jsErrors": [] },
+        "independentSubmission2Reported": {
+          "externalSpeedAndUiSpeed": 1.3,
+          "textOnlySaveRetainsSpeed": 1.3,
+          "explicitLocalVoiceSave": true,
+          "localVoiceConflictRetainsDraft": true,
+          "draftSrt": 404,
+          "currentSrt": 200,
+          "invalidatedSrt": 404,
+          "unknownExtension": 404,
+          "desktopOverflow": false,
+          "mobileOverflow": false,
+          "jsErrors": []
+        },
         "reviewerReportedAreaTestsPassed": 24,
         "reviewerReportedOwnChecksPassed": 3,
         "reviewerReportedFrontendBuild": "pass",
         "subsequentWorkingTreeDelta": "After 933cafa: temporary disabled fieldset while busy and separate editable-export click guard. Source-inspected; new submission/review still pending at this refresh.",
-        "subsequentDeltaAuthorEvidence": ["qa961-voice-r2b.log", "prospero-r2b-build.log"],
+        "subsequentDeltaAuthorEvidence": [
+          "qa961-voice-r2b.log",
+          "prospero-r2b-build.log"
+        ],
         "globalR2Suite": "Still running at this documentation refresh; no final pass claimed.",
         "layoutChanged": false,
         "scopeOfEarlierShip": "Earlier finish-review961.txt ship remains a visual-scope disposition; it is not approval of this later functional correction."
+      },
+      "portableFigureExpansion": {
+        "task": 1056,
+        "sourceTip": "ee52c0cc2cdb3c70873c7df3331e883c9d100cb2",
+        "implementationCommits": [
+          "3a5fb44",
+          "ee52c0c"
+        ],
+        "brief": "prospero-figures-brief.txt",
+        "packets": [
+          "prospero1056-submission.txt",
+          "prospero1056-submission-r2.txt"
+        ],
+        "sourceInspected": [
+          "frontend/src/views/Explainer.tsx",
+          "frontend/src/api.ts",
+          "frontend/src/components/ui.tsx",
+          "frontend/src/styles.css",
+          "frontend/src/studio.css",
+          "prosperos_hoard/explainers.py",
+          "prosperos_hoard/figures.py"
+        ],
+        "receipt": "qa1056/results-final.json",
+        "openedCaptures": [
+          {
+            "file": "qa1056/figure-final-1440.png",
+            "viewport": "1440x1000",
+            "region": "Internal content pane scrolled to retained figure"
+          },
+          {
+            "file": "qa1056/figure-final-390.png",
+            "viewport": "390x844",
+            "region": "Internal content pane scrolled to retained figure"
+          },
+          {
+            "file": "qa1056/preview-final-1440.png",
+            "viewport": "1440x1000",
+            "region": "Local capture inspector at 2×"
+          },
+          {
+            "file": "qa1056/preview-final-390.png",
+            "viewport": "390x844",
+            "region": "Local capture inspector with focused scroll region at 2×"
+          }
+        ],
+        "captureTruth": "Real retained PNG exported from a synthetic diagram, displayed in the inherited Operate panel and local inspector; no new comp reference.",
+        "authorReportedAreaTestsPassed": 20,
+        "areaTestScope": [
+          "13 invalid inputs preserve state.json exactly",
+          "identical PNG with different retained state",
+          "selective sentence/page reuse",
+          "return to earlier capture",
+          "independent-store reimport"
+        ],
+        "nativeReported": {
+          "mcpTools": 170,
+          "coldModulesUnchanged": true,
+          "sourceExact": true,
+          "state": "inside",
+          "revision": 3,
+          "importExportExact": true,
+          "invalidAtomic": true
+        },
+        "browserReported": {
+          "viewports": [
+            1440,
+            390
+          ],
+          "saveReopen": true,
+          "downloadSourceExact": true,
+          "draftExportExact": true,
+          "replaceWithText": true,
+          "invalidKeepsDraft": true,
+          "previewKeyboardZoomFitDraft": true,
+          "errors": [],
+          "overflow": false
+        },
+        "previewInteractionPacket": "Enter activation; native PNG 640px to 1280px at 2×; mobile keyboard horizontal scrolling; fit; Escape/focus return; exact pending text.",
+        "authorReportedFrontendBuild": "pass",
+        "frontendBuildReceipt": "prospero1056-build-final.log",
+        "globalSuite": "Still running without a terminal result at this documentation refresh; no full-suite pass claimed.",
+        "globalSuiteLog": "prospero1056-full.log",
+        "checkerCorrections": "prospero1056-checker-errors.txt retains two corrected helper expectations and the corrected useDialog object-to-zIndex build error; original logs preserved.",
+        "detectorFile": "prospero1056-detector.txt",
+        "suppliedDetectorFindings": [],
+        "historicalCompWarningRetained": true,
+        "initialFinish": {
+          "file": "qa1056/FINISH.txt",
+          "disposition": "fix",
+          "finding": "F1: missing one-click and keyboard full-size capture inspection"
+        },
+        "finishF1": {
+          "file": "qa1056/FINISH-F1.txt",
+          "finding": "F1 resolved",
+          "disposition": "ship",
+          "scope": "Only the scored F1 correction; no whole-surface approval, root gate closure or global accessibility certification",
+          "visualBasis": "Four final opened captures; interaction receipts supplement the visual verdict"
+        },
+        "documenterActivity": "Source, supplied receipts and four final captures inspected; JSON parsed and diff checked. No apps, models, test reruns or new captures."
       }
     },
     "limits": [
@@ -107,7 +382,11 @@
       "Scoped ship disposition does not close old Studio comp gates.",
       "Separate later browser receipt does not rewrite historical native browser_pending.",
       "Native author and independent submission-2 receipts verify the voice/SRT correction against their described cases; the subsequent busy-fieldset delta still needs its own submission/review.",
-      "Global R2 suite was still running at this documentation refresh; no final pass claimed."
+      "Global R2 suite was still running at this documentation refresh; no final pass claimed.",
+      "Expansion #1056 uses a real retained PNG from a synthetic diagram; no model-quality or scientific-accuracy claim.",
+      "Expansion #1056 full suite was still running without a terminal result at this refresh; no full-suite pass claimed.",
+      "FINISH-F1 ship covers only F1 local inspection; it does not approve the whole surface, close root gates or certify global accessibility.",
+      "Expansion #1056 dark-theme desktop/mobile captures and scoped keyboard receipts do not cover all themes, browsers or concurrent states."
     ]
   },
   "components": [
@@ -156,34 +435,69 @@
       "description": "Native fieldset/legend and source checkbox; separate source-reviewed acknowledgement appears for associated scenes.",
       "html": "<fieldset class=\"ds-sources\"><legend>Fuentes de esta escena</legend><label><input type=\"checkbox\" checked>Datos sintéticos del ejercicio</label></fieldset>",
       "css": ".ds-sources{min-width:0;color:var(--text);font:14px/1.45 var(--font,sans-serif)}.ds-sources label{display:flex;align-items:center;gap:10px}.ds-sources input{accent-color:var(--accent);width:15px;height:15px}.ds-sources input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "Retained figure provenance and actions",
+      "kind": "custom",
+      "description": "Caption, explicit local inspection/download and optional origin link follow the retained PNG. The PNG itself is supplied content and is not synthesized in this snippet.",
+      "html": "<figure class=\"ds-figure\"><figcaption>Conjunto de prueba · Revisión 3 · Estado inside</figcaption><div class=\"ds-figure-actions\"><button>Ampliar figura</button><button>Descargar figura y fuente</button><a href=\"https://example.invalid/diagram\" target=\"_blank\" rel=\"noreferrer\">Abrir diagrama de origen</a></div><p>Se conserva esta captura y su fuente. Para usar otra revisión o estado, importa la nueva figura.</p></figure>",
+      "css": ".ds-figure{display:flex;flex-direction:column;gap:12px;margin:0;min-width:0;color:var(--text);font:12px/1.45 var(--font,sans-serif)}.ds-figure-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.ds-figure-actions button,.ds-figure-actions a{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font:500 13px var(--font,sans-serif);text-decoration:none;white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-figure-actions button:hover,.ds-figure-actions a:hover{background:var(--surface-2);border-color:var(--border-strong)}.ds-figure-actions button:focus-visible,.ds-figure-actions a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-figure-actions button:active,.ds-figure-actions a:active{transform:translateY(1px)}.ds-figure p{margin:0;color:var(--muted)}"
+    },
+    {
+      "name": "Figure inspector toolbar",
+      "kind": "custom",
+      "description": "Wrapping shared controls above the focusable native scroll region. The application starts at actual size; this static snippet records toolbar appearance, not dialog behavior.",
+      "html": "<div class=\"ds-inspector-tools\"><button>Cerrar</button><button aria-pressed=\"false\">Ajustar</button><button aria-pressed=\"true\">Tamaño real</button><button aria-pressed=\"false\">Ampliar 2×</button><span>Conjunto de prueba</span></div>",
+      "css": ".ds-inspector-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:16px;background:#08090af5;color:var(--text);font:14px/1.45 var(--font,sans-serif)}.ds-inspector-tools button{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font:500 13px var(--font,sans-serif);white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-inspector-tools button:hover{background:var(--surface-2);border-color:var(--border-strong)}.ds-inspector-tools button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-inspector-tools button:active{transform:translateY(1px)}"
     }
   ],
   "narrative": {
     "northStar": "The Shot Review Bench",
-    "overview": "This is the built Explainers surface for task #961, an **Operate** extension of Prospero's existing production workbench. Production identity, pipeline and current job action precede the scene editor. The editor groups narration, on-screen text, a library figure and source associations so one scene can be corrected and produced again while unchanged page and sentence-audio assets are reused.\n\nThe surface inherits the plum ground, magenta actions, dragon-and-wand identity and shared cards, fields and buttons. It does not establish a replacement visual world. `PRODUCT.md` and root `DESIGN.md` remain incumbent context; this scoped record does not close the old Studio comp gates or repair root metadata. Source is authoritative for the current cascade: `studio.css` now declares Source Sans 3 body type and Cinzel headings, both imported by `App.tsx`; the older root document's Space Grotesk body description is not repeated as built truth here.",
+    "overview": "This is the built Explainers surface for task #961 and its portable-figure expansion #1056, an **Operate** extension of Prospero's existing production workbench. Production identity, pipeline and current job action precede the scene editor. The editor groups narration, on-screen text, a library or retained portable figure and source associations so one scene can be corrected and produced again while unchanged page and sentence-audio assets are reused.\n\nThe surface inherits the plum ground, magenta actions, dragon-and-wand identity and shared cards, fields and buttons. It does not establish a replacement visual world. `PRODUCT.md` and root `DESIGN.md` remain incumbent context; this scoped record does not close the old Studio comp gates or repair root metadata. Source is authoritative for the current cascade: `studio.css` now declares Source Sans 3 body type and Cinzel headings, both imported by `App.tsx`; the older root document's Space Grotesk body description is not repeated as built truth here.",
     "keyCharacteristics": [
       "Production state stays above editable scene content.",
       "Native disclosures keep sources and repeated scenes manageable.",
       "Explicit save, produce and editable-project export actions retain the working context.",
-      "Responsive shared controls preserve the same scene fields at narrow widths."
+      "Responsive shared controls preserve the same scene fields at narrow widths.",
+      "Portable figures keep their capture, source and revision together, with local inspection before saving."
     ],
     "rules": [
-      { "name": "The Inherited Accent Rule", "body": "Use the shared action and focus variables for this editor; source checkboxes and native field focus already use them.", "section": "colors" },
-      { "name": "The Working Copy Rule", "body": "Preserve explicit field labels and short action names in Spanish and English; narration and on-screen copy remain separately editable.", "section": "typography" },
-      { "name": "The Scene Identity Rule", "body": "Preserve scene/source IDs while editing and moving existing content; use returned revisions and retained assets as the evidence for selective reproduction.", "section": "components" }
+      {
+        "name": "The Inherited Accent Rule",
+        "body": "Use the shared action and focus variables for this editor; source checkboxes and native field focus already use them.",
+        "section": "colors"
+      },
+      {
+        "name": "The Working Copy Rule",
+        "body": "Preserve explicit field labels and short action names in Spanish and English; narration and on-screen copy remain separately editable.",
+        "section": "typography"
+      },
+      {
+        "name": "The Scene Identity Rule",
+        "body": "Preserve scene/source IDs while editing and moving existing content; use returned revisions and retained assets as the evidence for selective reproduction.",
+        "section": "components"
+      },
+      {
+        "name": "The Retained Figure Rule",
+        "body": "Keep the capture and complete source together; use explicit import to change revision or state and an explicit link to visit the origin.",
+        "section": "components"
+      }
     ],
     "dos": [
       "Do keep production state ahead of the scene editor and preserve existing short/video entry points.",
       "Do retain the shared theme roles, native disclosures, labelled fields and wrapping action rows.",
       "Do preserve local edits when a newer revision appears and show the conflict warning.",
       "Do save a dirty draft before exporting its editable project.",
-      "Do verify selective reproduction with unchanged page and sentence-audio asset identities."
+      "Do verify selective reproduction with unchanged page and sentence-audio asset identities.",
+      "Do retain the complete portable figure and expose its revision and page or state beside the capture.",
+      "Do allow local capture inspection before saving, with keyboard closure and focus return to the working scene."
     ],
     "donts": [
       "Don't promote this surface composition into a global Studio template.",
       "Don't add form entrance motion or a replacement visual identity to this scoped editor.",
       "Don't describe the synthetic render as proof of LLM planning, scientific accuracy or universal reliability.",
-      "Don't treat these viewport captures or the scoped ship disposition as closure of inherited Studio comp gates."
+      "Don't treat these viewport captures or the scoped ship disposition as closure of inherited Studio comp gates.",
+      "Don't imply that opening or importing a retained figure synchronizes it with its origin."
     ]
   }
 }
