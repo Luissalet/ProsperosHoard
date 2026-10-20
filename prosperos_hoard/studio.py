@@ -466,7 +466,8 @@ def create_app(data_dir, **kwargs):
     from .hoard_link.guard import GuardMiddleware, parse_allowed_hosts
     import os
     studio = Studio(data_dir, **kwargs)
-    guarded = GuardMiddleware(studio, port_getter=lambda: studio.port,
+    from .compat_mcp import install
+    guarded = GuardMiddleware(install(studio), port_getter=lambda: studio.port,
         allowed=parse_allowed_hosts(os.environ.get('PROSPERO_ALLOWED_HOSTS', '')), strict_ports=True)
     guarded.studio = studio
     return guarded
