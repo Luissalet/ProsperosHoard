@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+Explanatory videos: **Generation → Productions → New explainer** edits scenes, source references, narration and figures on the existing production pipeline. Native `studio_explainer` creates/reads/edits/imports the same source through MCP. Unchanged sentence audio/pages are reused; output includes MP4, SRT and editable JSON with voice/timeline options. [Workflow and tested limits](docs/EXPLAINERS.md).
+
 Prospero includes complete generation and native editing modules, each OFF until explicitly enabled. The common home connects real project/timeline revisions and XML results to both full clients at `/generation/` and `/editing/`; API and MCP discovery remain cold. See [studio setup, project flow and data transition](docs/STUDIO.md). This candidate has synthetic transfer/MCP checks and native engine builds; visual approval, real-profile continuity and live global-model deployment are pending. It has not been integrated or installed on the real profile.
 
 The Faustus button opens the shared copilot panel for the selected project.

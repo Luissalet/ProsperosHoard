@@ -795,7 +795,7 @@ export function ProductionCard({ p, projectName, onOpen, compact }: {
  * of them), and one production at a time with its pipeline, its next step
  * and its storyboard. */
 export function ProductionsView({ projectId }: { projectId?: string }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const app = useApp();
   const { data, reload } = useAsync(() => api.productions(), [app.dataVersion]);
   const { data: projects } = useAsync(() => api.projects(), [app.dataVersion]);
@@ -814,11 +814,12 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
   };
   const back = () => (projectId ? app.go("video") : app.go("productions"));
   const [newShort, setNewShort] = useState(false);
+  const [newExplainer, setNewExplainer] = useState(false);
   const [newVideo, setNewVideo] = useState(false);
   const modals = (
     <>
       {newVideo && <VideoModal projectId={projectId} onClose={() => setNewVideo(false)} onStarted={(s) => { setNewVideo(false); openSlug(s); }} />}
-      {newShort && <ShortModal onClose={() => setNewShort(false)} onStarted={(s) => { setNewShort(false); openSlug(s); }} />}
+      {newShort && <ShortModal initialExplanatory={newExplainer} onClose={() => { setNewShort(false); setNewExplainer(false); }} onStarted={(s) => { setNewShort(false); setNewExplainer(false); openSlug(s); }} />}
     </>
   );
 
@@ -837,7 +838,7 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
         <div><h1>{title}</h1><p>{projectId ? t("videoLeadText") : t("productionsLead")}</p></div>
         <div className="actions">
           <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
-          <button className="btn" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
+          <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button>
         </div>
       </div>
       {modals}
@@ -848,7 +849,7 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
           <p className="muted">{t("prodStartHere")}</p>
           <div className="row" style={{ gap: 8, justifyContent: "center" }}>
             <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
-            <button className="btn" onClick={() => setNewShort(true)}><Megaphone size={15} /> {t("newShort")}</button>
+            <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button>
           </div>
         </div>
       ) : (

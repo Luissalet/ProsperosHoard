@@ -598,6 +598,22 @@ class ShortScriptBody(BaseModel):
     run: bool = True
 
 
+class ExplainerBody(BaseModel):
+    action: str = "get"
+    production: str | None = None
+    name: str = "Vídeo explicativo"
+    topic: str = ""
+    sources: list[dict[str, Any]] | None = None
+    scenes: list[dict[str, Any]] | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+    voice: dict[str, Any] | None = None
+    settings: dict[str, Any] | None = None
+    project: str | None = None
+    run: bool = False
+    base_revision: int | None = None
+    bundle: dict[str, Any] | None = None
+
+
 class StockSearchBody(BaseModel):
     query: str
     kind: str = "video"
@@ -4634,6 +4650,50 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_style_cards", f"{body.action}:{body.id or body.name or ''}"[:80], lambda: op_style_cards(body))
 
     # ------------------------------------------------------ narrated shorts
+    @app.post("/api/explainers")
+    @app.post("/api/agent/studio_explainer")
+    def explainer_operation(body: ExplainerBody):
+        from . import explainers
+        def execute():
+            if body.action == "import":
+                bundle = body.bundle or {}
+                if bundle.get("format") != "prospero.explainer/1":
+                    raise engine.EngineError("bad_explainer_format", "Choose a native explanatory-video project.")
+                if body.project:
+                    store.get_project(body.project)
+                state = explainers.create(store.data_dir, bundle.get("name") or body.name, topic=bundle.get("topic", ""), sources=bundle.get("sources"), scenes=bundle.get("scenes"),
+                                          options=bundle.get("options"), settings=body.settings, project_id=body.project)
+            elif body.action == "create":
+                if body.project:
+                    store.get_project(body.project)
+                state = explainers.create(store.data_dir, body.name, topic=body.topic, sources=body.sources, scenes=body.scenes,
+                                          options=body.options, settings=body.settings, project_id=body.project)
+            elif body.action == "edit":
+                state = explainers.update(store.data_dir, body.production, scenes=body.scenes, sources=body.sources, voice=body.voice, base_revision=body.base_revision)
+            elif body.action == "get":
+                state = productions_mod.load_state(store.data_dir, body.production)
+            else:
+                raise engine.EngineError("bad_action", "Use create, get, edit or import.")
+            result = {"explainer": explainers.view(state), "production": production_view(state["slug"])}
+            if body.run:
+                result["job"] = engine.job_view(queue_production(state["slug"]))
+            return result
+        return agent("studio_explainer", body.production or body.name, execute)
+
+    @app.get("/api/productions/{slug}/explainer.{kind}")
+    def explainer_file(slug: str, kind: str):
+        from . import explainers
+        state = productions_mod.load_state(store.data_dir, slug)
+        explainers.view(state)
+        if kind == "json":
+            return Response(json.dumps(explainers.export_project(state), ensure_ascii=False), media_type="application/json")
+        if kind != "srt":
+            raise HTTPException(404, "Unknown explainer export.")
+        path = productions_mod.production_dir(store.data_dir, slug) / "explainer.srt"
+        if not path.is_file() or not state["done"].get("narration") or not state["done"].get("report"):
+            raise HTTPException(404, "Run the narration before exporting subtitles.")
+        return FileResponse(path, media_type="application/x-subrip", filename=f"{slug}.srt")
+
     def op_short_create(body: ShortCreateBody) -> dict[str, Any]:
         spec = dict(body.options or {})
         if body.topic:
@@ -4657,7 +4717,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 raise engine.EngineError("not_a_short", f"'{slug}' is not a narrated short")
             script = (state.get("done") or {}).get("script") or state["spec"].get("script")
             return {"production": slug, "script": script}
-        shorts_mod.replace_script(store.data_dir, slug, body.script)
+        state = productions_mod.load_state(store.data_dir, slug)
+        if "explainer" in state["spec"]:
+            from . import explainers
+            segments = shorts_mod.normalise_script(body.script)["segments"]
+            previous = state["spec"]["explainer"]["scenes"]
+            scenes = [{**(previous[index] if index < len(previous) else {"id": f"scene-{new_id('s')}", "title": "Scene", "source_ids": []}), "narration": seg["text"]} for index, seg in enumerate(segments)]
+            explainers.update(store.data_dir, slug, scenes=scenes)
+        else:
+            shorts_mod.replace_script(store.data_dir, slug, body.script)
         out: dict[str, Any] = {"production": production_view(slug)}
         if body.run:
             out["job"] = engine.job_view(queue_production(slug))

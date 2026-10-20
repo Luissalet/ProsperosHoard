@@ -851,6 +851,9 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
         from .shorts import compact_extras
 
         view.update(compact_extras(state))
+        if "explainer" in spec:
+            from .explainers import view as explainer_view
+            view["explainer"] = explainer_view(state)
         timeline = done.get("timeline") or {}
         if timeline.get("timelines"):
             view["renders"] = {aspect: info.get("renders") for aspect, info in timeline["timelines"].items()}
@@ -1710,8 +1713,11 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
                    stage_hooks: Optional[dict[str, Callable[[Run], Any]]] = None) -> dict[str, Any]:
     if load_state(store.data_dir, slug).get("kind") == "short":
         from .shorts import ShortRun  # a narrated short (shorts.py)
-
-        return ShortRun(store, studio, slug, progress, qa_hook=None, stage_hooks=stage_hooks).run()
+        runner = ShortRun
+        if "explainer" in load_state(store.data_dir, slug).get("spec", {}):
+            from .explainers import ExplainerRun
+            runner = ExplainerRun
+        return runner(store, studio, slug, progress, qa_hook=None, stage_hooks=stage_hooks).run()
     return Run(store, studio, slug, progress, qa_hook=qa_hook, stage_hooks=stage_hooks).run()
 
 

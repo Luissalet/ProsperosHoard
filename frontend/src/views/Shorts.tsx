@@ -5,6 +5,7 @@ import {
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { Modal, useApp } from "../components/ui";
+import { ExplainerScenes } from "./Explainer";
 
 const SOURCES = ["auto", "stock", "generate", "mix"] as const;
 const MUSIC = ["none", "compose", "library"] as const;
@@ -12,7 +13,7 @@ const CAPTIONS = ["bold", "default", "horror", "none"] as const;
 const ASPECTS = ["9:16", "16:9", "1:1"] as const;
 
 /** "New short": a topic (the script is written for you) or your own script, and the few choices that matter. */
-export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStarted: (slug: string) => void }) {
+export function ShortModal({ onClose, onStarted, initialExplanatory = false }: { onClose: () => void; onStarted: (slug: string) => void; initialExplanatory?: boolean }) {
   const { t, lang } = useT();
   const app = useApp();
   const [mode, setMode] = useState<"topic" | "script">("topic");
@@ -27,14 +28,15 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
   const [studio, setStudio] = useState<StudioVoice[]>([]);
   const [source, setSource] = useState<(typeof SOURCES)[number]>("auto");
   const [clips, setClips] = useState(0);
-  const [music, setMusic] = useState<(typeof MUSIC)[number]>("compose");
+  const [music, setMusic] = useState<(typeof MUSIC)[number]>(initialExplanatory ? "none" : "compose");
   const [musicTags, setMusicTags] = useState("lo-fi ambient instrumental, soft pads, gentle beat");
   const [captions, setCaptions] = useState<(typeof CAPTIONS)[number]>("bold");
-  const [aspects, setAspects] = useState<string[]>(["9:16"]);
+  const [aspects, setAspects] = useState<string[]>(initialExplanatory ? ["16:9"] : ["9:16"]);
   const [final, setFinal] = useState(false);
   const [review, setReview] = useState(false);
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [explanatory, setExplanatory] = useState(initialExplanatory), [material, setMaterial] = useState("");
 
   useEffect(() => {
     api.voices().then((r) => setCurated(r.items)).catch(() => undefined);
@@ -58,7 +60,11 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
         captions: { style: captions },
         timeline: { aspects, qualities: final ? ["preview", "final"] : ["preview"] },
       };
-      const out = await api.createShort({
+      const supplied = material.trim() ? [{ id: "source-1", title: lang === "es" ? "Material aportado" : "Supplied material", text: material.trim(), reference: "" }] : [];
+      const out = explanatory ? await api.explainer({ action: "create", name: name.trim() || topic.trim() || (lang === "es" ? "Vídeo explicativo" : "Explanatory video"), topic: topic.trim(), sources: supplied,
+        ...(mode === "script" ? { scenes: script.trim().split(/\n\s*\n/).map((text, index) => ({ id: `scene-${index + 1}`, title: text.split(/[.!?\n]/)[0].slice(0, 80), narration: text, body: text.split(/[.!?\n]/)[0], source_ids: supplied.map(s => s.id) })) } : {}),
+        options, settings: { script_review: review }, project: app.projectId || undefined, run: true,
+      }) : await api.createShort({
         name: name.trim() || undefined,
         ...(mode === "topic" ? { topic: topic.trim() } : { script: script.trim() }),
         options, settings: { script_review: review }, count, project: app.projectId || undefined,
@@ -73,14 +79,24 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
       setBusy(false);
     }
   };
-  const ready = (mode === "topic" ? topic.trim() : script.trim()) && aspects.length > 0;
+  const ready = (mode === "topic" ? topic.trim() || (explanatory ? material.trim() : "") : script.trim()) && aspects.length > 0;
+  const importProject = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    try { const out = await api.explainer({ action: "import", bundle: JSON.parse(await file.text()), project: app.projectId || undefined }); onStarted(out.production.slug); }
+    catch (failure) { app.toast((failure as Error).message, "bad"); }
+    finally { setBusy(false); }
+  };
   const toggleAspect = (a: string) => setAspects(aspects.includes(a) ? aspects.filter((x) => x !== a) : [...aspects, a]);
 
   return (
-    <Modal title={t("shortModalTitle")} onClose={onClose} wide
-      footer={<button className="btn primary" disabled={!ready || busy} onClick={start}><Play size={14} /> {t("startShort")}</button>}>
+    <Modal title={explanatory ? (lang === "es" ? "Vídeo explicativo" : "Explanatory video") : t("shortModalTitle")} onClose={onClose} wide
+      footer={<button className="btn primary" disabled={!ready || busy} onClick={start}><Play size={14} /> {explanatory ? (lang === "es" ? "Crear vídeo explicativo" : "Create explanatory video") : t("startShort")}</button>}>
       <div className="stack">
         <p className="small muted" style={{ margin: 0 }}>{t("shortLead")}</p>
+        <label className="row"><input type="checkbox" checked={explanatory} onChange={event => { setExplanatory(event.target.checked); if (event.target.checked) { setMusic("none"); setAspects(["16:9"]); } }}/>{lang === "es" ? "Vídeo explicativo con escenas y fuentes" : "Explanatory video with scenes and sources"}</label>
+        {explanatory && <label className="field">{lang === "es" ? "Material de partida" : "Source material"}<textarea rows={4} value={material} onChange={event => setMaterial(event.target.value)} placeholder={lang === "es" ? "Notas y fragmentos que debe explicar. Las referencias se pueden completar por escena." : "Notes and excerpts to explain. References can be completed per scene."}/></label>}
+        {explanatory && <label className="field">{lang === "es" ? "Importar proyecto editable" : "Import editable project"}<input type="file" accept=".json,application/json" disabled={busy} onChange={event => { importProject(event.target.files?.[0]); event.target.value = ""; }}/></label>}
         <div className="segmented" style={{ alignSelf: "flex-start" }}>
           <button className={mode === "topic" ? "on" : ""} onClick={() => setMode("topic")}>{t("shortFromTopic")}</button>
           <button className={mode === "script" ? "on" : ""} onClick={() => setMode("script")}>{t("shortFromScript")}</button>
@@ -109,10 +125,10 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
               {studio.map((v) => <option key={v.id} value={v.id}>{v.name} · {v.engine_id}</option>)}
               {curated.filter((v) => v.lang.startsWith(language)).map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
             </select></label>
-          <label className="field">{t("shortPictures")}
+          {!explanatory && <label className="field">{t("shortPictures")}
             <select value={source} onChange={(e) => setSource(e.target.value as (typeof SOURCES)[number])}>
               {SOURCES.map((s) => <option key={s} value={s}>{t(`source_${s}` as MessageKey)}</option>)}
-            </select></label>
+            </select></label>}
           <label className="field">{t("shortMusic")}
             <select value={music} onChange={(e) => setMusic(e.target.value as (typeof MUSIC)[number])}>
               {MUSIC.map((m) => <option key={m} value={m}>{t(`music_${m}` as MessageKey)}</option>)}
@@ -124,8 +140,8 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
             <select value={captions} onChange={(e) => setCaptions(e.target.value as (typeof CAPTIONS)[number])}>
               {CAPTIONS.map((c) => <option key={c} value={c}>{t(`caption_${c}` as MessageKey)}</option>)}
             </select></label>
-          <label className="field">{t("shortClips")}
-            <input type="number" min={0} max={20} value={clips} onChange={(e) => setClips(Math.max(0, Math.min(20, Number(e.target.value) || 0)))} /></label>
+          {!explanatory && <label className="field">{t("shortClips")}
+            <input type="number" min={0} max={20} value={clips} onChange={(e) => setClips(Math.max(0, Math.min(20, Number(e.target.value) || 0)))} /></label>}
         </div>
         <div className="row wrap" style={{ gap: 14 }}>
           <span className="small muted">{t("shortAspects")}:</span>
@@ -142,10 +158,10 @@ export function ShortModal({ onClose, onStarted }: { onClose: () => void; onStar
           <label className="row small" style={{ gap: 5 }}>
             <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> {t("shortScriptReview")}
           </label>
-          <label className="row small" style={{ gap: 5 }}>{t("shortVariants")}
+          {!explanatory && <label className="row small" style={{ gap: 5 }}>{t("shortVariants")}
             <input type="number" min={1} max={8} value={count} style={{ width: 60 }}
               onChange={(e) => setCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))} />
-          </label>
+          </label>}
         </div>
       </div>
     </Modal>
@@ -174,6 +190,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
 
   return (
     <>
+      {!!state.spec.explainer && <ExplainerScenes state={state} onChanged={onChanged}/>}
       {script && (
         <div className="card">
           <h2>

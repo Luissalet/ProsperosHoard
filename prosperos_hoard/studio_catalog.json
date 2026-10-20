@@ -1972,6 +1972,154 @@
       }
     },
     {
+      "name": "studio_explainer",
+      "description": "Create, read, edit or import a source-linked explanatory video using native scenes, voice and montage.\n\nsources: [{id,title,text,reference}], with retained explicit references. scenes: [{id,title,narration,body,\nsource_ids,asset_id?,graphic?}]. Reorder by supplying the scene list. Edits reuse unchanged sentence audio\nand scene pages. A changed source marks dependent scenes for review without imposing an approval gate.\noptions uses the narrated production's language/voice/music/timeline. run starts/resumes native jobs;\nfalse saves the editable project. Read the resulting production with studio_production.\naction=import accepts bundle from the production's explainer.json export; base_revision protects edits\nmade from an older read. Source references are retained text, not implicitly fetched documents.\nKeywords: explainer, storyboard, sources, scenes, explanatory video, vídeo explicativo, fuentes, escenas, guion",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "get",
+            "title": "Action",
+            "type": "string"
+          },
+          "production": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Production"
+          },
+          "name": {
+            "default": "Vídeo explicativo",
+            "title": "Name",
+            "type": "string"
+          },
+          "topic": {
+            "default": "",
+            "title": "Topic",
+            "type": "string"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sources"
+          },
+          "scenes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scenes"
+          },
+          "options": {
+            "title": "Options",
+            "type": "object"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Voice"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Settings"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project"
+          },
+          "run": {
+            "default": false,
+            "title": "Run",
+            "type": "boolean"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Revision"
+          },
+          "bundle": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bundle"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
       "name": "studio_export_timeline",
       "description": "Export a cut for Premiere Pro or DaVinci Resolve: XML/EDL plus timed SRT/VTT captions / exportar.\n\nGive production (and aspect, e.g. \"16:9\") or a timeline_id. Returns the download links (a zip with\nXML/EDL, caption SRT/VTT and word-timing JSON when present, plus a README; or each format alone).\nImport SRT/VTT separately as a subtitle track; caption styling/animation is not transferred.\nThe XML points at the media where they live on\nthis computer, so the editor opens the same clips and stills - nothing is copied.\n\nKeywords: export, premiere, davinci, resolve, final cut, xml, edl, srt, vtt, captions, subtítulos, exportar montaje, editar en premiere",
       "inputSchema": {
