@@ -2218,7 +2218,7 @@ def update_shots(data_dir: Path, slug: str, changes: list[dict[str, Any]]) -> di
 
 
 def set_script_segments(data_dir: Path, slug: str, *, text: Optional[str] = None,
-                        segments: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+                        segments: Optional[list[dict[str, Any]]] = None, source_song_asset_id: Optional[str] = None) -> dict[str, Any]:
     """Optional script/lyric fragments with explicit text and shot timing links."""
     from . import script_segments
 
@@ -2226,6 +2226,8 @@ def set_script_segments(data_dir: Path, slug: str, *, text: Optional[str] = None
         raise ProductionError("bad_segments", "give text to import, or segments to edit")
     with lock_for(slug):
         state = load_state(data_dir, slug)
+        if source_song_asset_id is not None and source_song_asset_id != ((state.get('done') or {}).get('song') or {}).get('song_asset_id'):
+            raise ProductionError('timing_source_changed', 'The audio changed. Reopen the timing editor before saving.')
         if is_running(state, data_dir):
             raise ProductionError("production_running", "wait for the production to pause or finish")
         if is_legacy(state) or state.get("kind") == "short":

@@ -3818,7 +3818,7 @@
     },
     {
       "name": "studio_production_segments",
-      "description": "Optional script/lyrics import and text-to-shot links / guion y letra por tomas.\n\nGive text (TXT, SRT, VTT or LRC) to import, or the complete segments list to edit.\nEach segment has id, text, optional start_s/end_s and shot_key. Untimed text stays untimed.\nLinked complete ranges place existing shots on those times, rejecting overlaps.\nNo generation is queued; original images and clips remain. This is optional.\nKeywords: script, lyrics, subtitle import, text shot matching, guion, letra, segmentos, vincular tomas\n",
+      "description": "Optional script/lyrics import and text-to-shot links / guion y letra por tomas.\n\nGive text (TXT, SRT, VTT or LRC) to import, or the complete segments list to edit.\nEach segment has id, text, optional start_s/end_s and shot_key. Untimed text stays untimed.\nLinked complete ranges place existing shots on those times, rejecting overlaps.\nWhen marking while listening, give source_song_asset_id to retain the audio used by the editor;\na changed song asks for the timings to be reopened instead of linking marks to the wrong audio.\nNo generation is queued; original images and clips remain. This is optional.\nKeywords: script, lyrics, subtitle import, text shot matching, guion, letra, segmentos, vincular tomas\n",
       "inputSchema": {
         "properties": {
           "production": {
@@ -3851,6 +3851,18 @@
             ],
             "default": null,
             "title": "Segments"
+          },
+          "source_song_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Song Asset Id"
           },
           "reason": {
             "anyOf": [

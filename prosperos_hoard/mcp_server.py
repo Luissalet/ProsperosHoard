@@ -1219,17 +1219,20 @@ def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = Non
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_production_segments(production: str, text: Optional[str] = None,
-                               segments: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+                               segments: Optional[list[dict[str, Any]]] = None,
+                               source_song_asset_id: Optional[str] = None) -> dict[str, Any]:
     """Optional script/lyrics import and text-to-shot links / guion y letra por tomas.
 
     Give text (TXT, SRT, VTT or LRC) to import, or the complete segments list to edit.
     Each segment has id, text, optional start_s/end_s and shot_key. Untimed text stays untimed.
     Linked complete ranges place existing shots on those times, rejecting overlaps.
+    When marking while listening, give source_song_asset_id to retain the audio used by the editor;
+    a changed song asks for the timings to be reopened instead of linking marks to the wrong audio.
     No generation is queued; original images and clips remain. This is optional.
     Keywords: script, lyrics, subtitle import, text shot matching, guion, letra, segmentos, vincular tomas
     """
     return _call("POST", "/api/agent/studio_production_segments", params={"production": production},
-                 json={"text": text, "segments": segments})
+                 json={"text": text, "segments": segments, 'source_song_asset_id': source_song_asset_id})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

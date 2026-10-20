@@ -501,7 +501,13 @@ def capture_production(ctx: Any, args: dict) -> dict:
     state = prod.load_state(ctx.store.data_dir, slug)
     if prod.is_legacy(state):
         raise prod.ProductionError("legacy_production", "a scripted production cannot be edited here")
-    folder = _snapshot_dir(ctx.store, slug)
+    return capture_production_state(ctx.store, state)
+
+
+def capture_production_state(store: Any, state: dict) -> dict:
+    """Capture the effective state inside an operation's mutation lock."""
+    slug = state['slug']
+    folder = _snapshot_dir(store, slug)
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{new_id('snap')}.json"
     write_text_atomic(folder / name, json.dumps(state, indent=1, ensure_ascii=False))
@@ -582,19 +588,31 @@ _PRODUCTION = {"capture": capture_production, "track": track_production, "undo":
 def capture_lyric_timing(ctx: Any, args: dict) -> dict:
     if args.get('preview'):
         return {'noop': True}
-    return capture_production(ctx, args) if args.get('production') else {'asset_create': True}
+    # Recognition may take minutes. Its production snapshot is captured at the
+    # actual write, after any human edits made while the words were recognized.
+    return {'late_timing_snapshot': True} if args.get('production') else {'asset_create': True}
 
 
 def track_lyric_timing(args: dict, result: dict, ctx: Any = None) -> dict:
     if args.get('preview'):
         return {'objects': [], 'etag': ''}
-    return track_production(args, result, ctx) if args.get('production') else track_asset_create(args, result, ctx)
+    if args.get('production'):
+        tracked = track_production(args, result, ctx)
+        tracked['ids'].append(f"timing_asset_id={result['id']}")
+        return tracked
+    return track_asset_create(args, result, ctx)
 
 
 def undo_lyric_timing(ctx: Any, record: dict, dry_run: bool = False) -> dict:
     before = _before(record)
     if _noop(before):
         return {'unchanged': True}
+    if before.get('late_timing_snapshot'):
+        asset = ctx.store.get_asset(_id(record, 'timing_asset_id'))
+        snapshot = (asset.get('recipe') or {}).get('production_timing_before')
+        if not snapshot:
+            raise _conflict('The production snapshot for this timing operation is unavailable.')
+        return undo_production(ctx, {**record, 'before': snapshot}, dry_run)
     return undo_production(ctx, record, dry_run) if before.get('slug') else undo_asset_create(ctx, record, dry_run)
 
 #: tool name -> the hooks to attach (``dataclasses.replace(tool, **HOOKS[name])``)
