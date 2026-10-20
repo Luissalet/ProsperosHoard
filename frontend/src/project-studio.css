@@ -1,6 +1,7 @@
 .main { min-width: 0; overflow-x: hidden; }
 .topbar { flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
 .studio-tabs { align-self: center; min-height: 36px; }
+.clip-mobile-help { display: none; }
 .project-dashboard { max-width: 1600px; margin: 0 auto; }
 .project-dashboard-head { display: flex; gap: 20px; align-items: center; padding: 10px 0 26px; border-bottom: 1px solid var(--border); }
 .project-dashboard-cover { position: relative; flex: none; }
@@ -116,6 +117,8 @@
   .dashboard-video-list .prod-info { padding: 12px; }
 }
 @media (max-width: 800px) {
+  .clip-desktop-help { display: none; }
+  .clip-mobile-help { display: inline; }
   .project-dashboard-columns { grid-template-columns: 1fr; gap: 0; }
   .project-dashboard-head { gap: 12px; }
   .project-cover-preview { width: 66px; height: 66px; }
