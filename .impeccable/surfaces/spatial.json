@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T10:46:40.469Z",
+  "title": "Design System: Prospero — Image composition",
+  "extensions": {
+    "scope": {
+      "surface": "spatial",
+      "mode": "Operate",
+      "task": 953,
+      "document": "docs/design/spatial.md",
+      "inherits": "DESIGN.md",
+      "visualAuthority": "Incumbent plum workbench; local extension",
+      "targets": [
+        "frontend/src/views/Spatial.tsx",
+        "frontend/src/views/spatial.css",
+        "frontend/src/views/Designer.tsx",
+        "frontend/src/api.ts",
+        "frontend/src/components/FaustusCopilot.tsx"
+      ],
+      "authorship": "Direction contract written after first build; scan documentation completed after visual finish review.",
+      "rootCompGatesChanged": false,
+      "rootMetadataRepaired": false,
+      "shippingRasterAssetsAdded": false
+    },
+    "colorMeta": {
+      "action": {
+        "role": "primary",
+        "displayName": "Inherited magenta action"
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "White artifact"
+      },
+      "box-fill": {
+        "role": "neutral",
+        "displayName": "Schematic blue-grey"
+      },
+      "box-ink": {
+        "role": "neutral",
+        "displayName": "Schematic dark ink"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Inherited application field"
+      }
+    },
+    "typographyMeta": {
+      "heading": {
+        "displayName": "Inherited serif page heading",
+        "purpose": "Shared page-head specificity retains 30px and the hoard serif stack, led by Cinzel."
+      },
+      "body": {
+        "displayName": "Working sans",
+        "purpose": "Current studio.css declares Source Sans 3; root Space Grotesk description remains historical."
+      },
+      "box": {
+        "displayName": "Literal content label",
+        "purpose": "Preserves line breaks and wraps inside the requested rectangle; not a generated-image lettering guarantee."
+      }
+    },
+    "shadows": [
+      {
+        "name": "artifact",
+        "value": "none",
+        "purpose": "Flat clipped canvas and rectangular items."
+      },
+      {
+        "name": "field-focus",
+        "value": "0 0 0 3px var(--accent-soft)",
+        "purpose": "Inherited field focus ring accompanies accent border."
+      }
+    ],
+    "motion": [
+      {
+        "name": "button-feedback",
+        "value": "background 0.12s, border-color 0.12s, transform 0.05s",
+        "purpose": "Shared button feedback; active translates down 1px."
+      },
+      {
+        "name": "form-entrance",
+        "value": "none",
+        "purpose": "No new editor entrance animation."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "inspector-stack",
+        "value": "900px",
+        "purpose": "At or below, inspector follows canvas in one column."
+      },
+      {
+        "name": "shared-mobile",
+        "value": "700px",
+        "purpose": "Inherited shell uses mobile Tools trigger."
+      }
+    ],
+    "geometry": {
+      "desktopColumns": "minmax(0,1fr) 280px",
+      "workbenchGap": "24px",
+      "mobileInspectorMarginTop": "8px",
+      "numericColumns": "1fr 1fr",
+      "toolbarFieldMinimum": "180px",
+      "selectionOutline": "3px solid var(--accent)",
+      "selectionOutlineOffset": "-3px",
+      "boxBorder": "1px solid #798b98",
+      "referenceFit": "cover",
+      "referenceLabelPadding": "4px",
+      "artboardOverflow": "hidden",
+      "artboardIsolation": "isolate"
+    },
+    "behavior": {
+      "defaultDocument": {
+        "format": "prospero.composition/1",
+        "width": 1024,
+        "height": 1024,
+        "items": []
+      },
+      "initialDesignerMode": "templates",
+      "entry": "Generation → Design → Image composition",
+      "sourceSave": "New immutable layout asset; edited source becomes parent_id.",
+      "sessionDraft": "Per-project sessionStorage; restored when switching modes, not a durable asset.",
+      "sourceListPagination": true,
+      "keyboardMovement": {
+        "arrowPixels": 1,
+        "shiftArrowPixels": 10,
+        "clampedToCanvas": true
+      },
+      "drag": "Pointer capture; scale maps screen movement to document pixels; completed drag adds history, cancellation restores prior document.",
+      "inspectorFields": [
+        "name",
+        "caption",
+        "width",
+        "height",
+        "selected item",
+        "item caption",
+        "exact text for text item",
+        "x/y/width/height",
+        "preview background",
+        "text colour",
+        "retained reference image"
+      ],
+      "canvasResize": "Retains item coordinates; invalid boxes require correction before save.",
+      "referenceImage": "Retained asset ID; cover within item rectangle; no media embedding in JSON.",
+      "undoRedo": "Local document history including completed drags; saved-source identity is separate.",
+      "actions": [
+        "Ver instrucciones",
+        "Formato MOSS",
+        "JSON",
+        "Importar JSON",
+        "Guardar vista previa PNG",
+        "Generar con Qwen"
+      ],
+      "jsonImport": "Parse then validate through caption compilation before changing draft; clears saved-source association.",
+      "preview": "Save source, create schematic CPU PNG, open shared asset viewer.",
+      "generation": "Save source, enqueue qwen21 with composition_asset_id and report final prompt; disabled when item list is empty.",
+      "requestPending": "Borderless fieldset disables descendant editor controls while busy.",
+      "messages": {
+        "working": "status",
+        "apiError": "alert",
+        "sourceListError": "alert",
+        "saveAndQueue": "shared toast"
+      },
+      "faustusContext": "Draft, selected ID and saved source ID emitted to shared provider; cleared on editor unmount. Snapshot checked; live chat not tested."
+    },
+    "evidence": {
+      "directory": "D:/LocalAI/research-inbox/spatial953",
+      "openedCaptures": [
+        {
+          "file": "spatial953-desktop.png",
+          "viewport": "1440x1000",
+          "region": "Internal content pane at top"
+        },
+        {
+          "file": "spatial953-mobile.png",
+          "viewport": "390x844",
+          "region": "Internal content pane at top"
+        },
+        {
+          "file": "spatial953-mobile-inspector.png",
+          "viewport": "390x844",
+          "region": "Internal content pane scrolled to inspector"
+        },
+        {
+          "file": "spatial953-desktop-actions.png",
+          "viewport": "1440x1000",
+          "region": "Internal content pane scrolled to lower inspector, actions and compiled output"
+        },
+        {
+          "file": "spatial953-mobile-actions.png",
+          "viewport": "390x844",
+          "region": "Internal content pane scrolled to actions and compiled output"
+        }
+      ],
+      "review": {
+        "file": "finish-review953.txt",
+        "disposition": "ship",
+        "materialFixes": [],
+        "scope": "Visual surface across five supplied captures only; excludes FaustusCopilot, execution and model quality."
+      },
+      "nativeReceipt": "qa-native-results.json",
+      "browserReceipt": "qa-browser-results.json",
+      "nativeReported": {
+        "mcpTools": 170,
+        "preview": "Schematic CPU PNG",
+        "generation": "Native demo transport only; exact source retained in recipe"
+      },
+      "browserReported": {
+        "keyboard": true,
+        "dragUndo": true,
+        "exportReopen": true,
+        "contextSnapshot": true,
+        "desktopOverflow": false,
+        "mobileOverflow": false,
+        "errors": [],
+        "generationButton": "native demo only"
+      },
+      "suppliedTests": {
+        "spatial": {
+          "file": "tests-r1.log",
+          "passed": 8
+        },
+        "area": {
+          "file": "area-r3.log",
+          "passed": 40
+        },
+        "frontendBuild": {
+          "file": "frontend-build-r2.log",
+          "result": "pass"
+        }
+      },
+      "detector": {
+        "file": "detector953.json",
+        "findings": []
+      },
+      "documenterActivity": "Read source, receipts, test logs and finish review; opened all five supplied captures. No apps, servers, models, live chat, new captures or test reruns."
+    },
+    "limits": [
+      "Dark-theme viewport evidence only; light theme inherited from source.",
+      "Top and scrolled captures show internal-scroll regions, not full-page coverage.",
+      "Empty/loading/error/focus states not captured by finish review; their documentation is source-derived.",
+      "No real-model generation quality, layout adherence or exact-spelling conclusion.",
+      "No live LLM planning or Faustus conversation check; context snapshot is separate evidence.",
+      "No whole-product, all-theme, full accessibility or inherited Studio comp-gate certification.",
+      "No new shipping raster assets; QA PNGs are not packaged application imagery."
+    ]
+  },
+  "components": [
+    {
+      "name": "Save copy",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shared magenta source action above the canvas; saves a new immutable copy.",
+      "html": "<button class=\"ds-save\">Guardar copia</button>",
+      "css": ".ds-save{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:var(--accent-ink);font:600 13px var(--font,sans-serif);white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-save:hover{background:var(--accent-2);border-color:var(--accent-2)}.ds-save:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-save:active{transform:translateY(1px)}.ds-save:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Compile instructions",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Shared secondary action in the wrapping downstream row.",
+      "html": "<button class=\"ds-compile\">Ver instrucciones</button>",
+      "css": ".ds-compile{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font:500 13px var(--font,sans-serif);white-space:nowrap;cursor:pointer;transition:background .12s,border-color .12s,transform .05s}.ds-compile:hover{background:var(--surface-2);border-color:var(--border-strong)}.ds-compile:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-compile:active{transform:translateY(1px)}.ds-compile:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Exact text field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Inspector field for literal text content, separate from the element description.",
+      "html": "<label class=\"ds-field\">Texto exacto<input value=\"¿Qué cambió? 30 €\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:var(--text-2);font:12.5px var(--font,sans-serif)}.ds-field input{min-width:0;max-width:100%;padding:7px 10px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);color:var(--text);font:inherit}.ds-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}"
+    },
+    {
+      "name": "Designer mode",
+      "kind": "nav",
+      "refersTo": "mode-selected",
+      "description": "Incumbent segmented choice keeps Templates beside Image composition; sample shows active styling, not runtime navigation.",
+      "html": "<div class=\"ds-modes\" aria-label=\"Modo de diseño\"><button>Plantillas</button><button class=\"ds-on\">Composición de imagen</button></div>",
+      "css": ".ds-modes{display:inline-flex;padding:2px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);font:12.5px var(--font,sans-serif)}.ds-modes button{padding:5px 11px;border:0;border-radius:7px;background:none;color:var(--text-2);font:inherit;cursor:pointer}.ds-modes .ds-on{background:var(--surface-3);color:var(--text)}.ds-modes button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "Selected schematic item",
+      "kind": "custom",
+      "refersTo": "spatial-box",
+      "description": "Rectangular native button; pale default fill and inset magenta selection. Sample content is from the supplied QA composition.",
+      "html": "<button class=\"ds-box\" aria-pressed=\"true\">¿Qué cambió? 30 €</button>",
+      "css": ".ds-box{display:flex;align-items:center;justify-content:center;width:100%;min-height:96px;padding:8px;border:1px solid #798b98;border-radius:0;background:#e4edf3;color:#172c3e;font:14px/1.25 var(--font,sans-serif);white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;touch-action:none;cursor:move;outline:3px solid var(--accent);outline-offset:-3px}.ds-box:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}"
+    },
+    {
+      "name": "Composition canvas",
+      "kind": "custom",
+      "refersTo": "artboard",
+      "description": "Flat white artifact whose aspect ratio follows the current document; square example is the blank-document default.",
+      "html": "<div class=\"ds-canvas\" aria-label=\"Lienzo de composición\"><p>Añade un objeto o texto para empezar.</p></div>",
+      "css": ".ds-canvas{position:relative;width:100%;aspect-ratio:1;background:#fff;overflow:hidden;isolation:isolate;font:14px/1.45 var(--font,sans-serif)}.ds-canvas p{position:absolute;top:42%;width:100%;margin:0;text-align:center;padding:24px;color:#435667}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Place content, retain its source, then generate and inspect it.",
+    "overview": "The built surface is Generation → Design → Image composition, an **Operate** extension of the existing Prospero workbench. A saved-source selector and Guardar copia precede the editable canvas. The inspector edits scene intent, literal text, pixel geometry and retained image references. Plantillas remains the adjacent mode and the initial Designer choice.\n\nThe visual authority is the incumbent plum application with magenta actions and selection, shared fields and compact buttons. The white canvas is the artifact being composed. This scoped record was completed after implementation and the independent visual finish review; the Direction contract below was itself written after the first build. Neither is evidence of an earlier comp or workshop. The north-star wording comes directly from that existing contract.",
+    "keyCharacteristics": [
+      "Source selection and save remain above the editable artifact.",
+      "Rectangular boxes distinguish requested placement from a generated image.",
+      "Parallel desktop inspection becomes sequential mobile inspection.",
+      "Compiled instructions, export, preview and generation follow the work area."
+    ],
+    "rules": [
+      {
+        "name": "The Artifact Ground Rule",
+        "body": "Preserve the white composition canvas and use the shared theme accent for application actions, focus and box selection.",
+        "section": "colors"
+      },
+      {
+        "name": "The Retained Source Rule",
+        "body": "Keep editable source identity separate from the schematic preview and generated image; inspect the engine result before claiming placement or spelling adherence.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do preserve the source selector and save action before the canvas.",
+      "Do retain the white artifact, shared plum controls and magenta selection.",
+      "Do keep the desktop inspector alongside and mobile inspector after the canvas.",
+      "Do retain labeled exact text, numeric geometry and wrapping downstream actions.",
+      "Do distinguish retained source, schematic preview and generated result in evidence."
+    ],
+    "donts": [
+      "Don't replace Plantillas or introduce a new visual world for this extension.",
+      "Don't treat a session draft as a durable saved composition.",
+      "Don't equate successful compilation or demo transport with real-model adherence.",
+      "Don't describe viewport captures or scoped ship as whole-product or old-comp approval.",
+      "Don't package QA screenshots as application imagery or imply new shipping raster assets."
+    ]
+  }
+}
