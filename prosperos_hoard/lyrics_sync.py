@@ -274,7 +274,8 @@ def production_timing(store: Any, slug: str, *, method: str = 'align', lines: li
         result = save_asset(store, project_id, current_text, result, name=f"{state.get('name') or slug} - linked lyrics",
                             production_before=before)
         state.setdefault('done', {})['lyrics'] = {'lyrics_asset_id': result['id'], 'source': result['method'],
-            'lines': result['timed_lines'], 'total_lines': result['total_lines'], 'complete': result['complete']}
+            'lines': result['timed_lines'], 'total_lines': result['total_lines'],
+            'complete': True, 'timing_complete': result['complete']}
         for stage in ('animatic', 'timeline', 'report'):
             state['done'].pop(stage, None)
             state.get('partial', {}).pop(stage, None)
