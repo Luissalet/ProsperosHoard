@@ -2,7 +2,7 @@
 
 # Prospero's Hoard
 
-Vídeos explicativos: **Generación → Producciones → Nuevo explicativo** permite editar escenas, fuentes, narración y figuras sobre la producción existente. `studio_explainer` crea, lee, edita e importa esa misma fuente por MCP. Conserva voces/páginas intactas y entrega MP4, SRT y JSON editable con voz y montaje. [Recorrido y límites comprobados](docs/EXPLAINERS.md).
+Vídeos explicativos: **Generación → Producciones → Nuevo explicativo** permite editar escenas, fuentes, narración y figuras sobre la producción existente. Cada escena puede importar un diagrama `.vfigure` con su PNG, fuente completa, revisión y página/estado capturado; el proyecto exportado lo conserva para otro perfil. `studio_explainer` crea, lee, edita e importa esa misma fuente por MCP. Conserva voces/páginas intactas y entrega MP4, SRT y JSON editable con voz y montaje. [Recorrido y límites comprobados](docs/EXPLAINERS.md).
 
 Composición de imagen: **Generación → Diseño → Composición de imagen** permite colocar objetos, texto exacto y referencias antes de generar. `studio_spatial` conserva fuentes editables inmutables, compila instrucciones o JSON de disposición MOSS y crea vistas previas esquemáticas PNG; `studio_generate_image` conserva la fuente elegida en la receta. Compilar o superar el recorrido de demostración no acredita que el modelo respete la disposición. [Formato y límites](docs/SPATIAL.md).
 
