@@ -53,6 +53,10 @@ h2 { font-size: 18px; }
 .card { background: var(--surface); box-shadow: none; min-width: 0; }
 .field { min-width: 0; }
 input, select, textarea { min-width: 0; max-width: 100%; }
+.modal .field > .slash-wrap > textarea {
+  width: 100%; min-height: 10rem; max-height: 28rem; field-sizing: content;
+  font-size: 14px; line-height: 1.6; resize: vertical;
+}
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .page-head .actions { min-width: 0; max-width: 100%; }
