@@ -82,8 +82,8 @@ export function SpatialView() {
       <div className="spatial-toolbar">
         <button className="btn" onClick={() => add("object")}><Plus size={16} />{text("Objeto", "Object")}</button>
         <button className="btn" onClick={() => add("text")}><Plus size={16} />{text("Texto", "Text")}</button>
-        <button className="btn icon" aria-label={text("Deshacer", "Undo")} disabled={!past.current.length} onClick={() => { const previous = past.current.pop(); if (previous) { future.current.push(doc); setDoc(previous); } }}><Undo2 size={16} /></button>
-        <button className="btn icon" aria-label={text("Rehacer", "Redo")} disabled={!future.current.length} onClick={() => { const next = future.current.pop(); if (next) { past.current.push(doc); setDoc(next); } }}><Redo2 size={16} /></button>
+        <button className="btn icon" aria-label={text("Deshacer", "Undo")} disabled={!past.current.length} onClick={() => { const previous = past.current.pop(); if (previous) { future.current.push(doc); setDoc(previous); setOutput(""); } }}><Undo2 size={16} /></button>
+        <button className="btn icon" aria-label={text("Rehacer", "Redo")} disabled={!future.current.length} onClick={() => { const next = future.current.pop(); if (next) { past.current.push(doc); setDoc(next); setOutput(""); } }}><Redo2 size={16} /></button>
         <span className="hint">{doc.width} × {doc.height} · {doc.items.length} {text("elementos", "elements")}</span>
       </div>
       <div className="spatial-workbench">
