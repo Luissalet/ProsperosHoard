@@ -42,6 +42,8 @@ def test_editable_project_roundtrip_keeps_voice_options_sources_and_scenes(clien
     c, app, _ = client
     created = c.post("/api/explainers", json={"action": "create", "name": "Proyecto", "sources": sources(), "scenes": scenes(), "options": {"voice": {"backend": "piper", "voice_id": "es_ES-davefx-medium", "speed": 0.8}}}).json()
     slug = created["production"]["slug"]
+    assert c.get(f"/api/productions/{slug}/explainer.srt").status_code == 404
+    assert c.get(f"/api/productions/{slug}/explainer.unknown").status_code == 404
     bundle = c.get(f"/api/productions/{slug}/explainer.json").json()
     assert bundle["options"]["voice"]["speed"] == 0.8
     imported = c.post("/api/explainers", json={"action": "import", "bundle": bundle})
@@ -85,6 +87,9 @@ def test_native_api_run_edit_and_resume_reuses_unchanged_voice_and_pages(client)
     assert c.get(f"/api/productions/{slug}/explainer.json").json()["scenes"][0]["narration"] == changed[0]["narration"]
     subtitles = c.get(f"/api/productions/{slug}/explainer.srt")
     assert subtitles.status_code == 200 and changed[0]["narration"] in subtitles.text
+    invalidated = c.post("/api/explainers", json={"action": "edit", "production": slug, "scenes": changed})
+    assert invalidated.status_code == 200
+    assert c.get(f"/api/productions/{slug}/explainer.srt").status_code == 404
     # A user may remove a generated sentence from the library between edits.
     # An obsolete cache entry must be regenerated rather than abort recovery.
     retained = next(record["asset_id"] for record in second["explainer_cache"]["voice"].values()
