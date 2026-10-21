@@ -2,7 +2,7 @@
 
 # Prospero's Hoard
 
-Selecting a project opens its dashboard: enter a video directly, create or edit characters and groups in place, or choose **Create clip**. The clip studio connects reference nodes to a video node containing the preview, motion prompt and generation action, with job recovery, queue/progress, cancellation and the actual result. Optional motion/end-frame guides accept uploads or library assets. Mobile uses full-size stacked controls. Generated clips remain project assets; entering from a storyboard frame does not automatically replace that production shot. [Workflow](docs/PROJECT-STUDIO.md).
+Selecting a project opens its dashboard: enter a video directly, create or edit characters and groups in place, or choose **Create clip**. The clip studio connects references to a video node containing preview, motion and generation, with job recovery and actual results. Clicking a storyboard shot opens its own frame/video nodes directly, even before its first frame; saving and rendering remain bound to that production. Standalone studio clips remain project assets. Mobile stacks full-size controls. [Workflow](docs/PROJECT-STUDIO.md).
 
 Explanatory videos: **Generation → Productions → New explainer** edits scenes, source references, narration and figures on the existing production pipeline. Scenes can import `.vfigure` diagrams with their PNG, full source, revision and captured page/state, retained in the exported project for another profile. Native `studio_explainer` creates/reads/edits/imports the same source through MCP. Unchanged sentence audio/pages are reused; output includes MP4, SRT and editable JSON with voice/timeline options. [Workflow and tested limits](docs/EXPLAINERS.md).
 
