@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } 
 import { Box, Clapperboard, Mic, Film, Images, Link2, Loader2, MapPin, Pause, Pin, Plus, RefreshCw, Trash2, Upload, Users, X, Lock, Unlock, ArrowRightToLine, Dices, Gauge, Columns2, Check, Type } from "lucide-react";
 import { api, fileUrl, thumbUrl, type Asset, type CastMember, type Job, type MotionRef, type ProductionShot, type ProductionState, type ShotRef } from "../api";
 import { useT } from "../i18n";
+import { shotGenerationStatus } from "../shotGeneration";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
 import { useSlashMenu } from "../components/Slash";
@@ -331,6 +332,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
     return all.slice(0, idx < 0 ? all.length : idx).filter((s) => s.clips.length > 0 && s.key !== shot?.key);
   })();
   const [picking, setPicking] = useState<"image" | "video" | null>(null);
+  const [replacingRef, setReplacingRef] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [framesOf, setFramesOf] = useState<Asset[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -356,8 +358,12 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
   const firstTag = lead ? 2 : 1;
 
   const addRef = (a: Asset) => {
-    if (refs.some((r) => r.asset_id === a.id) || refs.length >= 6) return;
-    setRefs([...refs, { asset_id: a.id, use: "" }]);
+    setRefs(current => {
+      if (current.some(r => r.asset_id === a.id)) return current;
+      if (replacingRef) return current.map(r => r.asset_id === replacingRef ? { ...r, asset_id: a.id } : r);
+      return current.length < 6 ? [...current, { asset_id: a.id, use: "" }] : current;
+    });
+    setReplacingRef(null);
   };
   const pickedVideo = async (a: Asset) => {
     setPicking(null);
@@ -496,6 +502,50 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
             </span>
           </label>
         );
+  const referenceEditor = <div className="field">{!nodeEditor && t("sbRefs")}
+          <span className="hint">{nodeEditor ? (es ? "Imágenes que guían el fotograma. Hasta 6 referencias." : "Images that guide the frame. Up to 6 references.") : t("sbRefsHint")}</span>
+          <div className="stack" style={{ gap: 6 }}>
+            {refs.map((r, i) => (
+              <div key={r.asset_id} className={nodeEditor ? "shot-reference-item" : "row"} style={{ gap: 8 }}>
+                <a href={fileUrl(r.asset_id)} onClick={(e) => { e.preventDefault(); app.openAsset(r.asset_id); }} aria-label={t("zoom")}><img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} /></a>
+                <span className="small">{nodeEditor ? (es ? `Referencia ${i + 1}` : `Reference ${i + 1}`) : `<image${firstTag + i}>`}</span>
+                <input className="grow" aria-label={es ? `Uso de referencia ${i + 1}` : `Reference ${i + 1} use`} value={r.use} placeholder={t("sbRefUsePh")}
+                  onChange={(e) => setRefs(refs.map((x, j) => (j === i ? { ...x, use: e.target.value } : x)))} />
+                {nodeEditor && <button type="button" className="btn sm" onClick={() => { setReplacingRef(r.asset_id); setPicking("image"); }}>{es ? "Cambiar" : "Replace"}</button>}
+                <button type="button" className="btn sm icon ghost" aria-label={es ? `Quitar referencia ${i + 1}` : `Remove reference ${i + 1}`} onClick={() => setRefs(refs.filter((_, j) => j !== i))}><X size={13} /></button>
+              </div>
+            ))}
+            <div className="row wrap" style={{ gap: 6 }}>
+              <button type="button" className="btn sm" disabled={refs.length >= 6} onClick={() => { setReplacingRef(null); setPicking("image"); }}><Plus size={13} /> {nodeEditor ? (es ? "Añadir referencia" : "Add reference") : t("sbRefPick")}</button>
+              <button type="button" className="btn sm" disabled={refs.length >= 6} onClick={() => setPicking("video")}><Film size={13} /> {t("sbRefFromVideo")}</button>
+              <button type="button" className={`btn sm${linkOpen ? " primary" : ""}`} disabled={refs.length >= 6} onClick={() => setLinkOpen(!linkOpen)}><Link2 size={13} /> {t("sbRefLink")}</button>
+              <label className={`btn sm${refs.length >= 6 ? " disabled" : ""}`}><Upload size={13} /> {t("sbRefUpload")}
+                <input type="file" aria-label={es ? "Subir referencia" : "Upload reference"} accept="image/*,video/*,.gif" disabled={refs.length >= 6} hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label>
+              {busy && <Loader2 size={14} className="spin" />}
+            </div>
+            {linkOpen && projectId && (
+              <LinkDownload projectId={projectId} compact onDone={async (a) => {
+                setLinkOpen(false);
+                if (a.kind !== "video") return;
+                setBusy(true);
+                try { setFramesOf((await api.videoFrames(a.id, 8)).items); } catch (e) { app.toast((e as Error).message, "bad"); }
+                finally { setBusy(false); }
+              }} />
+            )}
+            {framesOf && (
+              <div className="stack" style={{ gap: 4 }}>
+                <span className="hint">{t("sbFramesPick")}</span>
+                <div className="row wrap" style={{ gap: 6 }}>
+                  {framesOf.map((f) => (
+                    <button key={f.id} type="button" className={`tile${refs.some((r) => r.asset_id === f.id) ? " selected" : ""}`} style={{ width: 92 }}
+                      onClick={() => addRef(f)}><img src={thumbUrl(f)} alt="" /></button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <span className="hint">{t("sbRefsStillNote")}</span>
+          </div>
+        </div>;
   const settings = <>      {kindSwitch}
       {!isNew && (
         <label className={`check sb-approve${locked ? " on" : ""}`} title={t("sbLockHint")}>
@@ -633,49 +683,7 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
             </>
           )}
         </div>
-        <div className="field">{t("sbRefs")}
-          <span className="hint">{t("sbRefsHint")}</span>
-          <div className="stack" style={{ gap: 6 }}>
-            {refs.map((r, i) => (
-              <div key={r.asset_id} className="row" style={{ gap: 8 }}>
-                <a href={fileUrl(r.asset_id)} onClick={(e) => { e.preventDefault(); app.openAsset(r.asset_id); }} aria-label={t("zoom")}><img src={thumbUrl({ id: r.asset_id, thumb_path: "x", kind: "image" })} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} /></a>
-                <span className="mono small">{`<image${firstTag + i}>`}</span>
-                <input className="grow" value={r.use} placeholder={t("sbRefUsePh")}
-                  onChange={(e) => setRefs(refs.map((x, j) => (j === i ? { ...x, use: e.target.value } : x)))} />
-                <button type="button" className="btn sm icon ghost" onClick={() => setRefs(refs.filter((_, j) => j !== i))}><X size={13} /></button>
-              </div>
-            ))}
-            <div className="row wrap" style={{ gap: 6 }}>
-              <button type="button" className="btn sm" disabled={refs.length >= 6} onClick={() => setPicking("image")}><Images size={13} /> {t("sbRefPick")}</button>
-              <button type="button" className="btn sm" disabled={refs.length >= 6} onClick={() => setPicking("video")}><Film size={13} /> {t("sbRefFromVideo")}</button>
-              <button type="button" className={`btn sm${linkOpen ? " primary" : ""}`} disabled={refs.length >= 6} onClick={() => setLinkOpen(!linkOpen)}><Link2 size={13} /> {t("sbRefLink")}</button>
-              <label className="btn sm"><Upload size={13} /> {t("sbRefUpload")}
-                <input type="file" accept="image/*,video/*,.gif" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label>
-              {busy && <Loader2 size={14} className="spin" />}
-            </div>
-            {linkOpen && projectId && (
-              <LinkDownload projectId={projectId} compact onDone={async (a) => {
-                setLinkOpen(false);
-                if (a.kind !== "video") return;
-                setBusy(true);
-                try { setFramesOf((await api.videoFrames(a.id, 8)).items); } catch (e) { app.toast((e as Error).message, "bad"); }
-                finally { setBusy(false); }
-              }} />
-            )}
-            {framesOf && (
-              <div className="stack" style={{ gap: 4 }}>
-                <span className="hint">{t("sbFramesPick")}</span>
-                <div className="row wrap" style={{ gap: 6 }}>
-                  {framesOf.map((f) => (
-                    <button key={f.id} type="button" className={`tile${refs.some((r) => r.asset_id === f.id) ? " selected" : ""}`} style={{ width: 92 }}
-                      onClick={() => addRef(f)}><img src={thumbUrl(f)} alt="" /></button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <span className="hint">{t("sbRefsStillNote")}</span>
-          </div>
-        </div>
+        {!nodeEditor && referenceEditor}
         {!isNew && variants.length > 0 && (
           <label className="check"><input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> {t("regenerateShot")}</label>
         )}
@@ -688,21 +696,36 @@ function ImageShotEditor({ state, shot, after, running, onPause, onClose, onSave
       )}
       {picking && projectId && (
         <AssetPicker projectId={projectId} kind={picking} allProjects title={picking === "video" ? t("sbRefFromVideo") : t("sbRefPick")}
-          onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => setPicking(null)} />
+          onPick={(a) => { if (picking === "video") pickedVideo(a); else { addRef(a); setPicking(null); } }} onClose={() => { setPicking(null); setReplacingRef(null); }} />
       )}
 </>;
   const clipItems = (state.done?.clips?.items || {}) as Record<string, string>;
   const output = shot && (clipItems[shot.key] || Object.entries(clipItems).find(([key]) => key.startsWith(`${shot.key}v`))?.[1]);
   const frozen = running || busy || nodeActive || (locked && !!shot?.locked);
-  const stateLabel = nodeJob ? ({ queued: es ? "En cola" : "Queued", waiting_gpu: es ? "Esperando GPU" : "Waiting for GPU", running: es ? "Renderizando producción" : "Rendering production", done: state.status === "awaiting_review" ? (es ? "Producción en pausa para revisión" : "Production paused for review") : (es ? "Trabajo terminado" : "Job finished"), failed: es ? "El render ha fallado" : "Render failed", cancelled: es ? "Cancelado" : "Cancelled" })[nodeJob.state] : running ? (es ? "Producción en curso" : "Production running") : output ? (es ? "Clip del plano" : "Shot clip") : (es ? "Sin clip generado" : "No clip generated");
+  const wantsClip = motion === "move" && clip;
+  const readiness = shotGenerationStatus(selectedFrame, output || undefined, wantsClip);
+  const stateLabel = ({
+    missing_frame_and_clip: es ? "Faltan fotograma y clip" : "Frame and clip missing",
+    missing_frame: es ? "Falta generar el fotograma" : "Frame missing",
+    missing_clip: es ? "Fotograma listo · Falta generar el clip" : "Frame ready · Clip missing",
+    ready_clip: es ? "Clip generado" : "Clip generated",
+    ready_still: es ? "Fotograma listo · Plano de imagen fija" : "Frame ready · Still-image shot",
+  })[readiness];
+  const workLabel = nodeActive ? (pending && nodeJob?.id === pending
+    ? ({ queued: es ? "Este plano está en cola" : "This shot is queued", waiting_gpu: es ? "Este plano espera GPU" : "This shot is waiting for GPU", running: es ? "Generando este plano" : "Generating this shot", done: "", failed: "", cancelled: "" })[nodeJob.state]
+    : es ? "La producción está en curso" : "Production is in progress")
+    : nodeJob?.state === "failed" ? (es ? "El último trabajo de la producción falló. Puedes volver a renderizar." : "The last production job failed. You can render again.")
+    : nodeJob?.state === "cancelled" ? (es ? "El último trabajo de la producción se canceló." : "The last production job was cancelled.")
+    : state.status === "awaiting_review" ? (es ? "La producción está en pausa para revisión." : "Production is paused for review.") : "";
   if (nodeEditor && shot) return <section ref={workspaceRef} className="shot-node-workspace" aria-label={es ? `Nodos del plano ${shot.key}` : `Shot ${shot.key} nodes`}>
     <div className="clip-studio-heading"><button className="btn sm" disabled={busy} onClick={onClose}>{es ? "Volver al storyboard" : "Back to storyboard"}</button><h2>{t("sbShotN", { n: shot.key })}</h2><span className="hint">{state.name || state.slug}</span><span className="spacer" /><button className="btn" disabled={busy || nodeActive} onClick={() => save(false)}>{t("sbSave")}</button></div>
     <p className="small muted">{es ? "Los cambios se guardan en este plano. Renderizar continúa la producción y puede completar otros planos pendientes." : "Changes belong to this shot. Rendering continues the production and may complete other pending shots."}</p>
     {locked && !!shot.locked && <label className="check shot-node-lock"><input type="checkbox" checked={locked} disabled={running || busy} onChange={e => setLocked(e.target.checked)} /><Lock size={14} />{es ? "Plano aprobado. Desmarca para editar o renderizar." : "Approved shot. Uncheck to edit or render."}</label>}
     <Suspense fallback={<p>{t("loading")}</p>}><ClipCanvas label={es ? "Nodos de generación del plano" : "Shot generation nodes"}
       reference={<><h2>{es ? "Fotograma" : "Frame"}</h2><div className="shot-node-reference">{selectedFrame ? <button className="reference-preview" onClick={() => app.openAsset(selectedFrame)}><img src={fileUrl(selectedFrame)} alt={es ? "Fotograma del plano" : "Shot frame"} /></button> : <div className="shot-node-empty"><Images size={32} /><p>{es ? "Este plano aún no tiene fotograma." : "This shot has no frame yet."}</p></div>}<fieldset disabled={frozen}>{promptEditor}</fieldset></div></>}
-      guides={refs.map((ref, i) => ({ id: `shot-ref-${ref.asset_id}`, content: <><h2>{es ? `Referencia ${i+1}` : `Reference ${i+1}`}</h2><div className="shot-node-reference"><button className="reference-preview" onClick={() => app.openAsset(ref.asset_id)}><img src={fileUrl(ref.asset_id)} alt={ref.use || ""} /></button><p>{ref.use}</p></div></> })).concat(motionRef ? [{ id: "shot-motion", content: <><h2>{t("sbMotionRef")}</h2><video src={fileUrl(motionRef.asset_id)} controls preload="metadata" className="shot-node-guide" /></> }] : [])}
-      video={<><div className="clip-node-title"><Film size={16} /><strong>{es ? "Vídeo del plano" : "Shot video"}</strong></div><div className="clip-run-state" role="status" aria-live="polite"><strong>{stateLabel}{nodeJob?.state === "running" ? ` · ${Math.round(nodeJob.progress * 100)}%` : ""}</strong>{nodeJob?.message && nodeJob.message.trim().toLowerCase() !== nodeJob.state && <span>{nodeJob.message}</span>}{nodeError && <span role="alert">{nodeError}</span>}{nodeActive && <button className="btn sm" onClick={async () => { try { await api.cancelJob(nodeJob?.id || state.job_id!); onSaved(true); } catch (e) { setNodeError((e as Error).message); } }}>{t("sbPause")}</button>}</div><div className="clip-monitor">{output ? <video src={fileUrl(output)} controls preload="metadata" /> : selectedFrame ? <img src={fileUrl(selectedFrame)} alt={es ? "Fotograma de partida; todavía no es un clip" : "Start frame; not a generated clip"} /> : <div className="monitor-empty"><Film size={32} /><p>{es ? "El fotograma y el clip aparecerán aquí al renderizar." : "The frame and clip will appear here when rendered."}</p></div>}</div><div className="node-composer shot-node-composer"><fieldset disabled={frozen}>{motionEditor || <p>{es ? "Este plano usa una imagen fija. Puedes cambiarlo en Ajustes del plano." : "This shot uses a still image. Change it in Shot settings."}</p>}</fieldset><button className="btn primary generate-clip" disabled={frozen || !prompt.trim()} onClick={() => save(true)}>{busy ? <Loader2 size={16} className="spin" /> : <Film size={16} />}{selectedFrame ? t("sbSaveRun") : (es ? "Crear fotograma y renderizar" : "Create frame and render")}</button></div></>} /></Suspense>
+      references={<><h2>{es ? "Referencias" : "References"}</h2><fieldset className="shot-reference-editor" disabled={frozen}>{referenceEditor}</fieldset></>}
+      guides={motionRef ? [{ id: "shot-motion", content: <><h2>{t("sbMotionRef")}</h2><video src={fileUrl(motionRef.asset_id)} controls preload="metadata" className="shot-node-guide" /></> }] : []}
+      video={<><div className="clip-node-title"><Film size={16} /><strong>{es ? "Vídeo del plano" : "Shot video"}</strong></div><div className="clip-run-state" role="status" aria-live="polite"><strong>{stateLabel}</strong><span>{es ? `Fotograma: ${selectedFrame ? "listo" : "pendiente"} · Clip: ${output ? "listo" : wantsClip ? "pendiente" : "no requerido"}` : `Frame: ${selectedFrame ? "ready" : "pending"} · Clip: ${output ? "ready" : wantsClip ? "pending" : "not required"}`}</span>{workLabel && <span>{workLabel}{pending && nodeJob?.id === pending && nodeJob.state === "running" ? ` · ${Math.round(nodeJob.progress * 100)}%` : ""}</span>}{nodeError && <span role="alert">{nodeError}</span>}{nodeActive && <button className="btn sm" onClick={async () => { try { await api.cancelJob(nodeJob?.id || state.job_id!); onSaved(true); } catch (e) { setNodeError((e as Error).message); } }}>{t("sbPause")}</button>}</div><div className="clip-monitor">{output ? <video src={fileUrl(output)} controls preload="metadata" /> : selectedFrame ? <img src={fileUrl(selectedFrame)} alt={es ? "Fotograma de partida; todavía no es un clip" : "Start frame; not a generated clip"} /> : <div className="monitor-empty"><Film size={32} /><p>{es ? "El fotograma y el clip aparecerán aquí al renderizar." : "The frame and clip will appear here when rendered."}</p></div>}</div><div className="node-composer shot-node-composer"><fieldset disabled={frozen}>{motionEditor || <p>{es ? "Este plano usa una imagen fija. Puedes cambiarlo en Ajustes del plano." : "This shot uses a still image. Change it in Shot settings."}</p>}</fieldset><button className="btn primary generate-clip" disabled={frozen || !prompt.trim()} onClick={() => save(true)}>{busy ? <Loader2 size={16} className="spin" /> : <Film size={16} />}{selectedFrame ? t("sbSaveRun") : (es ? "Crear fotograma y renderizar" : "Create frame and render")}</button></div></>} /></Suspense>
     <details className="shot-node-settings"><summary>{es ? "Ajustes del plano · referencias, tiempos y tomas" : "Shot settings · references, timing and takes"}</summary>{settings}<div className="row"><button className="btn ghost" disabled={busy || nodeActive} onClick={remove}><Trash2 size={14} />{t("sbDelete")}</button></div></details>
     {overlays}
   </section>;
