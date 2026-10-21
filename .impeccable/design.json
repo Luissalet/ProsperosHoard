@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-20T23:59:07+00:00",
+  "generatedAt": "2026-10-21T00:22:13+00:00",
   "title": "Design System: Prospero's Hoard",
   "extensions": {
     "colorMeta": {
@@ -795,7 +795,15 @@
         "D:/LocalAI/research-inbox/prospero-shot1086/screenshots/shot-mobile-controls.png",
         "D:/LocalAI/research-inbox/prospero-shot1086/screenshots/empty-desktop.png",
         "D:/LocalAI/research-inbox/prospero-shot1086/screenshots/empty-user-1116.png",
-        "D:/LocalAI/research-inbox/prospero-shot1086/screenshots/empty-mobile.png"
+        "D:/LocalAI/research-inbox/prospero-shot1086/screenshots/empty-mobile.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/desktop.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/user-1116.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/light.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/empty.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/frame-ready.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-references.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-status.png",
+        "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-action.png"
       ],
       "workingFont": "studio.css --font: \"Source Sans 3\", sans-serif; imported Space Grotesk is not the active working-font token"
     },
@@ -811,7 +819,8 @@
       "asynchronousUserChecks": "Parent reports isolated-proxy slow-to-fast out-of-order library responses cannot replace current results, and 503 error/re-check recovery returns 15 tiles with 0 alerts. These prove the tested interleavings only; independent picker checks remain underway.",
       "engineStatusCorrection": "EngineBar/i18n source and initial-loading capture inspected. Parent reports delayed/503/retry/recovered manual checks, new frontend build and repository screenshot checks. Full 746-pass/3-skip suite was before this final status-label patch. Specific reviewer continuation pending; formal disposition fix and inherited open gates unchanged.",
       "projectDashboardClips": "finish-review requested mobile-help and redundant raw-state copy fixes; finish-verdict resolves both at 6e350ac and returns scoped ship. Historical October 5 gates unchanged; no exact-comp, model-quality or whole-product certification.",
-      "storyboardShotNodes": "Fresh finish-review respects the user's rejection of the previous modal entry and finds only CTA overflow F1. finish-verdict resolves F1 at 6ef1e0c and returns scoped ship. CPU cross-review vote and activation remain coordinator-owned; historical October 5 gates, exactCompApproved and wholeProductApproved are unchanged."
+      "storyboardShotNodes": "Fresh finish-review respects the user's rejection of the previous modal entry and finds only CTA overflow F1. finish-verdict resolves F1 at 6ef1e0c and returns scoped ship. CPU cross-review vote and activation remain coordinator-owned; historical October 5 gates, exactCompApproved and wholeProductApproved are unchanged. This is historical 1086 evidence; the later user rejection and 1090 status/reference correction below govern the current status and References node.",
+      "storyboardShotReferences1090": "Fresh finish-review returns scoped ship with no material fixes at 5f0a3fba27715630bba46ad603819a2d211d1fb0 after c6e1fdd for actual shot readiness, visible References and responsive use. No Operate QUALITY BAR card supplied. Final coordinator validation passed 1114 Python tests with 4 skipped and 3 warnings in 1068.94 s; CPU CAS3 rechecks passed. The formal vote and activation are coordinator-owned in task 1090. Historical October 5 gates, exactCompApproved and wholeProductApproved are unchanged."
     },
     "surfaceEvidence": {
       "studio": {
@@ -860,13 +869,14 @@
       "storyboardShotNodes": {
         "brief": ".impeccable/surfaces/storyboard-shot-nodes.md",
         "entry": "Clicking the existing image-shot card itself calls openShot regardless of frame availability and enters ImageShotEditor through ShotEditor nodeEditor. Graphic shots and insertion retain native editors; enlargement stays separate.",
-        "composition": "Back/shot identity/Save above a frame and scene-description node connected to a video node with actual shot preview, motion and native Save and render. Reference and motion-guide nodes remain available; <=800px stacks full-size fields.",
+        "composition": "Back/shot identity/Save precede an always-present References node connected to the frame/scene-description node, then the video node with actual shot preview, motion and native Save and render. Empty references and missing outputs stay in the same flow; <=800px stacks references/frame/optional guides/video with full-size fields.",
         "productionContext": "Parent hides production header, local tabs and song track while open, and pins storyboard through job updates. Save/render keep the workspace open; Back restores the production controls.",
         "nativeBinding": "Existing productionShots/changeShots, continueProduction and regenerateUnlocked retain state.slug and shot.key. Frame and clip previews use production shot records; rendering continues the production and may fill other pending shots, as the visible explanation states.",
         "frameSelection": "Asset ID plus current best-frame baseline preserves a local choice across variant reordering and yields to a changed saved best.",
-        "settings": "Labelled native disclosure retains references, cast, timing, takes, approval, chaining and deletion.",
+        "settings": "Labelled native disclosure retains cast, timing, takes, approval, chaining and deletion; reference editing is exposed directly in the References node.",
         "renderAction": "Natural height, 48px minimum, 10px 12px padding, 1.4 line height and align-self:start keep complete multi-line labels inside the button without fieldset stretching.",
-        "stateTruth": "A finished native job alone is not evidence of a shot clip; the actual output, start-frame fallback and explicit empty states remain distinct. Standalone Studio assets remain a separate flow."
+        "stateTruth": "Primary readiness follows actual selected frame, shot-linked clip and motion requirement independently of global job state: both missing, frame missing, clip missing, generated clip or ready still. A completed production job cannot mark an empty shot finished. Queued/waiting/active/paused/cancelled/failed work is secondary; preserve substantive errors with log_excerpt fallback for empty or generic failed messages. Start-frame preview remains distinct from a generated clip.",
+        "references": "Native maximum six; visible library/add, upload, video/GIF frames and link import; enlargement, editable use, replacement and removal per reference. Local body max-height268px with scrolling; wrapped add/import row sticky at top. Optional References content leaves standalone ClipCanvas layout unchanged when absent."
       }
     },
     "notCanonized": [
@@ -880,7 +890,8 @@
       "An unanswered or failed backend status request is not evidence that the backend is off.",
       "Dashboard columns and desktop reference-to-video geometry are local to their surface, not global templates.",
       "A selected prior take is not evidence that a queued, failed or cancelled job generated an output.",
-      "Standalone Studio clip generation does not automatically assign its project asset to a production shot; the storyboard node editor uses native production binding."
+      "Standalone Studio clip generation does not automatically assign its project asset to a production shot; the storyboard node editor uses native production binding.",
+      "The global production job state is secondary to actual shot frame/clip readiness; a completed job is not proof of either output. Reference-node local scrolling does not become a shared layout token."
     ],
     "brandIdentity": {
       "instruction": "Original dragon-and-wand icon and magenta/pink highlights pinned by user; prior delegated copper palette superseded.",
@@ -952,6 +963,31 @@
         "captureNotes": "Documenter opened all nine final captures. shot-mobile-controls is scrolled; empty-mobile ends before the render action. Demonstration media establish layout/interaction only.",
         "validation": "Supplied browser and production-binding receipts; coordinator reports build and 20 Node checks pass, plus 1114 passed/4 skipped/3 warnings. Documenter inspected sources/captures and did not rerun these checks.",
         "formalGates": "Scoped finish ship after F1 resolved. CPU cross-review vote/activation remain coordinator-owned; inherited October 5 gates and whole-product/model-quality limits unchanged."
+      },
+      "storyboardShotReferences1090": {
+        "review": "D:/LocalAI/research-inbox/prospero-reference1090/finish-review.md",
+        "disposition": "ship",
+        "sourceCommit": "5f0a3fba27715630bba46ad603819a2d211d1fb0",
+        "baseCommit": "c6e1fdd",
+        "userRejection": "Completed-job wording on a shot without outputs was rejected; user requested a visible References node. This overrides the earlier status approval.",
+        "sourceFiles": [
+          "frontend/src/views/Storyboard.tsx",
+          "frontend/src/components/ClipCanvas.tsx",
+          "frontend/src/project-studio.css"
+        ],
+        "captures": [
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/desktop.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/user-1116.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/light.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/empty.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/frame-ready.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-references.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-status.png",
+          "D:/LocalAI/research-inbox/prospero-reference1090/screenshots/mobile-action.png"
+        ],
+        "captureNotes": "Documenter opened all eight valid final captures: desktop/light/empty/frame-ready 1440x900, user-1116 1116x777, mobile 390x844. Mobile status/action are scrolled; action shows the complete CTA. Black empty monitor contains drawn icon/message. Discarded mobile-reference-edit excluded. Durable external paths remain after worktree removal.",
+        "validation": "Coordinator reports build and 23 Node checks passing, plus native MCP/browser reference save-and-reopen persistence. Documenter inspected sources and captures but did not rerun checks. The final coordinator run passed 1114 Python tests with 4 skipped and 3 warnings in 1068.94 s; independent CPU CAS3 rechecks passed, with the formal vote tracked in task 1090.",
+        "formalGates": "Scoped finish ship with no material fixes for actual shot readiness, References and responsive use. No Operate QUALITY BAR card. No inherited October 5 gate closure or exact-comp, model-quality or whole-product approval; activation remains coordinator-owned."
       }
     }
   },
@@ -1092,7 +1128,8 @@
       "Do contain table and editing-track overflow locally while wrapping surrounding actions.",
       "Do distinguish loading, failed requests and filtered-empty results before enabling a selection.",
       "Do distinguish an unanswered engine check and unavailable status from a completed backend-down response.",
-      "Do keep the tracked generation state distinct from a previously selected project take."
+      "Do keep the tracked generation state distinct from a previously selected project take.",
+      "Do derive shot readiness from its actual frame and clip, keeping production job state secondary and reference actions visible."
     ],
     "donts": [
       "Don't use orange/copper for brand actions, focus or selection.",

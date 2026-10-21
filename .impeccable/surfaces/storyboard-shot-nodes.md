@@ -14,8 +14,12 @@ connected to preview, motion and render at right. Missing frames stay in this fl
 FORM: precise local correction, code-led; no concept seed or replacement identity.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
-Keep all native timing, approval, cast, reference, takes and chaining controls in
-the labelled shot-settings disclosure. Native save/render keeps production and
+The 1090 correction follows Luis's further rejection of a completed-job label
+on an empty shot and his explicit request for a References node. Primary status
+must describe actual shot outputs and missing generation; job state is secondary.
+An always-present References node exposes add/upload and per-reference use,
+replacement and removal, connected to the frame. Keep timing, approval, cast,
+takes and chaining in the labelled shot-settings disclosure. Native save/render keeps production and
 shot IDs; it continues the production and may fill other pending shots, which
 the interface states. No standalone clip redirect or user production mutation
 during verification. Mobile stacks full-size fields as in the existing studio.
