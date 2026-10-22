@@ -1197,11 +1197,16 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
         engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
         if body.template == "auto_clip":
+            from .video_engines import catalog as video_catalog
+            ready = video_catalog(backend, object_info)
             # a production's clip: the best video model installed (motion
             # transfer when the call brings a driving video)
             if body.driving_asset_id and not engine.animate2_installed(object_info or {}):
                 raise engine.EngineError("animate_missing", "motion transfer needs Wan Animate 2; install it or disconnect the motion guide")
-            body = body.model_copy(update={"template": engine.clip_template(object_info or {}, bool(body.driving_asset_id))})
+            selected = "animate" if body.driving_asset_id else ready["auto_resolves_to"]
+            if not selected:
+                raise engine.EngineError("video_model_missing", "No complete Wan video model is available. Check the video node's model list for missing files.")
+            body = body.model_copy(update={"template": {"animate": "wan_animate2", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v"}[selected]})
             if body.template != "wan_animate2":
                 params = {k: v for k, v in (body.template_params or {}).items() if k in ("seconds", "length", "lightning")}
                 if body.template == "wan22_ti2v" and "seconds" in params:
@@ -1419,6 +1424,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             info = engine.object_info_live_or_cached(backend)
         except Exception:  # noqa: BLE001
             info = {}
+        if body.engine == "auto" and not body.driving_asset_id and info:
+            from .video_engines import catalog as video_catalog
+            selected = video_catalog(backend, info)["auto_resolves_to"]
+            if not selected:
+                raise engine.EngineError("video_model_missing", "No complete Wan video model is available. Check the video node's model list for missing files.")
+            body = body.model_copy(update={"engine": selected})
         if body.engine == "animate" or (body.engine == "auto" and body.driving_asset_id):
             if not body.driving_asset_id:
                 raise engine.EngineError("driving_video_required", "animate copies the motion of a video: pass driving_asset_id")
@@ -1580,6 +1591,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/backend/comfy/free")
     def free_comfy():
         return backend.free_comfy_memory()
+
+    @app.get("/api/video-engines")
+    def video_engines():
+        from .video_engines import catalog
+        return catalog(backend)
+
+    @app.post("/api/agent/studio_video_engines")
+    def agent_video_engines():
+        return video_engines()
 
     @app.get("/api/image-engines")
     def image_engines(project: Optional[str] = None):
@@ -3809,7 +3829,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             project = store.get_character(body.character_id)["project_id"]
         settings = dict(body.settings or {})
         if not body.song_asset_id and body.song_takes > 1:
-            settings.setdefault("song_review", True)  # listen to the takes and pick one before the stills
+            settings.setdefault("song_review", False)  # review is an explicit choice, including multiple takes
         return op_production_create(ProductionCreateBody(name=body.name, spec=spec, settings=settings, project=project))
 
     def op_production_continue(slug: str, take: Optional[int] = None) -> dict[str, Any]:

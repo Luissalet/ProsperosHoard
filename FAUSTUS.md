@@ -1,6 +1,20 @@
-# Prospero project navigation
+# Prospero video workspace
 
-Project selection opens the dashboard. Its inline character/group editors use the existing native cast APIs; MCP keeps the same `studio_cast` contract. Clip creation uses the existing animation/generation APIs, direct job polling and actual output IDs. Native `studio_animate`, `studio_job` and `studio_video_from_plan` were exercised through stdio MCP on isolated synthetic data.
+The primary entry resumes a persistent, connectable Spaces canvas. MCP
+`studio_spaces` supports the `quick_video` starter and explicit video engine,
+fast/full schedule, prompts, references and durations in the same graph.
+`studio_video_engines` exposes live complete-workflow readiness without loading
+models. `studio_video_from_plan` continues automatically unless
+`autopilot=false` opts into review. See [video workflow](docs/video-workspace.md).
+
+Real video comparisons are separate from simulated interaction checks: one
+four-second walking/waving scene took 250.60 s at four-step 14B versus 951.09 s
+at the full schedule, with both subject continuity and the action observed.
+These single runs do not establish universal quality or speed.
+
+## Existing project and shot tools
+
+The dashboard remains available from Project. Its inline character/group editors use the existing native cast APIs; MCP keeps the same `studio_cast` contract. Clip creation uses the existing animation/generation APIs, direct job polling and actual output IDs. Native `studio_animate`, `studio_job` and `studio_video_from_plan` were exercised through stdio MCP on isolated synthetic data.
 
 Clicking an image-shot storyboard card opens its own connected frame/video workspace, including when no frame exists. It saves through `studio_production_shots` semantics and continues the native production; it retains the shot identity, selected frame and actual output binding. Rendering may complete other pending shots too. The standalone clip studio creates separate project assets. Free-form Spaces and native production take selection remain available. See [project and clip workflow](docs/PROJECT-STUDIO.md).
 

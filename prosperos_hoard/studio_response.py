@@ -55,7 +55,7 @@ class HTML(HTMLParser):
         if tag == 'head':
             self.parts.append('<link rel="stylesheet" href="/studio-assets/studio.css">'
                 f'<script data-module="{self.module}" src="/studio-assets/native.js"></script>')
-        if tag == 'body':
+        if tag == 'body' and self.module != 'generation':
             self.parts.append('<nav class="studio-owner" aria-label="Prospero"><a href="/">'
                 '<img src="/studio-assets/app-icon.png" alt="">Prospero</a>'
                 '<a href="/generation/">Generación</a><a href="/editing/">Montaje</a>'

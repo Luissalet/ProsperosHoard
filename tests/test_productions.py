@@ -101,13 +101,15 @@ def test_look_words_in_shot_prompts_are_flagged():
 
 def test_production_runs_end_to_end_and_exports_a_recipe(client):
     c, app, _ = client
-    r = c.post("/api/agent/studio_production_create", json={"name": "Night Walk", "spec": tiny_spec()})
+    spec = tiny_spec()
+    r = c.post("/api/agent/studio_production_create", json={"name": "Night Walk", "spec": spec,
+                                                           "settings": {"animatic_autocontinue": False}})
     assert r.status_code == 200, r.text
     body = r.json()
     slug = body["production"]["slug"]
     job = wait_job(c, body["job"]["id"])
     assert job["state"] == "done", job
-    # the animatic (on by default) pauses the production before any clip is made
+    # Explicit review mode pauses the production before any clip is made.
     paused = c.get(f"/api/agent/studio_production?production={slug}").json()
     assert paused["status"] == "awaiting_review" and paused["stages"]["clips"] == "pending", paused
     assert paused["animatic"]["clips_planned"] == 2 and paused["animatic"]["gpu_minutes_estimate"] == 19.0

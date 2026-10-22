@@ -158,6 +158,7 @@ def test_the_pipeline_pauses_after_the_animatic_until_continued(store, productio
 
     state = prod.load_state(store.data_dir, production["slug"])
     state["done"]["character"] = {"character_id": None}
+    state["settings"]["animatic_autocontinue"] = False
     prod.save_state(store.data_dir, state)
     out = prod.run_production(store, NoStudio(), production["slug"], progress)
     assert out == {"slug": production["slug"], "status": "awaiting_review", "stage": "animatic"}

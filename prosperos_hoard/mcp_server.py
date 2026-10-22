@@ -293,21 +293,23 @@ def studio_video_from_plan(
     name: str, draft: dict[str, Any], character_id: Optional[str] = None, lead_name: Optional[str] = None,
     lead_look: Optional[str] = None, song_asset_id: Optional[str] = None, clips: str = "all",
     aspects: Optional[list[str]] = None, song_takes: int = 2, engine: str = "auto", project: Optional[str] = None,
-    lyrics: Optional[str] = None,
+    lyrics: Optional[str] = None, autopilot: bool = True,
 ) -> dict[str, Any]:
     """Start a music video production from a (possibly edited) studio_video_plan draft.
 
-    Runs character -> song -> stills -> animatic (pauses for review: studio_production_continue) ->
+    Runs character -> song -> stills -> animatic ->
     clips -> cut, resumable. clips: "all" moving shots get a Wan clip, "lead" only shots with the lead,
     "none" (a still-image cut). aspects: ["16:9"] by default, "9:16" for vertical. With an existing
     song, pass its lyrics too: timed, they tie each shot to its section. Poll studio_production.
+    autopilot=true continues without review stops; false opts into song/animatic review.
 
     Keywords: create music video, start videoclip, produce, crear videoclip, empezar produccion, montar videoclip
     """
     return _call("POST", "/api/agent/studio_video_from_plan", json={
         "name": name, "draft": draft, "character_id": character_id, "lead_name": lead_name, "lead_look": lead_look,
         "song_asset_id": song_asset_id, "clips": clips, "aspects": aspects, "song_takes": song_takes, "engine": engine,
-        "project": project, "lyrics": lyrics})
+        "project": project, "lyrics": lyrics,
+        "settings": {"animatic_autocontinue": autopilot, "song_review": not autopilot}})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
@@ -1748,7 +1750,7 @@ def studio_spaces(
 ) -> dict[str, Any]:
     """Spaces: the node canvas - wire references into picture, clip and song generators and run them / espacios.
 
-    action: "list" | "create" (name, template "blank"|"character_outfit_motion"|"reference_film"|"singing_shot"|"short_film") | "get"
+    action: "list" | "create" (name, template "quick_video"|"blank"|"character_outfit_motion"|"reference_film"|"singing_shot"|"short_film") | "get"
     (space) | "edit" (space, ops) | "run" (space, mode "node"|"downstream"|"upto" (run to here: the node and the stale nodes feeding it)|"all", node_ids, force) | "stop"
     (cancel a run and its renders) | "estimate" (space, mode, node_ids: renders, seconds and VRAM before a run,
     from this computer's own render times) | "build" (space, request: the local model draws or extends the graph
@@ -1761,7 +1763,8 @@ def studio_spaces(
     Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
     "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
     count, engine, seed, camera} with inputs prompt (text), refs (image), pose (a pose map: the body pose to
-    copy) and layout (a depth map: the composition to keep); video {prompt, quality "draft"|"final", seconds,
+    copy) and layout (a depth map: the composition to keep); video {prompt, engine "auto"|"wan14b"|"wan"|"svd",
+    lightning (true: 4-step 14B, false: full schedule), quality "draft"|"final", seconds,
     audio_start_s, motion_start_s, seed, camera, sing_engine "auto"|"s2v"|"infinitetalk"} with inputs start
     (image: one clip per image), end (image: the frame the clip ends on, Wan 2.2 14B), prompt, motion (video:
     copy its moves) and audio (audio: the character sings it, lip sync; S2V up to 19 s, InfiniteTalk up to
@@ -2219,6 +2222,12 @@ def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None
     Keywords: tts, text to speech, narrate, speak, family, narration, texto a voz, narrar, locución, audio de un texto
     """
     return _call("POST", "/api/agent/voice_tts", json={"text": text, "voice": voice, "lang": lang, "engine": engine, "speed": speed})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def studio_video_engines() -> dict[str, Any]:
+    """List video engines, exact installed model files, missing dependencies and live availability. Does not start or load a model. Auto selects an available image-to-video engine. / Motores de vídeo disponibles y modelos que faltan."""
+    return _call("GET", "/api/video-engines")
 
 
 def _install_studio_catalog() -> None:

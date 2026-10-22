@@ -52,7 +52,8 @@ SUB_JOB_POLL_S = 0.5
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "animatic": True,
-    "animatic_autocontinue": False,
+    "animatic_autocontinue": True,
+    "song_review": False,
     "qa": {"enabled": False, "thresholds": {}, "max_retries": 2},
     "clip_quality": "final",
 }
@@ -704,7 +705,7 @@ def normalise_settings(settings: Any) -> dict[str, Any]:
         return out
     if not isinstance(settings, dict):
         raise ProductionError("bad_settings", "settings must be an object")
-    for key in ("animatic", "animatic_autocontinue"):
+    for key in ("animatic", "animatic_autocontinue", "song_review"):
         if key in settings:
             out[key] = bool(settings[key])
     if "qa" in settings:
@@ -2506,8 +2507,7 @@ def set_song(store: Store, slug: str, *, asset_id: Optional[str] = None, take: O
             song.setdefault("count", 1)
             done.pop("song", None)
             partial.pop("song", None)
-            if song["count"] > 1:
-                state.setdefault("settings", {})["song_review"] = True
+            # More takes must not change the user's chosen review mode.
             review = {}
             lyrics_source = "compose" if "lyrics" in clean else "kept"
             what = "compose"
