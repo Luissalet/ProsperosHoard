@@ -5,7 +5,7 @@ import math
 import pytest
 from PIL import Image
 
-from prosperos_hoard import engine, spaces
+from prosperos_hoard import spaces, video_engines
 
 
 class ReferenceStore:
@@ -45,7 +45,7 @@ def test_references_are_not_silently_dropped():
         spaces.plan_node(ReferenceStore(), graph, {}, "frame")
 
 
-@pytest.mark.parametrize("quality,expected", [("draft", {"length": 73}), ("final", {"seconds": 3.0})])
+@pytest.mark.parametrize("quality,expected", [("draft", {"length": 73}), ("final", {"seconds": 3.0, "lightning": True})])
 def test_duration_reaches_the_selected_video_model(quality, expected):
     graph = reference_graph()
     clip = next(n for n in graph["nodes"] if n["id"] == "clip")
@@ -76,7 +76,10 @@ def test_invalid_durations_fail_before_queueing(seconds):
 @pytest.mark.parametrize("template,expected", [("wan22_i2v_14b", ("seconds", 3)), ("wan22_ti2v", ("length", 73))])
 def test_auto_clip_preserves_duration_when_resolving_the_installed_model(client, monkeypatch, template, expected):
     c, app, _ = client
-    monkeypatch.setattr(engine, "clip_template", lambda *args: template)
+    # Readiness now comes from the complete video catalog; this test isolates
+    # duration forwarding for either selected engine.
+    monkeypatch.setattr(video_engines, "catalog", lambda *args: {
+        "auto_resolves_to": "wan14b" if template == "wan22_i2v_14b" else "wan"})
     project = app.state.store.create_project("Reference workflow")
     image = io.BytesIO()
     Image.new("RGB", (128, 72), "orange").save(image, "PNG")
