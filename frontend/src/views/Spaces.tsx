@@ -1043,8 +1043,11 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       // rather than shrinking every control to fit the available height.
       const width = node.measured.width || node.width || 340;
       const height = node.measured.height || node.height || 700;
-      const zoom = Math.max(.5, Math.min(1.15, (bounds.width - 32) / width));
-      const left = Math.max(16, (bounds.width - width * zoom) / 2);
+      const visibleLeft = Math.max(0, bounds.left);
+      const visibleWidth = Math.min(bounds.right, window.innerWidth) - visibleLeft;
+      // Include the handles and selection outline, not just the card body.
+      const zoom = Math.max(.3, Math.min(1.15, (visibleWidth - 48) / (width + 8)));
+      const left = visibleLeft - bounds.left + (visibleWidth - width * zoom) / 2;
       const top = Math.max(16, (bounds.height - height * zoom) / 2);
       const position = node.internals.positionAbsolute;
       void flow.setViewport({ x: left - position.x * zoom, y: top - position.y * zoom, zoom }, { duration: 250 });
