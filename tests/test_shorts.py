@@ -203,6 +203,7 @@ def test_short_end_to_end(client, tmp_path):
     calls = hooks(app, mp4)
     r = c.post("/api/agent/studio_short_create", json={
         "topic": "why the sea glows at night", "name": "Sea glow",
+        "settings": {"animatic_autocontinue": False},
         "options": {"language": "en", "duration_s": 20, "visuals": {"source": "mix", "shot_s": 2.5, "clips": 1},
                     "music": {"mode": "compose", "tags": "calm ambient"},
                     "timeline": {"aspects": ["9:16"], "qualities": ["preview"]}}})
