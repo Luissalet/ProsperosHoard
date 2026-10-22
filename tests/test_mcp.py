@@ -96,7 +96,9 @@ async def test_mcp_protocol_end_to_end(running_app):
                 assert "Keywords:" in (t.description or ""), t.name
                 assert t.annotations is not None
                 if t.name in generation_names:
-                    assert t.annotations.destructiveHint is False or t.name == "studio_trash"
+                    assert t.annotations.destructiveHint is False or t.name in {"studio_trash", "studio_style_profile_delete"}
+            assert by_name["studio_style_profile_delete"].annotations.destructiveHint is True
+            assert by_name["studio_style_profile_delete"].annotations.readOnlyHint is False
             for contract in native_contracts['editing']:
                 assert by_name[contract['name']].annotations.destructiveHint == contract['annotations']['destructiveHint']
             assert by_name["studio_show"].annotations.readOnlyHint is True
