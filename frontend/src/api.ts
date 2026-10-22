@@ -983,6 +983,7 @@ export interface StockStatus {
 }
 
 export interface ProductionState {
+  style_profile?: { id: string; name: string; target_duration_s: number };
   kind?: "short";
   slug: string;
   name: string;
@@ -1041,6 +1042,81 @@ export interface RecipeSummary {
   clips: number;
   reusable: { song: boolean; frames: number; clips: number };
   warnings: number;
+}
+
+export interface StyleProfileShot {
+  key: string;
+  relative_duration: number;
+  span: { start_s: number; end_s: number; duration_s: number };
+  palette: string[];
+  camera: { observed: boolean; shot_type: string; angle: string; movement: string; note: string };
+  transition_in: { type: string; observed: boolean; measured: boolean };
+  motion_energy: string;
+  notes: string;
+}
+
+export interface StyleProfile {
+  format: string;
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  source_reference?: {
+    source_path: string;
+    filename: string;
+    duration_s: number;
+    width: number;
+    height: number;
+    aspect: string;
+    fps: number;
+    codec: string;
+  };
+  measured_facts?: {
+    duration_s: number;
+    shot_count: number;
+    cuts_s: number[];
+    shot_durations_s: number[];
+    dominant_palette: string[];
+    shots: any[];
+  };
+  pacing?: {
+    shot_count: number;
+    average_shot_duration_s: number;
+    pacing_bpm: number;
+    rhythm_durations_s: number[];
+  };
+  shots: StyleProfileShot[];
+  palette: string[];
+  provenance?: Record<string, unknown>;
+}
+
+export interface StyleProfileSummary {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  shot_count: number;
+  duration_s: number;
+  pacing_bpm: number;
+  palette: string[];
+}
+
+export interface ShotComment {
+  id: string;
+  shot_key: string;
+  time_s: number;
+  shot_revision: number;
+  revision_id?: string;
+  current_revision_id?: string | null;
+  current_shot_revision?: number;
+  is_stale?: boolean;
+  author: string;
+  content: string;
+  kind: "request_change" | "critique" | "note" | "approved";
+  resolved: boolean;
+  resolution_note?: string | null;
+  created_at: string;
+  resolved_at?: string | null;
 }
 
 export class ApiError extends Error {
@@ -1442,6 +1518,25 @@ export const api = {
     request<{ regenerated: string[]; kept: string[]; chained: string[]; job?: Job }>("POST", `/generation/api/productions/${slug}/regenerate`, { stage, keys, run }),
   promoteClips: (slug: string, keys?: string[], run = true) =>
     request<{ promoted: string[]; chained: string[]; job?: Job }>("POST", `/generation/api/productions/${slug}/promote`, { keys, run }),
+  extractStyleProfile: (body: { video_path?: string; asset_id?: string; name?: string; scene_threshold?: number }) =>
+    request<StyleProfile>("POST", "/generation/api/style-profiles/extract", body),
+  styleProfiles: () => request<{ profiles: StyleProfileSummary[] }>("GET", "/generation/api/style-profiles"),
+  styleProfile: (id: string) => request<StyleProfile>("GET", `/generation/api/style-profiles/${id}`),
+  updateStyleProfile: (id: string, patch: Partial<StyleProfile>) =>
+    request<StyleProfile>("PUT", `/generation/api/style-profiles/${id}`, patch),
+  deleteStyleProfile: (id: string) => request<{ ok: boolean; profile_id: string }>("DELETE", `/generation/api/style-profiles/${id}`),
+  applyStyleProfile: (slug: string, body: { profile_id?: string; profile?: Partial<StyleProfile>; target_duration_s?: number }) =>
+    request<{ slug: string; style_profile_id: string; shot_count: number; target_duration_s: number; production: ProductionView }>(
+      "POST", `/generation/api/productions/${slug}/apply-style-profile`, body),
+  shotComments: (slug: string, shotKey?: string) =>
+    request<{ slug: string; comments: ShotComment[] }>("GET", `/generation/api/productions/${slug}/shot-comments${shotKey ? `?shot_key=${shotKey}` : ""}`),
+  addShotComment: (slug: string, body: { shot_key: string; time_s: number; content: string; author?: string; kind?: string }) =>
+    request<{ slug: string; comment: ShotComment }>("POST", `/generation/api/productions/${slug}/shot-comments`, body),
+  resolveShotComment: (slug: string, commentId: string, note?: string) =>
+    request<{ slug: string; comment: ShotComment }>("POST", `/generation/api/productions/${slug}/shot-comments/${commentId}/resolve`, { note }),
+  regenerateDependent: (slug: string, body: { keys: string[]; reason?: string; stage?: "frames" | "clips"; force?: boolean; run?: boolean }) =>
+    request<{ slug: string; stage: string; targets: string[]; regenerated_shots: string[]; preserved_shots: string[]; shot_revisions: Record<string, number>; status: string; production: ProductionView }>(
+      "POST", `/generation/api/productions/${slug}/regenerate-dependent`, body),
   graphicOptions: () => request<GraphicOptions>("GET", "/generation/api/graphics/options"),
   graphicPreview: (body: { production?: string; project?: string; graphic: GraphicSpec; start_s?: number; end_s?: number; duration_s?: number;
                            aspect?: string; at_s?: number; max_side?: number }, signal?: AbortSignal) =>

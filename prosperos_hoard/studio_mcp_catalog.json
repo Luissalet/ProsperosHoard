@@ -5098,6 +5098,440 @@
       }
     },
     {
+      "name": "studio_style_profile_extract",
+      "description": "Extract an editable style profile (rhythm, shot cuts, color palette, camera and transition grammar)\nfrom a local reference video using local deterministic engines (ffprobe/ffmpeg).\n\nKeywords: style profile, video reference, scene cuts, shot rhythm, color palette, camera grammar,\nperfil de estilo, referencia de video, cortes de plano, ritmo, paleta de colores\n",
+      "inputSchema": {
+        "properties": {
+          "video_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Video Path"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Asset Id"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "scene_threshold": {
+            "default": 0.3,
+            "title": "Scene Threshold",
+            "type": "number"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "title": "studio_style_profile_extractArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_list",
+      "description": "List all saved editable style profiles.\n\nKeywords: style profiles list, video templates, listar perfiles de estilo\n",
+      "inputSchema": {
+        "properties": {},
+        "title": "studio_style_profile_listArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_get",
+      "description": "Get the full details and editable grammar of a style profile.\n\nKeywords: style profile get, inspect style, ver perfil de estilo\n",
+      "inputSchema": {
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id"
+        ],
+        "title": "studio_style_profile_getArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_update",
+      "description": "Update editable aspects of a style profile (name, palette, shot notes, camera hints).\n\nKeywords: edit style profile, update shots, editar perfil de estilo\n",
+      "inputSchema": {
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "patch": {
+            "title": "Patch",
+            "type": "object"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "profile_id",
+          "patch"
+        ],
+        "title": "studio_style_profile_updateArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_delete",
+      "description": "Delete a saved template without deleting footage or applied productions.\n\nKeywords: delete style profile, remove template, borrar perfil de estilo\n",
+      "inputSchema": {
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "profile_id"
+        ],
+        "title": "studio_style_profile_deleteArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_production_apply_style_profile",
+      "description": "Apply a style profile (rhythm, shot structure, camera hints, palette) to a production\nwithout copying or reusing the reference's original video files.\n\nKeywords: apply style profile, video style transfer, grammar, aplicar perfil de estilo\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile Id"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production"
+        ],
+        "title": "studio_production_apply_style_profileArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_production_shot_comments",
+      "description": "List review comments for a production, showing timestamp, shot revision, and staleness.\n\nKeywords: shot comments, review feedback, comentarios de plano, revision\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "shot_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shot Key"
+          }
+        },
+        "required": [
+          "production"
+        ],
+        "title": "studio_production_shot_commentsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_production_shot_comment",
+      "description": "Add a review comment anchored to an exact timestamp and current shot revision in a production.\n\nKeywords: add shot comment, timecoded feedback, comentario de plano, correccion temporal\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "shot_key": {
+            "title": "Shot Key",
+            "type": "string"
+          },
+          "time_s": {
+            "title": "Time S",
+            "type": "number"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "kind": {
+            "default": "request_change",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "shot_key",
+          "time_s",
+          "content"
+        ],
+        "title": "studio_production_shot_commentArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_production_regenerate_dependent",
+      "description": "Selectively regenerate target shots and their downstream dependent continuation chains\nwhile strictly preserving all other approved and unrelated shots.\n\nKeywords: selective retake, regenerate dependent, preserve approved shots, regeneracion dependiente\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "stage": {
+            "default": "clips",
+            "title": "Stage",
+            "type": "string"
+          },
+          "run": {
+            "default": false,
+            "title": "Run",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "keys"
+        ],
+        "title": "studio_production_regenerate_dependentArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_production_shot_comment_resolve",
+      "description": "Resolve a comment while retaining its timecode and original take identity.\n\nKeywords: resolve shot comment, review resolution, resolver comentario de plano\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "comment_id": {
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "comment_id"
+        ],
+        "title": "studio_production_shot_comment_resolveArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "studio_production_finishing",
       "description": "Set a music video's look: colour grade, grain, vignette, letterbox, lyric style and beat effects / look.\n\nfinishing (all optional; {} = plain): {\"color_grade\": \"teal_orange\"|\"sodium_night\"|\"bleach_bypass\",\n\"grain\": 0-1, \"vignette\": true, \"letterbox\": true, \"glitch_on_downbeats\": true,\n\"lyric_style\": \"default\"|\"horror\"|\"bold\"|\"pop\"|\"pulse\"|\"typewriter\"|\"handwritten\"|\"cinema\",\n\"beat_fx\": {\"source\": \"kick\"|\"beats\"|\"downbeats\"|\"drums\"|\"bass\"|\"vocals\"|\"other\" (a stem: its own attacks, once split with studio_stems), \"zoom\": 0-1, \"flash\": 0-1, \"shake\": 0-1},\n\"framing\": \"fill\"|\"blur\"|\"fit\"} - beat_fx punches in, flashes and shakes the picture on\nthe bass drum (kick), every beat or every bar. Lyric styles: pop = one huge word at a time popping in,\npulse = the whole line in caps swelling on every beat, typewriter = letters typed out, handwritten =\nhand lettering, cinema = film-title serif with slow fades. framing: how a clip of another shape fills\nthe frame (fill crops, blur fits it over a blurred copy, fit adds bars). The animatic and the cut use it; a cut already\nrendered is re-rendered (render=true queues it; nothing else is redone). Returns the clean look and\nthe aspects that will render again.\n\nKeywords: look, colour grade, film grain, beat effects, zoom on the kick, flash on the beat, camera shake,\nmusic video style, lyric typography, word by word captions, efectos al ritmo, zoom al bombo, destellos, temblor,\ngradacion de color, estilo del videoclip, tipografia de la letra, letra palabra a palabra\n",
       "inputSchema": {

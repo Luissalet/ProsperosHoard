@@ -1267,6 +1267,10 @@ class Run:
         else:
             body["aspect"] = shot.get("aspect") or "16:9"
         text = shot["prompt"] + (f", {look}" if look else "")
+        from .style_profiles import prompt_hints
+        hints = prompt_hints(shot)
+        if hints:
+            text += ". " + hints
         refs = [r for r in shot.get("refs") or [] if r.get("asset_id")]
         # the shot's own references follow the lead's canonical image (which
         # is <image1> of a lead shot), each with what to take from it
@@ -1424,6 +1428,10 @@ class Run:
             if shot.get("motion") != "still" else "Locked camera; restrained natural movement, stable composition.")
         if shot.get("motion") != "still" and text.strip().lower() == "subtle motion":
             text = "Continuous visible subject movement throughout the shot, natural body movement and changing poses."
+        from .style_profiles import prompt_hints
+        hints = prompt_hints(shot, moving=True)
+        if hints:
+            text += ". " + hints
         if cast_for_shot(self.spec, shot):
             # the still already holds the background cast; the clip must not
             # add anybody to it
@@ -1448,6 +1456,8 @@ class Run:
                          "prompt": f"{shot.get('motion_prompt') or shot['prompt']}.{sung} Natural lip movement in time "
                                    "with the words, expressive face, the camera and the body move a little."})
             body.update(self.s2v_size(self.still_for(key)))
+            if hints:
+                body["prompt"] += ". " + hints
             return body
         motion = shot.get("motion_ref") or {}
         if motion.get("asset_id") and template == "auto_clip":
@@ -1476,6 +1486,8 @@ class Run:
         for k in ("sampler", "scheduler", "steps", "cfg"):
             if shot.get(f"clip_{k}") is not None:
                 body[k] = shot[f"clip_{k}"]
+        if hints and hints not in body["prompt"]:
+            body["prompt"] += ". " + hints
         return body
 
     def lines_in(self, span: tuple[float, float]) -> str:
@@ -1676,6 +1688,8 @@ class Run:
                 if free_pools:
                     options["section_pools"] = free_pools
                 built = engine.timeline_auto(self.store, self.project_id, song_id, free, None, aspect, lyrics_id, options)
+                from .style_profiles import apply_timeline_transitions
+                apply_timeline_transitions(self.store, self.state, built["id"])
                 if tl.get("finishing"):
                     engine.update_timeline(self.store, built["id"], {"finishing": tl["finishing"]})
                 info = timelines[aspect] = {"timeline_id": built["id"], "renders": {}}
@@ -1811,6 +1825,8 @@ def drop_stale_chains(state: dict[str, Any]) -> list[str]:
             ck = shot_key(key, 0)
             src = shot.get("continue_from")
             link = chained.get(ck)
+            if shot.get("locked"):
+                continue  # an approved continuation retains its chosen take when its source changes
             if ck not in clips:
                 continue
             stale = (src and link and clips.get(shot_key(src, 0)) != link.get("from")) or (not src and link) \
