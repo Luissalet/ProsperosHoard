@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "title": "Design System: Prospero — Spaces video workspace",
+  "extensions": {
+    "scope": {
+      "surface": "spaces",
+      "mode": "Operate",
+      "task": 1167,
+      "document": ".impeccable/surfaces/spaces.md",
+      "inherits": "DESIGN.md",
+      "visualAuthority": "Existing graph editor and pinned dragon, plum and magenta identity; local extension",
+      "rootCompGatesChanged": false,
+      "shippingRasterAssetsAdded": false
+    },
+    "surfaceBrief": {
+      "audience": "Users creating and revising audiovisual work in Prospero's local node editor.",
+      "job": "Resume or start a connected video canvas, generate clips and inspect or revise them inline.",
+      "direction": "Preserve the mature @xyflow editor, shared typography and theme tokens, typed ports and existing tool access.",
+      "firstViewport": "Saved canvas or a Media to Clip starter, with direct source choice, prompt and node-level generation.",
+      "signatureInteraction": "Generate and compare a clip in its connected node without leaving the canvas.",
+      "constraints": [
+        "No compulsory document, wizard or production review for direct clip generation.",
+        "Keep all existing node types, branches, continuation, Combine, templates, Apps and save/recovery tools.",
+        "Preserve user positions and original media.",
+        "Keep model readiness distinct from job success and output quality.",
+        "Keep full output frames visible and focused mobile nodes usable through vertical panning."
+      ],
+      "unresolvedDecisions": []
+    },
+    "geometry": {
+      "videoAndCombineWidth": "440px in graph coordinates",
+      "videoMonitor": "width: 100%; max-height: 280px; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 6px",
+      "resultActions": "flex-wrap: wrap; gap: 4px; margin: 8px 0",
+      "selectedNode": "outline: 2px solid var(--accent); outline-offset: 3px",
+      "handles": "12px by 12px",
+      "mobileFocus": "Intersect canvas bounds with visible window width; reserve 48px and include width + 8px for handles/outline; fit by width and allow vertical panning.",
+      "tokenStatus": "Local surface geometry; not new global design tokens."
+    },
+    "breakpoints": [
+      { "name": "canvas-width-focus", "value": "600px", "purpose": "Canvas width threshold for width-based node focus." },
+      { "name": "workspace-mobile", "value": "700px", "purpose": "Wrap toolbar and hide secondary module/vitals regions in the workspace shell." }
+    ],
+    "behavior": {
+      "entry": "Resume remembered project canvas, then existing canvas; create quick_video only when none exists. A library image opens a new referenced graph.",
+      "openingFailure": "Visible error and Retry.",
+      "sourceConversion": "Convert source to image generator and preserve existing images in a connected upstream reference node.",
+      "engineCatalog": "Exact workflow nodes and model-file choices determine live availability. Cached inventory remains offline. Auto chooses available Wan 14B then Wan 5B.",
+      "output": "Native inline playback, download, enlargement, saved runs and selected takes; previous-run comparison appears below the current output at matching output position.",
+      "regeneration": "Existing node-level generation and run scopes remain available.",
+      "productionReview": "New music-video productions continue by default; explicit song/animatic review remains optional."
+    },
+    "evidence": {
+      "directory": "D:/LocalAI/research-inbox/prospero1167",
+      "openedCaptures": [
+        { "file": "ui/desktop.png", "size": "1280x800", "state": "Connected source and inline clip" },
+        { "file": "ui/desktop-compare.png", "size": "1280x800", "state": "Previous-run player below current output" },
+        { "file": "ui/mobile.png", "size": "390x844", "state": "Replaced F1 capture showing both port edges and selection outline" }
+      ],
+      "backend": "Declared demo backend in all captures; layout and interaction evidence only.",
+      "sourcesInspected": [
+        "frontend/src/App.tsx",
+        "frontend/src/views/VideoWorkspace.tsx",
+        "frontend/src/views/Spaces.tsx",
+        "frontend/src/studio.css",
+        "prosperos_hoard/video_engines.py",
+        "prosperos_hoard/productions.py",
+        "docs/video-workspace.md"
+      ],
+      "review": {
+        "initial": "finish-review.md",
+        "verdict": "finish-verdict.md",
+        "finding": "F1 mobile node-edge clipping",
+        "status": "resolved",
+        "disposition": "ship",
+        "scope": "F1 correction; original review exclusions retained"
+      },
+      "documenterVerification": "Source inspection and all three final screenshots opened; no test rerun or live app operation."
+    },
+    "limits": [
+      "Dark-theme screenshots only for this pass; inherited light-theme support was not independently captured here.",
+      "Tall-node lower controls require vertical panning and are not all visible in the mobile viewport.",
+      "Static evidence does not establish job transitions, comprehensive accessibility or real model quality.",
+      "Historical continuation measurements belong to their original pass.",
+      "Separate Studio composition gates and root metadata remain unchanged; no exact-comp or whole-product approval."
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "The Shot Review Bench",
+    "overview": "Create, inspect and revise video in the existing connected canvas, using Prospero's inherited working surfaces and pinned identity.",
+    "dos": [
+      "Do keep generation, preview and result actions in the node.",
+      "Do contain full media frames and wrap result actions.",
+      "Do focus mobile nodes by visible width with room for ports and selection outline."
+    ],
+    "donts": [
+      "Don't replace the existing graph editor or pinned dragon-and-magenta identity.",
+      "Don't make the quick-video starter a compulsory workflow.",
+      "Don't infer model quality or exact-comp approval from demo captures."
+    ]
+  }
+}
