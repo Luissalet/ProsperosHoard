@@ -2226,7 +2226,10 @@ def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def studio_video_engines() -> dict[str, Any]:
-    """List video engines, exact installed model files, missing dependencies and live availability. Does not start or load a model. Auto selects an available image-to-video engine. / Motores de vídeo disponibles y modelos que faltan."""
+    """List video engines, exact installed model files, missing dependencies and live availability. Does not start or load a model. Auto selects an available image-to-video engine. / Motores de vídeo disponibles y modelos que faltan.
+
+    Keywords: video engines, available models, missing files, motores de vídeo, modelos disponibles.
+    """
     return _call("GET", "/api/video-engines")
 
 
