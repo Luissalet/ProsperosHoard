@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+Style profiles: **Productions → Review & style** extracts rhythm and palettes from local videos, supports editable camera and transition choices, and reuses a profile across productions. Timecoded comments retain the take identity; dependent retakes preserve earlier takes and approved shots. UI, HTTP and MCP share the native local operations. [Workflow, format and verified limits](docs/style-profiles.md).
+
 Selecting a project opens its dashboard: enter a video directly, create or edit characters and groups in place, or choose **Create clip**. The clip studio connects references to a video node containing preview, motion and generation, with job recovery and actual results. Clicking a storyboard shot opens its own frame/video nodes directly, even before its first frame; saving and rendering remain bound to that production. Standalone studio clips remain project assets. Mobile stacks full-size controls. [Workflow](docs/PROJECT-STUDIO.md).
 
 Shot nodes show exactly which frame or clip is missing. Their visible References node adds library images or uploads and lets you describe, replace or remove each reference before saving.

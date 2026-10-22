@@ -2952,6 +2952,13 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     lyrics_lines = None
     sections = analysis["sections"]
     options = dict(options or {})
+    target_duration = options.pop("duration_s", None)
+    cut_duration = analysis["duration_s"]
+    if target_duration is not None:
+        target_duration = float(target_duration)
+        if not math.isfinite(target_duration) or target_duration <= 0:
+            raise EngineError("bad_options", "duration_s must be finite and positive")
+        cut_duration = min(cut_duration, target_duration)
     if lyrics_asset_id:
         lyrics = read_lyrics(store, lyrics_asset_id)
         lyrics_lines = lyrics["lines"]
@@ -2992,7 +2999,7 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
         options["pinned_spans"] = spans
     try:
         built = timeline_mod.build_auto_cut(
-            analysis["duration_s"], analysis["beat_times"], sections, pool,
+            cut_duration, analysis["beat_times"], sections, pool,
             options=options, lyrics_lines=lyrics_lines, downbeats=analysis.get("downbeats"),
         )
     except timeline_mod.TimelineError as exc:
@@ -3003,10 +3010,10 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     if graphic_shots:
         try:
             built["tracks"] = timeline_mod.inject_graphics(built["tracks"], graphic_shots, lyrics_lines, analysis["beat_times"],
-                                                           analysis["duration_s"])
+                                                           cut_duration)
         except (timeline_mod.TimelineError, KeyError, TypeError, ValueError) as exc:
             raise EngineError("bad_graphic", f"the graphic shots did not fit the cut: {exc}") from None
-    return {"tracks": built["tracks"], "fps": fps, "sections": sections, "duration_s": analysis["duration_s"],
+    return {"tracks": built["tracks"], "fps": fps, "sections": sections, "duration_s": cut_duration,
             "song_name": re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac|opus)$", "", song.get("name") or song["id"], flags=re.I)}
 
 

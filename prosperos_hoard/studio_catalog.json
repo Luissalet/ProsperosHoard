@@ -3248,6 +3248,67 @@
       }
     },
     {
+      "name": "studio_production_apply_style_profile",
+      "description": "Apply a style profile (rhythm, shot structure, camera hints, palette) to a production\nwithout copying or reusing the reference's original video files.\n\nKeywords: apply style profile, video style transfer, grammar, aplicar perfil de estilo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile Id"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "studio_production_cast",
       "description": "Set a production's background cast: the only characters allowed in the background / reparto de fondo.\n\ncast = [{asset_id, name, note}] - one image per character (up to 24). Shots marked crowd=true\n(studio_production_shots) get `per_shot` of them (default 3, rotating so every member shows up)\nas references, with the instruction that only they appear in the background, exactly as drawn,\nnobody invented. A shot can also name its own: {key, cast: [\"Name\", ...]}. Shots whose crowd\nchanged are redrawn on the next run; run=true queues it.\n\nKeywords: background cast, extras, crowd, background characters, reparto, figurantes, fondo, publico",
       "inputSchema": {
@@ -3603,6 +3664,74 @@
       }
     },
     {
+      "name": "studio_production_regenerate_dependent",
+      "description": "Selectively regenerate target shots and their downstream dependent continuation chains\nwhile strictly preserving all other approved and unrelated shots.\n\nKeywords: selective retake, regenerate dependent, preserve approved shots, regeneracion dependiente",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Reason"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "clips",
+            "title": "Stage"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Force"
+          },
+          "run": {
+            "default": false,
+            "title": "Run",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "production",
+          "keys",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "studio_production_script",
       "description": "Read or replace the script of a narrated short / ver o cambiar el guion de un short.\n\nWithout `script`: returns the current script (segments with their narration, image prompt, stock query and,\nonce voiced, their start/end seconds). With `script` (plain text, or {\"title\"?, \"segments\": [{\"text\",\n\"visual\"?, \"query\"?}]}): it replaces the script and redoes the narration, pictures, mix and render (the\nmusic is kept) - and with run=true queues that right away.\n\nKeywords: edit script, change narration, rewrite short, script review, cambiar guion, editar guion, revisar guion",
       "inputSchema": {
@@ -3812,6 +3941,141 @@
       "annotations": {
         "readOnlyHint": false,
         "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_production_shot_comment",
+      "description": "Add a review comment anchored to an exact timestamp and current shot revision in a production.\n\nKeywords: add shot comment, timecoded feedback, comentario de plano, correccion temporal",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "shot_key": {
+            "title": "Shot Key",
+            "type": "string"
+          },
+          "time_s": {
+            "title": "Time S",
+            "type": "number"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "reviewer",
+            "title": "Author"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "request_change",
+            "title": "Kind"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "shot_key",
+          "time_s",
+          "content",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_production_shot_comment_resolve",
+      "description": "Resolve a comment while retaining its timecode and original take identity.\n\nKeywords: resolve shot comment, review resolution, resolver comentario de plano",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "comment_id": {
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Note"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "comment_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_production_shot_comments",
+      "description": "List review comments for a production, showing timestamp, shot revision, and staleness.\n\nKeywords: shot comments, review feedback, comentarios de plano, revision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "shot_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "production"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
       }
     },
     {
@@ -5267,6 +5531,210 @@
       },
       "annotations": {
         "readOnlyHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_delete",
+      "description": "Delete a saved template without deleting footage or applied productions.\n\nKeywords: delete style profile, remove template, borrar perfil de estilo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "profile_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "studio_style_profile_extract",
+      "description": "Extract an editable style profile (rhythm, shot cuts, color palette, camera and transition grammar)\nfrom a local reference video using local deterministic engines (ffprobe/ffmpeg).\n\nKeywords: style profile, video reference, scene cuts, shot rhythm, color palette, camera grammar,\nperfil de estilo, referencia de video, cortes de plano, ritmo, paleta de colores",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "video_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Video Path"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Asset Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Name"
+          },
+          "scene_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0.3,
+            "title": "Scene Threshold"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_style_profile_get",
+      "description": "Get the full details and editable grammar of a style profile.\n\nKeywords: style profile get, inspect style, ver perfil de estilo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_style_profile_list",
+      "description": "List all saved editable style profiles.\n\nKeywords: style profiles list, video templates, listar perfiles de estilo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_style_profile_update",
+      "description": "Update editable aspects of a style profile (name, palette, shot notes, camera hints).\n\nKeywords: edit style profile, update shots, editar perfil de estilo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "palette": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Palette"
+          },
+          "shots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shots"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "profile_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
       }
     },
     {

@@ -1517,6 +1517,104 @@ def studio_production_promote(production: str, keys: Optional[list[str]] = None,
                  json={"keys": keys, "run": run})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_style_profile_extract(video_path: Optional[str] = None, asset_id: Optional[str] = None, name: str = "", scene_threshold: float = 0.3) -> dict[str, Any]:
+    """Extract an editable style profile (rhythm, shot cuts, color palette, camera and transition grammar)
+    from a local reference video using local deterministic engines (ffprobe/ffmpeg).
+
+    Keywords: style profile, video reference, scene cuts, shot rhythm, color palette, camera grammar,
+    perfil de estilo, referencia de video, cortes de plano, ritmo, paleta de colores
+    """
+    return _call("POST", "/api/agent/studio_style_profile_extract", json={"video_path": video_path, "asset_id": asset_id, "name": name, "scene_threshold": scene_threshold})
+
+
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_style_profile_list() -> dict[str, Any]:
+    """List all saved editable style profiles.
+
+    Keywords: style profiles list, video templates, listar perfiles de estilo
+    """
+    return _call("GET", "/api/agent/studio_style_profile_list")
+
+
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_style_profile_get(profile_id: str) -> dict[str, Any]:
+    """Get the full details and editable grammar of a style profile.
+
+    Keywords: style profile get, inspect style, ver perfil de estilo
+    """
+    return _call("GET", "/api/agent/studio_style_profile_get", params={"profile_id": profile_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_style_profile_update(profile_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Update editable aspects of a style profile (name, palette, shot notes, camera hints).
+
+    Keywords: edit style profile, update shots, editar perfil de estilo
+    """
+    return _call("POST", "/api/agent/studio_style_profile_update", params={"profile_id": profile_id}, json=patch)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
+def studio_style_profile_delete(profile_id: str) -> dict[str, Any]:
+    """Delete a saved template without deleting footage or applied productions.
+
+    Keywords: delete style profile, remove template, borrar perfil de estilo
+    """
+    return _call("POST", "/api/agent/studio_style_profile_delete", params={"profile_id": profile_id})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_apply_style_profile(production: str, profile_id: Optional[str] = None, target_duration_s: Optional[float] = None) -> dict[str, Any]:
+    """Apply a style profile (rhythm, shot structure, camera hints, palette) to a production
+    without copying or reusing the reference's original video files.
+
+    Keywords: apply style profile, video style transfer, grammar, aplicar perfil de estilo
+    """
+    return _call("POST", "/api/agent/studio_production_apply_style_profile", params={"production": production},
+                 json={"profile_id": profile_id, "target_duration_s": target_duration_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_shot_comments(production: str, shot_key: Optional[str] = None) -> dict[str, Any]:
+    """List review comments for a production, showing timestamp, shot revision, and staleness.
+
+    Keywords: shot comments, review feedback, comentarios de plano, revision
+    """
+    return _call("GET", "/api/agent/studio_production_shot_comments", params={"production": production, "shot_key": shot_key})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_shot_comment(production: str, shot_key: str, time_s: float, content: str, kind: str = "request_change") -> dict[str, Any]:
+    """Add a review comment anchored to an exact timestamp and current shot revision in a production.
+
+    Keywords: add shot comment, timecoded feedback, comentario de plano, correccion temporal
+    """
+    return _call("POST", "/api/agent/studio_production_shot_comment", params={"production": production},
+                 json={"shot_key": shot_key, "time_s": time_s, "content": content, "kind": kind})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_production_regenerate_dependent(production: str, keys: list[str], note: str = "", stage: str = "clips", run: bool = False) -> dict[str, Any]:
+    """Selectively regenerate target shots and their downstream dependent continuation chains
+    while strictly preserving all other approved and unrelated shots.
+
+    Keywords: selective retake, regenerate dependent, preserve approved shots, regeneracion dependiente
+    """
+    return _call("POST", "/api/agent/studio_production_regenerate_dependent", params={"production": production},
+                 json={"keys": keys, "reason": note, "stage": stage, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_production_shot_comment_resolve(production: str, comment_id: str, note: str = "") -> dict[str, Any]:
+    """Resolve a comment while retaining its timecode and original take identity.
+
+    Keywords: resolve shot comment, review resolution, resolver comentario de plano
+    """
+    return _call("POST", "/api/agent/studio_production_shot_comment_resolve",
+                 params={"production": production, "comment_id": comment_id}, json={"note": note})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def studio_production_finishing(production: str, finishing: dict[str, Any], render: bool = True) -> dict[str, Any]:
     """Set a music video's look: colour grade, grain, vignette, letterbox, lyric style and beat effects / look.

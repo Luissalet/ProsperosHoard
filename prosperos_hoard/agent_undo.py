@@ -633,6 +633,8 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_production_settings": _PRODUCTION,
     "studio_production_finishing": _PRODUCTION,
     "studio_production_script": _PRODUCTION,
+    "studio_production_apply_style_profile": _PRODUCTION,
+    "studio_production_regenerate_dependent": _PRODUCTION,
     "studio_production_create": {"track": track_production_create, "undo": undo_production_create},
 }
 
@@ -651,5 +653,6 @@ DRAFT_SAFE = frozenset({
     "studio_character_sheet", "studio_production_create", "studio_graphic_shot", "studio_graphic_render",
     "studio_production_segments", "studio_production_settings", "studio_production_finishing", "studio_production_script",
     "studio_recipe_export", "studio_recipe_run", "studio_animatic",
+    "studio_style_profile_extract", "studio_style_profile_update", "studio_production_shot_comment", "studio_production_shot_comment_resolve",
     "voice_create", "voice_speak", "voice_tts", "voice_audiobook", "voice_dub", "production_from_storyboard",
 })

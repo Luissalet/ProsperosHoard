@@ -55,6 +55,8 @@ from . import voice_retake as retake_mod
 from . import auk_retake
 from . import voice_pipelines as vp
 from . import voices as voices_mod
+from . import style_profiles as style_profiles_mod
+from . import shot_review as shot_review_mod
 from .backend import Backend, ffmpeg_path
 from .design import DesignError
 from .hoard_link import family
@@ -112,6 +114,12 @@ def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
         return 400, {"error": code, "message": str(exc)}
     if isinstance(exc, (charkit.KitError, charpack.PackError, trainers_mod.TrainingError)):
         return 400, {"error": exc.code, "message": exc.message}
+    if isinstance(exc, style_profiles_mod.StyleProfileError):
+        code_status = 404 if "not_found" in exc.code else 400
+        return code_status, {"error": exc.code, "message": exc.message}
+    if isinstance(exc, shot_review_mod.ShotReviewError):
+        code_status = 404 if "not_found" in exc.code else 400
+        return code_status, {"error": exc.code, "message": exc.message}
     if isinstance(exc, ValueError):
         return 400, {"error": "bad_request", "message": str(exc)}
     return 500, {"error": "internal_error", "message": f"{type(exc).__name__}: {str(exc)[:300]}"}
@@ -824,6 +832,46 @@ class ProductionRegenerateBody(BaseModel):
 class ProductionPromoteBody(BaseModel):
     keys: Optional[list[str]] = None            # only the drafts of these shots
     run: bool = True
+
+
+class StyleProfileExtractBody(BaseModel):
+    video_path: Optional[str] = None
+    asset_id: Optional[str] = None
+    name: Optional[str] = ""
+    scene_threshold: Optional[float] = 0.3
+
+
+class StyleProfileUpdateBody(BaseModel):
+    name: Optional[str] = None
+    palette: Optional[list[str]] = None
+    shots: Optional[list[dict[str, Any]]] = None
+    notes: Optional[str] = None
+
+
+class ProductionApplyStyleProfileBody(BaseModel):
+    profile_id: Optional[str] = None
+    profile: Optional[dict[str, Any]] = None
+    target_duration_s: Optional[float] = None
+
+
+class ShotCommentBody(BaseModel):
+    shot_key: str
+    time_s: float
+    content: str
+    author: Optional[str] = "reviewer"
+    kind: Optional[str] = "request_change"
+
+
+class ShotCommentResolveBody(BaseModel):
+    note: Optional[str] = ""
+
+
+class RegenerateDependentBody(BaseModel):
+    keys: list[str]
+    reason: Optional[str] = ""
+    stage: Optional[str] = "clips"
+    force: Optional[bool] = False
+    run: bool = False
 
 
 class QaRunBody(BaseModel):
@@ -4342,6 +4390,191 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_promote")
     def agent_production_promote(production: str, body: ProductionPromoteBody):
         return agent("studio_production_promote", production, lambda: op_production_promote(production, body))
+
+    # --------------------------------------------- Style Profiles (ReelMimic/OpenDesign inspiration)
+    def op_style_profile_extract(body: StyleProfileExtractBody) -> dict[str, Any]:
+        video_path = None
+        if body.video_path:
+            video_path = engine.resolve_import_path(backend, store, body.video_path)
+        elif body.asset_id:
+            asset = store.get_asset(body.asset_id)
+            video_path = _asset_path(store, asset["file_path"])
+        if not video_path or not Path(video_path).is_file():
+            raise style_profiles_mod.StyleProfileError("file_not_found", "Valid video_path or asset_id is required")
+        profile = style_profiles_mod.extract_style_profile_from_video(
+            video_path,
+            name=body.name or "",
+            scene_threshold=0.3 if body.scene_threshold is None else body.scene_threshold,
+        )
+        return style_profiles_mod.save_style_profile(store.data_dir, profile)
+
+    @app.post("/api/style-profiles/extract")
+    def api_style_profile_extract(body: StyleProfileExtractBody):
+        return op_style_profile_extract(body)
+
+    @app.post("/api/agent/studio_style_profile_extract")
+    def agent_style_profile_extract(body: StyleProfileExtractBody):
+        """Extract an editable style profile (rhythm, shot cuts, color palette, camera and transition grammar)
+        from a local reference video using local deterministic engines (ffprobe/ffmpeg).
+
+        Keywords: style profile, video reference, scene cuts, shot rhythm, color palette, camera grammar,
+        perfil de estilo, referencia de video, cortes de plano, ritmo, paleta de colores.
+        """
+        ref_id = body.asset_id or (Path(body.video_path).name if body.video_path else "")
+        return agent("studio_style_profile_extract", ref_id, lambda: op_style_profile_extract(body))
+
+    @app.get("/api/style-profiles")
+    def api_style_profile_list():
+        return {"profiles": style_profiles_mod.list_style_profiles(store.data_dir)}
+
+    @app.get("/api/agent/studio_style_profile_list")
+    def agent_style_profile_list():
+        """List all saved editable style profiles.
+
+        Keywords: style profiles list, video templates, listar perfiles de estilo.
+        """
+        return {"profiles": style_profiles_mod.list_style_profiles(store.data_dir)}
+
+    @app.get("/api/style-profiles/{profile_id}")
+    def api_style_profile_get(profile_id: str):
+        return style_profiles_mod.load_style_profile(store.data_dir, profile_id)
+
+    @app.get("/api/agent/studio_style_profile_get")
+    def agent_style_profile_get(profile_id: str):
+        """Get the full details and editable grammar of a style profile.
+
+        Keywords: style profile get, inspect style, ver perfil de estilo.
+        """
+        return style_profiles_mod.load_style_profile(store.data_dir, profile_id)
+
+    @app.put("/api/style-profiles/{profile_id}")
+    def api_style_profile_update(profile_id: str, body: StyleProfileUpdateBody):
+        patch = body.model_dump(exclude_unset=True)
+        return style_profiles_mod.update_style_profile(store.data_dir, profile_id, patch)
+
+    @app.post("/api/agent/studio_style_profile_update")
+    def agent_style_profile_update(profile_id: str, body: StyleProfileUpdateBody):
+        """Update editable aspects of a style profile (name, palette, shot notes, camera hints).
+
+        Keywords: edit style profile, update shots, editar perfil de estilo.
+        """
+        patch = body.model_dump(exclude_unset=True)
+        return agent("studio_style_profile_update", profile_id, lambda: style_profiles_mod.update_style_profile(store.data_dir, profile_id, patch))
+
+    @app.delete("/api/style-profiles/{profile_id}")
+    def api_style_profile_delete(profile_id: str):
+        ok = style_profiles_mod.delete_style_profile(store.data_dir, profile_id)
+        return {"ok": ok, "profile_id": profile_id}
+
+    @app.post("/api/agent/studio_style_profile_delete")
+    def agent_style_profile_delete(profile_id: str):
+        """Delete a saved template without deleting footage or applied productions.
+
+        Keywords: delete style profile, remove template, borrar perfil de estilo.
+        """
+        return agent("studio_style_profile_delete", profile_id, lambda: api_style_profile_delete(profile_id))
+
+    def op_production_apply_style_profile(slug: str, body: ProductionApplyStyleProfileBody) -> dict[str, Any]:
+        target = body.profile_id or body.profile
+        if not target:
+            raise style_profiles_mod.StyleProfileError("profile_required", "profile_id or profile object required")
+        opts = {}
+        if body.target_duration_s is not None:
+            opts["target_duration_s"] = body.target_duration_s
+        out = style_profiles_mod.apply_style_profile_to_production(store.data_dir, slug, target, options=opts)
+        return {**out, "production": production_view(slug)}
+
+    @app.post("/api/productions/{slug}/apply-style-profile")
+    def api_production_apply_style_profile(slug: str, body: ProductionApplyStyleProfileBody):
+        return op_production_apply_style_profile(slug, body)
+
+    @app.post("/api/agent/studio_production_apply_style_profile")
+    def agent_production_apply_style_profile(production: str, body: ProductionApplyStyleProfileBody):
+        """Apply a style profile (rhythm, shot structure, camera hints, palette) to a production
+        without copying or reusing the reference's original video files.
+
+        Keywords: apply style profile, video style transfer, grammar, aplicar perfil de estilo.
+        """
+        return agent("studio_production_apply_style_profile", production, lambda: op_production_apply_style_profile(production, body))
+
+    # --------------------------------------------- Shot Review & Timecoded Comments
+    @app.get("/api/productions/{slug}/shot-comments")
+    def api_production_shot_comments(slug: str, shot_key: Optional[str] = None):
+        return {"slug": slug, "comments": shot_review_mod.list_shot_comments(store.data_dir, slug, shot_key=shot_key)}
+
+    @app.get("/api/agent/studio_production_shot_comments")
+    def agent_production_shot_comments(production: str, shot_key: Optional[str] = None):
+        """List review comments for a production, showing timestamp, shot revision, and staleness.
+
+        Keywords: shot comments, review feedback, comentarios de plano, revision.
+        """
+        return {"slug": production, "comments": shot_review_mod.list_shot_comments(store.data_dir, production, shot_key=shot_key)}
+
+    def op_production_shot_comment(slug: str, body: ShotCommentBody) -> dict[str, Any]:
+        comment = shot_review_mod.add_shot_comment(
+            store.data_dir,
+            slug,
+            shot_key=body.shot_key,
+            time_s=body.time_s,
+            content=body.content,
+            author=body.author or "reviewer",
+            kind=body.kind or "request_change",
+        )
+        return {"slug": slug, "comment": comment}
+
+    @app.post("/api/productions/{slug}/shot-comments")
+    def api_production_shot_comment(slug: str, body: ShotCommentBody):
+        return op_production_shot_comment(slug, body)
+
+    @app.post("/api/agent/studio_production_shot_comment")
+    def agent_production_shot_comment(production: str, body: ShotCommentBody):
+        """Add a review comment anchored to an exact timestamp and current shot revision in a production.
+
+        Keywords: add shot comment, timecoded feedback, comentario de plano, correccion temporal.
+        """
+        return agent("studio_production_shot_comment", f"{production}:{body.shot_key}", lambda: op_production_shot_comment(production, body))
+
+    @app.post("/api/productions/{slug}/shot-comments/{comment_id}/resolve")
+    def api_production_shot_comment_resolve(slug: str, comment_id: str, body: Optional[ShotCommentResolveBody] = None):
+        note = body.note if body else ""
+        resolved = shot_review_mod.resolve_shot_comment(store.data_dir, slug, comment_id, note=note or "")
+        return {"slug": slug, "comment": resolved}
+
+    @app.post("/api/agent/studio_production_shot_comment_resolve")
+    def agent_production_shot_comment_resolve(production: str, comment_id: str, body: ShotCommentResolveBody):
+        """Resolve a timecoded shot comment while keeping its historical take identity.
+
+        Keywords: resolve shot comment, review resolution, resolver comentario de plano.
+        """
+        return agent("studio_production_shot_comment_resolve", comment_id,
+                     lambda: api_production_shot_comment_resolve(production, comment_id, body))
+
+    def op_production_regenerate_dependent(slug: str, body: RegenerateDependentBody) -> dict[str, Any]:
+        out = shot_review_mod.regenerate_dependent_shots(
+            store.data_dir,
+            slug,
+            target_keys=body.keys,
+            reason=body.reason or "",
+            stage=body.stage or "clips",
+            force=bool(body.force),
+        )
+        if body.run and (out["regenerated_shots"] or out["chained_dropped"]):
+            out["job"] = engine.job_view(queue_production(slug))
+        return {**out, "production": production_view(slug)}
+
+    @app.post("/api/productions/{slug}/regenerate-dependent")
+    def api_production_regenerate_dependent(slug: str, body: RegenerateDependentBody):
+        return op_production_regenerate_dependent(slug, body)
+
+    @app.post("/api/agent/studio_production_regenerate_dependent")
+    def agent_production_regenerate_dependent(production: str, body: RegenerateDependentBody):
+        """Selectively regenerate target shots and their downstream dependent continuation chains
+        while strictly preserving all other approved and unrelated shots.
+
+        Keywords: selective retake, regenerate dependent, preserve approved shots, regeneracion dependiente.
+        """
+        return agent("studio_production_regenerate_dependent", f"{production}:{','.join(body.keys)}", lambda: op_production_regenerate_dependent(production, body))
+
 
     def production_preflight(slug: str) -> dict[str, Any]:
         """What would stop the production's next run, before it starts:

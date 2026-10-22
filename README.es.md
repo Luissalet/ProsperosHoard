@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+Perfiles de estilo: **Producciones → Revisión y estilo** extrae ritmo y paletas de vídeos locales, permite editar cámara y transiciones y reutilizar el perfil en otras producciones. Los comentarios conservan instante e identidad de la toma; la corrección por dependientes mantiene tomas anteriores y planos aprobados. UI, API y MCP comparten las operaciones locales. [Formato, recorrido y límites](docs/style-profiles.md).
+
 Al seleccionar un proyecto se abre su dashboard: entra directamente al vídeo, crea o edita personajes y grupos sin cambiar de página o pulsa **Crear clip**. El estudio conecta referencias con un nodo de vídeo que reúne previsualización, movimiento y generación, con recuperación de trabajos y resultado real. Pulsar un plano del storyboard abre directamente sus nodos de fotograma y vídeo, incluso antes de tener imagen; guardar y renderizar sigue vinculado a esa producción. Los clips del estudio independiente quedan como recursos del proyecto. En móvil los controles se apilan a tamaño legible. [Recorrido](docs/PROJECT-STUDIO.md).
 
 Los nodos del plano indican si faltan el fotograma o el clip. El nodo Referencias permite añadir imágenes de la biblioteca o subir archivos, describir su uso, cambiarlas o quitarlas y guardar el plano.

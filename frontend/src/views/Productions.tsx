@@ -7,6 +7,7 @@ import {
   api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type Lang, type MessageKey } from "../i18n";
+import { ShotReviewsCard } from "../components/ShotReviews";
 import { errorText, jobMessage, lineageEvent, stageName, translateText } from "../messages";
 import { LookPanel } from "../components/LookPanel";
 import { Modal, timeAgo, useApp, useAsync } from "../components/ui";
@@ -139,7 +140,7 @@ export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onS
   );
 }
 
-type Tab = "storyboard" | "script" | "preview" | "qa" | "history";
+type Tab = "storyboard" | "script" | "preview" | "reviews" | "qa" | "history";
 const STAGE_TAB: Record<string, Tab> = {
   character: "storyboard", song: "storyboard", frames: "storyboard", lyrics: "storyboard", animatic: "preview", clips: "preview",
   photocards: "preview", album: "preview", timeline: "preview", report: "history",
@@ -401,7 +402,9 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const current = tab || autoTab;
   const tabs: [Tab, string][] = [
     ["storyboard", t("tabStoryboard")], ["preview", `${t("tabPreview")}${outputs ? ` · ${outputs}` : ""}`],
-    ["script", lang === "es" ? "Texto y tomas" : "Text and shots"], ["qa", t("tabQa")], ["history", t("tabHistory")],
+    ["script", lang === "es" ? "Texto y tomas" : "Text and shots"],
+    ["reviews", lang === "es" ? "Revisión y estilo" : "Review & style"],
+    ["qa", t("tabQa")], ["history", t("tabHistory")],
   ];
 
   return (
@@ -441,6 +444,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
             </>
           )}
           {current === "script" && !legacy && <ScriptDesk state={data} onChanged={changed} onStoryboard={() => setTab("storyboard")} />}
+          {current === "reviews" && !legacy && <ShotReviewsCard state={data} onChanged={changed} />}
           {current === "preview" && (
             <>
               {Object.keys(renders).length > 0 && (
