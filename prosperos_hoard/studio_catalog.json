@@ -6015,7 +6015,7 @@
     },
     {
       "name": "studio_video_engines",
-      "description": "List video engines, exact installed model files, missing dependencies and live availability. Does not start or load a model. Auto selects an available image-to-video engine. / Motores de vídeo disponibles y modelos que faltan.",
+      "description": "List video engines, exact installed model files, missing dependencies and live availability. Does not start or load a model. Auto selects an available image-to-video engine. / Motores de vídeo disponibles y modelos que faltan.\n\nKeywords: video engines, available models, missing files, motores de vídeo, modelos disponibles.",
       "inputSchema": {
         "type": "object",
         "properties": {}
