@@ -33,7 +33,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
   const [clips, setClips] = useState<"all" | "lead" | "none">("all");
   const [aspects, setAspects] = useState<string[]>(["16:9"]);
   const [takes, setTakes] = useState(2);
-  const [autopilot, setAutopilot] = useState(false);
+  const [autopilot, setAutopilot] = useState(true);
   const [draft, setDraft] = useState<VideoDraft | null>(null);
   const [busy, setBusy] = useState<"" | "plan" | "create">("");
   // how long the plan has been writing, and the way to stop waiting for it
@@ -122,7 +122,7 @@ export function VideoModal({ onClose, onStarted, projectId: forced }: { onClose:
         name: name.trim() || draft.title || [lead?.name || newName.trim(), concept.trim().split(/[,.;\n]/)[0].slice(0, 40)].filter(Boolean).join(" - ") || "Music video", draft, ...leadBody(), clips, aspects, song_takes: takes,
         song_asset_id: songMode === "asset" ? songId || null : null, project: projectId || null, brief: concept || null,
         lyrics: songMode === "asset" ? lyrics || null : null,
-        ...(autopilot ? { settings: { animatic_autocontinue: true, song_review: false } } : {}),
+        settings: { animatic_autocontinue: autopilot, song_review: !autopilot },
       });
       app.toast(t("videoStarted"), "ok");
       onStarted(r.production.slug);

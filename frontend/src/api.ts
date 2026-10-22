@@ -1305,6 +1305,7 @@ export const api = {
   compose: (pid: string, prompt: string, negative: string, style: string | null, opts: { engine?: string; references?: number } = {}) =>
     request<Composed>("POST", `/generation/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style, ...opts }),
   imageEngines: (pid?: string) => request<ImageEngines>("GET", `/generation/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
+  videoEngines: () => request<{ live: boolean; problem: string | null; auto_resolves_to: string | null; engines: { id: string; label: string; template: string; mode: string; installed: boolean; available: boolean; missing: string[]; models: string[]; vram_mb: number }[] }>("GET", "/generation/api/video-engines"),
   generate: (pid: string, body: Record<string, unknown>) =>
     request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/generation/api/projects/${pid}/generate`, body),
   edit: (assetId: string, body: Record<string, unknown>) =>

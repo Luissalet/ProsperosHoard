@@ -481,8 +481,14 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             elif end:
                 body.update({"template": "auto_clip", "end_asset_id": end, "template_params": {"seconds": seconds}})
             else:
-                body["template"] = "wan22_ti2v" if quality == "draft" else "auto_clip"
-                body["template_params"] = {"length": int(round(seconds * 24)) + 1} if quality == "draft" else {"seconds": seconds}
+                selected = data.get("engine") or ("wan" if quality == "draft" else "auto")
+                templates = {"auto": "auto_clip", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v", "svd": "svd_img2vid"}
+                if selected not in templates:
+                    raise SpaceError("unknown_video_engine", "choose auto, wan14b, wan or svd")
+                body["template"] = templates[selected]
+                body["template_params"] = ({"length": int(round(seconds * 24)) + 1} if selected == "wan"
+                    else {"frames": 25, "fps": 25 / seconds} if selected == "svd"
+                    else {"seconds": seconds, "lightning": data.get("lightning", True)})
             ops.append({"op": "generate", "body": body})
         return ops
     if t == "music":
@@ -849,7 +855,8 @@ def _wait(studio: Any, jobs: list[str], poll_s: float, timeout_s: float,
                 outputs += list(out.get("asset_ids") or ([out["asset_id"]] if out.get("asset_id") else []))
                 if job["state"] != "done":
                     err = job.get("error") or {}
-                    errors.append(str(err.get("message") if isinstance(err, dict) else err or job["state"])[:200])
+                    message = err.get("message") if isinstance(err, dict) else err
+                    errors.append(str(message or job.get("message") or job["state"])[:300])
         if pending:
             if tick:
                 tick(f"waiting for {len(pending)} job(s)")  # raises JobCancelled when the run is stopped
@@ -1270,7 +1277,15 @@ def template_graph(name: str) -> dict[str, Any]:
     sheets wired into a picture and a clip (the reference-driven short);
     "singing_shot": a cast member + a song into a lip-synced clip;
     "blank": nothing."""
-    if name == "character_outfit_motion":
+    if name == "quick_video":
+        nodes = [
+            {"id": "reference", "type": "asset", "x": 0, "y": 0,
+             "data": {"kind": "image", "asset_ids": []}},
+            {"id": "clip", "type": "video", "x": 410, "y": 0,
+             "data": {"quality": "final", "seconds": 5, "prompt": ""}},
+        ]
+        edges = [{"source": "reference", "target": "clip", "target_handle": "start"}]
+    elif name == "character_outfit_motion":
         nodes = [
             {"id": "person", "type": "asset", "x": 0, "y": 0, "data": {"title": "Person", "kind": "image", "asset_ids": [], "ref_role": "identity"}},
             {"id": "outfit", "type": "asset", "x": 0, "y": 500, "data": {"title": "Outfit", "kind": "image", "asset_ids": [], "ref_role": "outfit"}},
@@ -1341,10 +1356,11 @@ def template_graph(name: str) -> dict[str, Any]:
         raise SpaceError("unknown_template", f"templates: {', '.join(TEMPLATES)}")
     for i, e in enumerate(edges):
         e["id"] = f"e{i}"
-    return validate_graph({"nodes": nodes, "edges": edges})
+    return validate_graph({"nodes": nodes, "edges": edges,
+                           **({"viewport": {"x": 24, "y": 20, "zoom": 0.9}} if name == "quick_video" else {})})
 
 
-TEMPLATES = ("blank", "character_outfit_motion", "reference_film", "singing_shot", "short_film")
+TEMPLATES = ("blank", "quick_video", "character_outfit_motion", "reference_film", "singing_shot", "short_film")
 
 
 # ---------------------------------------------------------------- techniques

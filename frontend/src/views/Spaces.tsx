@@ -16,7 +16,7 @@ import {
   Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload, Search, ChevronRight, Undo2, Redo2, Save,
 } from "lucide-react";
 import {
-  ApiError, api, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
+  ApiError, api, fileUrl, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
   type SpaceNodeType, type SpaceSummary,
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
@@ -64,7 +64,7 @@ const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   clip_edit: { prompt: "", mode: "auto", quality: "draft" },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
-  text: 280, asset: 290, cast: 290, image: 340, video: 340, music: 310, list: 280, note: 260, assistant: 310, edit: 280, combine: 310,
+  text: 280, asset: 290, cast: 290, image: 340, video: 440, music: 310, list: 280, note: 260, assistant: 310, edit: 280, combine: 440,
   variations: 270, group: 620, composite: 300, clip_edit: 290,
 };
 
@@ -161,6 +161,9 @@ interface Ctx {
   open: (assetId: string, list: string[]) => void;
   touched: () => void;
   exportTechnique: (group?: string) => void;
+  videoEngines: Awaited<ReturnType<typeof api.videoEngines>> | null;
+  refreshEngines: () => void;
+  makeImage: (id: string) => void;
 }
 const SpaceCtx = createContext<Ctx>(null as unknown as Ctx);
 
@@ -259,6 +262,20 @@ function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boole
               onError={(e) => { if (!fallback) setFallback(true); else e.currentTarget.style.visibility = "hidden"; }} />}
     </button>
   );
+}
+
+function VideoResult({ id, previous, onOpen }: { id: string; previous?: string; onOpen: () => void }) {
+  const { lang } = useT();
+  const [compare, setCompare] = useState(false);
+  return <div className="sp-video-result nodrag nowheel">
+    <video key={id} src={fileUrl(id)} controls playsInline preload="metadata" aria-label={lang === "es" ? "Vídeo generado" : "Generated video"} />
+    {compare && previous && <video key={previous} src={fileUrl(previous)} controls playsInline preload="metadata" aria-label={lang === "es" ? "Toma anterior" : "Previous take"} />}
+    <div className="sp-result-actions">
+      <a className="btn sm" href={`${fileUrl(id)}?download=true`}><Download size={14} />{lang === "es" ? "Descargar" : "Download"}</a>
+      <button className="btn sm ghost" onClick={onOpen}><Maximize size={14} />{lang === "es" ? "Ampliar" : "Enlarge"}</button>
+      {previous && <button className="btn sm ghost" aria-pressed={compare} onClick={() => setCompare(v => !v)}>{lang === "es" ? "Comparar tomas" : "Compare takes"}</button>}
+    </div>
+  </div>;
 }
 
 function StatusChip({ st }: { st?: SpaceNodeState }) {
@@ -447,6 +464,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             }
           }} />
         </label>
+        {(data.kind || "image") === "image" && <button className="btn sm ghost nodrag" onClick={() => ctx.makeImage(id)}><Wand2 size={14} />{words("Crear imagen en este nodo", "Create an image in this node")}</button>}
       </>
     );
   } else if (kind === "cast") {
@@ -492,10 +510,12 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={t("spVideoPh")} />
         <div className="sp-opts nodrag">
           {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && (
-            <div className="seg">
-              <button className={data.quality === "draft" ? "on" : ""} onClick={() => set({ quality: "draft" })} title={t("spDraftHint")}>{t("spDraft")}</button>
-              <button className={data.quality !== "draft" ? "on" : ""} onClick={() => set({ quality: "final" })} title={t("spFinalHint")}>{t("spFinal")}</button>
-            </div>
+            <label className="sp-engine-select">{words("Modelo", "Model")}
+              <select aria-label={words("Modelo de vídeo", "Video model")} value={data.engine || (data.quality === "draft" ? "wan" : "auto")} onChange={e => set({ engine: e.target.value })}>
+                <option value="auto">{words("Automático", "Automatic")}{ctx.videoEngines?.auto_resolves_to ? ` · ${ctx.videoEngines.engines.find(e => e.id === ctx.videoEngines?.auto_resolves_to)?.label}` : ""}</option>
+                {(ctx.videoEngines?.engines.filter(e => e.mode === "image") || [{ id: "wan14b", label: "Wan 2.2 14B" }, { id: "wan", label: "Wan 2.2 5B" }, { id: "svd", label: "SVD XT" }]).map(e => <option key={e.id} value={e.id}>{e.label}{"available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
+              </select>
+            </label>
           )}
           {!wired.has("audio") && <label className="sp-num">{t("spLength")}<input type="number" min={1} max={wired.has("motion") ? 5 : 20} step={0.1}
             value={data.seconds ?? (wired.has("motion") ? 3 : 5)} onChange={(e) => set({ seconds: Number(e.target.value) })} />s</label>}
@@ -517,6 +537,19 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               onChange={(e) => set({ motion_start_s: Number(e.target.value) })} />s</label>
           )}
         </div>
+        {ctx.videoEngines && <div className="sp-engine-status">
+          <span>{!ctx.videoEngines.live ? words("Motor sin conexión", "Engine offline") :
+            (() => { const mode = wired.has("motion") ? "motion" : wired.has("end") ? "end" : wired.has("audio") ? "audio" : "image";
+              const selected = data.engine || (data.quality === "draft" ? "wan" : "auto");
+              const wanted = mode === "audio" ? (data.sing_engine && data.sing_engine !== "auto" ? data.sing_engine :
+                (data.seconds ?? 4.8) > 10 && ctx.videoEngines.engines.some(e => e.id === "infinitetalk" && e.available) ? "infinitetalk" : "s2v") : null;
+              const model = ctx.videoEngines.engines.find(e => mode === "image" ? e.id === (selected === "auto" ? ctx.videoEngines?.auto_resolves_to : selected) : wanted ? e.id === wanted : e.mode === mode && e.available);
+              return model?.available ? `${model.label} · ${words("Listo", "Ready")}` : words("Faltan modelos para esta entrada", "Models missing for this input"); })()}</span>
+          <button className="btn xs ghost" onClick={ctx.refreshEngines}>{words("Comprobar", "Check")}</button>
+        </div>}
+        {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && !["wan", "svd"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto")) &&
+          <label className="check nodrag"><input type="checkbox" checked={data.lightning !== false} onChange={e => set({ lightning: e.target.checked })} />{words("Generación rápida · 4 pasos", "Fast generation · 4 steps")}</label>}
+        {data.engine === "svd" && <p className="hint">{words("SVD anima la imagen sin seguir el prompt de movimiento. Usa Wan para dirigir la acción.", "SVD animates the image without following the motion prompt. Use Wan to direct the action.")}</p>}
         {["audio", "motion", "end"].filter((h) => wired.has(h)).length > 1 && <p className="sp-error" role="alert">{words("Conecta una sola guía: audio, movimiento o fotograma final.", "Connect one guide: audio, motion or end frame.")}</p>}
         <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion")
           : wired.has("end") ? t("spModeEnd") : t("spModeAnimate")}</div>
@@ -709,7 +742,8 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         {list.length > 0 && <div className={`sp-thumbs${list.length === 1 ? " sp-single-result" : ""}`}>
           {list.map((a) => (
             <div key={a} className="sp-thumb-wrap">
-              <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />
+              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} />
+                : <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />}
               <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")} aria-pressed={!ex.has(a)}
                 onClick={() => ctx.setExcluded(id, ex.has(a) ? [...ex].filter((x) => x !== a) : [...ex, a])}><Check size={11} /></button>
             </div>
@@ -774,7 +808,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           </div>
         </div>
       )}
-      <div className="sp-body">{appLabel}{body}{outputs}</div>
+      <div className="sp-body">{appLabel}{kind === "video" || kind === "combine" ? <>{outputs}{body}</> : <>{body}{outputs}</>}</div>
       <div className="sp-node-foot"><span>{t(TYPE_LABEL[kind])}</span><span>{inputs.filter(([h]) => wired.has(h)).length ? words("Entradas conectadas", "Inputs connected") : id}</span></div>
     </div>
   );
@@ -924,6 +958,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const flow = useReactFlow();
   const updateInternals = useUpdateNodeInternals();
   const [space, setSpace] = useState<Space | null>(null);
+  const engineCatalog = useAsync(() => api.videoEngines(), [spaceId]);
   const [nodes, setNodes] = useState<SpNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [state, setState] = useState<Record<string, SpaceNodeState>>({});
@@ -1008,7 +1043,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       // rather than shrinking every control to fit the available height.
       const width = node.measured.width || node.width || 340;
       const height = node.measured.height || node.height || 700;
-      const zoom = Math.max(1, Math.min(1.15, (bounds.width - 32) / width));
+      const zoom = Math.max(.5, Math.min(1.15, (bounds.width - 32) / width));
       const left = Math.max(16, (bounds.width - width * zoom) / 2);
       const top = Math.max(16, (bounds.height - height * zoom) / 2);
       const position = node.internals.positionAbsolute;
@@ -1024,10 +1059,14 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const characters = useAsync(() => api.characters(app.projectId!), [app.projectId]);
   const chars = useMemo(() => (characters.data?.items || []), [characters.data]);
 
+  const loadEpoch = useRef(0);
   const load = useCallback(async (fit = false, keepHistory = false) => {
+    const epoch = ++loadEpoch.current;
     setLoadError("");
     try {
     const s = await api.space(spaceId);
+    if (epoch !== loadEpoch.current) return;
+    try { localStorage.setItem(`prospero.workspace.${s.project_id}`, s.id); } catch { /* storage optional */ }
     setSpace(s);
     setName(s.name);
     version.current = s.version;
@@ -1062,14 +1101,15 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     for (const ms of [60, 400]) setTimeout(() => updateInternals(ids), ms);
     document.fonts?.ready.then(() => updateInternals(ids)).catch(() => undefined);
     if (fit) setTimeout(() => {
+      if (epoch !== loadEpoch.current) return;
       if (s.graph.viewport && s.graph.nodes.length) flow.setViewport(s.graph.viewport);
       else flow.fitView({ padding: 0.2, maxZoom: 1 });
     }, 30);
     if (Object.values(s.state).some((x) => x.status === "queued" || x.status === "running")) setPolling(true);
-    } catch (e) { setLoadError((e as Error).message); }
+    } catch (e) { if (epoch === loadEpoch.current) setLoadError((e as Error).message); }
   }, [spaceId, flow, updateInternals, snapshot, updateHistoryFlags, queue, draftKey, draftPrefix]);
 
-  useEffect(() => { void load(true); }, [load]);
+  useEffect(() => { void load(true); return () => { loadEpoch.current++; }; }, [load]);
 
   const flush = useCallback(async () => {
     if (version.current === null || recoveryRef.current || conflictRef.current) return false;
@@ -1235,6 +1275,20 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   };
 
   const ctx: Ctx = {
+    videoEngines: engineCatalog.data || null,
+    refreshEngines: engineCatalog.reload,
+    makeImage: (id) => {
+      const source = latest.current.nodes.find(n => n.id === id);
+      if (!source) return;
+      const ids = source.data.data.asset_ids || [];
+      const refId = newId("asset", new Set(latest.current.nodes.map(n => n.id)));
+      liveNodes(ns => [
+        ...ns.map(n => n.id === id ? { ...n, style: { ...n.style, width: WIDTH.image }, data: { kind: "image" as const, data: { ...DEFAULT_DATA.image, aspect: "16:9", count: 1 } } } : n),
+        ...(ids.length ? [{ id: refId, type: "sp" as const, position: { x: source.position.x - 410, y: source.position.y }, style: { width: WIDTH.asset }, data: { kind: "asset" as const, data: { kind: "image", asset_ids: ids } } }] : []),
+      ]);
+      if (ids.length) liveEdges(es => [...es, edgeOf({ id: `${refId}-${id}`, source: refId, target: id, target_handle: "refs" }, "asset", { kind: "image" })]);
+      markDirty();
+    },
     projectId: app.projectId!, state, characters: chars, edges, nodes,
     toast: (message) => app.toast(message, "bad"),
     appendAssets: (id, ids) => {
@@ -1409,6 +1463,11 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       <div className="space-editor">
         <div className="sp-toolbar">
           <button className="btn sm ghost" onClick={async () => { if (await flush()) onBack(); }}><ArrowLeft size={15} /> {t("spAll")}</button>
+          <button className="btn sm ghost" onClick={async () => {
+            if (!await flush()) return;
+            try { const created = await api.createSpace(app.projectId!, words("Nuevo vídeo", "New video"), "quick_video"); app.go("spaces", created.id); }
+            catch (e) { app.toast((e as Error).message, "bad"); }
+          }}><Plus size={14} />{words("Nuevo flujo", "New workflow")}</button>
           <input className="sp-name" value={name} disabled={!!recovery} onChange={(e) => { latest.current.name = e.target.value; setName(e.target.value); markDirty("name"); }}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} aria-label={t("name")} />
           <span className={`sp-save small ${save}`} role="status">{t(save === "saved" ? "spSaved" : save === "saving" ? "spSaving" : save === "error" ? "spSaveError" : "spUnsaved")}</span>
@@ -1575,8 +1634,8 @@ export function SpacesView() {
   const create = async (template: string) => {
     setBusy(true);
     try {
-      const tpl = TEMPLATES.find((x) => x.id === template)!;
-      const sp = await api.createSpace(pid, template === "blank" ? t("spUntitled") : t(tpl.title), template);
+      const tpl = TEMPLATES.find((x) => x.id === template);
+      const sp = await api.createSpace(pid, template === "quick_video" ? (lang === "es" ? "Mi vídeo" : "My video") : template === "blank" ? t("spUntitled") : t(tpl!.title), template);
       app.go("spaces", sp.id);
     } catch (e) { app.toast((e as Error).message, "bad"); }
     finally { setBusy(false); }
@@ -1608,9 +1667,10 @@ export function SpacesView() {
       {!trash && (
         <>
         <section className="sp-start-workflow">
-          <div className="sp-start-copy"><h2>{lang === "es" ? "Tu personaje. Otro vestuario. El movimiento que quieras." : "Your character. A new outfit. Your chosen movement."}</h2>
+          <div className="sp-start-copy"><h2>{lang === "es" ? "Crear vídeo con nodos" : "Create video with nodes"}</h2>
             <p>{lang === "es" ? "Combina tus referencias, revisa cada resultado y conecta la toma siguiente. Cada rama conserva sus versiones." : "Combine your references, review each result and connect the next shot. Every branch keeps its versions."}</p>
-            <button className="btn primary" disabled={busy} onClick={() => create("character_outfit_motion")}><Workflow size={17} />{lang === "es" ? "Crear flujo con referencias" : "Create a reference workflow"}</button>
+            <button className="btn primary" disabled={busy} onClick={() => create("quick_video")}><Film size={17} />{lang === "es" ? "Nuevo vídeo" : "New video"}</button>
+            <button className="btn" disabled={busy} onClick={() => create("character_outfit_motion")}><Workflow size={17} />{lang === "es" ? "Persona y vestuario" : "Person and outfit"}</button>
             <button className="btn ghost" disabled={busy} onClick={() => create("blank")}><Plus size={16} />{t("spTplBlank")}</button></div>
           <div className="sp-start-diagram" aria-label={lang === "es" ? "Persona y vestuario producen una imagen; imagen y movimiento producen un clip" : "Person and outfit create a picture; picture and motion create a clip"}>
             <div className="sp-start-sources"><span><User />{lang === "es" ? "Persona" : "Person"}</span><span><Layers2 />{lang === "es" ? "Vestuario" : "Outfit"}</span></div>

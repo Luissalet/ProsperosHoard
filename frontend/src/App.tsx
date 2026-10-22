@@ -19,6 +19,7 @@ import { ProjectsView } from "./views/Projects";
 import { OverviewView } from "./views/Overview";
 import { CastView } from "./views/Cast";
 import { StudioView } from "./views/Studio";
+import { VideoWorkspaceView } from "./views/VideoWorkspace";
 import { LibraryView } from "./views/Library";
 import { DesignerView } from "./views/Designer";
 import { AudioView } from "./views/Audio";
@@ -76,8 +77,8 @@ const PROJECT_IDS = new Set(PROJECT_SECTIONS.map((s) => s.id));
 
 function parseHash(): Route {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  if (parts[0] === "p" && parts[1]) return { projectId: parts[1], section: parts[2] || "overview", arg: parts[3] };
-  return { projectId: null, section: parts[0] || "projects", arg: parts[1] };
+  if (parts[0] === "p" && parts[1]) return { projectId: parts[1], section: parts[2] === "generate" && parts[3] && parts[3] !== "clip" ? "create" : parts[2] || "overview", arg: parts[3] };
+  return { projectId: null, section: parts[0] || "create", arg: parts[1] };
 }
 
 function readStore(key: string): string | null {
@@ -163,7 +164,8 @@ export default function App() {
     if (PROJECT_IDS.has(section)) {
       const pid = projectId || projects[0]?.id;
       if (!pid) { window.location.hash = "#/projects"; return; }
-      hash = `#/p/${pid}/${section}${arg ? `/${arg}` : ""}`;
+      const target = section === "generate" && arg && arg !== "clip" ? "create" : section;
+      hash = `#/p/${pid}/${target}${arg ? `/${arg}` : ""}`;
     } else hash = `#/${section}${arg ? `/${arg}` : ""}`;
     if (window.location.hash !== hash) window.location.hash = hash;
     else setRoute(parseHash());
@@ -171,7 +173,7 @@ export default function App() {
 
   const setProject = useCallback((id: string | null) => {
     if (!id) { window.location.hash = "#/projects"; return; }
-    window.location.hash = `#/p/${id}/overview`;
+    window.location.hash = `#/p/${id}/create`;
   }, []);
 
   // global shortcuts: G generate, / search (Library handles focus), Esc handled by overlays
@@ -207,7 +209,8 @@ export default function App() {
 
   let view;
   const needsProject = PROJECT_IDS.has(section);
-  if (needsProject && !projectId) view = <ProjectsView projects={projects} reload={loadProjects} />;
+  if (section === "create") view = <VideoWorkspaceView />;
+  else if (needsProject && !projectId) view = <ProjectsView projects={projects} reload={loadProjects} />;
   else if (section === "overview") view = <OverviewView key={projectId} />;
   else if (section === "video") view = <ProductionsView key={`${projectId}/${route.arg || ""}`} projectId={projectId!} />;
   else if (section === "spaces") view = <Suspense fallback={null}><SpacesView key={projectId} /></Suspense>;
@@ -230,10 +233,11 @@ export default function App() {
   return (
     <I18nContext.Provider value={{ t, lang }}>
       <AppContext.Provider value={ctx}>
-        <div className="app" inert={Boolean(lightbox)}>
+        <div className={`app${section === "spaces" && route.arg ? " workspace-mode" : ""}`} inert={Boolean(lightbox)}>
           <aside className="studio-rail" aria-label={t("studio")}>
             <button className="rail-logo" onClick={() => go("projects")} title={t("navProjects")}><img src="/favicon-192.png" alt={t("appName")} /></button>
-            {PROJECT_SECTIONS.filter((s) => ["generate", "spaces", "cast", "timeline", "audio", "designer"].includes(s.id)).map((s) =>
+            <button className={section === "spaces" || section === "create" ? "active" : ""} onClick={() => go("create")}><Workflow size={21} /><span>{lang === "es" ? "Lienzo" : "Canvas"}</span></button>
+            {PROJECT_SECTIONS.filter((s) => ["library", "cast", "timeline", "audio", "designer"].includes(s.id)).map((s) =>
               <button key={s.id} className={section === s.id ? "active" : ""} onClick={() => go(s.id)}
                 title={t(s.key)} disabled={!projectId && !projects.length}><s.icon size={21} /><span>{t(s.key)}</span></button>)}
             <button onClick={(e) => { toolsOpener.current = e.currentTarget; setToolsOpen(true); setToolQuery(""); }} aria-expanded={toolsOpen}><Menu size={21} /><span>{lang === "es" ? "Herramientas" : "Tools"}</span></button>
@@ -298,10 +302,13 @@ export default function App() {
                 <option value="">{t("noProject")}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
-                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", lang === "es" ? "Crear" : "Create"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
+                <button className={section === "spaces" || section === "create" ? "on" : ""} onClick={() => go("create")}>{lang === "es" ? "Lienzo de vídeo" : "Video canvas"}</button>
+                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
                   <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
               </nav>
               <div className="spacer" />
+              <a className="btn sm ghost" href="/editing/">{lang === "es" ? "Montaje" : "Editing"}</a>
+              <a className="btn sm ghost workspace-modules" href="/?manage=1">{lang === "es" ? "Módulos" : "Modules"}</a>
               <div className="studio-vitals"><Vitals /></div>
               {demo && <span className="pill gold" title={t("demoHint")}>{t("demoBadge")}</span>}
               <JobsMenu />

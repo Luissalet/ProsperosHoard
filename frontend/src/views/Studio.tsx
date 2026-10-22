@@ -41,7 +41,7 @@ export function StudioView() {
       <span className="spacer" />
       <button onClick={() => app.go("spaces")}>{lang === "es" ? "Spaces · Crear con nodos" : "Spaces · Create with nodes"}<ArrowRight size={15} /></button>
     </div>
-    {mode === "image" ? <GenerateView onAnimate={(asset) => { setStart(asset); setMode("video"); }} />
+    {mode === "image" ? <GenerateView onAnimate={(asset) => app.go("create", asset.id)} />
       : <VideoStudio key={app.route.arg || "free"} initial={start} onImage={() => setMode("image")} />}
   </>;
 }

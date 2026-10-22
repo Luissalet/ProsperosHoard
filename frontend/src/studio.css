@@ -278,7 +278,30 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) { .tools-drawer { animation: none; } }
 
 /* Spaces shares the review bench: material → instruction → result. */
-.space-editor { margin: -20px; height: calc(100dvh - 64px); min-height: 500px; }
+.workspace-mode .studio-tabs { display: none; }
+.workspace-mode .studio-content { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.workspace-mode .space-editor { margin: 0; min-height: 0; flex: 1; height: 100%; }
+.workspace-mode .sp-canvas { min-height: 260px; }
+.workspace-mode .sp-toolbar { padding: 8px 12px; gap: 6px; }
+.workspace-mode .studio-vitals .vitals-gpus, .workspace-mode .studio-vitals .vitals-host, .workspace-mode .studio-vitals .vitals-total { display: none; }
+.workspace-mode .studio-vitals { flex: 0 0 auto; }
+.workspace-mode .sp-port { min-height: 20px; }
+.sp-video-result { width: 100%; }
+.sp-video-result video { display: block; width: 100%; max-height: 280px; aspect-ratio: 16 / 9; background: #0c090c; object-fit: contain; border-radius: 6px; }
+.sp-video-result video + video { margin-top: 10px; }
+.sp-result-actions { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
+.sp-outputs:has(.sp-video-result) .sp-thumbs { display: block; }
+.sp-outputs:has(.sp-video-result) .sp-thumb-wrap { width: 100%; margin-bottom: 12px; }
+.sp-engine-select { display: grid; gap: 4px; width: 100%; }
+.sp-engine-status { display: flex; gap: 8px; justify-content: space-between; align-items: center; color: var(--text-2); font-size: 12px; margin-bottom: 10px; }
+.workspace-opening { padding: 24px; }
+@media (max-width: 700px) {
+  .workspace-mode .topbar { min-height: 56px; }
+  .workspace-mode .studio-vitals, .workspace-mode .workspace-modules { display: none; }
+  .workspace-mode .sp-toolbar .sp-name { flex-basis: 50%; }
+  .workspace-mode .sp-canvas-guide { display: none; }
+}
+.space-editor { margin: -20px; height: 100%; min-height: 500px; }
 .sp-toolbar { flex-wrap: wrap; padding: 10px 16px; gap: 8px; }
 .sp-name { width: 210px; border-color: transparent; background: transparent; }
 .sp-save { min-width: 0; font-size: 11px; }

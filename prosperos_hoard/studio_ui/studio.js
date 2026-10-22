@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 const labels = {generation:'Generación',editing:'Montaje'};
+$('management').hidden = !new URLSearchParams(location.search).has('manage');
 let selected;
 async function api(path, method='GET', body) {
   const response = await fetch('/api/studio/' + path, {method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
@@ -9,6 +10,9 @@ function node(tag, text, parent) {const element=document.createElement(tag);if(t
 function fail(error){$('error').textContent=error.message;}
 async function modules(){
   const state=await api('modules');$('modules').replaceChildren();
+  if(!new URLSearchParams(location.search).has('manage') && state.modules.some(m=>m.id==='generation'&&m.enabled)){
+    location.replace('/generation/#/create');return;
+  }
   for(const module of state.modules){const row=node('div',null,$('modules'));node('strong',labels[module.id],row);node('span',module.phase==='on'?'Activo':module.phase==='stopping'?'Cierre pendiente':'Apagado',row);
     const label=node('label',null,row),automatic=node('input',null,label);automatic.type='checkbox';automatic.checked=module.automatic;label.append(' Reanudar trabajos anteriores');
     const button=node('button',module.phase==='stopping'?'Reintentar apagado':module.enabled?'Apagar':'Activar',row);button.onclick=async()=>{button.disabled=true;$('error').textContent='';try{await api('modules/'+module.id,'PUT',{enabled:module.phase!=='stopping'&&!module.enabled,automatic:automatic.checked});await modules();}catch(e){fail(e);await modules();}};
@@ -28,4 +32,5 @@ async function openProject(id){selected=id;const p=await api('projects/'+id);con
   for(const transfer of p.transfers){const line=node('p','Corte recibido · '+transfer.receipt.sha256.slice(0,12)+' · ',area);const download=node('a','Descargar XML editable',line);download.href='/api/studio/artifacts/'+id+'/'+transfer.receipt.sha256;const skipped=transfer.receipt.result.skipped||[];if(skipped.length)line.append(' · Medios pendientes: '+skipped.map(x=>x.name).join(', '));}
 }
 $('new-project').onsubmit=async event=>{event.preventDefault();try{const p=await api('projects','POST',{title:new FormData(event.target).get('title')});event.target.reset();await projects();await openProject(p.id);}catch(e){fail(e);}};
+$('open-workspace').onclick=async()=>{const button=$('open-workspace');button.disabled=true;$('error').textContent='';$('opening').textContent='Abriendo el lienzo…';try{await api('modules/generation','PUT',{enabled:true,automatic:false});location.href='/generation/#/create';}catch(e){fail(e);button.disabled=false;$('opening').textContent='';}};
 Promise.all([modules(),projects()]).catch(fail);
