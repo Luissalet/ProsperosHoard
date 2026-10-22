@@ -290,7 +290,7 @@ def extract_style_profile_from_video(
             "notes": "",
         })
 
-    profile_id = f"sp_{new_id()[:12]}"
+    profile_id = f"sp_{new_id()}"
     display_name = name.strip() or f"Style from {path.stem}"
 
     profile = {
@@ -340,7 +340,7 @@ def extract_style_profile_from_video(
 
 
 def save_style_profile(data_dir: Path, profile: dict[str, Any]) -> dict[str, Any]:
-    pid = _profile_id(profile.get("id") or f"sp_{new_id()[:12]}")
+    pid = _profile_id(profile.get("id") or f"sp_{new_id()}")
     profile["id"] = pid
     profile["updated_at"] = now_iso()
     out_dir = style_profiles_dir(data_dir)
@@ -512,6 +512,7 @@ def apply_style_profile_to_production(data_dir: Path, slug: str, profile_or_id: 
                 prod._set_span(shots[j], prod._parse_span({"start_s": round(start, 3), "end_s": round(finish, 3)}, shots[j]["key"]))
                 start = finish
             begin, cursor = i + 1, span[1] if span else duration
+        timeline_changed = (spec.get("timeline", {}).get("options", {}).get("duration_s") != duration)
         spec["shots"] = shots
         spec.setdefault("timeline", {}).setdefault("options", {})["duration_s"] = duration
         if spec.get("song") and not (state["done"].get("song") or {}).get("song_asset_id") and not spec["song"].get("asset_id"):
@@ -531,7 +532,7 @@ def apply_style_profile_to_production(data_dir: Path, slug: str, profile_or_id: 
                 (clips.get("chained") or {}).pop(ck, None)
         state["style_profile"] = {"id": profile.get("id"), "name": profile.get("name"), "applied_at": now_iso(),
                                   "target_duration_s": duration, "shot_count": len(shots)}
-        if changed:
+        if changed or timeline_changed:
             prod._requeue(state, f"Applied style profile to {len(changed)} shots")
         prod.log(state, "style_profile", "applied", profile_id=profile.get("id"), keys=changed)
         prod.save_state(data_dir, state)

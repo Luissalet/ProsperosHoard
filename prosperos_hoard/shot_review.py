@@ -110,7 +110,7 @@ def add_shot_comment(
         current_rev = int(revs.get(key_str, 1))
         revs[key_str] = current_rev
 
-        comment_id = f"c_{new_id()[:10]}"
+        comment_id = f"c_{new_id()}"
         comment = {
             "id": comment_id,
             "shot_key": key_str,
