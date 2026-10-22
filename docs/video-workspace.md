@@ -52,5 +52,12 @@ Ti. Both preserved the subject and performed the action in inspected frames.
 These are individual runs, not a general performance guarantee. Further scenes
 are recorded in the task's QA evidence, not inferred from the UI demo.
 
+The same walking source and seed took 541.43 s with Wan 5B (97 frames).
+It also walked and waved, with less stable hand detail. The existing Blacephalon
+reference remained recognizable in the four-step 14B clip (211.94 s rendering,
+331.35 s including queueing): arm and body motion succeeded, while the requested
+half spin did not. These checks support the fast 14B default; they do not promise
+exact choreography or universal character consistency.
+
 Style/review fixes retain unique full IDs and invalidate montage on a target
 duration change even when all shots are approved; approved clips stay intact.
