@@ -1076,6 +1076,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         try:
             with gpu_lease.hold(job, backend.vram_estimates_mb, on_gpu=assigned,
                                 gpu=backend.comfy_gpu() if gpu_lease.enabled() else None,
+                                resolve_template_class=lambda name: comfy_driver.load_template(name, store.data_dir)[1].get("vram_class"),
                                 resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto")) as held:
                 yield held
         finally:

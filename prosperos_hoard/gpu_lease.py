@@ -40,14 +40,23 @@ def enabled() -> bool:
     return os.environ.get(ENV, "1").strip().lower() not in ("0", "off", "false", "no")
 
 
-def vram_class(job: dict[str, Any], resolve_image_engine: Optional[Callable[[], str]] = None) -> str:
+def vram_class(job: dict[str, Any], resolve_image_engine: Optional[Callable[[], str]] = None,
+               resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> str:
     params = job.get("params") or {}
     if job["type"] in ("retake", "clip_edit"):
         return "wan14b" if params.get("quality") == "final" else "wan"
     if job["type"] == "edit_image" and params.get("operation") in EDIT_CLASS:
         return EDIT_CLASS[params["operation"]]
-    if job["type"] == "generate_image" and params.get("template") in TEMPLATE_CLASS:
-        return TEMPLATE_CLASS[params["template"]]
+    if job["type"] == "generate_image" and params.get("template"):
+        if resolve_template_class:
+            try:
+                declared = resolve_template_class(params["template"])
+                if declared:
+                    return declared
+            except Exception:  # no usable spec: retain the existing model-family fallback
+                pass
+        if params["template"] in TEMPLATE_CLASS:
+            return TEMPLATE_CLASS[params["template"]]
     if job["type"] == "generate_image":
         picked = str(params.get("engine") or "auto")
         if picked != "auto":
@@ -59,8 +68,9 @@ def vram_class(job: dict[str, Any], resolve_image_engine: Optional[Callable[[], 
     return TYPE_CLASS.get(job["type"], "sdxl")
 
 
-def estimate_mb(job: dict[str, Any], vram_estimates: dict[str, int], resolve_image_engine: Optional[Callable[[], str]] = None) -> int:
-    return int(vram_estimates.get(vram_class(job, resolve_image_engine), DEFAULT_MB))
+def estimate_mb(job: dict[str, Any], vram_estimates: dict[str, int], resolve_image_engine: Optional[Callable[[], str]] = None,
+                resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> int:
+    return int(vram_estimates.get(vram_class(job, resolve_image_engine, resolve_template_class), DEFAULT_MB))
 
 
 def _purpose(job: dict[str, Any]) -> str:
@@ -70,14 +80,14 @@ def _purpose(job: dict[str, Any]) -> str:
 @contextlib.contextmanager
 def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, lease_fn: Optional[Callable[..., Any]] = None,
          resolve_image_engine: Optional[Callable[[], str]] = None, on_gpu: Optional[Callable[[str, Optional[int]], None]] = None,
-         gpu: Optional[int] = None) -> Iterator[Any]:
+         gpu: Optional[int] = None, resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> Iterator[Any]:
     """Hold the hub's lease while the body runs (nothing when it is off or cannot be had). ``on_gpu(job_id, gpu)`` hears which card."""
     if not enabled():
         yield None
         return
     lease_cm: Any = None
     try:
-        mb = estimate_mb(job, vram_estimates(), resolve_image_engine)
+        mb = estimate_mb(job, vram_estimates(), resolve_image_engine, resolve_template_class)
         lease_cm = (lease_fn or default_lease)(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S,
                                               **({"gpu": gpu} if gpu is not None else {}))
         lease_cm.__enter__()
