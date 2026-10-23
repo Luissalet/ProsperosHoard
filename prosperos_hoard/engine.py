@@ -17,6 +17,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
+from fractions import Fraction
 from typing import Any, Callable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -1223,20 +1224,42 @@ def frame_at(store: Store, asset_id: str, at_s: float, project_id: Optional[str]
     exe = ffmpeg_path()
     if not exe:
         raise EngineError("no_ffmpeg", "ffmpeg is needed to take a frame out of a video")
+    try:
+        at_s = float(at_s)
+    except (TypeError, ValueError):
+        raise EngineError("bad_parameter", "at_s must be a finite, non-negative time") from None
     duration = float(asset.get("duration_s") or 0)
-    if at_s < 0 or (duration and at_s >= duration):
+    if not math.isfinite(at_s) or at_s < 0 or (duration and at_s >= duration):
         raise EngineError("bad_parameter", f"at_s must be between 0 and the clip's length ({duration:.2f} s)")
+    src = store.data_dir / asset["file_path"]
+    # Decode timestamps in ffmpeg's playback time base, including VFR. The
+    # muxer's cutoff can log a later frame: compare PTS explicitly, never FPS
+    # or the last log line. This also works with ffmpeg-only installations.
+    probe = procutil.run([exe, "-nostdin", "-hide_banner", "-nostats", "-loglevel", "info",
+                          "-t", str(at_s + 1), "-i", str(src), "-map", "0:v:0", "-vf", "showinfo",
+                          "-an", "-sn", "-dn", "-f", "null", "-"], timeout=90, text=True)
+    log = probe.stderr or ""
+    base = re.search(r"config in time_base:\s*(\d+)/(\d+)", log)
+    frames = re.findall(r"\bn:\s*(\d+)\s+pts:\s*(-?\d+)\s+pts_time:", log)
+    if probe.returncode or not base or not frames:
+        raise EngineError("no_frames", "no frame timestamps could be read from that video")
+    time_base = Fraction(int(base[1]), int(base[2]))
+    requested = Fraction(str(at_s))
+    presented = [(int(n), int(pts) * time_base) for n, pts in frames if int(pts) * time_base <= requested]
+    if not presented:
+        raise EngineError("no_frames", "no frame could be read at that time")
+    index, frame_time = max(presented, key=lambda item: (item[1], item[0]))
     tmp_dir = store.data_dir / "tmp" / "frames"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp = tmp_dir / f"{new_id('fr')}.png"
-    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(store.data_dir / asset["file_path"]), "-vf",
-                  f"select=gte(t\\,{float(at_s):.4f})", "-frames:v", "1", str(tmp)], timeout=90)
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-i", str(src), "-map", "0:v:0", "-vf",
+                  f"select=eq(n\\,{index})", "-frames:v", "1", str(tmp)], timeout=90)
     if not tmp.is_file() or not tmp.stat().st_size:
         raise EngineError("no_frames", "no frame could be read at that time")
     try:
         return import_asset(store, project_id or asset["project_id"], tmp, "image",
                             original_name=f"{Path(asset.get('name') or 'clip').stem} frame {at_s:.2f}s.png",
-                            recipe={"operation": "frame", "at_s": round(float(at_s), 3), "backend": "local",
+                            recipe={"operation": "frame", "at_s": at_s, "frame_time_s": float(frame_time), "backend": "local",
                                     "input_asset_ids": [asset_id], "derived_from": asset_id}, source="derived")
     finally:
         tmp.unlink(missing_ok=True)

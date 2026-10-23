@@ -416,8 +416,8 @@ def test_frame_node_extracts_chosen_time_locally_and_reuses_it(client, tmp_path)
     pid = c.post("/api/projects", json={"name": "Frame time"}).json()["id"]
     store = _store(client)
     clip_path = tmp_path / "two-colours.mp4"
-    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x96:d=1:r=24",
-                  "-f", "lavfi", "-i", "color=c=blue:s=160x96:d=1:r=24", "-filter_complex",
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x96:d=1:r=4",
+                  "-f", "lavfi", "-i", "color=c=blue:s=160x96:d=1:r=4", "-filter_complex",
                   "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-pix_fmt", "yuv420p", str(clip_path)], timeout=30)
     clip = engine.import_asset(store, pid, clip_path, "video")
     original_bytes = (store.data_dir / clip["file_path"]).read_bytes()
@@ -456,6 +456,12 @@ def test_frame_node_extracts_chosen_time_locally_and_reuses_it(client, tmp_path)
     assert len(changed["state"]["still"]["runs"]) == 2
     assert (store.data_dir / clip["file_path"]).read_bytes() == original_bytes
     assert spaces.estimate(store, sp["id"], mode="node", node_ids=["still"])["renders"] == 0
+    # The visible frame covers its interval; do not take the next frame or
+    # fail between the last frame's PTS and the duration.
+    for at, expected_pts, channel in [(0.99, 0.75, 0), (1.99, 1.75, 2)]:
+        still = engine.frame_at(store, clip["id"], at)
+        px = Image.open(store.data_dir / still["file_path"]).convert("RGB").getpixel((20, 20))
+        assert px[channel] > 150 and still["recipe"]["frame_time_s"] == expected_pts
 
 
 @pytest.mark.parametrize("at", [-1, "NaN", "Infinity", None, "invalid", 2])
@@ -471,3 +477,28 @@ def test_frame_node_rejects_invalid_times_before_extraction(client, at):
     with pytest.raises(spaces.SpaceError, match="time|outside") as exc:
         spaces.plan_node(store, graph, {}, "still")
     assert exc.value.code == "bad_time"
+
+
+def test_frame_time_uses_variable_timestamps_with_a_nonzero_stream_start(client, tmp_path):
+    from PIL import Image
+    from prosperos_hoard import engine, procutil
+    from prosperos_hoard.backend import ffmpeg_path
+
+    exe = ffmpeg_path()
+    if not exe:
+        pytest.skip("no ffmpeg")
+    store = _store(client)
+    pid = store.create_project("Variable frame intervals")["id"]
+    for i, color in enumerate(("red", "green", "blue")):
+        Image.new("RGB", (96, 64), color).save(tmp_path / f"vfr{i}.png")
+    (tmp_path / "frames.txt").write_text("file 'vfr0.png'\nduration 0.3\nfile 'vfr1.png'\nduration 0.9\nfile 'vfr2.png'\nduration 0.4\nfile 'vfr2.png'\n", encoding="utf-8")
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "frames.txt",
+                  "-fps_mode", "vfr", "-vf", "setpts=PTS+5/TB", "-pix_fmt", "yuv420p", "vfr.mp4"], cwd=tmp_path, timeout=30)
+    clip = engine.import_asset(store, pid, tmp_path / "vfr.mp4", "video")
+    # Input PTS are shifted by 5s; ffmpeg's playback origin is normalized.
+    # The .32s green frame lasts until1.2s, unlike any constant-FPS rounding.
+    for at, expected_pts, channel in [(0.1, 0, 0), (0.4, .32, 1), (1.15, .32, 1), (1.3, 1.2, 2)]:
+        out = engine.frame_at(store, clip["id"], at)
+        pixel = Image.open(store.data_dir / out["file_path"]).convert("RGB").getpixel((20, 20))
+        assert pixel[channel] > 100 and pixel[channel] > max(v for i, v in enumerate(pixel) if i != channel) + 80
+        assert out["recipe"]["frame_time_s"] == pytest.approx(expected_pts)
