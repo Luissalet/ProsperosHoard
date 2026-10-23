@@ -1012,10 +1012,12 @@ The seventh TTS adapter connects to an already-running local [Yovoice](https://g
 
 Former MCP and Hub identities can use the incorporated cold compatibility adapters without the retired repositories. See [native connections](docs/NATIVE-CONNECTIONS.md). Modules still require explicit activation.
 
-The docked node library groups27 shortcuts by references, generation, transforms,
+The docked node library groups28 shortcuts by references, generation, transforms,
 assembly and organization. Search accepts Spanish/English and ignores accents.
 Transfer motion, Lip sync and Between two frames add source nodes and connections
 without rendering; one undo removes the addition. Combine lists clip inputs with
-up/down ordering. All15 native types and their model requirements remain.
+up/down ordering. The16 native types include Extract frame: choose a time or use
+the source playhead, extract a still locally and connect it as a reference or
+the start of another shot. No model is needed and the original clip stays intact.
 
 For LTX image-to-video, **Refine · 2× resolution** optionally adds native latent upscaling and three refinement steps after the eight-step base. It doubles both dimensions, needs `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` in a native `latent_upscale_models` path, and records the extra stage in the take recipe. The base mode remains the default; refinement does not guarantee correct anatomy, identity or camera motion. API/MCP callers can select `template="ltx23_i2v_hq"`; Spaces accepts `engine="ltx23", refine=true`.
