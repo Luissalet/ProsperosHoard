@@ -954,6 +954,10 @@ and existing technique. Clip duration controls the real workflow; excess
 references and conflicting guides produce actionable errors. See the
 [research and local evidence](docs/PROSPERO_STUDIO_RESEARCH_2026-10-05.md).
 
+Connecting a final frame keeps the clip's fast/full sampling choice: four
+steps by default, or the full twenty-step schedule with fast generation off.
+The same setting is preserved when the graph is run through `studio_spaces`.
+
 ## License
 
 MIT - see [LICENSE](LICENSE). Bundled fonts keep their own licences: SIL
