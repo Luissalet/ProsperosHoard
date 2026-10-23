@@ -3,7 +3,7 @@
 // state (statuses, outputs, runs) is what runs write and is polled while
 // something runs. Saves are versioned: a save over a newer version (an agent
 // edited the space meanwhile) reloads instead of overwriting it.
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useReactFlow,
   type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type OnConnectEnd,
@@ -13,7 +13,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Aperture, ArrowLeft, AudioLines, Check, Copy, Film, Image as ImageIcon, LayoutTemplate, ListChecks, Loader2, Maximize,
   Music, Play, Plus, RotateCcw, StickyNote, Trash2, Type, User, Workflow, X, FastForward, Bot, ScanLine, Layers, Square, Captions,
-  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload, Search, ChevronRight, Undo2, Redo2, Save,
+  Grid3x3, Frame, LogIn, Star, AppWindow, Clock, Wand2, Layers2, ListEnd, Download, Upload, Search, ChevronRight, ChevronUp, ChevronDown, Undo2, Redo2, Save,
 } from "lucide-react";
 import {
   ApiError, api, fileUrl, type Character, type Space, type SpaceApp, type SpaceEdge, type SpaceEstimate, type SpaceGraph, type SpaceNodeState,
@@ -24,6 +24,7 @@ import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "..
 import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
 import { EditHistory, SaveQueue, freeNodePosition } from "../spaceEditing";
+import { NODE_TOOLS, TOOL_SECTIONS, searchNodeTools, type ToolChoice } from "../nodeTools";
 
 // ------------------------------------------------------------ the node model
 
@@ -154,6 +155,7 @@ interface Ctx {
   remove: (id: string) => void;
   duplicate: (id: string) => void;
   continueVideo: (id: string) => void;
+  moveClipInput: (id: string, edgeId: string, by: number) => void;
   setExcluded: (id: string, excluded: string[]) => void;
   pickRun: (id: string, outputs: string[]) => void;
   pickAssets: (id: string, kind: string) => void;
@@ -179,28 +181,40 @@ const NODE_PURPOSE: Record<SpaceNodeType, [string, string]> = {
   clip_edit: ["Reimaginar un vídeo existente", "Reimagine an existing video"],
 };
 
-function NodePalette({ choices, onPick, onClose, connected }: {
-  choices: { kind: SpaceNodeType; handle?: string }[]; onPick: (choice: { kind: SpaceNodeType; handle?: string }) => void; onClose: () => void; connected: boolean;
+function NodePalette({ choices, onPick, onClose, connected, library = false }: {
+  choices: ToolChoice[]; onPick: (choice: ToolChoice) => void; onClose: () => void; connected: boolean; library?: boolean;
 }) {
   const { t, lang } = useT();
   const [query, setQuery] = useState("");
-  const found = choices.filter((c) => `${t(TYPE_LABEL[c.kind])} ${NODE_PURPOSE[c.kind][lang === "es" ? 0 : 1]} ${c.kind}`.toLowerCase().includes(query.toLowerCase()));
-  return <div className="sp-palette" role="dialog" aria-label={lang === "es" ? "Añadir nodo" : "Add node"} onKeyDown={(e) => {
+  const [section, setSection] = useState("all");
+  const found = searchNodeTools(choices, query, section);
+  const wi = lang === "es" ? 0 : 1;
+  return <div className={`sp-palette${library ? " sp-library-palette" : ""}`} role={library ? "region" : "dialog"} aria-label={lang === "es" ? "Biblioteca de nodos" : "Node library"} onKeyDown={(e) => {
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
     const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>(".sp-palette-option"));
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); buttons[(current + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus(); }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && buttons.length && (e.target instanceof HTMLInputElement || current >= 0)) {
+      e.preventDefault(); buttons[current < 0 ? (e.key === "ArrowDown" ? 0 : buttons.length - 1) : (current + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+    }
     if (e.key === "Enter" && e.target instanceof HTMLInputElement && found.length) { e.preventDefault(); onPick(found[0]); }
   }}>
-    <div className="sp-palette-head"><strong>{connected ? t("spMenuWire") : t("spMenuAdd")}</strong><button className="btn sm icon ghost" onClick={onClose} aria-label={t("close")}><X size={16} /></button></div>
+    <div className="sp-palette-head"><strong>{connected ? t("spMenuWire") : lang === "es" ? "Nodos" : "Nodes"}</strong><button className="btn sm icon ghost" onClick={onClose} aria-label={t("close")}><X size={16} /></button></div>
     <label className="sp-palette-search"><Search size={16} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
       aria-label={lang === "es" ? "Buscar nodo" : "Search nodes"} placeholder={lang === "es" ? "Buscar una herramienta…" : "Search a tool…"} /></label>
-    <div className="sp-palette-results">{found.map((choice) => {
-      const Icon = TYPE_ICON[choice.kind];
-      return <button className="sp-palette-option" key={`${choice.kind}-${choice.handle || ""}`} onClick={() => onPick(choice)}>
-        <Icon size={19} /><span><strong>{t(TYPE_LABEL[choice.kind])}</strong><small>{NODE_PURPOSE[choice.kind][lang === "es" ? 0 : 1]}</small></span><ChevronRight size={14} />
-      </button>;
-    })}{!found.length && <p className="small muted">{t("spMenuNone")}</p>}</div>
+    <div className="sp-tool-filters" aria-label={lang === "es" ? "Funciones de los nodos" : "Node functions"}>
+      {[{ id: "all", label: ["Todos", "All"] }, ...TOOL_SECTIONS].map(s => <button key={s.id} className={section === s.id ? "on" : ""}
+        aria-pressed={section === s.id} onClick={() => setSection(s.id)}>{s.label[wi]}</button>)}
+    </div>
+    <div className="sp-palette-results">{TOOL_SECTIONS.map(s => {
+      const items = found.filter(c => c.tool?.section === s.id);
+      return items.length ? <section className="sp-tool-section" key={s.id} aria-label={s.label[wi]}>
+        <h3>{s.label[wi]}</h3>{items.map(choice => {
+          const Icon = choice.kind === "asset" ? (choice.data?.kind === "video" ? Film : choice.data?.kind === "audio" ? AudioLines : ImageIcon) : TYPE_ICON[choice.kind];
+          return <button className="sp-palette-option" key={`${choice.tool?.id}-${choice.handle || ""}`} onClick={() => onPick(choice)}>
+            <Icon size={18} /><span><strong>{choice.tool?.label[wi] || t(TYPE_LABEL[choice.kind])}</strong><small>{choice.tool?.hint[wi]}</small></span><Plus size={14} />
+          </button>;
+        })}</section> : null;
+    })}{!found.length && <p className="sp-palette-empty" role="status">{lang === "es" ? "No hay nodos que coincidan. Prueba otra búsqueda o elige Todos." : "No matching nodes. Try another search or choose All."}</p>}</div>
     <p className="sp-palette-help">{lang === "es" ? "↑ ↓ para elegir · Intro para añadir · Esc para cerrar" : "↑ ↓ to choose · Enter to add · Esc to close"}</p>
   </div>;
 }
@@ -324,14 +338,16 @@ function StatusChip({ st }: { st?: SpaceNodeState }) {
   );
 }
 
-function PromptBox({ value, onChange, kind, placeholder, rows = 3 }: {
-  value: string; onChange: (s: string) => void; kind: "image" | "video" | "music"; placeholder: string; rows?: number;
+function PromptBox({ value, onChange, kind, placeholder, rows = 3, label }: {
+  value: string; onChange: (s: string) => void; kind: "image" | "video" | "music"; placeholder: string; rows?: number; label?: string;
 }) {
+  const inputId = useId();
   const ref = useRef<HTMLTextAreaElement>(null);
   const slash = useSlashMenu(value, onChange, ref, { clips: kind === "video" });
   return (
     <div className="sp-prompt slash-wrap">
-      <textarea ref={ref} className="nodrag nowheel" rows={rows} value={value} placeholder={placeholder}
+      {label && <label className="sp-field-label" htmlFor={inputId}>{label}</label>}
+      <textarea id={inputId} aria-label={label || placeholder} ref={ref} className="nodrag nowheel" rows={rows} value={value} placeholder={placeholder}
         onChange={(e) => { onChange(e.target.value); if (kind !== "music") slash.update(e.target.value, e.target.selectionStart); }}
         onKeyDown={(e) => { slash.onKeyDown(e); }} onBlur={() => setTimeout(slash.close, 150)} />
       {slash.menu}
@@ -519,7 +535,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
   } else if (kind === "image") {
     body = (
       <>
-        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="image" placeholder={t("spImagePh")} />
+        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="image" label={words("Descripción de la imagen", "Image description")} placeholder={t("spImagePh")} />
         <div className="sp-opts nodrag">
           <select value={data.aspect || "1:1"} onChange={(e) => set({ aspect: e.target.value })} title={t("spAspect")}>
             {["1:1", "16:9", "9:16", "2:3", "3:2", "4:5"].map((a) => <option key={a}>{a}</option>)}
@@ -596,9 +612,8 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>}
           </div>
           <p className="hint">{words("1 es el valor de entrenamiento. Una fuerza mayor no garantiza más fidelidad; compara las tomas.", "1 is the training value. Higher strength does not guarantee better fidelity; compare the takes.")}</p>
-          <div className="small muted">{words("Aspecto del personaje y escenario", "Character appearance and setting")}</div>
         </>}
-        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={wired.has("motion")
+        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" label={wired.has("motion") ? words("Personaje y escenario", "Character and setting") : words("Acción del plano", "Shot action")} placeholder={wired.has("motion")
           ? words("Describe la apariencia y el lugar; el vídeo conectado aporta el movimiento.", "Describe the appearance and setting; the connected video supplies the movement.") : t("spVideoPh")} />
         {wired.has("motion") && <label className="small">{words("Movimiento de la guía", "Guide movement")}
           <textarea className="nodrag nowheel" rows={2} value={data.motion_prompt || ""}
@@ -739,9 +754,21 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
       </>
     );
   } else if (kind === "combine") {
+    const clipInputs = ctx.edges.filter(e => e.target === id && e.targetHandle === "clips");
     body = (
       <>
         <div className="small muted">{t("spCombineHint")}</div>
+        <ol className="sp-clip-order nodrag" aria-label={words("Orden del montaje", "Assembly order")}>
+          {clipInputs.map((edge, i) => {
+            const source = ctx.nodes.find(n => n.id === edge.source);
+            const title = source?.data.data.title || (source ? t(TYPE_LABEL[source.data.kind]) : edge.source);
+            return <li key={edge.id}><span className="sp-clip-number">{i + 1}</span><span className="sp-clip-title">{title}</span>
+              <button className="btn xs icon ghost" disabled={i === 0} aria-label={`${words("Subir", "Move up")}: ${title}`} onClick={() => ctx.moveClipInput(id, edge.id, -1)}><ChevronUp size={15} /></button>
+              <button className="btn xs icon ghost" disabled={i === clipInputs.length - 1} aria-label={`${words("Bajar", "Move down")}: ${title}`} onClick={() => ctx.moveClipInput(id, edge.id, 1)}><ChevronDown size={15} /></button>
+            </li>;
+          })}
+        </ol>
+        {!clipInputs.length && <p className="hint">{words("Conecta las salidas de tus clips a la entrada clips. Después podrás ordenar el montaje aquí.", "Connect your clip outputs to the clips input. Then arrange them here.")}</p>}
         {wired.has("audio") && <div className="sp-opts nodrag">
           <label className="sp-num" title={t("spAudioStartHint")}>{t("spFrom")}<input type="number" min={0} step={0.1} value={data.audio_start_s ?? 0}
             onChange={(e) => set({ audio_start_s: Number(e.target.value) })} />s</label>
@@ -831,9 +858,13 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           onChange={(e) => set({ title: e.target.value })} />
         <StatusChip st={st} />
       </div>
+      <p className="sp-node-purpose">{kind === "video" ? wired.has("audio") ? words("Imagen y audio → sincronización labial", "Image and audio → lip sync")
+        : wired.has("motion") ? words("Imagen y vídeo guía → movimiento", "Image and guide video → motion")
+        : wired.has("end") ? words("Fotograma inicial y final → clip", "Start and end frame → clip")
+        : words("Imagen inicial y acción → clip", "Start image and action → clip") : NODE_PURPOSE[kind][lang === "es" ? 0 : 1]}</p>
       <div className="sp-node-actions nodrag">
         {runnable && <>
-          <button className="btn xs ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} />{words("Generar", "Generate")}</button>
+          <button className="btn xs ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} />{kind === "combine" ? words("Montar", "Assemble") : ["edit", "clip_edit", "composite"].includes(kind) ? words("Aplicar", "Apply") : words("Generar", "Generate")}</button>
           <button className="btn xs icon ghost nodrag" title={t("spRunUpto")} disabled={busy} onClick={() => ctx.run(id, "upto")}><ListEnd size={13} /></button>
           <button className="btn xs icon ghost nodrag" title={t("spRunDown")} disabled={busy} onClick={() => ctx.run(id, "downstream")}><FastForward size={13} /></button>
         </>}
@@ -848,10 +879,12 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         <div className="sp-ports">
           <div className="sp-ins">
             {inputs.map(([h, port, many]) => (
-              <div key={h} className="sp-port in">
-                <Handle type="target" position={Position.Left} id={h} style={{ background: PORT_COLOR[port] }} />
+              <div key={h} className={`sp-port in${wired.has(h) ? " connected" : ""}`} title={ctx.edges.filter(e => e.target === id && e.targetHandle === h).map(e => {
+                const source = ctx.nodes.find(n => n.id === e.source); return source?.data.data.title || (source ? t(TYPE_LABEL[source.data.kind]) : e.source);
+              }).join(", ")}>
+                <Handle type="target" position={Position.Left} id={h} aria-label={`${words("Entrada", "Input")}: ${t(`spIn_${h}` as MessageKey)}`} style={{ background: PORT_COLOR[port] }} />
                 <span style={{ color: PORT_COLOR[port] }}>{t(`spIn_${h}` as MessageKey)}</span>
-                {!many && <span className="sp-one">1</span>}
+                {wired.has(h) ? <Check size={12} aria-label={words("Conectada", "Connected")} /> : !many && <span className="sp-one">1</span>}
               </div>
             ))}
           </div>
@@ -859,7 +892,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             {outs.map(([h, port]) => (
               <div key={h} className="sp-port out">
                 <span style={{ color: PORT_COLOR[port] }}>{t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}</span>
-                <Handle type="source" position={Position.Right} id={h} style={{ background: PORT_COLOR[port] }} />
+                <Handle type="source" position={Position.Right} id={h} aria-label={`${words("Salida", "Output")}: ${t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}`} style={{ background: PORT_COLOR[port] }} />
               </div>
             ))}
           </div>
@@ -1045,6 +1078,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const recoveredKey = useRef(draftKey);
   const [picking, setPicking] = useState<{ id: string; kind: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; fx: number; fy: number; from?: { node: string; handle: string; type: "source" | "target" } } | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(() => window.matchMedia("(min-width: 1100px)").matches);
   const [polling, setPolling] = useState(false);
   const version = useRef<number | null>(null);
   const viewport = useRef<{ x: number; y: number; zoom: number } | undefined>(undefined);
@@ -1240,7 +1274,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     } finally { runRequest.current = false; setRunSubmitting(false); }
   }, [flush, spaceId]);
 
-  const addNode = useCallback((kind: SpaceNodeType, at?: { x: number; y: number }, data?: Record<string, unknown>) => {
+  const addNode = useCallback((kind: SpaceNodeType, at?: { x: number; y: number }, data?: Record<string, unknown>, options?: { group: string; focus?: boolean }) => {
     const taken = new Set(latest.current.nodes.map((n) => n.id));
     const id = newId(kind, taken);
     let pos = at;
@@ -1254,8 +1288,8 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     const node: SpNode = { id, type: kind === "group" ? "grp" : "sp", position: pos, data: { kind, data: { ...DEFAULT_DATA[kind], ...(data || {}) } },
       style: { width: WIDTH[kind], ...(kind === "group" ? { height: 380 } : {}) }, ...(kind === "group" ? { zIndex: -1 } : {}) };
     liveNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { ...node, selected: true }]);
-    markDirty(`add:${id}`);
-    setTimeout(() => focusNodeRef.current(id), 60);
+    markDirty(options?.group || `add:${id}`);
+    if (options?.focus !== false) setTimeout(() => focusNodeRef.current(id), 60);
     return id;
   }, [flow, markDirty, liveNodes]);
 
@@ -1294,47 +1328,69 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       from: { node: cs.fromNode.id, handle: cs.fromHandle.id || "out", type: cs.fromHandle.type } });
   }, [flow]);
 
-  const menuChoices = useMemo((): { kind: SpaceNodeType; handle?: string }[] => {
+  const libraryChoices: ToolChoice[] = NODE_TOOLS.map(tool => ({ kind: tool.kind, data: tool.data, tool }));
+  const menuChoices = useMemo((): ToolChoice[] => {
     if (!menu) return [];
-    if (!menu.from) return ADDABLE.map((k) => ({ kind: k }));
+    if (!menu.from) return libraryChoices;
     const from = nodes.find((n) => n.id === menu.from!.node);
     if (!from) return [];
     if (menu.from.type === "source") {
       const produced = outputPort(from.data.kind, from.data.data, menu.from.handle === "out" ? null : menu.from.handle);
-      const out: { kind: SpaceNodeType; handle?: string }[] = [];
-      for (const k of ADDABLE) {
-        const spec = (INPUTS[k] || []).find(([, port]) => port === produced || port === "any" || produced === "any");
-        if (spec) out.push({ kind: k, handle: spec[0] });
+      const out: ToolChoice[] = [];
+      for (const choice of libraryChoices) {
+        const spec = (INPUTS[choice.kind] || []).find(([, port]) => port === produced || port === "any" || produced === "any");
+        if (spec) out.push({ ...choice, handle: spec[0] });
       }
       return out;
     }
     const accepts = (INPUTS[from.data.kind] || []).find(([h]) => h === menu.from!.handle)?.[1];
-    const fits: Record<Port, SpaceNodeType[]> = {
-      text: ["text", "cast"], image: ["image", "asset", "cast", "list"], video: ["video", "asset", "list"], audio: ["music", "asset", "list"], any: ADDABLE,
-    };
-    return (fits[accepts || "any"] || []).map((k) => ({ kind: k }));
+    return libraryChoices.filter(choice => {
+      const produced = outputPort(choice.kind, choice.data || {}, choice.kind === "cast" && accepts === "text" ? "text" : null);
+      return produced && (accepts === "any" || produced === "any" || produced === accepts);
+    });
   }, [menu, nodes]);
 
-  const pickFromMenu = (choice: { kind: SpaceNodeType; handle?: string }) => {
+  const toolData = (choice: ToolChoice) => ({ ...choice.data, ...(choice.tool ? { title: choice.tool.label[lang === "es" ? 0 : 1] } : {}) });
+  const addTool = (choice: ToolChoice, at?: { x: number; y: number }, skipInput?: string) => {
+    const id = addNode(choice.kind, at, toolData(choice));
+    const position = latest.current.nodes.find(n => n.id === id)!.position;
+    for (const [i, input] of (choice.tool?.inputs || []).entries()) {
+      if (input.port === skipInput) continue;
+      const source = addNode("asset", { x: position.x - 380, y: position.y + i * 470 },
+        { kind: input.media, title: input.label[lang === "es" ? 0 : 1] }, { group: `add:${id}`, focus: false });
+      connect({ source, sourceHandle: "out", target: id, targetHandle: input.port }, `add:${id}`);
+    }
+    liveNodes(ns => ns.map(n => ({ ...n, selected: n.id === id })));
+    return id;
+  };
+  const pickFromMenu = (choice: ToolChoice) => {
     if (!menu) return;
     const from = menu.from;
-    let data: Record<string, unknown> | undefined;
-    if (from?.type === "target" && choice.kind === "asset") {
-      const dst = nodes.find((n) => n.id === from.node);
-      const accepts = (INPUTS[dst?.data.kind as SpaceNodeType] || []).find(([h]) => h === from.handle)?.[1];
-      data = { kind: accepts && accepts !== "any" && accepts !== "text" ? accepts : "image", asset_ids: [] };
-    }
     const at = { x: menu.fx - (from?.type === "target" ? WIDTH[choice.kind] : 0), y: menu.fy - 20 };
-    const id = addNode(choice.kind, at, data);
+    const id = addTool(choice, at, from?.type === "source" ? choice.handle : undefined);
     setMenu(null);
     if (!from) return;
     setTimeout(() => {
       if (from.type === "source") connect({ source: from.node, sourceHandle: from.handle, target: id, targetHandle: choice.handle || null }, `add:${id}`);
-      else connect({ source: id, sourceHandle: choice.kind === "cast" ? (from.handle === "prompt" ? "text" : "image") : "out", target: from.node, targetHandle: from.handle }, `add:${id}`);
+      else {
+        const dst = latest.current.nodes.find(n => n.id === from.node);
+        const accepts = (INPUTS[dst?.data.kind as SpaceNodeType] || []).find(([h]) => h === from.handle)?.[1];
+        connect({ source: id, sourceHandle: choice.kind === "cast" ? (accepts === "text" ? "text" : "image") : "out", target: from.node, targetHandle: from.handle }, `add:${id}`);
+      }
     }, 0);
   };
 
   const ctx: Ctx = {
+    moveClipInput: (id, edgeId, by) => {
+      const indices = latest.current.edges.flatMap((e, i) => e.target === id && e.targetHandle === "clips" ? [i] : []);
+      const from = indices.findIndex(i => latest.current.edges[i].id === edgeId);
+      const to = from + by;
+      if (from < 0 || to < 0 || to >= indices.length) return;
+      liveEdges(es => {
+        const next = [...es]; [next[indices[from]], next[indices[to]]] = [next[indices[to]], next[indices[from]]]; return next;
+      });
+      markDirty();
+    },
     videoEngines: engineCatalog.data || null,
     refreshEngines: engineCatalog.reload,
     makeImage: (id) => {
@@ -1547,12 +1603,8 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
             <button className="btn sm ghost icon" aria-label={words("Rehacer", "Redo")} title={words("Rehacer · Ctrl+Mayús+Z / Ctrl+Y", "Redo · Ctrl+Shift+Z / Ctrl+Y")} disabled={!historyFlags.redo || !!recovery} onClick={() => undoRedo(true)}><Redo2 size={16} /></button>
             <button className="btn sm ghost icon" aria-label={words("Guardar flujo", "Save workflow")} title={words("Guardar flujo · Ctrl+S", "Save workflow · Ctrl+S")} disabled={save === "saved" || save === "saving" || !!recovery || conflict} onClick={() => void flush()}><Save size={16} /></button>
           </div>
-          {!appMode && <button ref={addOpener} disabled={!!recovery} className="btn sm sp-add-node" aria-expanded={!!menu} onClick={() => {
-            if (menu) { closeMenu(); return; }
-            const r = wrap.current?.getBoundingClientRect();
-            const at = flow.screenToFlowPosition({ x: (r?.left || 0) + (r?.width || 800) / 2, y: (r?.top || 0) + 140 });
-            setMenu({ x: 16, y: 16, fx: at.x, fy: at.y });
-          }}><Plus size={16} />{lang === "es" ? "Añadir nodo" : "Add node"}</button>}
+          {!appMode && <button ref={addOpener} disabled={!!recovery} className="btn sm sp-add-node" aria-expanded={libraryOpen} aria-controls="sp-node-library"
+            onClick={() => { setLibraryOpen(v => !v); setMenu(null); }}><Plus size={16} />{lang === "es" ? "Añadir nodo" : "Add node"}</button>}
           {!appMode && nodes.length > 0 && <select className="sp-focus-node" aria-label={lang === "es" ? "Acercar a un nodo" : "Focus a node"} value="" onChange={(e) => {
             const id = e.target.value;
             if (!id) return;
@@ -1594,7 +1646,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
             <div><button disabled={!!recovery || conflict} className="btn sm" title={t("spRunAllForceHint")} onClick={() => run("all", [], true)}><RotateCcw size={14} /> {t("spRunAllForce")}</button>
               <p className="small muted">{lang === "es" ? "Rehacer también las ramas que no han cambiado." : "Regenerate even branches that have not changed."}</p></div>
           </details>
-          <button disabled={!!recovery || conflict || runSubmitting} className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}>{runSubmitting ? <Loader2 size={14} className="spin" /> : <Play size={14} />} {t("spRunAll")}</button>
+          <button disabled={!!recovery || conflict || runSubmitting} className="btn sm primary" title={t("spRunAllHint")} onClick={(e) => run("all", [], e.shiftKey)}>{runSubmitting ? <Loader2 size={14} className="spin" /> : <Play size={14} />} {words("Ejecutar flujo", "Run workflow")}</button>
         </div>
         {recovery && <div className="sp-recovery" role="region" aria-label={words("Borrador recuperable", "Recoverable draft")}>
           <div><strong>{words("Hay cambios sin guardar en este navegador", "This browser has unsaved changes")}</strong>
@@ -1624,7 +1676,14 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
         {loadError && space && <div className="sp-recovery" role="alert"><p>{loadError}</p><button className="btn" onClick={() => void load(false)}>{t("recheck")}</button></div>}
         {storageError && <p className="sp-storage-error" role="alert">{words("No se pudo conservar una copia local. Mantén esta pestaña abierta hasta guardar.", "Could not retain a local copy. Keep this tab open until saved.")}</p>}
         {appMode && <AppView spaceId={spaceId} beforeRun={flush} onRan={() => { void load(false, true); setPolling(true); }} state={state} />}
-        <div className="sp-canvas" inert={!!recovery} ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} style={appMode ? { display: "none" } : undefined}>
+        <div className="sp-workbench" style={appMode ? { display: "none" } : undefined}>
+          {libraryOpen && <aside id="sp-node-library" className="sp-node-library" inert={!!recovery}>
+            <NodePalette library choices={libraryChoices} connected={false} onClose={() => { setLibraryOpen(false); addOpener.current?.focus(); }} onPick={choice => {
+              addTool(choice);
+              if (window.matchMedia("(max-width: 1099px)").matches) setLibraryOpen(false);
+            }} />
+          </aside>}
+        <div className="sp-canvas" inert={!!recovery} ref={wrap} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
           <ReactFlow<SpNode, Edge>
             nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} onConnectEnd={onConnectEnd}
@@ -1652,7 +1711,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
               <Workflow size={30} />
               <h2>{lang === "es" ? "De una idea a un flujo" : "From an idea to a workflow"}</h2>
               <p>{lang === "es" ? "Añade una foto o arrastra archivos aquí. Conecta sus puertos con una imagen o un clip para empezar." : "Add a photo or drop files here. Connect its ports to a picture or a clip to begin."}</p>
-              <button className="btn primary" onClick={() => addOpener.current?.click()}><Plus size={16} />{lang === "es" ? "Añadir el primer nodo" : "Add the first node"}</button>
+              <button className="btn primary" onClick={() => setLibraryOpen(true)}><Plus size={16} />{lang === "es" ? "Añadir el primer nodo" : "Add the first node"}</button>
             </div>
           )}
           <div className="sp-canvas-guide">{(["text", "image", "video", "audio"] as Port[]).map((p) => <span key={p}><i style={{ background: PORT_COLOR[p] }} />{t(`spOut_${p}` as MessageKey)}</span>)}
@@ -1662,6 +1721,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
               <NodePalette key={`${menu.fx}-${menu.fy}-${menu.from?.node || ""}`} choices={menuChoices} onPick={pickFromMenu} onClose={closeMenu} connected={!!menu.from} />
             </div>
           )}
+        </div>
         </div>
       </div>
       {picking && (

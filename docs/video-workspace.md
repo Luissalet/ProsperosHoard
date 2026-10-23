@@ -68,6 +68,29 @@ Image-only dimensions are multiples of32; structure control needs multiples
 of64 (896x512 by default), because its guide uses half-sized latent dimensions.
 `studio_video_from_plan(autopilot=false)` opts into review; its default continues.
 
+## Node library and assembly order
+
+The library groups27 shortcuts into References and text, Generate, Transform,
+Assemble and Organize. Docked at desktop widths1100px and above, it overlays the
+canvas below that and closes after selection. Search accepts both languages,
+ignores accents and matches all entered terms. All15 native types remain.
+
+Transfer motion creates a video plus image/start and video/motion sources. Lip
+sync creates image/start and audio/audio sources. Between two frames creates
+image/start and image/end sources. The addition is undoable together and starts
+no render. With wire-drop creation, the incoming wire replaces the corresponding
+empty source. These configure existing operations, with existing model needs.
+
+MCP equivalents use studio_spaces add_node type=asset, data.kind=image/video/audio,
+add_node type=video, then connect to start/motion/audio/end. The motion starter
+sets motion_engine=animate and seconds=3; lip sync sets seconds=4.8. No new tool
+or graph type is required. Readiness does not prove output quality.
+
+Combine lists incoming clips in edge order. Up/down moves each wire as one input;
+each contributes its source's included outputs in native order. MCP callers can
+disconnect the relevant clip inputs and reconnect them in the desired order in
+one edit request. Other edges remain unchanged.
+
 ## Verification scope
 
 Isolated simulated-generator checks prove interaction and transport, not model
