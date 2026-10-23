@@ -297,6 +297,8 @@ def test_invalid_visual_scores_cannot_turn_into_positive_scores():
     assert uncertain["motion"] is uncertain["anatomy"] is None
     broken = qa.parse_scores('motion:9, anatomy:9', ("motion", "anatomy"), require_json=True)
     assert broken["motion"] is broken["anatomy"] is None
+    outside = qa.parse_scores('{"motion":100,"anatomy":-1,"scene":"9"}', ("motion", "anatomy", "scene"), require_json=True)
+    assert outside["motion"] is outside["anatomy"] is outside["scene"] is None
 
 
 def test_standalone_clip_review_is_available_without_a_production_and_is_read_only(client):
@@ -332,6 +334,12 @@ def test_standalone_clip_review_is_available_without_a_production_and_is_read_on
     result = c.post(f"/api/assets/{aid}/review", json={"asset_id": aid, "check_supporting_cast": True}).json()
     assert result["item"]["visual_review"]["status"] == "incomplete"
     assert "supporting_cast" in result["item"]["visual_review"]["unassessed"]
+    no_reference = _clip(store, pid, RNG.integers(40, 150, (30, 36, 64), dtype=np.uint8))
+    reply["supporting_cast"] = 9
+    result = c.post(f"/api/assets/{no_reference}/review", json={"asset_id": no_reference, "check_supporting_cast": True}).json()
+    assert result["item"]["visual_review"]["reference_count"] == 0
+    assert result["item"]["model"]["supporting_cast"] is None
+    assert set(result["item"]["visual_review"]["unassessed"]) == {"reference", "supporting_cast"}
     assert c.post("/api/agent/studio_review_clip", json={"asset_id": reference}).status_code == 400
 
 
