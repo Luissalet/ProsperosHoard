@@ -32,7 +32,8 @@ EDIT_CLASS = {"upscale": "esrgan", "remove_background": "birefnet", "pose_map": 
 #: a generate job with a clip template needs the video model, not the image engine
 TEMPLATE_CLASS = {"wan22_ti2v": "wan", "wan22_i2v_14b": "wan14b", "wan22_flf2v": "wan14b", "auto_clip": "wan14b",
                   "wan21_infinitetalk": "wan14b", "wan22_s2v": "wan_s2v", "auto_sing": "wan_s2v",
-                  "wan_animate2": "wan_animate", "ace15_song": "ace"}
+                  "wan_animate2": "wan_animate", "ace15_song": "ace",
+                  "ltx23_i2v": "wan14b", "ltx23_control": "wan14b"}
 
 
 def enabled() -> bool:
