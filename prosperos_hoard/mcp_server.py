@@ -508,7 +508,7 @@ def studio_generate_image(
     character has one.
     Clips: template "auto_clip" with reference_asset_id = the start picture (Wan 2.2 14B when installed);
     end_asset_id = the picture the clip must end on (Wan 2.2 14B first+last frame, template wan22_flf2v).
-    template="ltx23_i2v": LTX2.3 distilled image-to-video. template="ltx23_control" with driving_asset_id:
+    template="ltx23_i2v": LTX2.3 distilled image-to-video. template="ltx23_i2v_hq" adds native2x detail refinement (base8+refine3 steps). template="ltx23_control" with driving_asset_id:
     the reference supplies appearance and the guide supplies structure/camera/action through Canny IC-LoRA.
     driving_start_s chooses the guide offset; template_params carries the template's declared knobs such as
     length(8*n+1 frames at24fps) and control_strength(default1). Neither runs a local prompt-generating LLM.

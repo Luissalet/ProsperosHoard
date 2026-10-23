@@ -41,6 +41,7 @@
       { "name": "workspace-mobile", "value": "700px", "purpose": "Wrap toolbar and hide secondary module/vitals regions in the workspace shell." }
     ],
     "behavior": {
+      "ltxRefinement": "Optional image-only LTX checkbox before status/text; off by default, doubles output dimensions with native refinement. Availability checks the upscaler independently. Desktop/mobile390 and reload persistence in research-inbox/prospero-quality1190/r14-refine-* and r14-ui-persistence.json; demo does not prove output quality.",
       "entry": "Resume remembered project canvas, then existing canvas; create quick_video only when none exists. A library image opens a new referenced graph.",
       "openingFailure": "Visible error and Retry.",
       "sourceConversion": "Convert source to image generator and preserve existing images in a connected upstream reference node.",

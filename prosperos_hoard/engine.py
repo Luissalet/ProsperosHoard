@@ -2006,12 +2006,12 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
     values = _generation_values(params, spec.get("defaults"))
-    if template == "ltx23_i2v":
+    if template in ("ltx23_i2v", "ltx23_i2v_hq"):
         # This distilled graph samples a fixed ManualSigmas schedule. Do not
         # record caller settings which the graph cannot execute.
         for key, expected in (("steps", 8), ("scheduler", "manual_sigmas"), ("denoise", 1.0)):
             if values[key] != expected:
-                raise EngineError("fixed_sampling", f"ltx23_i2v uses fixed {key}={expected}")
+                raise EngineError("fixed_sampling", f"{template} uses fixed {key}={expected}")
     for key in spec.get("map", {}):
         if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
             values[key] = params[key]
@@ -2041,7 +2041,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])
         values["width"], values["height"] = _size_from_reference(size_mode, ref.get("width") or 1024, ref.get("height") or 1024)
-    if template in ("ltx23_i2v", "ltx23_control"):
+    if template in ("ltx23_i2v", "ltx23_i2v_hq", "ltx23_control"):
         divisor = 64 if template == "ltx23_control" else 32
         if any(isinstance(values[key], bool) or not isinstance(values[key], int) or values[key] % divisor
                for key in ("width", "height")):
@@ -2059,6 +2059,8 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         end_asset_id=params.get("end_asset_id"), use_vocals=params.get("use_vocals", True) is not False,
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
+                      **({"video_refinement": {"scale": 2, "steps": 3, "cfg": 1, "sigmas": [0.85, 0.725, 0.4219, 0],
+                          "sampler": values["sampler"], "seed": values["seed"]}} if template == "ltx23_i2v_hq" else {}),
                       **({"composition_asset_id": params["composition_asset_id"]} if params.get("composition_asset_id") else {}),
                       "image_engine": engine_name or "custom"},
         name=params.get("prompt") or params["positive_prompt"],

@@ -78,3 +78,5 @@ exact choreography or universal character consistency.
 
 Style/review fixes retain unique full IDs and invalidate montage on a target
 duration change even when all shots are approved; approved clips stay intact.
+
+For image-only LTX nodes, `refine: true` selects `ltx23_i2v_hq`. The default stays the single-stage model. The optional native graph doubles base width/height and adds3 fixed Euler-sigma refinement steps, reanchors the original first frame, and reuses the caller seed/sampler. The extra upscaler is checked by the catalog entry `ltx23_hq` (mode `refinement`, outside the model selector); the recipe records `video_refinement`. Base steps8/manual_sigmas/denoise1 and the8*n+1 frame grid still apply. More detail does not establish correct anatomy, feet, supporting cast or a camera arc.

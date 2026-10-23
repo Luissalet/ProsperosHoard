@@ -545,7 +545,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             <label className="sp-engine-select">{words("Modelo", "Model")}
               <select aria-label={words("Modelo de vídeo", "Video model")} value={data.engine || (data.quality === "draft" ? "wan" : "auto")} onChange={e => set({ engine: e.target.value })}>
                 <option value="auto">{words("Automático", "Automatic")}{ctx.videoEngines?.auto_resolves_to ? ` · ${ctx.videoEngines.engines.find(e => e.id === ctx.videoEngines?.auto_resolves_to)?.label}` : ""}</option>
-                {(ctx.videoEngines?.engines.filter(e => e.mode === "image") || [{ id: "wan14b", label: "Wan 2.2 14B" }, { id: "wan", label: "Wan 2.2 5B" }, { id: "svd", label: "SVD XT" }]).map(e => <option key={e.id} value={e.id}>{e.label}{ctx.videoEngines?.live && "available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
+                {(ctx.videoEngines?.engines.filter(e => e.mode === "image") || [{ id: "wan14b", label: "Wan 2.2 14B" }, { id: "wan", label: "Wan 2.2 5B" }, { id: "ltx23", label: "LTX 2.3 distilled" }, { id: "svd", label: "SVD XT" }]).map(e => <option key={e.id} value={e.id}>{e.label}{ctx.videoEngines?.live && "available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
               </select>
             </label>
           )}
@@ -569,10 +569,14 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               onChange={(e) => set({ motion_start_s: Number(e.target.value) })} />s</label>
           )}
         </div>
+        {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && data.engine === "ltx23" &&
+          <label className="check nodrag" title={words("Duplica ancho y alto con una segunda etapa; tarda más y necesita el modelo de refinamiento. Compara las tomas.", "Doubles width and height with a second stage; takes longer and needs the refinement model. Compare the takes.")}>
+            <input type="checkbox" checked={data.refine === true} onChange={e => set({ refine: e.target.checked })} />{words("Refinar · 2× resolución", "Refine · 2× resolution")}
+          </label>}
         {ctx.videoEngines && <div className="sp-engine-status">
           <span>{!ctx.videoEngines.live ? words("Motor sin conexión", "Engine offline") :
             (() => { const mode = wired.has("motion") ? "motion" : wired.has("end") ? "end" : wired.has("audio") ? "audio" : "image";
-              const selected = data.engine || (data.quality === "draft" ? "wan" : "auto");
+              const selected = data.engine === "ltx23" && data.refine === true ? "ltx23_hq" : data.engine || (data.quality === "draft" ? "wan" : "auto");
               const wanted = mode === "audio" ? (data.sing_engine && data.sing_engine !== "auto" ? data.sing_engine :
                 (data.seconds ?? 4.8) > 10 && ctx.videoEngines.engines.some(e => e.id === "infinitetalk" && e.available) ? "infinitetalk" : "s2v") : null;
               const model = ctx.videoEngines.engines.find(e => mode === "image" ? e.id === (selected === "auto" ? ctx.videoEngines?.auto_resolves_to : selected) : mode === "motion" ? e.id === (data.motion_engine || "animate") : wanted ? e.id === wanted : e.mode === mode && e.available);

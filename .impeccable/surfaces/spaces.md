@@ -144,3 +144,7 @@ This is a local reading-order correction, not a new visual world. Demo captures
 at 1280×720, 768×900 and 390×844 and native save/reload checks are recorded under
 `D:/LocalAI/research-inbox/prospero-quality1190/layout-r13-*`. The scoped finish
 review returns ship; it does not approve generated motion or historical comp gates.
+
+### Optional LTX refinement — task1190
+
+One contextual checkbox below duration and above engine status/texts selects a native2x refinement stage for image-only LTX. It is off by default and absent for motion, end-frame and audio modes. The same LTX model remains selected; no extra navigation or approval. Availability reports the actual optional upscaler, and the hint explains the added cost without promising corrected motion. Existing playback and generation stay in place.

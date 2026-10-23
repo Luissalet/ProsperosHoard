@@ -80,7 +80,7 @@ def test_ltx_control_budgets_full_fields_only_after_combining_them(monkeypatch, 
         assert prompt == appearance + ". " + action
 
 
-@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_i2v_hq", "ltx23_control"])
 def test_ltx_checkpoint_override_reaches_all_three_loaders(template):
     from prosperos_hoard import comfy_driver
     workflow, spec = comfy_driver.load_template(template)
@@ -90,7 +90,7 @@ def test_ltx_checkpoint_override_reaches_all_three_loaders(template):
     assert all(n["inputs"]["ckpt_name"] == "alternate_ltx.safetensors" for n in loaders)
 
 
-@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_i2v_hq", "ltx23_control"])
 def test_ltx_lease_matches_the_renderer_class_without_resolving_an_image_engine(template, monkeypatch):
     from contextlib import contextmanager
     from prosperos_hoard import comfy_driver, gpu_lease
@@ -114,13 +114,14 @@ def test_ltx_lease_matches_the_renderer_class_without_resolving_an_image_engine(
     assert released == [True]
 
 
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_i2v_hq"])
 @pytest.mark.parametrize("override", [{"steps": 20}, {"scheduler": "karras"}, {"strength": 0.5}, {"denoise": 0.5}])
-def test_fixed_ltx_sampling_does_not_record_unexecuted_settings(store, monkeypatch, override):
+def test_fixed_ltx_sampling_does_not_record_unexecuted_settings(store, monkeypatch, override, template):
     from prosperos_hoard import engine
     monkeypatch.setattr(engine, "run_template", lambda *a, **k: pytest.fail("Ignored settings reached renderer"))
     with pytest.raises(engine.EngineError) as error:
         engine.generate_image(store, None, {"params": {
-            "template": "ltx23_i2v", "positive_prompt": "Move", **override,
+            "template": template, "positive_prompt": "Move", **override,
         }}, lambda *a: None)
     assert error.value.code == "fixed_sampling"
 
@@ -144,7 +145,7 @@ def test_ltx_effective_sampling_and_explicit_control_denoise_reach_the_graph(sto
     assert applied["129:704"]["inputs"]["denoise"] == 0.75
 
 
-@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_i2v_hq", "ltx23_control"])
 def test_ltx_dimensions_duration_and_fps_are_consistent_across_the_whole_graph(template):
     from prosperos_hoard import comfy_driver, engine
     workflow, spec = comfy_driver.load_template(template)
@@ -154,7 +155,7 @@ def test_ltx_dimensions_duration_and_fps_are_consistent_across_the_whole_graph(t
     applied = comfy_driver.apply_params(workflow, spec, values)
     classes = {node["class_type"] for node in applied.values()}
     assert "TextGenerateLTX2Prompt" not in classes and "LoraLoader" not in classes
-    if template == "ltx23_i2v":
+    if template in ("ltx23_i2v", "ltx23_i2v_hq"):
         assert applied["320:295"]["inputs"] == {"width": 768, "height": 512, "length": 73, "batch_size": 1}
         assert applied["320:290"]["inputs"]["resize_type.width"] == 768
         assert applied["320:290"]["inputs"]["resize_type.height"] == 512
@@ -358,3 +359,37 @@ def test_native_node_add_preserves_explicit_zero_coordinates(client):
     assert response.status_code == 200, response.text
     graph = c.get(f"/api/spaces/{space['id']}").json()["graph"]
     assert [(n["id"], n["x"], n["y"]) for n in graph["nodes"]] == [("first", 520, 450), ("second", 0, 450)]
+
+
+@pytest.mark.parametrize("refine,template", [(True,"ltx23_i2v_hq"),(False,"ltx23_i2v"),(None,"ltx23_i2v"),("false","ltx23_i2v")])
+def test_optional_ltx_refinement_plans_the_actual_two_stage_template(monkeypatch,refine,template):
+    monkeypatch.setattr(spaces,"inputs_of",lambda *a:{"start":[("image","ref")]})
+    graph={"nodes":[{"id":"clip","type":"video","data":{"engine":"ltx23","refine":refine,"seconds":3,"prompt":"Wave"}}],"edges":[]}
+    body=spaces.plan_node(None,graph,{},"clip")[0]["body"]
+    assert body["template"]==template and body["template_params"]=={"length":73}
+    assert body["reference_asset_id"]=="ref"
+
+
+def test_ltx_refinement_reuses_caller_seed_and_records_the_extra_stage(store,monkeypatch):
+    from prosperos_hoard import comfy_driver,engine
+    captured=[]
+    monkeypatch.setattr(engine,"run_template",lambda *a,**k:captured.append(k) or {})
+    engine.generate_image(store,None,{"params":{"template":"ltx23_i2v_hq","positive_prompt":"Wave","seed":917,"sampler":"euler"}},lambda *a:None)
+    workflow,spec=comfy_driver.load_template("ltx23_i2v_hq")
+    applied=comfy_driver.apply_params(workflow,spec,captured[0]["values"])
+    assert applied["up_sample"]["inputs"]["noise"]==applied["320:283"]["inputs"]["noise"]==["320:277",0]
+    assert applied["320:277"]["inputs"]["noise_seed"]==917
+    assert applied["up_video"]["inputs"]["samples"]==["320:284",2]
+    assert applied["up_anchor"]["inputs"]["strength"]==1
+    assert applied["up_sigmas"]["inputs"]["sigmas"]=="0.85, 0.7250, 0.4219, 0.0"
+    assert applied["320:315"]["inputs"]["samples"]==["up_crop",2]
+    assert captured[0]["extra_recipe"]["video_refinement"]=={"scale":2,"steps":3,"cfg":1,"sigmas":[0.85,0.725,0.4219,0],"sampler":"euler","seed":917}
+
+
+def test_optional_refinement_checks_its_upscaler_without_hiding_base_model(backend_with_comfy):
+    info=model_inventory(backend_with_comfy)
+    info["LatentUpscaleModelLoader"]["input"]["required"]["model_name"][0].clear()
+    entries={e["id"]:e for e in video_engines.catalog(backend_with_comfy,info)["engines"]}
+    assert entries["ltx23"]["available"]
+    assert not entries["ltx23_hq"]["available"]
+    assert "ltx-2.3-spatial-upscaler-x2-1.1.safetensors" in entries["ltx23_hq"]["missing"]

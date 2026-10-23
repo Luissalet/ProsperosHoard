@@ -1009,3 +1009,5 @@ The seventh TTS adapter connects to an already-running local [Yovoice](https://g
 ## Native connections
 
 Former MCP and Hub identities can use the incorporated cold compatibility adapters without the retired repositories. See [native connections](docs/NATIVE-CONNECTIONS.md). Modules still require explicit activation.
+
+For LTX image-to-video, **Refine · 2× resolution** optionally adds native latent upscaling and three refinement steps after the eight-step base. It doubles both dimensions, needs `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` in a native `latent_upscale_models` path, and records the extra stage in the take recipe. The base mode remains the default; refinement does not guarantee correct anatomy, identity or camera motion. API/MCP callers can select `template="ltx23_i2v_hq"`; Spaces accepts `engine="ltx23", refine=true`.
