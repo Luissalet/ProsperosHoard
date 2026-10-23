@@ -547,7 +547,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               return model?.available ? `${model.label} · ${words("Listo", "Ready")}` : words("Faltan modelos para esta entrada", "Models missing for this input"); })()}</span>
           <button className="btn xs ghost" onClick={ctx.refreshEngines}>{words("Comprobar", "Check")}</button>
         </div>}
-        {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && !["wan", "svd"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto")) &&
+        {!wired.has("audio") && !wired.has("motion") && (wired.has("end") || !["wan", "svd"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto"))) &&
           <label className="check nodrag"><input type="checkbox" checked={data.lightning !== false} onChange={e => set({ lightning: e.target.checked })} />{words("Generación rápida · 4 pasos", "Fast generation · 4 steps")}</label>}
         {data.engine === "svd" && <p className="hint">{words("SVD anima la imagen sin seguir el prompt de movimiento. Usa Wan para dirigir la acción.", "SVD animates the image without following the motion prompt. Use Wan to direct the action.")}</p>}
         {["audio", "motion", "end"].filter((h) => wired.has(h)).length > 1 && <p className="sp-error" role="alert">{words("Conecta una sola guía: audio, movimiento o fotograma final.", "Connect one guide: audio, motion or end frame.")}</p>}
