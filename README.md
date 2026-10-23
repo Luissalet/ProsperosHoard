@@ -972,6 +972,19 @@ pass or sampled assessment does not certify full playback or artistic quality;
 review never blocks generation. Image references for named secondary characters
 still need to be supplied through the existing cast/reference tools.
 
+The video model list also offers **LTX 2.3 distilled** explicitly. With a motion
+guide, its own model selector offers **LTX 2.3 · Structure control** alongside
+Animate2: the connected clip supplies Canny structure, including camera and
+action, and the image supplies appearance. LTX uses 24fps with durations rounded
+to an eight-frame grid. The motion offset and strength stay in the node; automatic
+selection is unchanged. Required weights are the LTX2.3 distilled FP8 checkpoint,
+Gemma3 FP4 text encoder, and, for structure control, the Union Control ref0.5 LoRA.
+The text encoder encodes the prompt; no local prompt-generating LLM is started.
+Use the same controls through `studio_spaces` or `studio_generate_image` with
+`driving_asset_id`, `driving_start_s` and `template_params`. Exact motion and
+character continuity still require inspection of actual clips. Model weights
+use the LTX-2 Community License; adapted workflow notices are kept in their specs.
+
 ## License
 
 MIT - see [LICENSE](LICENSE). Bundled fonts keep their own licences: SIL

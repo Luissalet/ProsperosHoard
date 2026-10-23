@@ -1,0 +1,42 @@
+{
+  "template": "ltx23_control",
+  "kind": "video",
+  "vram_class": "wan14b",
+  "requires_reference": true,
+  "reference_node": "200.image",
+  "driving_video_node": "199.file",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "output_node": "68",
+  "map": {
+    "positive_prompt": "129:128.text",
+    "negative_prompt": "129:112.text",
+    "checkpoint": "129:127.ckpt_name",
+    "seed": "129:704.seed",
+    "steps": "129:704.steps",
+    "cfg": "129:704.cfg",
+    "sampler": "129:704.sampler_name",
+    "scheduler": "129:704.scheduler",
+    "width": "129:113.value",
+    "height": "129:98.value",
+    "length": "control_length.value",
+    "fps": "129:114.value",
+    "control_strength": "129:115.strength"
+  },
+  "defaults": {
+    "width": 896,
+    "height": 512,
+    "length": 121,
+    "fps": 24,
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler": "euler_ancestral",
+    "scheduler": "linear_quadratic",
+    "denoise": 1.0,
+    "control_strength": 1.0
+  },
+  "notes": "LTX-2.3 distilled with official Union Control IC-LoRA(ref0.5): reference image for appearance, aligned Canny video for structure/camera/action. Native GetICLoRAParameters preserves the trained factor2. Output dimensions must be multiples of64 (896x512 default). Guide is cropped to requested8*n+1frames and downscaled to half output size. No local text generation/audio/MoGe dependencies. Source: Comfy-Org/workflow_templates video_ltx2_3_ic_lora.json, adapted; model weights under LTX-2 Community License.",
+  "workflow_license": {
+    "source": "https://github.com/Comfy-Org/workflow_templates",
+    "notice": "MIT License\n\nCopyright (c) 2023-present Comfy Org\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  }
+}

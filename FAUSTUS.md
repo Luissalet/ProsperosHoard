@@ -16,6 +16,19 @@ and setting in `prompt`, plus native `pose_strength` and
 `reference_image_strength` (0–10, trained default 1). Do not assume stronger
 conditioning yields better results. Inspect actual takes and keep failed ones.
 
+`engine="ltx23"` selects LTX2.3 distilled image-to-video explicitly. A motion
+node's `motion_engine="ltx23_control"` selects Union Control IC-LoRA: Canny
+structure from the guide, appearance from the reference. Animate2 remains the
+motion default; automatic image-to-video selection stays unchanged. LTX uses
+24fps and rounds duration to its eight-frame grid, with native guide offset and
+motion strength. No local prompt-generating LLM runs. These are generation
+controls, not guarantees of choreography, anatomy or identity continuity.
+MCP `studio_generate_image` exposes the same `driving_asset_id`,
+`driving_start_s` and declared `template_params`; references and guide IDs remain
+in the resulting recipe. LTX weights use the LTX-2 Community License.
+Image-only dimensions must be multiples of32; ref0.5 structure control requires
+multiples of64 (896x512 default). Invalid sizes/frame counts fail before rendering.
+
 Imported UI workflows preserve numeric union widgets such as `FLOAT,INT`,
 declared input order and named widget values. The node-schema cache keeps
 nested field order: an audio frame rate must not silently become a batch count,

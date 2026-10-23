@@ -2035,6 +2035,14 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     if size_mode and params.get("reference_asset_id") and not (params.get("width") and params.get("height")):
         ref = store.get_asset(params["reference_asset_id"])
         values["width"], values["height"] = _size_from_reference(size_mode, ref.get("width") or 1024, ref.get("height") or 1024)
+    if template in ("ltx23_i2v", "ltx23_control"):
+        divisor = 64 if template == "ltx23_control" else 32
+        if any(isinstance(values[key], bool) or not isinstance(values[key], int) or values[key] % divisor
+               for key in ("width", "height")):
+            raise EngineError("bad_video_size", f"{template} needs width and height in multiples of {divisor}")
+        length = values["length"]
+        if isinstance(length, bool) or not isinstance(length, int) or length < 9 or (length - 1) % 8:
+            raise EngineError("bad_video_length", "LTX2.3 needs 8*n+1 frames (for example 73 or 121)")
     return run_template(
         store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),

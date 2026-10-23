@@ -547,12 +547,17 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           <div className="sp-opts nodrag">
             <label className="sp-num">{words("Fuerza del movimiento", "Motion strength")}<input type="number" min={0} max={10} step={0.1}
               value={data.pose_strength ?? 1} onChange={e => set({ pose_strength: Number(e.target.value) })} /></label>
-            <label className="sp-num">{words("Fuerza de la referencia", "Reference strength")}<input type="number" min={0} max={10} step={0.1}
-              value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>
+            {data.motion_engine !== "ltx23_control" && <label className="sp-num">{words("Fuerza de la referencia", "Reference strength")}<input type="number" min={0} max={10} step={0.1}
+              value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>}
           </div>
           <p className="hint">{words("1 es el valor de entrenamiento. Una fuerza mayor no garantiza más fidelidad; compara las tomas.", "1 is the training value. Higher strength does not guarantee better fidelity; compare the takes.")}</p>
         </>}
         <div className="sp-opts nodrag">
+          {wired.has("motion") && !wired.has("audio") && <label className="sp-engine-select">{words("Modelo", "Model")}
+            <select aria-label={words("Modelo de movimiento", "Motion model")} value={data.motion_engine || "animate"} onChange={e => set({ motion_engine: e.target.value })}>
+              {(ctx.videoEngines?.engines.filter(e => e.mode === "motion") || [{ id: "animate", label: "Wan Animate 2" }, { id: "ltx23_control", label: "LTX 2.3 · Structure control" }]).map(e => <option key={e.id} value={e.id}>{e.label}{ctx.videoEngines?.live && "available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
+            </select>
+          </label>}
           {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && (
             <label className="sp-engine-select">{words("Modelo", "Model")}
               <select aria-label={words("Modelo de vídeo", "Video model")} value={data.engine || (data.quality === "draft" ? "wan" : "auto")} onChange={e => set({ engine: e.target.value })}>
@@ -587,11 +592,11 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
               const selected = data.engine || (data.quality === "draft" ? "wan" : "auto");
               const wanted = mode === "audio" ? (data.sing_engine && data.sing_engine !== "auto" ? data.sing_engine :
                 (data.seconds ?? 4.8) > 10 && ctx.videoEngines.engines.some(e => e.id === "infinitetalk" && e.available) ? "infinitetalk" : "s2v") : null;
-              const model = ctx.videoEngines.engines.find(e => mode === "image" ? e.id === (selected === "auto" ? ctx.videoEngines?.auto_resolves_to : selected) : wanted ? e.id === wanted : e.mode === mode && e.available);
+              const model = ctx.videoEngines.engines.find(e => mode === "image" ? e.id === (selected === "auto" ? ctx.videoEngines?.auto_resolves_to : selected) : mode === "motion" ? e.id === (data.motion_engine || "animate") : wanted ? e.id === wanted : e.mode === mode && e.available);
               return model?.available ? `${model.label} · ${words("Listo", "Ready")}` : words("Faltan modelos para esta entrada", "Models missing for this input"); })()}</span>
           <button className="btn xs ghost" onClick={ctx.refreshEngines}>{words("Comprobar", "Check")}</button>
         </div>}
-        {!wired.has("audio") && !wired.has("motion") && (wired.has("end") || !["wan", "svd"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto"))) &&
+        {!wired.has("audio") && !wired.has("motion") && (wired.has("end") || !["wan", "svd", "ltx23"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto"))) &&
           <label className="check nodrag"><input type="checkbox" checked={data.lightning !== false} onChange={e => set({ lightning: e.target.checked })} />{words("Generación rápida · 4 pasos", "Fast generation · 4 steps")}</label>}
         {data.engine === "svd" && <p className="hint">{words("SVD anima la imagen sin seguir el prompt de movimiento. Usa Wan para dirigir la acción.", "SVD animates the image without following the motion prompt. Use Wan to direct the action.")}</p>}
         {["audio", "motion", "end"].filter((h) => wired.has(h)).length > 1 && <p className="sp-error" role="alert">{words("Conecta una sola guía: audio, movimiento o fotograma final.", "Connect one guide: audio, motion or end frame.")}</p>}

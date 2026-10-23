@@ -1197,7 +1197,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                            "width": composition["document"]["width"], "height": composition["document"]["height"],
                                            "reference_asset_ids": refs, "reference_asset_id": refs[0] if refs else None})
         if body.camera:
-            is_clip = any(k in (body.template or "") for k in ("wan", "svd", "clip", "animate", "s2v"))
+            is_clip = any(k in (body.template or "") for k in ("wan", "svd", "clip", "animate", "s2v", "ltx"))
             terms = cinema.camera_prompt(body.camera, video=is_clip)
             if terms:
                 body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})

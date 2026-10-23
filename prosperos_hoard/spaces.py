@@ -475,6 +475,9 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                              "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0)), "audio_seconds": seconds,
                              **({"template_params": {"sing_engine": engine_pick}} if engine_pick != "auto" else {})})
             elif motion:
+                motion_engine = data.get("motion_engine") or "animate"
+                if motion_engine not in ("animate", "ltx23_control"):
+                    raise SpaceError("unknown_video_engine", "choose animate or ltx23_control for a motion guide")
                 motion_params = {"length": int(round(seconds * 24)) + 1,
                                  "pose_prompt": str(data.get("motion_prompt") or prompt)[:3900]}
                 for key in ("pose_strength", "reference_image_strength"):
@@ -483,7 +486,12 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 10:
                             raise SpaceError("bad_motion_strength", f"{key} must be a number between 0 and 10")
                         motion_params[key] = value
-                body.update({"template": "auto_clip", "driving_asset_id": motion,
+                if motion_engine == "ltx23_control":
+                    motion_params = {"length": int(round(seconds * 24 / 8)) * 8 + 1,
+                                     "control_strength": motion_params.get("pose_strength", 1)}
+                    if data.get("motion_prompt"):
+                        body["prompt"] = f"{body['prompt']}. {data['motion_prompt']}"[:3900]
+                body.update({"template": "ltx23_control" if motion_engine == "ltx23_control" else "auto_clip", "driving_asset_id": motion,
                              "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0)),
                              "template_params": motion_params})
             elif end:
@@ -491,11 +499,12 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                              "template_params": {"seconds": seconds, "lightning": data.get("lightning", True)}})
             else:
                 selected = data.get("engine") or ("wan" if quality == "draft" else "auto")
-                templates = {"auto": "auto_clip", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v", "svd": "svd_img2vid"}
+                templates = {"auto": "auto_clip", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v", "svd": "svd_img2vid", "ltx23": "ltx23_i2v"}
                 if selected not in templates:
-                    raise SpaceError("unknown_video_engine", "choose auto, wan14b, wan or svd")
+                    raise SpaceError("unknown_video_engine", "choose auto, wan14b, wan, ltx23 or svd")
                 body["template"] = templates[selected]
                 body["template_params"] = ({"length": int(round(seconds * 24)) + 1} if selected == "wan"
+                    else {"length": int(round(seconds * 24 / 8)) * 8 + 1} if selected == "ltx23"
                     else {"frames": 25, "fps": 25 / seconds} if selected == "svd"
                     else {"seconds": seconds, "lightning": data.get("lightning", True)})
             ops.append({"op": "generate", "body": body})
