@@ -476,3 +476,7 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .gfx-stage[data-aspect="9:16"] { max-width: 190px; }
   .gfx-card-list { max-height: 200px; }
 }
+.sp-frame-picker { display: grid; gap: 10px; }
+.sp-frame-picker video { display: block; width: 100%; max-height: 190px; object-fit: contain; background: var(--monitor-black, #08090a); border-radius: 6px; }
+.sp-frame-picker .sp-num { justify-content: space-between; }
+.sp-frame-picker p { margin: 0; }

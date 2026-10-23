@@ -54,8 +54,8 @@ from .store import NotFound, Store
 from .util import now_iso
 
 NODE_TYPES = ("text", "asset", "cast", "image", "video", "music", "list", "note", "assistant", "edit", "combine",
-              "variations", "group", "composite", "clip_edit")
-GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit")
+              "variations", "group", "composite", "clip_edit", "frame")
+GENERATORS = ("image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit", "frame")
 INPUTS: dict[str, dict[str, str]] = {
     "image": {"prompt": "text", "refs": "image", "pose": "image", "layout": "image"},
     "video": {"start": "image", "end": "image", "prompt": "text", "motion": "video", "audio": "audio"},
@@ -67,6 +67,7 @@ INPUTS: dict[str, dict[str, str]] = {
     "variations": {"image": "image", "prompt": "text"},
     "composite": {"background": "any", "layers": "any"},
     "clip_edit": {"clip": "video", "prompt": "text", "refs": "image", "first": "image"},
+    "frame": {"clip": "video"},
 }
 SINGLE_INPUTS = {("video", "motion"), ("video", "audio"), ("video", "end"), ("combine", "audio"), ("image", "pose"),
                  ("image", "layout"), ("clip_edit", "first")}
@@ -108,7 +109,7 @@ def output_type(node: dict[str, Any], store: Optional[Store] = None, handle: Opt
         return "text" if handle == "text" else "image"
     if t == "video":
         return "image" if handle == "last" else "video"
-    if t in ("image", "edit", "variations"):
+    if t in ("image", "edit", "variations", "frame"):
         return "image"
     if t == "assistant":
         return "text"
@@ -285,7 +286,7 @@ def node_outputs(store: Store, graph: dict[str, Any], state: dict[str, Any], nod
                 except NotFound:
                     continue
             return out
-        kind = {"music": "audio", "edit": "image", "combine": "video", "variations": "image"}.get(t, t)
+        kind = {"music": "audio", "edit": "image", "combine": "video", "variations": "image", "frame": "image"}.get(t, t)
         return [(kind, a) for a in kept]
     if t == "list":
         items: list[tuple[str, str]] = []
@@ -538,6 +539,21 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             raise SpaceError("bad_operation", "edit nodes upscale, remove the background or make a pose or depth map")
         body_extra = {"scale": 4 if str(data.get("scale")) == "4" else 2} if op == "upscale" else {}
         return [{"op": "edit", "body": {"asset_id": a, "operation": op, **body_extra}} for a in images]
+    if t == "frame":
+        clips = list(dict.fromkeys(v for k, v in ins.get("clip", []) if k == "video"))[:MAX_FANOUT]
+        if not clips:
+            raise SpaceError("needs_clip", "wire a video into the frame node")
+        try:
+            at_s = float(data.get("at_s", 0))
+        except (ValueError, TypeError):
+            raise SpaceError("bad_time", "choose a finite, non-negative time in seconds") from None
+        if not math.isfinite(at_s) or at_s < 0:
+            raise SpaceError("bad_time", "choose a finite, non-negative time in seconds")
+        for clip in clips:
+            duration = float(store.get_asset(clip).get("duration_s") or 0)
+            if duration and at_s >= duration:
+                raise SpaceError("bad_time", f"{at_s:g} s is outside clip {clip} ({duration:g} s); choose an earlier time")
+        return [{"op": "frame", "body": {"asset_id": a, "at_s": at_s}} for a in clips]
     if t == "clip_edit":
         clips = list(dict.fromkeys(v for k, v in ins.get("clip", []) if k == "video"))[:MAX_FANOUT]
         if not clips:
@@ -810,6 +826,8 @@ def run_space(store: Store, studio: Any, space_id: str, mode: str = "node", node
                             outputs.append(studio.combine(pid, op["body"])["id"])
                         elif op["op"] == "composite":
                             outputs.append(studio.composite(pid, op["body"])["id"])
+                        elif op["op"] == "frame":
+                            outputs.append(studio.frame_at(op["body"]["asset_id"], op["body"]["at_s"], pid)["id"])
                     except Exception as exc:  # noqa: BLE001
                         errors.append(str(getattr(exc, "message", exc))[:300])
                 results[nid] = (outputs, texts, errors)
@@ -913,7 +931,7 @@ def _op_template(op: dict[str, Any]) -> tuple[str, float]:
         return _EDIT_OP_TEMPLATE.get(b.get("operation") or "upscale", "esrgan_upscale"), 1
     if op["op"] == "clip_edit":
         return ("wan22_bernini_edit" if b.get("quality") == "final" else "wan21_bernini_edit"), 1
-    if op["op"] in ("chat", "combine", "composite"):
+    if op["op"] in ("chat", "combine", "composite", "frame"):
         return op["op"], 1
     t = b.get("template")
     n = max(1, int(b.get("count") or 1))
@@ -971,6 +989,8 @@ def _rough_estimate(graph: dict[str, Any], nid: str, per_node: dict[str, int]) -
         return ("wan22_bernini_edit" if d.get("quality") == "final" else "wan21_bernini_edit"), fan("clip")
     if kind == "music":
         return "ace15_song", max(1, int(d.get("count") or 1)) * max(0.3, float(d.get("duration") or 60) / 60)
+    if kind == "frame":
+        return "frame", fan("clip")
     if kind in ("assistant", "combine", "composite"):
         return ("chat" if kind == "assistant" else kind), 1
     return None
@@ -1003,8 +1023,8 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
             tpl, units = rough
             if tpl == "chat":
                 secs, n_r = 15.0, 0
-            elif tpl in ("combine", "composite"):
-                secs, n_r = 10.0, 0
+            elif tpl in ("combine", "composite", "frame"):
+                secs, n_r = (3.0 * units if tpl == "frame" else 10.0), 0
             else:
                 secs = (medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)) * units
                 n_r = max(1, int(round(units)))
@@ -1032,6 +1052,9 @@ def estimate(store: Store, space_id: str, mode: str = "all", node_ids: Optional[
                 continue
             if tpl == "composite":
                 secs += 5
+                continue
+            if tpl == "frame":
+                secs += 3
                 continue
             per = medians.get(tpl) or DEFAULT_SECONDS.get(tpl, 120)
             secs += per * units
@@ -1127,6 +1150,7 @@ Each node is an object with an "id" (short, letters/digits), a "type" and fields
 - {"id","type":"music","tags","lyrics","duration":10-240}
 - {"id","type":"assistant","prompt","as_list":true,"items":3}: writes ideas; wire it into an image's prompt_from to make one picture per idea
 - {"id","type":"combine","clips":[ids of video nodes in order],"audio":"id of a music node"}
+- {"id","type":"frame","at_s":1.5,"clips":[ids of video/asset nodes]}: extracts one still per clip at that time, locally without a model; output is an image usable as a reference or a video's start
 - {"id","type":"clip_edit","prompt":"what changes, e.g. make it night with rain","mode":"auto|edit|restyle|reference","quality":"draft|final","clips":[ids of video/asset nodes],"refs":[ids of image/cast nodes]}: redraws an existing clip following the instruction and keeps its motion
 - {"id","type":"note","text"}
 Rules: a name the user mentions that is in the project cast is a cast node wired as refs into every picture
@@ -1158,7 +1182,7 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
     data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality", "seconds"),
                  "music": ("tags", "lyrics", "duration", "bpm"), "assistant": ("prompt", "as_list", "items"),
                  "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",),
-                 "clip_edit": ("prompt", "mode", "quality")}
+                 "clip_edit": ("prompt", "mode", "quality"), "frame": ("at_s",)}
     kept = []
     for n in raw:
         nid = ids[str(n.get("id") or n["type"])]
@@ -1206,7 +1230,7 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
             wires.append((ref(n.get("audio")), None, nid, "audio"))
         for src in n.get("clips") or []:
             if ref(src):
-                wires.append((ref(src), None, nid, "clip" if t == "clip_edit" else "clips"))
+                wires.append((ref(src), None, nid, "clip" if t in ("clip_edit", "frame") else "clips"))
     kept_set = set(kept) | existing
     _attach_cast(store, project_id, ops, wires, kept_set, existing)
     # an @Name nobody in the cast answers to loads no reference: plain words then

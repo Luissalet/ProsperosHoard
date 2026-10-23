@@ -70,10 +70,10 @@ of64 (896x512 by default), because its guide uses half-sized latent dimensions.
 
 ## Node library and assembly order
 
-The library groups27 shortcuts into References and text, Generate, Transform,
+The library groups28 shortcuts into References and text, Generate, Transform,
 Assemble and Organize. Docked at desktop widths1100px and above, it overlays the
 canvas below that and closes after selection. Search accepts both languages,
-ignores accents and matches all entered terms. All15 native types remain.
+ignores accents and matches all entered terms. The16 native types include frame extraction.
 
 Transfer motion creates a video plus image/start and video/motion sources. Lip
 sync creates image/start and audio/audio sources. Between two frames creates
@@ -92,6 +92,20 @@ disconnect the relevant clip inputs and reconnect them in the desired order in
 one edit request. Other edges remain unchanged.
 
 ## Verification scope
+
+Extract frame is a native `frame` node: video input `clip` (many), image output
+`out`, and `data.at_s` in seconds (default0). Its source player previews the first
+included clip; enter a time or use the playhead button, then Extract. One still
+is saved per included clip at that same time. Invalid/out-of-range times fail
+before extraction. The original clip remains unchanged. Connect the resulting
+image to an image's refs or a video's start. Execution, caching, history,
+selection and portable techniques use the ordinary graph machinery.
+
+MCP/API: `studio_spaces(action="edit", ops=[{"op":"add_node","id":"still",
+"type":"frame","data":{"at_s":1.2}}, {"op":"connect","source":"clip",
+"target":"still","target_handle":"clip"}])`, then run the still node. This
+uses the existing local `engine.frame_at` operation; no GPU or model download.
+It selects a frame from existing footage and does not improve its anatomy.
 
 Isolated simulated-generator checks prove interaction and transport, not model
 quality. Separate real GPU comparisons retain sources, prompts, seeds, jobs,

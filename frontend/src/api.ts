@@ -1177,7 +1177,7 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 // ------------------------------------------------------------- spaces
 
 export type SpaceNodeType = "text" | "asset" | "cast" | "image" | "video" | "music" | "list" | "note" | "assistant" | "edit" | "combine"
-  | "variations" | "group" | "composite" | "clip_edit";
+  | "variations" | "group" | "composite" | "clip_edit" | "frame";
 
 export interface SpaceNode {
   id: string;

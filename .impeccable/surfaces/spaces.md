@@ -207,3 +207,15 @@ review returns ship; it does not approve generated motion or historical comp gat
 ### Optional LTX refinement — task1190
 
 One contextual checkbox below duration and above engine status/texts selects a native2x refinement stage for image-only LTX. It is off by default and absent for motion, end-frame and audio modes. The same LTX model remains selected; no extra navigation or approval. Availability reports the actual optional upscaler, and the hint explains the added cost without promising corrected motion. Existing playback and generation stay in place.
+
+### Frame extraction — task1190, R20
+
+Extend the established node library and card system with a native `frame` node.
+Its 340px card keeps source playback, a playhead-time button and a labelled
+seconds input together; Extract stays in the ordinary node action row. The
+source monitor contains the whole frame on inspection black. At narrow widths,
+the existing Focus action preserves readable width and vertical pan. The image
+output feeds references or another clip's start. No new navigation, modal,
+model download or approval step. Verify the selected time against real decoded
+pixels, downstream input resolution, invalid times and original preservation;
+UI evidence covers desktop and mobile separately from generation quality.
