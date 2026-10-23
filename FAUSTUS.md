@@ -31,7 +31,10 @@ multiples of64 (896x512 default). Invalid sizes/frame counts fail before renderi
 The image-only graph records its effective eight-step `manual_sigmas` schedule
 and denoise1; incompatible sampling overrides return an explicit explanation.
 Control maps its denoise setting to the sampler. Managed local servers reserve
-their physical GPU; cold starts use the granted card, including pool workers.
+their physical GPU using the effective URL (including environment overrides).
+A worker starting a server under its lease uses the granted card. HTTP
+preflight may start the server process to read its schema before enqueueing;
+this does not load or execute the checkpoint. Model execution follows the lease.
 
 Imported UI workflows preserve numeric union widgets such as `FLOAT,INT`,
 declared input order and named widget values. The node-schema cache keeps

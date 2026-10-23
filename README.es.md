@@ -365,7 +365,7 @@ Prospero se une a las demás apps Hoard con el contrato común de la familia (el
   fallado (fallo = prioridad alta). Van por el hub de la familia y enlazan a la página de la producción. **Ajustes > Avisos de
   producciones** (o `GET|PUT /api/family/settings`): `notify.via` = `auto` (el hub cuando responde), `hub` (siempre lo intenta) u `off`;
   `notify.language` = `es` o `en`. Se guarda en `data/family.json`.
-- **Reserva de GPU.** Los servidores locales de ComfyUI gestionados reservan su tarjeta real, incluidos los workers del pool; un servidor apagado arranca en la tarjeta concedida. Un trabajo del carril de GPU toma la reserva del hub para su clase de modelo (`hoard_link.lease`) además de la
+- **Reserva de GPU.** Los servidores locales de ComfyUI gestionados reservan su tarjeta real, incluidos los workers del pool y la URL fijada por entorno. Si el worker arranca un servidor tras obtener la reserva, usa la tarjeta concedida. La preparación de una petición puede arrancar el proceso para leer su esquema antes de encolar; el modelo se ejecuta bajo la reserva del trabajo. Un trabajo del carril de GPU toma la reserva del hub para su clase de modelo (`hoard_link.lease`) además de la
   comprobación de VRAM que ya existía (dimensionada por operación de retoque - mapas de pose y profundidad 3 GB, ampliar, quitar fondo - y por plantilla de clip - InfiniteTalk, primer a último fotograma 14B, S2V - en lugar de por el motor de imagen), para que la transcripción del editor y los modelos de lenguaje no carguen a la vez. Sin hub no
   cambia nada; si el hub la mantiene en cola más de dos minutos el trabajo pasa a `waiting_gpu` y reintenta. `PROSPERO_GPU_LEASE=0` la
   desactiva.

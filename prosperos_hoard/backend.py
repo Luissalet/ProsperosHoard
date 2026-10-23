@@ -769,7 +769,7 @@ class Backend:
 
     def main_comfy_port(self) -> Optional[int]:
         """Port of the main ComfyUI when it is a local one (None = remote)."""
-        return comfy_port_from_url((self._raw_config().get("comfy") or {}).get("url"))
+        return comfy_port_from_url(self.link.config.comfy_url)
 
     def comfy_ports(self) -> list[int]:
         ports: list[int] = []

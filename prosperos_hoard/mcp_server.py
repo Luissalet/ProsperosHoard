@@ -1771,10 +1771,12 @@ def studio_spaces(
     Node types: text {text}; asset {kind, asset_ids}; cast {character_id} (outputs its reference image, or
     "@Name" from source_handle "text"); image {prompt, preset "sheet" (front/side/face turnaround), aspect,
     count, engine, seed, camera} with inputs prompt (text), refs (image), pose (a pose map: the body pose to
-    copy) and layout (a depth map: the composition to keep); video {prompt, engine "auto"|"wan14b"|"wan"|"svd",
+    copy) and layout (a depth map: the composition to keep); video {prompt, engine "auto"|"wan14b"|"wan"|"svd"|"ltx23",
     lightning (true: 4-step 14B, false: full schedule), quality "draft"|"final", seconds,
     audio_start_s, motion_start_s, motion_prompt (the action, separate from appearance/setting),
-    pose_strength, reference_image_strength (0-10, trained default 1; higher is not necessarily better),
+    motion_engine "animate"|"ltx23_control" (pose transfer or LTX Canny structure control),
+    pose_strength, reference_image_strength (0-10, trained default 1; higher is not necessarily better;
+    LTX control uses pose_strength and does not use the Animate2 reference strength),
     seed, camera, sing_engine "auto"|"s2v"|"infinitetalk"} with inputs start
     (image: one clip per image), end (image: the frame the clip ends on, Wan 2.2 14B), prompt, motion (video:
     copy its moves) and audio (audio: the character sings it, lip sync; S2V up to 19 s, InfiniteTalk up to
