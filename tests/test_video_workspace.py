@@ -49,6 +49,62 @@ def test_structural_guide_reaches_ltx_with_camera_action_and_valid_frame_grid(mo
     assert body["reference_asset_id"] == "reference" and body["seed"] == 9
 
 
+@pytest.mark.parametrize("appearance_length", [3890, 3900])
+def test_ltx_control_preserves_the_whole_action_with_a_long_appearance(monkeypatch, appearance_length):
+    monkeypatch.setattr(spaces, "inputs_of", lambda *args: {
+        "start": [("image", "reference")], "motion": [("video", "guide")],
+    })
+    action = "Two sharp steps then a clockwise camera arc" + "!" * (3800 if appearance_length == 3900 else 0)
+    appearance = "A" * appearance_length
+    graph = {"nodes": [{"id": "clip", "type": "video", "data": {
+        "motion_engine": "ltx23_control", "prompt": appearance, "motion_prompt": action,
+    }}], "edges": []}
+    prompt = spaces.plan_node(None, graph, {}, "clip")[0]["body"]["prompt"]
+    assert prompt.endswith(action) and len(prompt) <= 4000
+    if appearance_length == 3890:
+        assert prompt == appearance + ". " + action
+
+
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+def test_ltx_checkpoint_override_reaches_all_three_loaders(template):
+    from prosperos_hoard import comfy_driver
+    workflow, spec = comfy_driver.load_template(template)
+    applied = comfy_driver.apply_params(workflow, spec, {"checkpoint": "alternate_ltx.safetensors"})
+    loaders = [n for n in applied.values() if "ckpt_name" in n["inputs"]]
+    assert len(loaders) == 3
+    assert all(n["inputs"]["ckpt_name"] == "alternate_ltx.safetensors" for n in loaders)
+
+
+@pytest.mark.parametrize("override", [{"steps": 20}, {"scheduler": "karras"}, {"strength": 0.5}, {"denoise": 0.5}])
+def test_fixed_ltx_sampling_does_not_record_unexecuted_settings(store, monkeypatch, override):
+    from prosperos_hoard import engine
+    monkeypatch.setattr(engine, "run_template", lambda *a, **k: pytest.fail("Ignored settings reached renderer"))
+    with pytest.raises(engine.EngineError) as error:
+        engine.generate_image(store, None, {"params": {
+            "template": "ltx23_i2v", "positive_prompt": "Move", **override,
+        }}, lambda *a: None)
+    assert error.value.code == "fixed_sampling"
+
+
+def test_ltx_effective_sampling_and_explicit_control_denoise_reach_the_graph(store, monkeypatch):
+    from prosperos_hoard import engine, comfy_driver
+    captured = []
+    monkeypatch.setattr(engine, "run_template", lambda *a, **k: captured.append(k) or {})
+    for template in ("ltx23_i2v", "ltx23_control"):
+        params = {"template": template, "positive_prompt": "Move"}
+        if template == "ltx23_control":
+            params.update(steps=20, scheduler="simple", denoise=0.75)
+        engine.generate_image(store, None, {"params": params}, lambda *a: None)
+    assert captured[0]["values"]["steps"] == 8
+    assert captured[0]["values"]["scheduler"] == "manual_sigmas"
+    assert captured[0]["values"]["denoise"] == 1
+    workflow, spec = comfy_driver.load_template("ltx23_control")
+    applied = comfy_driver.apply_params(workflow, spec, captured[1]["values"])
+    assert applied["129:704"]["inputs"]["steps"] == 20
+    assert applied["129:704"]["inputs"]["scheduler"] == "simple"
+    assert applied["129:704"]["inputs"]["denoise"] == 0.75
+
+
 @pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
 def test_ltx_dimensions_duration_and_fps_are_consistent_across_the_whole_graph(template):
     from prosperos_hoard import comfy_driver, engine

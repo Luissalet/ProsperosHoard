@@ -1822,7 +1822,7 @@ def _generation_values(params: dict[str, Any], template_defaults: Optional[dict[
         # fallback: Qwen-Image 2.1 edit reads its references through the
         # text encoder and samples a fresh latent, so 0.6 there turns the
         # empty canvas into noise texture
-        "denoise": _first(params.get("strength"), t.get("denoise"),
+        "denoise": _first(params.get("strength"), params.get("denoise"), t.get("denoise"),
                           1.0 if not params.get("reference_asset_id") else 0.6),
     }
     for key, value in t.items():  # template-only knobs (guidance, shift, length, fps, ...)
@@ -2006,6 +2006,12 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
     values = _generation_values(params, spec.get("defaults"))
+    if template == "ltx23_i2v":
+        # This distilled graph samples a fixed ManualSigmas schedule. Do not
+        # record caller settings which the graph cannot execute.
+        for key, expected in (("steps", 8), ("scheduler", "manual_sigmas"), ("denoise", 1.0)):
+            if values[key] != expected:
+                raise EngineError("fixed_sampling", f"ltx23_i2v uses fixed {key}={expected}")
     for key in spec.get("map", {}):
         if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
             values[key] = params[key]
