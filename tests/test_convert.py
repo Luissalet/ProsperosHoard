@@ -40,6 +40,105 @@ IGNORED_INPUTS = {"seed", "noise_seed"}
 LEGACY_ACE = FIXTURES / "v0.34" / "audio_ace_step_1_5_checkpoint.json"
 
 
+@pytest.mark.parametrize("fps", [24, 29.97])
+def test_numeric_multitype_keeps_audio_batch_one(fps):
+    # LTXVEmptyLatentAudio exposes frame_rate as FLOAT,INT. Skipping its
+    # saved widget shifts fps into batch_size and can multiply GPU memory.
+    info = {"LTXVEmptyLatentAudio": {"input": {"required": {
+        "frames_number": ["INT", {"default": 97}],
+        "frame_rate": ["FLOAT,INT", {"default": 25.0, "min": 1, "max": 1000}],
+        "batch_size": ["INT", {"default": 1}],
+        "audio_vae": ["VAE"],
+    }}, "output": ["LATENT"]}}
+    ui = {"nodes": [{"id": 1, "type": "LTXVEmptyLatentAudio",
+                     "widgets_values": [121, fps, 1]}], "links": []}
+    inputs = convert.ui_to_api(ui, info)["1"]["inputs"]
+    assert inputs == {"frames_number": 121, "frame_rate": fps, "batch_size": 1}
+
+
+def test_linked_numeric_multitype_consumes_its_stale_widget():
+    info = {
+        "FrameRate": {"input": {"required": {"value": ["FLOAT", {"default": 30}]}}, "output": ["FLOAT"]},
+        "Audio": {"input": {"required": {"frame_rate": ["FLOAT,INT", {}], "batch_size": ["INT", {}]}}, "output": ["LATENT"]},
+    }
+    ui = {"nodes": [
+        {"id": 1, "type": "FrameRate", "widgets_values": [30]},
+        {"id": 2, "type": "Audio", "widgets_values": [25, 1],
+         "inputs": [{"name": "frame_rate", "link": 1}]},
+    ], "links": [[1, 1, 0, 2, 0, "FLOAT"]]}
+    assert convert.ui_to_api(ui, info)["2"]["inputs"] == {"frame_rate": ["1", 0], "batch_size": 1}
+
+
+def test_image_mask_multitype_stays_a_socket():
+    info = {
+        "Picture": {"input": {"required": {}}, "output": ["IMAGE"]},
+        "Resize": {"input": {"required": {"input": ["IMAGE,MASK", {}], "width": ["INT", {}]}}, "output": ["IMAGE"]},
+    }
+    ui = {"nodes": [
+        {"id": 1, "type": "Picture", "widgets_values": []},
+        {"id": 2, "type": "Resize", "widgets_values": [832], "inputs": [{"name": "input", "link": 1}]},
+    ], "links": [[1, 1, 0, 2, 0, "IMAGE"]]}
+    assert convert.ui_to_api(ui, info)["2"]["inputs"] == {"input": ["1", 0], "width": 832}
+
+
+def test_numeric_multitype_range_is_checked():
+    info = {"Audio": {"input": {"required": {"frame_rate": ["FLOAT,INT", {"min": 1, "max": 1000}]}}, "output": ["LATENT"]}}
+    api = {"1": {"class_type": "Audio", "inputs": {"frame_rate": 0}}}
+    assert any("frame_rate" in error and "minimum" in error for error in convert.validate_values(api, info))
+
+
+def test_subgraph_promotes_numeric_multitype_widgets():
+    info = {"Audio": {"input": {"required": {
+        "frame_rate": ["FLOAT,INT", {}], "batch_size": ["INT", {}],
+    }}, "output": ["LATENT"]}}
+    ui = {"nodes": [{"id": 4, "type": "audio_group", "widgets_values": [24, 1]}], "links": [],
+          "definitions": {"subgraphs": [{"id": "audio_group", "inputs": [
+              {"name": "fps", "type": "FLOAT,INT"}, {"name": "batch", "type": "INT"},
+          ], "nodes": [{"id": 1, "type": "Audio", "widgets_values": [12, 2], "inputs": [
+              {"name": "frame_rate", "link": 1}, {"name": "batch_size", "link": 2},
+          ]}], "links": [
+              {"id": 1, "origin_id": -10, "origin_slot": 0, "target_id": 1, "target_slot": 0, "type": "FLOAT,INT"},
+              {"id": 2, "origin_id": -10, "origin_slot": 1, "target_id": 1, "target_slot": 1, "type": "INT"},
+          ]}]}}
+    assert convert.ui_to_api(ui, info)["4:1"]["inputs"] == {"frame_rate": 24, "batch_size": 1}
+
+
+def test_declared_input_order_survives_sorted_old_cache():
+    info = {"Audio": {"input": {"required": {
+        "frames_number": ["INT", {}], "frame_rate": ["FLOAT,INT", {}], "batch_size": ["INT", {}],
+    }}, "input_order": {"required": ["frames_number", "frame_rate", "batch_size"]}, "output": ["LATENT"]}}
+    cached = json.loads(json.dumps(info, sort_keys=True))
+    ui = {"nodes": [{"id": 1, "type": "Audio", "widgets_values": [121, 24, 1]}], "links": []}
+    assert convert.ui_to_api(ui, cached)["1"]["inputs"] == {"frames_number": 121, "frame_rate": 24, "batch_size": 1}
+
+
+def test_named_dynamic_widgets_keep_dimensions_when_cached_children_are_sorted():
+    info = {"Resize": {"input": {"required": {
+        "size": ["COMFY_DYNAMICCOMBO_V3", {"options": [{"key": "dimensions", "inputs": {"required": {
+            "width": ["INT", {}], "height": ["INT", {}], "crop": ["COMBO", {"options": ["center", "disabled"]}],
+        }}}]}], "method": ["COMBO", {"options": ["lanczos", "area"]}],
+    }}, "input_order": {"required": ["size", "method"]}, "output": ["IMAGE"]}}
+    ui = {"nodes": [{"id": 1, "type": "Resize", "widgets_values": ["dimensions", 832, 480, "center", "lanczos"],
+                     "widgets_values_named": {"size": "dimensions", "size.width": 832, "size.height": 480,
+                                               "size.crop": "center", "method": "lanczos", "upload": "ignored"}}], "links": []}
+    api = convert.ui_to_api(ui, json.loads(json.dumps(info, sort_keys=True)))
+    assert api["1"]["inputs"] == {"size": "dimensions", "size.width": 832, "size.height": 480, "size.crop": "center", "method": "lanczos"}
+
+
+def test_engine_cache_preserves_nested_schema_order(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from prosperos_hoard import engine
+    info = {"Resize": {"input": {"required": {"size": ["COMFY_DYNAMICCOMBO_V3", {"options": [{
+        "key": "dimensions", "inputs": {"required": {"width": ["INT", {}], "height": ["INT", {}], "crop": ["STRING", {}]}},
+    }]}]}}}}
+    backend = SimpleNamespace(data_dir=tmp_path, run_async=lambda result: result)
+    monkeypatch.setattr(engine, "_comfy", lambda *_: SimpleNamespace(object_info=lambda: info))
+    engine._object_info(backend, autostart=False)
+    cached = json.loads(engine.object_info_cache_path(tmp_path).read_text(encoding="utf-8"))
+    children = cached["Resize"]["input"]["required"]["size"][1]["options"][0]["inputs"]["required"]
+    assert list(children) == ["width", "height", "crop"]
+
+
 @pytest.fixture(scope="module")
 def object_info() -> dict:
     return json.loads(OBJECT_INFO_PATH.read_text(encoding="utf-8"))
