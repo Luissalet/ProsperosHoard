@@ -87,11 +87,23 @@ def test_numeric_multitype_range_is_checked():
     assert any("frame_rate" in error and "minimum" in error for error in convert.validate_values(api, info))
 
 
-def test_subgraph_promotes_numeric_multitype_widgets():
+@pytest.mark.parametrize("widgets,named", [
+    ([24, 1], {}),
+    ([12, 2], {"fps": 24, "batch": 1}),
+    ([], {"fps": 24, "batch": 1, "unknown": 99}),
+])
+@pytest.mark.parametrize("linked", [False, True])
+def test_subgraph_promotes_numeric_multitype_widgets(widgets, named, linked):
     info = {"Audio": {"input": {"required": {
         "frame_rate": ["FLOAT,INT", {}], "batch_size": ["INT", {}],
     }}, "output": ["LATENT"]}}
-    ui = {"nodes": [{"id": 4, "type": "audio_group", "widgets_values": [24, 1]}], "links": [],
+    info["Rate"] = {"input": {"required": {"value": ["FLOAT", {}]}}, "output": ["FLOAT"]}
+    ui = {"nodes": [
+              {"id": 5, "type": "Rate", "widgets_values": [48]},
+              {"id": 4, "type": "audio_group", "widgets_values": widgets,
+               "widgets_values_named": named,
+               "inputs": [{"name": "fps", "link": 1 if linked else None}]},
+          ], "links": [[1, 5, 0, 4, 0, "FLOAT"]] if linked else [],
           "definitions": {"subgraphs": [{"id": "audio_group", "inputs": [
               {"name": "fps", "type": "FLOAT,INT"}, {"name": "batch", "type": "INT"},
           ], "nodes": [{"id": 1, "type": "Audio", "widgets_values": [12, 2], "inputs": [
@@ -100,7 +112,9 @@ def test_subgraph_promotes_numeric_multitype_widgets():
               {"id": 1, "origin_id": -10, "origin_slot": 0, "target_id": 1, "target_slot": 0, "type": "FLOAT,INT"},
               {"id": 2, "origin_id": -10, "origin_slot": 1, "target_id": 1, "target_slot": 1, "type": "INT"},
           ]}]}}
-    assert convert.ui_to_api(ui, info)["4:1"]["inputs"] == {"frame_rate": 24, "batch_size": 1}
+    assert convert.ui_to_api(ui, info)["4:1"]["inputs"] == {
+        "frame_rate": ["5", 0] if linked else 24, "batch_size": 1,
+    }
 
 
 def test_declared_input_order_survives_sorted_old_cache():

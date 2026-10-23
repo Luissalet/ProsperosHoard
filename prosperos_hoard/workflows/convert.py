@@ -184,6 +184,9 @@ def _make_inner_scope(scope: _Scope, instance_node: dict, subgraph_id: str) -> _
     widget_names = [i.get("name") for i in sg_inputs if _is_widget_type(i.get("type"))]
     widget_values = list(instance_node.get("widgets_values") or [])
     promoted = dict(zip(widget_names, widget_values)) if len(widget_values) == len(widget_names) else {}
+    named_values = instance_node.get("widgets_values_named")
+    if isinstance(named_values, dict):
+        promoted.update({name: named_values[name] for name in widget_names if name in named_values})
 
     def external_resolver(input_slot: int) -> Optional[Resolved]:
         if input_slot >= len(sg_inputs):
