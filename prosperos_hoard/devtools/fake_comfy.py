@@ -135,6 +135,7 @@ MOTION_FILES = {
     ("LTXVAudioVAELoader", "ckpt_name"): ["ltx-2.3-22b-distilled-fp8.safetensors"],
     ("LTXAVTextEncoderLoader", "ckpt_name"): ["ltx-2.3-22b-distilled-fp8.safetensors"],
     ("LTXAVTextEncoderLoader", "text_encoder"): ["gemma_3_12B_it_fp4_mixed.safetensors"],
+    ("LatentUpscaleModelLoader", "model_name"): ["ltx-2.3-spatial-upscaler-x2-1.1.safetensors"],
     ("LoadDA3Model", "model_name"): ["depth_anything_3_mono_large.safetensors"],
     ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
                                            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
