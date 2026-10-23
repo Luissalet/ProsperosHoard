@@ -479,7 +479,8 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                              "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0)),
                              "template_params": {"length": int(round(seconds * 24)) + 1, "pose_prompt": prompt}})
             elif end:
-                body.update({"template": "auto_clip", "end_asset_id": end, "template_params": {"seconds": seconds}})
+                body.update({"template": "auto_clip", "end_asset_id": end,
+                             "template_params": {"seconds": seconds, "lightning": data.get("lightning", True)}})
             else:
                 selected = data.get("engine") or ("wan" if quality == "draft" else "auto")
                 templates = {"auto": "auto_clip", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v", "svd": "svd_img2vid"}

@@ -140,6 +140,29 @@ def _store(client):
     return app.state.store if hasattr(app.state, "store") else app.state.studio_store
 
 
+@pytest.mark.parametrize("lightning", [True, False])
+def test_final_frame_keeps_video_sampling_mode(client, lightning):
+    import io
+    from PIL import Image
+
+    c, _, _ = client
+    pid = c.post("/api/projects", json={"name": "Controlled clip"}).json()["id"]
+    image = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(image, "PNG")
+    aid = c.post(f"/api/projects/{pid}/import-upload",
+                 files={"file": ("reference.png", image.getvalue(), "image/png")}).json()["id"]
+    graph = spaces.validate_graph({"nodes": [
+        {"id": "reference", "type": "asset", "data": {"kind": "image", "asset_ids": [aid]}},
+        {"id": "clip", "type": "video", "data": {"seconds": 4, "lightning": lightning}},
+    ], "edges": [
+        {"source": "reference", "target": "clip", "target_handle": "start"},
+        {"source": "reference", "target": "clip", "target_handle": "end"},
+    ]})
+    operation = spaces.plan_node(_store(client), graph, {}, "clip")[0]
+    assert operation["body"]["end_asset_id"] == aid
+    assert operation["body"]["template_params"] == {"seconds": 4.0, "lightning": lightning}
+
+
 def test_agents_edit_and_run_a_space(client):
     c, _, _ = client
     pid = c.post("/api/projects", json={"name": "Canvas 4"}).json()["id"]

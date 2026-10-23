@@ -7,6 +7,10 @@ fast/full schedule, prompts, references and durations in the same graph.
 models. `studio_video_from_plan` continues automatically unless
 `autopilot=false` opts into review. See [video workflow](docs/video-workspace.md).
 
+A video node's optional final-frame input also preserves the fast/full
+schedule. Switching fast generation off requests twenty steps for the
+first-and-last-frame workflow, as it does for a start-only clip.
+
 Real video comparisons are separate from simulated interaction checks: one
 four-second walking/waving scene took 250.60 s at four-step 14B versus 951.09 s
 at the full schedule, with both subject continuity and the action observed.
