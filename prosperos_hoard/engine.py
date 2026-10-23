@@ -1002,6 +1002,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
                 **(extra_recipe or {}),
             }
+            if template_name == "ltx23_i2v_hq":
+                recipe["video_refinement"] = {
+                    "scale": 2, "steps": 3, "cfg": 1, "sigmas": [0.85, 0.725, 0.4219, 0],
+                    "sampler": run_values["sampler"], "seed": run_values["seed"],
+                }
             if audio_name and audio_seconds and spec.get("kind") == "video":
                 # a lip-sync render is made in whole generations: keep exactly the line
                 data = _trim_video_bytes(data, float(audio_seconds))
@@ -2059,8 +2064,6 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         end_asset_id=params.get("end_asset_id"), use_vocals=params.get("use_vocals", True) is not False,
         extra_recipe={"prompt": params.get("prompt"), "style": params.get("style"),
                       "matched_characters": params.get("matched_characters") or [],
-                      **({"video_refinement": {"scale": 2, "steps": 3, "cfg": 1, "sigmas": [0.85, 0.725, 0.4219, 0],
-                          "sampler": values["sampler"], "seed": values["seed"]}} if template == "ltx23_i2v_hq" else {}),
                       **({"composition_asset_id": params["composition_asset_id"]} if params.get("composition_asset_id") else {}),
                       "image_engine": engine_name or "custom"},
         name=params.get("prompt") or params["positive_prompt"],
