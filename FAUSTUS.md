@@ -16,7 +16,7 @@ and setting in `prompt`, plus native `pose_strength` and
 `reference_image_strength` (0–10, trained default 1). Do not assume stronger
 conditioning yields better results. Inspect actual takes and keep failed ones.
 
-`studio_review_clip(asset_id, prompt?, reference_asset_ids?)` reviews a video
+`studio_review_clip(asset_id, prompt?, reference_asset_ids?, check_supporting_cast?)` reviews a video
 without a production, through the same optional action available in its node.
 It reports technical checks and, if vision is available, a chronological sample
 of up to 24 frames with motion, anatomy, setting and cast scores. Respect
@@ -25,6 +25,13 @@ of up to 24 frames with motion, anatomy, setting and cast scores. Respect
 an artistic approval. It does not pause or gate generation. Named secondary
 characters still use the existing individual cast/reference controls; this
 change adds no multi-reference video model.
+Without a prompt override, review uses the selected asset's saved appearance
+and action, including Animate2's pose prompt. It never substitutes newer node
+edits for an older take. Use `check_supporting_cast=true` to require a secondary
+identity assessment; null then leaves the review incomplete. Observed low cast
+scores are retained even when this flag is omitted. Temporal scores require
+valid model JSON: explicit nulls and malformed replies cannot become approval
+through numbers quoted in the explanation.
 
 Real video comparisons are separate from simulated interaction checks: one
 four-second walking/waving scene took 250.60 s at four-step 14B versus 951.09 s

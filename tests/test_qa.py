@@ -115,7 +115,7 @@ def _save(store, pid: str, img: Image.Image, **recipe) -> str:
                               width=img.width, height=img.height, source="generated", recipe=recipe, asset_id=aid)["id"]
 
 
-def _clip(store, pid: str, frames: np.ndarray, source: str | None = None) -> str:
+def _clip(store, pid: str, frames: np.ndarray, source: str | None = None, **recipe) -> str:
     exe = ffmpeg_path()
     if not exe:
         pytest.skip("ffmpeg missing")
@@ -128,7 +128,7 @@ def _clip(store, pid: str, frames: np.ndarray, source: str | None = None) -> str
     assert proc.returncode == 0, proc.stderr
     return store.create_asset(project_id=pid, kind="video", file_path=path.relative_to(store.data_dir).as_posix(),
                               duration_s=n / 24, source="generated", asset_id=aid,
-                              recipe={"input_asset_ids": [source] if source else []})["id"]
+                              recipe={"input_asset_ids": [source] if source else [], **recipe})["id"]
 
 
 class FakeStudio:
@@ -272,13 +272,15 @@ def test_temporal_review_catches_an_off_middle_failure_and_keeps_uncertainty(sto
         assert "chronological order" in prompt and "0.742" in prompt
         seen.append(len(images))
         return json.dumps({"bible": 9, "prompt": 9, "reference": 9, "motion": 2,
-                           "anatomy": 3, "scene": 4, "supporting_cast": None, "reason": "defect at0.99s"})
+                           "anatomy": 3, "scene": 4, "supporting_cast": None,
+                           "reason": "The reference identity and stage are stable throughout the chronological sample, including the decorated head and jacket. Nevertheless, the requested rapid pivot is not demonstrated with clear planted feet. Visible foot sliding at0.99s."})
 
     item = qa.QA(store, state, vision).check_clip("1", aid)
     assert seen and item["verdict"] == "fail" and item["score"] == 2
     assert "motion, anatomy, scene" in "; ".join(item["reasons"])
     assert item["visual_review"]["status"] == "sampled"
     assert item["visual_review"]["full_playback_reviewed"] is False
+    assert item["model"]["reason"].endswith("Visible foot sliding at0.99s.")
     # Model-free checks can pass, but cannot be represented as a visual assessment.
     unchecked = qa.QA(store, state).check_clip("1", aid)
     assert unchecked["verdict"] == "pass"
@@ -291,6 +293,10 @@ def test_temporal_review_catches_an_off_middle_failure_and_keeps_uncertainty(sto
 def test_invalid_visual_scores_cannot_turn_into_positive_scores():
     scores = qa.parse_scores('{"motion":NaN,"anatomy":true,"scene":Infinity}', ("motion", "anatomy", "scene"))
     assert scores["motion"] is scores["anatomy"] is scores["scene"] is None
+    uncertain = qa.parse_scores('{"motion":null,"not_anatomy":9,"reason":"motion:9, anatomy:9 are not observed"}', ("motion", "anatomy"))
+    assert uncertain["motion"] is uncertain["anatomy"] is None
+    broken = qa.parse_scores('motion:9, anatomy:9', ("motion", "anatomy"), require_json=True)
+    assert broken["motion"] is broken["anatomy"] is None
 
 
 def test_standalone_clip_review_is_available_without_a_production_and_is_read_only(client):
@@ -298,7 +304,8 @@ def test_standalone_clip_review_is_available_without_a_production_and_is_read_on
     store = app.state.store
     pid = store.create_project("Standalone review")["id"]
     reference = _save(store, pid, scene())
-    aid = _clip(store, pid, RNG.integers(40, 150, (30, 36, 64), dtype=np.uint8), reference)
+    aid = _clip(store, pid, RNG.integers(40, 150, (30, 36, 64), dtype=np.uint8), reference,
+                prompt="fixed circular stage", params={"pose_prompt": "rapid planted-foot pivot"})
     before = store.get_asset(aid)
     app.state.qa_vision = (None, "no vision model")
     response = c.post("/api/agent/studio_review_clip", json={"asset_id": aid, "prompt": "quick footwork", "reference_asset_ids": [reference]})
@@ -307,6 +314,24 @@ def test_standalone_clip_review_is_available_without_a_production_and_is_read_on
     assert result["asset_id"] == aid and result["item"]["model"] == {"skipped": "no vision model"}
     assert result["item"]["visual_review"]["status"] == "unavailable"
     assert store.get_asset(aid) == before
+    prompts = []
+    reply = {"prompt": None, "motion": None, "anatomy": None, "scene": None}
+    def vision(images, prompt):
+        prompts.append(prompt)
+        return json.dumps(reply)
+    app.state.qa_vision = (vision, "test-vision")
+    result = c.post(f"/api/assets/{aid}/review", json={"asset_id": aid}).json()
+    assert result["item"]["visual_review"]["status"] == "incomplete"
+    assert "fixed circular stage" in prompts[-1] and "rapid planted-foot pivot" in prompts[-1]
+    c.post(f"/api/assets/{aid}/review", json={"asset_id": aid, "prompt": "explicit override"})
+    assert "explicit override" in prompts[-1] and "rapid planted-foot pivot" not in prompts[-1]
+    reply.update(prompt=9, motion=9, anatomy=9, scene=9, reference=9, supporting_cast=1)
+    result = c.post(f"/api/assets/{aid}/review", json={"asset_id": aid, "prompt": "The lead dances beside Gengar; preserve the secondary's identity."}).json()
+    assert result["item"]["verdict"] == "fail" and result["item"]["model"]["supporting_cast"] == 1
+    reply["supporting_cast"] = None
+    result = c.post(f"/api/assets/{aid}/review", json={"asset_id": aid, "check_supporting_cast": True}).json()
+    assert result["item"]["visual_review"]["status"] == "incomplete"
+    assert "supporting_cast" in result["item"]["visual_review"]["unassessed"]
     assert c.post("/api/agent/studio_review_clip", json={"asset_id": reference}).status_code == 400
 
 
