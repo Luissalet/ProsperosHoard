@@ -699,6 +699,12 @@ class VideoFramesBody(BaseModel):
     at_s: Optional[float] = None                # one frame at this time (0 = the first) instead of `count` spread ones
 
 
+class ClipReviewBody(BaseModel):
+    asset_id: str
+    prompt: str = ""
+    reference_asset_ids: list[str] = Field(default_factory=list)
+
+
 class ProductionShotsBody(BaseModel):
     changes: list[dict[str, Any]]
     run: bool = True
@@ -3743,11 +3749,38 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
         def ask(images: list[bytes], prompt: str) -> str:
             return backend.link.sync.chat(messages=[{"role": "user", "content": prompt}], images=images,
-                                          capability="vision", max_tokens=240, temperature=0.0).text
+                                          capability="vision", max_tokens=512, temperature=0.0).text
 
         return ask, f"{res.provider or 'vision'}:{res.model or ''}".rstrip(":")
 
     production_hooks["qa_hook"] = lambda run, stage: qa_mod.inline_hook(run, stage, *vision_for_qa())
+
+    def op_review_clip(body: ClipReviewBody) -> dict[str, Any]:
+        asset = store.get_asset(body.asset_id)
+        if asset["kind"] != "video":
+            raise engine.EngineError("needs_video", "choose a video asset to review")
+        for aid in body.reference_asset_ids:
+            if store.get_asset(aid)["kind"] != "image":
+                raise engine.EngineError("needs_image_reference", "review references must be images")
+        shot = {"key": "1", "prompt": body.prompt or (asset.get("recipe") or {}).get("prompt", ""),
+                "motion": "move", "lead": True}
+        if body.reference_asset_ids:
+            shot["review_reference_asset_ids"] = body.reference_asset_ids
+        state = {"spec": {"lead": {"name": "reference character", "look": "as drawn in the supplied references"},
+                          "shots": [shot]}}
+        fn, name = vision_for_qa()
+        item = qa_mod.QA(store, state, fn, name).check_clip("1", body.asset_id)
+        return {"asset_id": body.asset_id, "vision": name, "item": item,
+                "notice": "Technical checks and a sampled visual review; not full-playback approval."}
+
+    @app.post("/api/assets/{asset_id}/review")
+    def review_clip(asset_id: str, body: ClipReviewBody):
+        body.asset_id = asset_id
+        return op_review_clip(body)
+
+    @app.post("/api/agent/studio_review_clip")
+    def agent_review_clip(body: ClipReviewBody):
+        return agent("studio_review_clip", body.asset_id, lambda: op_review_clip(body))
 
     def production_view(slug: str) -> dict[str, Any]:
         return productions_mod.compact_view(productions_mod.load_fresh(store.data_dir, slug))

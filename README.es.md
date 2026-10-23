@@ -970,6 +970,22 @@ Con `--demo` se configura un entrenador falso para probar el flujo entero sin GP
   comprueba los datos antes de publicar (`settings.script_review` se para
   para eso). No se sube nada a las plataformas; `publish.txt` es para pegar.
 
+Con una guía de movimiento conectada, el nodo de vídeo separa apariencia y
+escenario de `motion_prompt`. `pose_strength` y `reference_image_strength`
+exponen los controles nativos de Animate2 entre 0 y 10 (valor de entrenamiento:
+1). Subirlos no garantiza más fidelidad; los grafos antiguos conservan su
+comportamiento cuando no se añade una descripción de movimiento independiente.
+
+**Revisar movimiento** comprueba la toma seleccionada sin salir del nodo. MCP
+`studio_review_clip` permite revisar también cualquier vídeo de la biblioteca,
+sin crear una producción. Si hay modelo de visión, examina hasta 24 fotogramas
+cronológicos y las referencias, con notas separadas para movimiento, anatomía,
+escenario y secundarios. La ausencia de visión o una valoración incompleta se
+indican expresamente. Pasar las comprobaciones técnicas no acredita calidad
+artística ni reproducción completa. La revisión es opcional y no detiene la
+generación. Los secundarios identificables siguen necesitando sus referencias
+individuales mediante las herramientas de reparto y referencias existentes.
+
 ## Licencia
 
 MIT - ver [LICENSE](LICENSE). Las tipografías incluidas conservan sus

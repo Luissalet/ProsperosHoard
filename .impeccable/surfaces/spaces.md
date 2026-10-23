@@ -112,3 +112,17 @@ job transitions, keyboard behavior, comprehensive accessibility or real model
 quality. Real-generation evidence remains separate coordinator work. Historical
 continuation measurements above belong to their original pass. No exact-comp,
 root-gate closure or whole-product approval follows from this extension.
+
+## Motion controls and temporal review — task1190
+
+Extend the existing video card only. A wired motion guide reveals separate
+appearance/setting and movement fields, with native motion/reference strengths
+at trained default1. Keep these experimental controls next to the guide offset;
+do not imply that increasing a strength improves quality. Output review is an
+optional node action beside playback/download/compare. It reports missing
+vision or incomplete assessment explicitly, and identifies chronological
+sampling as distinct from full playback. No new approval screen or generation
+gate is introduced. The separate Studio composition gates remain unchanged.
+Focusing a tall node preserves a readable width on desktop as well as mobile;
+its lower controls remain reachable by vertical panning rather than shrinking
+every field to fit the whole card's height.

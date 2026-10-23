@@ -475,9 +475,17 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                              "audio_start_s": max(0.0, float(data.get("audio_start_s") or 0)), "audio_seconds": seconds,
                              **({"template_params": {"sing_engine": engine_pick}} if engine_pick != "auto" else {})})
             elif motion:
+                motion_params = {"length": int(round(seconds * 24)) + 1,
+                                 "pose_prompt": str(data.get("motion_prompt") or prompt)[:3900]}
+                for key in ("pose_strength", "reference_image_strength"):
+                    if data.get(key) is not None:
+                        value = data[key]
+                        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 10:
+                            raise SpaceError("bad_motion_strength", f"{key} must be a number between 0 and 10")
+                        motion_params[key] = value
                 body.update({"template": "auto_clip", "driving_asset_id": motion,
                              "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0)),
-                             "template_params": {"length": int(round(seconds * 24)) + 1, "pose_prompt": prompt}})
+                             "template_params": motion_params})
             elif end:
                 body.update({"template": "auto_clip", "end_asset_id": end,
                              "template_params": {"seconds": seconds, "lightning": data.get("lightning", True)}})

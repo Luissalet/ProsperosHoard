@@ -163,6 +163,37 @@ def test_final_frame_keeps_video_sampling_mode(client, lightning):
     assert operation["body"]["template_params"] == {"seconds": 4.0, "lightning": lightning}
 
 
+def test_motion_appearance_and_action_reach_separate_conditioning_inputs(store, project):
+    from prosperos_hoard import comfy_driver
+    reference = store.create_asset(project_id=project["id"], kind="image", file_path="reference.png")["id"]
+    drive = store.create_asset(project_id=project["id"], kind="video", file_path="drive.mp4")["id"]
+    graph = spaces.validate_graph({"nodes": [
+        {"id": "ref", "type": "asset", "data": {"kind": "image", "asset_ids": [reference]}},
+        {"id": "drive", "type": "asset", "data": {"kind": "video", "asset_ids": [drive]}},
+        {"id": "clip", "type": "video", "data": {"prompt": "Appearance: rigid decorated sphere in a closed club",
+         "motion_prompt": "quick planted-foot pivot", "seconds": 3, "pose_strength": 0.8, "reference_image_strength": 1.2}},
+    ], "edges": [{"source": "ref", "target": "clip", "target_handle": "start"},
+                {"source": "drive", "target": "clip", "target_handle": "motion"}]})
+    body = spaces.plan_node(store, graph, {}, "clip")[0]["body"]
+    workflow, spec = comfy_driver.load_template("wan_animate2")
+    values = {"positive_prompt": body["prompt"], **body["template_params"]}
+    for name, target in spec["map"].items():
+        if name in values:
+            node, _, field = target.partition(".")
+            workflow[node]["inputs"][field] = values[name]
+    assert workflow["261:3"]["inputs"]["text"].startswith("Appearance:")
+    assert workflow["261:222"]["inputs"]["text"] == "quick planted-foot pivot"
+    assert workflow["261:247"]["inputs"]["pose_strength"] == 0.8
+    assert workflow["261:247"]["inputs"]["reference_image_strength"] == 1.2
+    # Existing saved nodes retain their previous prompt until the user separates it.
+    data = graph["nodes"][-1]["data"]
+    data.pop("motion_prompt")
+    assert spaces.plan_node(store, graph, {}, "clip")[0]["body"]["template_params"]["pose_prompt"] == body["prompt"]
+    data["pose_strength"] = float("nan")
+    with pytest.raises(spaces.SpaceError, match="pose_strength"):
+        spaces.plan_node(store, graph, {}, "clip")
+
+
 def test_agents_edit_and_run_a_space(client):
     c, _, _ = client
     pid = c.post("/api/projects", json={"name": "Canvas 4"}).json()["id"]

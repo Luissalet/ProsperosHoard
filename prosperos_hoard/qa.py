@@ -21,9 +21,10 @@ when asked to, regenerates the ones that fail.
   contains) and durations against the plan (song, clips, renders).
 
 **Model checks** through Hoard Link's vision capability (the family's
-`Link.chat` with an image): 0-10 scores against the bible (the lead's look
-and palette), the shot prompt, and the reference (the lead's canonical
-reference for stills, the source still for clips), with a one-line reason.
+`Link.chat`): stills receive scores against the bible, prompt and references.
+Clips use up to 24 chronological frames plus available image/cast references,
+with separate action, physical motion, anatomy, setting and secondary-cast
+scores. This is a temporal sample, not full-playback or artistic approval.
 Without a vision model every item says `"no vision model"` and the pass
 goes on - QA never blocks a production.
 
@@ -42,6 +43,7 @@ from __future__ import annotations
 import difflib
 import io
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -283,7 +285,7 @@ def model_prompt(lead: dict[str, Any], shot_prompt: str, lead_in_frame: bool, ha
     return "\n".join(p for p in parts if p)
 
 
-def parse_scores(text: str) -> dict[str, Any]:
+def parse_scores(text: str, keys: tuple[str, ...] = ("bible", "prompt", "reference")) -> dict[str, Any]:
     """The model's JSON answer, tolerating prose or code fences around it."""
     match = re.search(r"\{.*\}", text or "", re.DOTALL)
     data: dict[str, Any] = {}
@@ -293,13 +295,14 @@ def parse_scores(text: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             data = {}
     out: dict[str, Any] = {}
-    for key in ("bible", "prompt", "reference"):
+    for key in keys:
         value = data.get(key)
         if value is None:
             m = re.search(rf'"?{key}"?\s*[:=]\s*(\d+(?:\.\d+)?)', text or "", re.IGNORECASE)
             value = float(m.group(1)) if m else None
         try:
-            out[key] = None if value is None else max(0.0, min(10.0, float(value)))
+            number = float(value) if value is not None and not isinstance(value, bool) else None
+            out[key] = max(0.0, min(10.0, number)) if number is not None and math.isfinite(number) else None
         except (TypeError, ValueError):
             out[key] = None
     reason = data.get("reason") if isinstance(data.get("reason"), str) else None
@@ -414,7 +417,9 @@ class QA:
             return item
         motion = clip_motion(frames)
         item["checks"]["motion"] = motion
-        fps = 24.0
+        asset = self.store.get_asset(asset_id)
+        duration = asset.get("duration_s") or audio_mod.probe_duration_s(path)
+        fps = len(frames) / float(duration) if duration else 24.0
         if motion["max_jump"] > th["exposure_jump"]:
             _fail(item, "exposure_jump", f"exposure jump of {motion['max_jump']} at frame {motion['jump_at']} "
                                          f"(~{motion['jump_at'] / fps:.1f} s)")
@@ -423,8 +428,6 @@ class QA:
             _fail(item, "moves_when_still", f"moves too much for a still shot (energy {motion['energy']} > {th['still_motion_max']})")
         if wanted == "move" and motion["energy"] < th["move_motion_min"]:
             _fail(item, "still_when_moving", f"barely moves (energy {motion['energy']} < {th['move_motion_min']})")
-        asset = self.store.get_asset(asset_id)
-        duration = asset.get("duration_s") or audio_mod.probe_duration_s(path)
         if duration:
             item["checks"]["duration_s"] = round(float(duration), 2)
             measured_fps = len(frames) / float(duration)
@@ -440,10 +443,93 @@ class QA:
             if bands:
                 item["checks"]["bands"] = bands
                 _fail(item, "edge_band", f"{bands[0]['side']} edge band, rgb {bands[0]['rgb']}")
-            source = ((asset.get("recipe") or {}).get("input_asset_ids") or [None])[0]
-            self._apply_model(item, middle, source, f"{shot.get('prompt', '')} - motion: {shot.get('motion_prompt', '')}",
-                              bool(shot.get("lead")), "clip", th)
+        self._apply_clip_model(item, path, asset, shot, duration, fps, th)
         return _finish(item)
+
+    def _apply_clip_model(self, item: dict[str, Any], path: Path, asset: dict[str, Any], shot: dict[str, Any],
+                          duration: Optional[float], fps: float, th: dict[str, float]) -> None:
+        """A temporal sample, never a claim of full playback or motion from one pose."""
+        item["visual_review"] = {"status": "unavailable", "full_playback_reviewed": False}
+        if self.vision is None:
+            item["model"] = {"skipped": "no vision model"}
+            return
+        if self.model_calls >= MAX_MODEL_ITEMS or not duration:
+            item["model"] = {"skipped": "temporal review needs a duration and an available model check"}
+            return
+        end = max(0.0, float(duration) - 1 / max(fps, 1))
+        times = np.linspace(0, end, min(24, max(2, math.ceil(float(duration) * 4) + 1)))
+        images, sampled = [], []
+        for at in times:
+            frame = video_frame(path, float(at))
+            if frame is not None:
+                images.append(_jpeg(frame, 512))
+                sampled.append(round(float(at), 3))
+        item["visual_review"].update(sample_times_s=sampled, sample_count=len(sampled),
+                                     sample_limit=24, duration_s=float(duration))
+        if len(images) < 2:
+            item["model"] = {"skipped": "could not decode a temporal sequence"}
+            return
+        refs = shot.get("review_reference_asset_ids")
+        if refs is None:
+            refs = list((asset.get("recipe") or {}).get("input_asset_ids") or [])
+            refs += [c["asset_id"] for c in prod.cast_for_shot(self.spec, shot)]
+        reference_labels, missing_refs = [], []
+        for aid in dict.fromkeys(refs):
+            try:
+                ref_asset = self.store.get_asset(aid)
+                if ref_asset["kind"] != "image":
+                    continue
+                with Image.open(self.path(aid)) as ref:
+                    images.append(_jpeg(ref))
+                reference_labels.append(f"Image {len(images)}: reference {aid}")
+            except (NotFound, OSError):
+                missing_refs.append(aid)
+        item["visual_review"].update(reference_count=len(reference_labels), missing_reference_ids=missing_refs)
+        keys = ("bible", "prompt", "reference", "motion", "anatomy", "scene", "supporting_cast")
+        lead = self.spec.get("lead") or {}
+        prompt = (f"You are a strict continuity supervisor for a music video. The first {len(sampled)} images are "
+                  f"video frames in chronological order at seconds {sampled}. "
+                  + " ".join(reference_labels) + "\n"
+                  + f"Bible: {lead.get('name')}, {lead.get('look')}. Palette: {lead.get('palette') or []}. "
+                  + ("The lead should be in this shot. " if shot.get("lead") else "The lead should NOT be in this shot. ")
+                  + f"Requested shot: {shot.get('prompt', '')}. Motion: {shot.get('motion_prompt', '')}.\n"
+                  + "Judge the actual sequence. "
+                  "Judge the entire chronological sample, not only a good middle frame. Score 0-10: bible, prompt "
+                  "(the requested action actually happens), reference (identity against the reference images), "
+                  "motion (weight transfer, planted feet, gravity, intended speed; no floating/sliding), "
+                  "anatomy (stable limbs, proportions and rigid ornaments), scene (stable geometry and layout, "
+                  "allowing requested camera and lighting changes), supporting_cast (recognisable identities "
+                  "against their supplied references). Intentional transformations requested in the prompt are allowed. "
+                  "Use null when the sample cannot establish a score; supporting_cast must be null when no "
+                  "secondary characters are requested. Do not infer physical motion from one pose, equate pixel "
+                  "changes with good action, or claim full-playback verification. Cite seconds for visible defects. "
+                  'Answer JSON only: {"bible":n,"prompt":n,"reference":n,"motion":n,"anatomy":n,"scene":n,'
+                  '"supporting_cast":n or null,"reason":"brief observed defects with seconds, or uncertainty"}.')
+        self.model_calls += 1
+        try:
+            model = parse_scores(self.vision(images, prompt), keys)
+        except Exception as exc:  # noqa: BLE001
+            item["model"] = {"skipped": f"vision call failed: {str(exc)[:160]}"}
+            return
+        if not reference_labels or missing_refs:
+            model["reference"] = None
+        wants_cast = bool(shot.get("crowd") or shot.get("cast"))
+        if not wants_cast or missing_refs:
+            model["supporting_cast"] = None
+        item["model"] = model
+        assessed = [k for k in keys if isinstance(model.get(k), (int, float))]
+        required = ["prompt", "motion", "anatomy", "scene"]
+        if reference_labels or missing_refs:
+            required.append("reference")
+        if wants_cast:
+            required.append("supporting_cast")
+        item["visual_review"].update(status="sampled" if all(k in assessed for k in required) else "incomplete",
+                                     unassessed=[k for k in required if k not in assessed])
+        if assessed:
+            item["score"] = round(min(model[k] for k in assessed), 1)
+            low = [k for k in assessed if model[k] < th["model_min"]]
+            if low:
+                _fail(item, "low_score", f"scored {item['score']}/10 on {', '.join(low)}: {model.get('reason', '')}")
 
     def check_render(self, stage: str, key: str, asset_id: str, expected_s: Optional[float]) -> dict[str, Any]:
         th = self.thresholds(stage)
@@ -670,8 +756,10 @@ def compact_scorecard(card: dict[str, Any], limit: int = 40) -> dict[str, Any]:
         model = it.get("model") or {}
         if model.get("reason") and it["verdict"] != "fail":
             row["model"] = model["reason"][:160]
-        elif model.get("skipped") and it["verdict"] == "fail":
+        elif model.get("skipped"):
             row["model"] = model["skipped"]
+        if it.get("visual_review"):
+            row["visual_review"] = it["visual_review"]
         out.append(row)
     return {k: v for k, v in card.items() if k != "items"} | {"items": out, "items_total": len(card.get("items") or [])}
 
