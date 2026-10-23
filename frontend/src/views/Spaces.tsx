@@ -153,6 +153,7 @@ interface Ctx {
   run: (id: string, mode: "node" | "downstream" | "upto") => void;
   remove: (id: string) => void;
   duplicate: (id: string) => void;
+  continueVideo: (id: string) => void;
   setExcluded: (id: string, excluded: string[]) => void;
   pickRun: (id: string, outputs: string[]) => void;
   pickAssets: (id: string, kind: string) => void;
@@ -264,7 +265,7 @@ function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boole
   );
 }
 
-function VideoResult({ id, previous, onOpen, canReview }: { id: string; previous?: string; onOpen: () => void; canReview?: boolean }) {
+function VideoResult({ id, previous, onOpen, canReview, onContinue }: { id: string; previous?: string; onOpen: () => void; canReview?: boolean; onContinue?: () => void }) {
   const { lang } = useT();
   const [compare, setCompare] = useState(false);
   const [review, setReview] = useState<Awaited<ReturnType<typeof api.reviewClip>> | null>(null);
@@ -283,6 +284,8 @@ function VideoResult({ id, previous, onOpen, canReview }: { id: string; previous
     <div className="sp-result-actions">
       <a className="btn sm" href={`${fileUrl(id)}?download=true`}><Download size={14} />{lang === "es" ? "Descargar" : "Download"}</a>
       <button className="btn sm ghost" onClick={onOpen}><Maximize size={14} />{lang === "es" ? "Ampliar" : "Enlarge"}</button>
+      {onContinue && <button className="btn sm ghost" onClick={onContinue} title={lang === "es" ? "Añade un vídeo conectado al último fotograma, listo para describir la siguiente acción." : "Add a video connected to the last frame, ready for the next action."}>
+        <ChevronRight size={14} />{lang === "es" ? "Continuar desde el último fotograma" : "Continue from last frame"}</button>}
       {previous && <button className="btn sm ghost" aria-pressed={compare} onClick={() => setCompare(v => !v)}>{lang === "es" ? "Comparar tomas" : "Compare takes"}</button>}
       {canReview && <button className="btn sm ghost" disabled={reviewBusy} onClick={inspect}>
         {reviewBusy && <Loader2 size={14} className="spin" />}{lang === "es" ? "Revisar movimiento" : "Review motion"}</button>}
@@ -795,7 +798,8 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         {list.length > 0 && <div className={`sp-thumbs${list.length === 1 ? " sp-single-result" : ""}`}>
           {list.map((a) => (
             <div key={a} className="sp-thumb-wrap">
-              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} canReview={kind === "video"} />
+              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} canReview={kind === "video"}
+                onContinue={kind === "video" && list.filter(aid => !ex.has(aid)).length === 1 && !ex.has(a) ? () => ctx.continueVideo(id) : undefined} />
                 : <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />}
               <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")} aria-pressed={!ex.has(a)}
                 onClick={() => ctx.setExcluded(id, ex.has(a) ? [...ex].filter((x) => x !== a) : [...ex, a])}><Check size={11} /></button>
@@ -1366,6 +1370,17 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
     duplicate: (id) => {
       const n = latest.current.nodes.find((x) => x.id === id);
       if (n) addNode(n.data.kind, { x: n.position.x + 40, y: n.position.y + 40 }, JSON.parse(JSON.stringify(n.data.data)));
+    },
+    continueVideo: (id) => {
+      const source = latest.current.nodes.find(n => n.id === id);
+      if (!source || source.data.kind !== "video") return;
+      const next = addNode("video", { x: source.position.x + Number(source.style?.width || WIDTH.video) + 80, y: source.position.y }, {
+        title: words("Continuación", "Continuation"), prompt: "", motion_prompt: "",
+        engine: source.data.data.engine || "auto", seconds: source.data.data.seconds ?? 5,
+        quality: source.data.data.quality || "final", refine: source.data.data.refine === true,
+        lightning: source.data.data.lightning,
+      });
+      connect({ source: id, sourceHandle: "last", target: next, targetHandle: "start" }, `add:${next}`);
     },
     setExcluded: async (id, excluded) => {
       setState((s) => ({ ...s, [id]: { ...(s[id] || {}), excluded } }));

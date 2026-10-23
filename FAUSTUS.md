@@ -7,6 +7,11 @@ fast/full schedule, prompts, references and durations in the same graph.
 models. `studio_video_from_plan` continues automatically unless
 `autopilot=false` opts into review. See [video workflow](docs/video-workspace.md).
 
+Video nodes with one included result offer **Continue from last frame**. This
+adds and focuses a wired successor, retains generation settings and leaves the
+next action blank; no render starts. It uses the selected upstream take and
+undoes as one edit. MCP has the same add-node/last-to-start graph operations.
+
 A video node's optional final-frame input also preserves the fast/full
 schedule. Switching fast generation off requests twenty steps for the
 first-and-last-frame workflow, as it does for a start-only clip.

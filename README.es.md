@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+**Continuar desde el último fotograma** añade un nodo conectado junto a un vídeo con una sola toma incluida. Conserva el modelo y la duración, describe la siguiente acción y genera allí; añadir el nodo no inicia un render.
+
 **Crear vídeo** abre directamente el último lienzo de nodos del proyecto. Conecta referencias, prompts y generadores, reproduce el resultado en el propio nodo, compara generaciones y descarga sin cambiar de pantalla. El selector comprueba los modelos instalados y muestra cuál ejecuta Automático. Las producciones nuevas continúan sin paradas de revisión; revisar sigue siendo una opción explícita. [Recorrido, MCP y pruebas reales](docs/video-workspace.md).
 
 Perfiles de estilo: **Producciones → Revisión y estilo** extrae ritmo y paletas de vídeos locales, permite editar cámara y transiciones y reutilizar el perfil en otras producciones. Los comentarios conservan instante e identidad de la toma; la corrección por dependientes mantiene tomas anteriores y planos aprobados. UI, API y MCP comparten las operaciones locales. [Formato, recorrido y límites](docs/style-profiles.md).
