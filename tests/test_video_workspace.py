@@ -75,6 +75,30 @@ def test_ltx_checkpoint_override_reaches_all_three_loaders(template):
     assert all(n["inputs"]["ckpt_name"] == "alternate_ltx.safetensors" for n in loaders)
 
 
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+def test_ltx_lease_matches_the_renderer_class_without_resolving_an_image_engine(template, monkeypatch):
+    from contextlib import contextmanager
+    from prosperos_hoard import comfy_driver, gpu_lease
+    from prosperos_hoard.backend import DEFAULT_VRAM_ESTIMATES_MB
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    _, spec = comfy_driver.load_template(template)
+    job = {"id": "ltx-lease-test", "type": "generate_image", "params": {"template": template}}
+    def unexpected():
+        pytest.fail("A video lease must not depend on the image engine")
+    requests, released = [], []
+    @contextmanager
+    def fake_lease(**kwargs):
+        requests.append(kwargs)
+        try:
+            yield None
+        finally:
+            released.append(True)
+    with gpu_lease.hold(job, lambda: DEFAULT_VRAM_ESTIMATES_MB, lease_fn=fake_lease,
+                        resolve_image_engine=unexpected):
+        assert requests[0]["vram_mb"] == comfy_driver.estimate_vram_mb(spec, DEFAULT_VRAM_ESTIMATES_MB) == 10000
+    assert released == [True]
+
+
 @pytest.mark.parametrize("override", [{"steps": 20}, {"scheduler": "karras"}, {"strength": 0.5}, {"denoise": 0.5}])
 def test_fixed_ltx_sampling_does_not_record_unexecuted_settings(store, monkeypatch, override):
     from prosperos_hoard import engine
