@@ -535,23 +535,6 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
   } else if (kind === "video") {
     body = (
       <>
-        {wired.has("motion") && <div className="small muted">{words("Aspecto del personaje y escenario", "Character appearance and setting")}</div>}
-        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={wired.has("motion")
-          ? words("Describe la apariencia y el lugar; el vídeo conectado aporta el movimiento.", "Describe the appearance and setting; the connected video supplies the movement.") : t("spVideoPh")} />
-        {wired.has("motion") && <>
-          <label className="small">{words("Movimiento de la guía", "Guide movement")}
-            <textarea className="nodrag nowheel" rows={2} value={data.motion_prompt || ""}
-              placeholder={words("Ej.: pasos rápidos con cambios de apoyo y giro", "E.g. quick footwork with weight shifts and a pivot")}
-              onChange={e => set({ motion_prompt: e.target.value })} />
-          </label>
-          <div className="sp-opts nodrag">
-            <label className="sp-num">{words("Fuerza del movimiento", "Motion strength")}<input type="number" min={0} max={10} step={0.1}
-              value={data.pose_strength ?? 1} onChange={e => set({ pose_strength: Number(e.target.value) })} /></label>
-            {data.motion_engine !== "ltx23_control" && <label className="sp-num">{words("Fuerza de la referencia", "Reference strength")}<input type="number" min={0} max={10} step={0.1}
-              value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>}
-          </div>
-          <p className="hint">{words("1 es el valor de entrenamiento. Una fuerza mayor no garantiza más fidelidad; compara las tomas.", "1 is the training value. Higher strength does not guarantee better fidelity; compare the takes.")}</p>
-        </>}
         <div className="sp-opts nodrag">
           {wired.has("motion") && !wired.has("audio") && <label className="sp-engine-select">{words("Modelo", "Model")}
             <select aria-label={words("Modelo de movimiento", "Motion model")} value={data.motion_engine || "animate"} onChange={e => set({ motion_engine: e.target.value })}>
@@ -598,6 +581,23 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         </div>}
         {!wired.has("audio") && !wired.has("motion") && (wired.has("end") || !["wan", "svd", "ltx23"].includes(data.engine || (data.quality === "draft" ? "wan" : "auto"))) &&
           <label className="check nodrag"><input type="checkbox" checked={data.lightning !== false} onChange={e => set({ lightning: e.target.checked })} />{words("Generación rápida · 4 pasos", "Fast generation · 4 steps")}</label>}
+        {wired.has("motion") && <>
+          <div className="sp-opts nodrag">
+            <label className="sp-num">{words("Fuerza del movimiento", "Motion strength")}<input type="number" min={0} max={10} step={0.1}
+              value={data.pose_strength ?? 1} onChange={e => set({ pose_strength: Number(e.target.value) })} /></label>
+            {data.motion_engine !== "ltx23_control" && <label className="sp-num">{words("Fuerza de la referencia", "Reference strength")}<input type="number" min={0} max={10} step={0.1}
+              value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>}
+          </div>
+          <p className="hint">{words("1 es el valor de entrenamiento. Una fuerza mayor no garantiza más fidelidad; compara las tomas.", "1 is the training value. Higher strength does not guarantee better fidelity; compare the takes.")}</p>
+          <div className="small muted">{words("Aspecto del personaje y escenario", "Character appearance and setting")}</div>
+        </>}
+        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={wired.has("motion")
+          ? words("Describe la apariencia y el lugar; el vídeo conectado aporta el movimiento.", "Describe the appearance and setting; the connected video supplies the movement.") : t("spVideoPh")} />
+        {wired.has("motion") && <label className="small">{words("Movimiento de la guía", "Guide movement")}
+          <textarea className="nodrag nowheel" rows={2} value={data.motion_prompt || ""}
+            placeholder={words("Ej.: pasos rápidos con cambios de apoyo y giro", "E.g. quick footwork with weight shifts and a pivot")}
+            onChange={e => set({ motion_prompt: e.target.value })} />
+        </label>}
         {data.engine === "svd" && <p className="hint">{words("SVD anima la imagen sin seguir el prompt de movimiento. Usa Wan para dirigir la acción.", "SVD animates the image without following the motion prompt. Use Wan to direct the action.")}</p>}
         {["audio", "motion", "end"].filter((h) => wired.has(h)).length > 1 && <p className="sp-error" role="alert">{words("Conecta una sola guía: audio, movimiento o fotograma final.", "Connect one guide: audio, motion or end frame.")}</p>}
         <div className="small muted sp-mode">{wired.has("audio") ? t("spModeSing") : wired.has("motion") ? t("spModeMotion")

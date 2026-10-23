@@ -133,3 +133,14 @@ gate is introduced. The separate Studio composition gates remain unchanged.
 Focusing a tall node preserves a readable width on desktop as well as mobile;
 its lower controls remain reachable by vertical panning rather than shrinking
 every field to fit the whole card's height.
+
+### Execution controls first — task1190, follow-up
+
+The video body places model choice, duration, guide offset, engine status and
+applicable strengths before the appearance and movement text fields. The strength
+hint remains next to its controls. Existing output playback still leads the card;
+all input modes, values, handlers, prompts and generation actions are retained.
+This is a local reading-order correction, not a new visual world. Demo captures
+at 1280×720, 768×900 and 390×844 and native save/reload checks are recorded under
+`D:/LocalAI/research-inbox/prospero-quality1190/layout-r13-*`. The scoped finish
+review returns ship; it does not approve generated motion or historical comp gates.
