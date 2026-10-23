@@ -51,7 +51,9 @@ The recipe records the effective `8/manual_sigmas/denoise1` image-only settings;
 incompatible overrides are explained before rendering. Control accepts denoise.
 Appearance and guide action are combined within the API's4000-character budget
 without discarding either field when both fit. GPU reservations follow the
-managed local server's physical card; cold starts use the granted card. A remote
+managed local server's physical card and effective URL. A worker starting a
+server under its lease uses the granted card. HTTP preflight may start the
+process to read schema before enqueueing; model execution follows the lease. A remote
 or unowned server's physical card remains unknown when the launcher cannot identify it.
 Image-only dimensions are multiples of32; structure control needs multiples
 of64 (896x512 by default), because its guide uses half-sized latent dimensions.

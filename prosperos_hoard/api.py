@@ -3638,7 +3638,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 nid = str(op.get("id") or f"{op.get('type', 'node')}{len(nodes) + 1}")
                 while nid in nodes:
                     nid += "x"
-                nodes[nid] = {"id": nid, "type": op.get("type"), "x": float(op.get("x") or 80 * len(nodes)),
+                nodes[nid] = {"id": nid, "type": op.get("type"), "x": float(op["x"] if op.get("x") is not None else 80 * len(nodes)),
                               "y": float(op.get("y") or 0), "data": dict(op.get("data") or {})}
             elif kind == "set":
                 n = nodes.get(str(op.get("id")))

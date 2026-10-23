@@ -53,6 +53,26 @@ def test_worker_lease_targets_the_owned_server_card_and_does_not_guess_remote_ca
     backend.close()
 
 
+@pytest.mark.parametrize("override,expected", [("http://127.0.0.1:8190", 3), ("http://example.invalid:8190", None)])
+def test_main_lease_and_start_follow_effective_environment_url(data_dir, monkeypatch, override, expected):
+    monkeypatch.setenv("HOARD_COMFY_URL", override)
+    backend = _pool_backend(data_dir, 8188, ["http://127.0.0.1:8191"])
+    looked_up, started = [], []
+    monkeypatch.setattr(backend.launcher, "get", lambda sid: looked_up.append(sid) or sid)
+    monkeypatch.setattr(backend.launcher, "status", lambda sid: {"state": "running", "gpu": 3 if sid == "comfyui@8190" else 1})
+    monkeypatch.setattr(backend.launcher, "start", lambda sid, **kwargs: started.append((sid, kwargs)) or {"ok": True, "ready": True})
+    monkeypatch.setattr(backend, "_after_service_change", lambda: None)
+    assert backend.comfy_gpu() == expected
+    assert looked_up == (["comfyui@8190"] if expected is not None else [])
+    backend.bind_lease_gpu(3)
+    assert backend.ensure_comfy(12) is (expected is not None)
+    assert started == ([("comfyui@8190", {"gpu": 3, "wait_s": 12})] if expected is not None else [])
+    # A pool worker's explicitly bound server still takes priority over main.
+    backend.bind_comfy("http://127.0.0.1:8191")
+    assert backend.comfy_gpu() == 1
+    backend.close()
+
+
 def test_unowned_running_server_gpu_stays_unknown_and_only_a_stopped_main_uses_config(data_dir, monkeypatch):
     backend = _pool_backend(data_dir, 8188, ["http://127.0.0.1:8190"])
     monkeypatch.setattr(backend.launcher, "get", lambda sid: sid)

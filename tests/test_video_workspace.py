@@ -341,3 +341,20 @@ def test_api_creates_quick_video_and_exposes_real_catalog(client):
     catalog = c.get("/api/video-engines")
     assert catalog.status_code == 200
     assert {x["id"] for x in catalog.json()["engines"]} >= {"wan14b", "wan", "svd", "animate"}
+
+
+def test_native_node_add_preserves_explicit_zero_coordinates(client):
+    c, _, _ = client
+    pid = c.post("/api/projects", json={"name": "Zero position"}).json()["id"]
+    space = c.post("/api/agent/studio_spaces", params={"project": pid}, json={
+        "action": "create", "template": "blank", "name": "Layout",
+    }).json()
+    response = c.post("/api/agent/studio_spaces", params={"project": pid}, json={
+        "action": "edit", "space": space["id"], "ops": [
+            {"op": "add_node", "id": "first", "type": "note", "x": 520, "y": 450, "data": {}},
+            {"op": "add_node", "id": "second", "type": "note", "x": 0, "y": 450, "data": {}},
+        ],
+    })
+    assert response.status_code == 200, response.text
+    graph = c.get(f"/api/spaces/{space['id']}").json()["graph"]
+    assert [(n["id"], n["x"], n["y"]) for n in graph["nodes"]] == [("first", 520, 450), ("second", 0, 450)]
