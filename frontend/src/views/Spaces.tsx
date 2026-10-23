@@ -41,21 +41,22 @@ const INPUTS: Partial<Record<SpaceNodeType, [string, Port, boolean][]>> = {
   variations: [["image", "image", true], ["prompt", "text", true]],
   composite: [["background", "any", true], ["layers", "any", true]],
   clip_edit: [["clip", "video", true], ["prompt", "text", true], ["refs", "image", true], ["first", "image", false]],
+  frame: [["clip", "video", true]],
 };
-const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit"];
+const GENERATORS: SpaceNodeType[] = ["image", "video", "music", "assistant", "edit", "combine", "variations", "composite", "clip_edit", "frame"];
 const APP_INPUTS: SpaceNodeType[] = ["text", "asset", "cast"];
 const PORT_COLOR: Record<Port, string> = { text: "#7fa6d9", image: "#b48cf0", video: "#5bbf86", audio: "#69c5d4", any: "#9a95a6" };
 const TYPE_ICON: Record<SpaceNodeType, typeof Type> = {
   text: Type, asset: ImageIcon, cast: User, image: ImageIcon, video: Film, music: Music, list: ListChecks, note: StickyNote,
-  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2, clip_edit: Wand2,
+  assistant: Bot, edit: ScanLine, combine: Layers, variations: Grid3x3, group: Frame, composite: Layers2, clip_edit: Wand2, frame: ImageIcon,
 };
 const TYPE_LABEL: Record<SpaceNodeType, MessageKey> = {
   text: "spNodeText", asset: "spNodeAsset", cast: "spNodeCast", image: "spNodeImage", video: "spNodeVideo",
   music: "spNodeMusic", list: "spNodeList", note: "spNodeNote", assistant: "spNodeAssistant", edit: "spNodeEdit", combine: "spNodeCombine",
-  variations: "spNodeVariations", group: "spNodeGroup", composite: "spNodeComposite", clip_edit: "spNodeClipEdit",
+  variations: "spNodeVariations", group: "spNodeGroup", composite: "spNodeComposite", clip_edit: "spNodeClipEdit", frame: "spNodeFrame",
 };
 const ADDABLE: SpaceNodeType[] = ["text", "asset", "cast", "image", "video", "clip_edit", "music", "assistant", "variations", "edit", "composite",
-  "combine", "list", "note", "group"];
+  "combine", "list", "note", "group", "frame"];
 const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   text: { text: "" }, asset: { kind: "image", asset_ids: [] }, cast: {}, image: { prompt: "", aspect: "1:1", count: 2 },
   video: { prompt: "", quality: "final", seconds: 5 }, music: { tags: "", lyrics: "[Instrumental]", duration: 30, count: 1 },
@@ -63,10 +64,11 @@ const DEFAULT_DATA: Record<SpaceNodeType, Record<string, unknown>> = {
   assistant: { prompt: "", as_list: true, items: 5 }, edit: { operation: "upscale", scale: 2 }, combine: { audio_start_s: 0 },
   variations: { mode: "angles", count: 4 }, group: { title: "", color: "#b48cf0" }, composite: { layers: [] },
   clip_edit: { prompt: "", mode: "auto", quality: "draft" },
+  frame: { at_s: 0 },
 };
 const WIDTH: Record<SpaceNodeType, number> = {
   text: 280, asset: 290, cast: 290, image: 340, video: 440, music: 310, list: 280, note: 260, assistant: 310, edit: 280, combine: 440,
-  variations: 270, group: 620, composite: 300, clip_edit: 290,
+  variations: 270, group: 620, composite: 300, clip_edit: 290, frame: 340,
 };
 
 type NodeData = { kind: SpaceNodeType; data: Record<string, any> };
@@ -76,7 +78,7 @@ function outputPort(kind: SpaceNodeType, data: Record<string, any>, handle?: str
   if (kind === "text") return "text";
   if (kind === "cast") return handle === "text" ? "text" : "image";
   if (kind === "video") return handle === "last" ? "image" : "video";
-  if (kind === "image" || kind === "edit" || kind === "variations") return "image";
+  if (kind === "image" || kind === "edit" || kind === "variations" || kind === "frame") return "image";
   if (kind === "assistant") return "text";
   if (kind === "combine" || kind === "clip_edit") return "video";
   if (kind === "composite") return "any";
@@ -179,6 +181,7 @@ const NODE_PURPOSE: Record<SpaceNodeType, [string, string]> = {
   combine: ["Montar clips en el orden conectado", "Join clips in connection order"], variations: ["Ángulos, expresiones y storyboards", "Angles, expressions and storyboards"],
   group: ["Agrupar y guardar una técnica", "Group nodes and save a technique"], composite: ["Superponer imágenes y vídeos", "Layer images and videos"],
   clip_edit: ["Reimaginar un vídeo existente", "Reimagine an existing video"],
+  frame: ["Vídeo → imagen en el segundo elegido", "Video → image at the chosen time"],
 };
 
 function NodePalette({ choices, onPick, onClose, connected, library = false }: {
@@ -432,6 +435,31 @@ function CameraPicker({ value, onChange, clips }: { value?: Record<string, strin
       )}
     </div>
   );
+}
+
+function FramePicker({ clip, at, onChange }: { clip?: string; at: number; onChange: (at: number) => void }) {
+  const { lang } = useT();
+  const video = useRef<HTMLVideoElement>(null);
+  const words = (es: string, en: string) => lang === "es" ? es : en;
+  const seek = () => {
+    const v = video.current;
+    if (v && Number.isFinite(at) && at >= 0 && at < v.duration) v.currentTime = at;
+  };
+  useEffect(seek, [clip, at]);
+  return <div className="sp-frame-picker nodrag nowheel">
+    {clip ? <>
+      <video key={clip} ref={video} src={fileUrl(clip)} controls playsInline preload="metadata"
+        aria-label={words("Vídeo de origen", "Source video")} onLoadedMetadata={seek} />
+      <button className="btn sm ghost" onClick={() => {
+        const v = video.current;
+        if (v) { v.pause(); onChange(Number(v.currentTime.toFixed(3))); }
+      }}>{words("Usar instante del reproductor", "Use playhead time")}</button>
+    </> : <p className="small muted">{words("Conecta un vídeo a la entrada Clip.", "Connect a video to the Clip input.")}</p>}
+    <label className="sp-num">{words("Segundo", "Time (seconds)")}<input type="number" min={0} step={0.001} value={at}
+      onChange={e => onChange(Number(e.target.value))} /></label>
+    <p className="small muted">{words("Extrae una imagen por clip en ese segundo, sin modelo. La vista previa muestra el primer clip conectado.",
+      "Extracts one image per clip at this time, without a model. The preview shows the first connected clip.")}</p>
+  </div>;
 }
 
 // ------------------------------------------------------------ the node
@@ -732,6 +760,10 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         })}
       </>
     );
+  } else if (kind === "frame") {
+    const clips = ctx.edges.filter(e => e.target === id && e.targetHandle === "clip")
+      .flatMap(e => resolveOutputs(ctx, e.source, e.sourceHandle)).filter(([port]) => port === "video");
+    body = <FramePicker clip={clips[0]?.[1]} at={data.at_s ?? 0} onChange={at_s => set({ at_s })} />;
   } else if (kind === "clip_edit") {
     body = (
       <>
@@ -864,7 +896,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         : words("Imagen inicial y acción → clip", "Start image and action → clip") : NODE_PURPOSE[kind][lang === "es" ? 0 : 1]}</p>
       <div className="sp-node-actions nodrag">
         {runnable && <>
-          <button className="btn xs ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} />{kind === "combine" ? words("Montar", "Assemble") : ["edit", "clip_edit", "composite"].includes(kind) ? words("Aplicar", "Apply") : words("Generar", "Generate")}</button>
+          <button className="btn xs ghost nodrag" title={t("spRunNode")} disabled={busy} onClick={() => ctx.run(id, "node")}><Play size={13} />{kind === "frame" ? words("Extraer", "Extract") : kind === "combine" ? words("Montar", "Assemble") : ["edit", "clip_edit", "composite"].includes(kind) ? words("Aplicar", "Apply") : words("Generar", "Generate")}</button>
           <button className="btn xs icon ghost nodrag" title={t("spRunUpto")} disabled={busy} onClick={() => ctx.run(id, "upto")}><ListEnd size={13} /></button>
           <button className="btn xs icon ghost nodrag" title={t("spRunDown")} disabled={busy} onClick={() => ctx.run(id, "downstream")}><FastForward size={13} /></button>
         </>}

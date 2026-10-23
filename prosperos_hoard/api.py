@@ -3293,6 +3293,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def last_frame(self, asset_id: str, project_id: str) -> dict[str, Any]:
             return engine.last_frame(store, asset_id, project_id)
 
+        def frame_at(self, asset_id: str, at_s: float, project_id: str) -> dict[str, Any]:
+            return engine.frame_at(store, asset_id, at_s, project_id)
+
         def combine(self, project_id: str, body: dict[str, Any]) -> dict[str, Any]:
             return engine.combine_clips(store, project_id, body["clips"], body.get("audio_asset_id"),
                                         float(body.get("audio_start_s") or 0))

@@ -402,3 +402,72 @@ def test_last_frame_and_joining_clips_with_ffmpeg(client, tmp_path):
     joined = engine.combine_clips(store, pid, clips, song_id, 1.0)
     assert joined["kind"] == "video" and 1.8 < (joined["duration_s"] or 0) < 2.4
     assert (joined["width"], joined["height"]) == (320, 180)
+
+
+def test_frame_node_extracts_chosen_time_locally_and_reuses_it(client, tmp_path):
+    from PIL import Image
+    from prosperos_hoard import engine, procutil
+    from prosperos_hoard.backend import ffmpeg_path
+
+    exe = ffmpeg_path()
+    if not exe:
+        pytest.skip("no ffmpeg")
+    c, _, _ = client
+    pid = c.post("/api/projects", json={"name": "Frame time"}).json()["id"]
+    store = _store(client)
+    clip_path = tmp_path / "two-colours.mp4"
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x96:d=1:r=24",
+                  "-f", "lavfi", "-i", "color=c=blue:s=160x96:d=1:r=24", "-filter_complex",
+                  "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-pix_fmt", "yuv420p", str(clip_path)], timeout=30)
+    clip = engine.import_asset(store, pid, clip_path, "video")
+    original_bytes = (store.data_dir / clip["file_path"]).read_bytes()
+    graph = spaces.validate_graph({"nodes": [
+        {"id": "source", "type": "asset", "data": {"kind": "video", "asset_ids": [clip["id"]]}},
+        {"id": "still", "type": "frame", "data": {"at_s": 1.2}},
+        {"id": "next", "type": "video", "data": {"prompt": "Continue the chosen pose"}}], "edges": [
+        {"source": "source", "target": "still", "target_handle": "clip"},
+        {"source": "still", "target": "next", "target_handle": "start"}]})
+    sp = store.create_space(pid, "Choose a frame", graph)
+
+    def run_still():
+        res = c.post(f"/api/spaces/{sp['id']}/run", json={"mode": "upto", "node_ids": ["still"]})
+        assert res.status_code == 200, res.text
+        assert _wait_job(c, res.json()["job"]["id"])["state"] == "done"
+        return store.get_space(sp["id"])
+
+    saved = run_still()
+    first_id = saved["state"]["still"]["outputs"][0]
+    first = store.get_asset(first_id)
+    assert first["kind"] == "image" and first["project_id"] == pid
+    assert first["recipe"]["at_s"] == 1.2 and first["recipe"]["input_asset_ids"] == [clip["id"]]
+    px = Image.open(store.data_dir / first["file_path"]).convert("RGB").getpixel((20, 20))
+    assert px[2] > 150 and px[0] < 80  # blue at 1.2, not the red first frame
+    assert spaces.plan_node(store, graph, saved["state"], "next")[0]["body"]["reference_asset_id"] == first_id
+    unchanged = run_still()
+    assert unchanged["state"]["still"]["outputs"] == [first_id]
+    assert len(unchanged["state"]["still"]["runs"]) == 1
+    graph["nodes"][1]["data"]["at_s"] = 0.2
+    updated = c.put(f"/api/spaces/{sp['id']}", json={"graph": graph, "version": unchanged["version"]})
+    assert updated.status_code == 200, updated.text
+    changed = run_still()
+    second = store.get_asset(changed["state"]["still"]["outputs"][0])
+    px = Image.open(store.data_dir / second["file_path"]).convert("RGB").getpixel((20, 20))
+    assert px[0] > 150 and px[2] < 80
+    assert len(changed["state"]["still"]["runs"]) == 2
+    assert (store.data_dir / clip["file_path"]).read_bytes() == original_bytes
+    assert spaces.estimate(store, sp["id"], mode="node", node_ids=["still"])["renders"] == 0
+
+
+@pytest.mark.parametrize("at", [-1, "NaN", "Infinity", None, "invalid", 2])
+def test_frame_node_rejects_invalid_times_before_extraction(client, at):
+    store = _store(client)
+    pid = store.create_project("Time validation")["id"]
+    # Planner validation needs only asset metadata; no ffmpeg operation is allowed here.
+    clip = store.create_asset(pid, "video", "file.mp4", duration_s=2)
+    graph = spaces.validate_graph({"nodes": [
+        {"id": "source", "type": "asset", "data": {"kind": "video", "asset_ids": [clip["id"]]}},
+        {"id": "still", "type": "frame", "data": {"at_s": at}}], "edges": [
+        {"source": "source", "target": "still", "target_handle": "clip"}]})
+    with pytest.raises(spaces.SpaceError, match="time|outside") as exc:
+        spaces.plan_node(store, graph, {}, "still")
+    assert exc.value.code == "bad_time"

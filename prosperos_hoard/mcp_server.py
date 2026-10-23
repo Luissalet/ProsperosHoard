@@ -1787,7 +1787,9 @@ def studio_spaces(
     music {tags, lyrics, duration, bpm, count} with input prompt;
     assistant {prompt, as_list, items} - the local model writes a text, or a list of `items` lines;
     edit {operation "upscale" (scale 2|4) | "remove_background" | "pose_map" | "depth_map"} with input image
-    (many); combine
+    (many); frame {at_s: non-negative seconds} with input clip (video, many) extracts one image per
+    included clip at that time locally, without a model. Choose a time inside every clip; its image
+    output can feed a reference, an edit or a video's start. combine
     {audio_start_s} joins the clips wired into "clips" in wire order, with input audio (a song under them);
     variations {mode "angles"|"expressions"|"ages"|"lighting"|"storyboard"|"custom" (data.custom: one change per
     line), count 1-9} edits each wired image (input image) once per change, keeping everything else;

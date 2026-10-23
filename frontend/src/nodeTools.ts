@@ -49,6 +49,7 @@ export const NODE_TOOLS: NodeTool[] = [
   { id: "pose", kind: "edit", section: "transform", label: ["Extraer pose", "Extract pose"], hint: ["Imagen → guía de postura", "Image → pose guide"], data: { operation: "pose_map" } },
   { id: "depth", kind: "edit", section: "transform", label: ["Extraer profundidad", "Extract depth"], hint: ["Imagen → guía de profundidad", "Image → depth guide"], data: { operation: "depth_map" } },
   { id: "clip-edit", kind: "clip_edit", section: "transform", label: ["Editar vídeo", "Edit video"], hint: ["Clip y descripción → nueva versión del clip", "Clip and description → a new clip version"] },
+  { id: "frame", kind: "frame", section: "transform", label: ["Extraer fotograma", "Extract frame"], hint: ["Vídeo y segundo elegido → imagen; sin modelo", "Video and chosen time → image; no model needed"], data: { at_s: 0 } },
   { id: "angles", kind: "variations", section: "transform", label: ["Variar ángulos", "Vary angles"], hint: ["Imagen → distintos puntos de vista", "Image → different viewpoints"], data: { mode: "angles" } },
   { id: "expressions", kind: "variations", section: "transform", label: ["Variar expresiones", "Vary expressions"], hint: ["Imagen → distintas expresiones", "Image → different expressions"], data: { mode: "expressions" } },
   { id: "lighting", kind: "variations", section: "transform", label: ["Variar iluminación", "Vary lighting"], hint: ["Imagen → variaciones de luz", "Image → lighting variations"], data: { mode: "lighting" } },
