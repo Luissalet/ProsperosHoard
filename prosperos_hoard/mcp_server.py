@@ -1773,6 +1773,7 @@ def studio_spaces(
     count, engine, seed, camera} with inputs prompt (text), refs (image), pose (a pose map: the body pose to
     copy) and layout (a depth map: the composition to keep); video {prompt, engine "auto"|"wan14b"|"wan"|"svd"|"ltx23",
     lightning (true: 4-step 14B, false: full schedule), quality "draft"|"final", seconds,
+    refine (true: optional2x/3-step LTX refinement for image-only input; false by default),
     audio_start_s, motion_start_s, motion_prompt (the action, separate from appearance/setting),
     motion_engine "animate"|"ltx23_control" (pose transfer or LTX Canny structure control),
     pose_strength, reference_image_strength (0-10, trained default 1; higher is not necessarily better;
@@ -1781,7 +1782,9 @@ def studio_spaces(
     (image: one clip per image), end (image: the frame the clip ends on, Wan 2.2 14B), prompt, motion (video:
     copy its moves) and audio (audio: the character sings it, lip sync; S2V up to 19 s, InfiniteTalk up to
     90 s, "auto" takes InfiniteTalk past 10 s when installed), and two outputs: the clips, and source_handle "last" = each clip's last frame (wire it into another
-    clip's start to continue the shot); music {tags, lyrics, duration, bpm, count} with input prompt;
+    clip's start to continue the shot; the UI shortcut adds this wire and a video node, retains model,
+    duration/quality/fast/refine settings and leaves the next action blank, without running it);
+    music {tags, lyrics, duration, bpm, count} with input prompt;
     assistant {prompt, as_list, items} - the local model writes a text, or a list of `items` lines;
     edit {operation "upscale" (scale 2|4) | "remove_background" | "pose_map" | "depth_map"} with input image
     (many); combine

@@ -15,6 +15,15 @@ branch into clips; connect a clip's last-frame output to the next clip; and join
 clips with Combine. Existing templates, library, cast, production editor,
 audio and native montage tools remain available.
 
+For a video node with one included output, **Continue from last frame** adds and
+focuses a connected video node in one action. It retains model, duration,
+quality, fast mode and optional refinement; the next action starts blank.
+The connection uses the source node's currently selected take, not a frozen
+copy. Describe what happens next and Generate. Adding it does not render.
+Undo removes the new node and wire together. MCP uses the same native graph:
+`studio_spaces` edit with `add_node` (video), then `connect` from the source's
+`source_handle="last"` to `target_handle="start"`.
+
 Video outputs play inside their generator, with download, full-size viewing
 and comparison with the same output position in the preceding generation.
 Runs, selected takes, positions, prompts and viewport remain saved. Generation

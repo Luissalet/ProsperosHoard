@@ -1,5 +1,11 @@
 # Spaces editor
 
+The video result's Continue from last frame action adds and focuses a wired
+successor when one output is included. It retains model/duration/quality/fast
+mode/refinement, leaves the next action blank, and starts no render. Use the
+existing wrapping action row; preserve one-step undo, current upstream take
+selection and the typed last-to-start connection. No modal or new visual world.
+
 Operate. Extend the media-first review bench with Prospero's original magenta
 brand palette, as explicitly pinned by the user. Preserve its dragon icon.
 The user explicitly requests node workflows resembling Magnific Spaces, with

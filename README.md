@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+**Continue from last frame** adds a wired successor beside a video with one included result. Keep the model and duration, describe the next action and generate in place; adding the node does not start a render.
+
 **Create video** resumes the project's last connected node canvas. Wire references, prompts and generators, play outputs inside their nodes, compare generations and download in place. Model selection checks installed dependencies and shows Auto's actual engine. New productions continue without review stops; review remains an explicit option. [Workflow, MCP and real-video checks](docs/video-workspace.md).
 
 Style profiles: **Productions → Review & style** extracts rhythm and palettes from local videos, supports editable camera and transition choices, and reuses a profile across productions. Timecoded comments retain the take identity; dependent retakes preserve earlier takes and approved shots. UI, HTTP and MCP share the native local operations. [Workflow, format and verified limits](docs/style-profiles.md).

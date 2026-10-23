@@ -19,6 +19,7 @@
       "firstViewport": "Saved canvas or a Media to Clip starter, with direct source choice, prompt and node-level generation.",
       "signatureInteraction": "Generate and compare a clip in its connected node without leaving the canvas.",
       "constraints": [
+        "Continue from last frame adds and focuses a wired successor for one included video output, without starting a render; action row wraps and one undo removes node plus wire.",
         "No compulsory document, wizard or production review for direct clip generation.",
         "Keep all existing node types, branches, continuation, Combine, templates, Apps and save/recovery tools.",
         "Preserve user positions and original media.",
