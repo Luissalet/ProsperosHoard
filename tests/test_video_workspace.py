@@ -19,6 +19,7 @@ def test_quick_video_is_a_connected_editable_graph():
     ("wan14b", "wan22_i2v_14b", "seconds", 4),
     ("wan", "wan22_ti2v", "length", 97),
     ("svd", "svd_img2vid", "fps", 6.25),
+    ("ltx23", "ltx23_i2v", "length", 97),
 ])
 def test_node_engine_and_duration_reach_the_renderer(monkeypatch, engine, template, parameter, expected):
     monkeypatch.setattr(spaces, "inputs_of", lambda *args: {"start": [("image", "reference")]})
@@ -29,6 +30,76 @@ def test_node_engine_and_duration_reach_the_renderer(monkeypatch, engine, templa
     assert result["prompt"] == "walk and wave"
     if engine == "wan14b":
         assert result["template_params"]["lightning"] is False
+
+
+def test_structural_guide_reaches_ltx_with_camera_action_and_valid_frame_grid(monkeypatch):
+    monkeypatch.setattr(spaces, "inputs_of", lambda *args: {
+        "start": [("image", "reference")], "motion": [("video", "guide")],
+    })
+    graph = {"nodes": [{"id": "clip", "type": "video", "data": {
+        "motion_engine": "ltx23_control", "seconds": 3.3, "prompt": "Blue jacket on the circular stage",
+        "motion_prompt": "Two sharp steps and a clockwise camera arc", "motion_start_s": 1.25,
+        "pose_strength": 0.75, "seed": 9,
+    }}], "edges": []}
+    body = spaces.plan_node(None, graph, {}, "clip")[0]["body"]
+    assert body["template"] == "ltx23_control"
+    assert body["driving_asset_id"] == "guide" and body["driving_start_s"] == 1.25
+    assert body["template_params"] == {"length": 81, "control_strength": 0.75}
+    assert body["prompt"] == "Blue jacket on the circular stage. Two sharp steps and a clockwise camera arc"
+    assert body["reference_asset_id"] == "reference" and body["seed"] == 9
+
+
+@pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
+def test_ltx_dimensions_duration_and_fps_are_consistent_across_the_whole_graph(template):
+    from prosperos_hoard import comfy_driver, engine
+    workflow, spec = comfy_driver.load_template(template)
+    values = engine._generation_values({"positive_prompt": "Move", "seed": 12,
+        "width": 768, "height": 512}, spec["defaults"])
+    values.update(length=73, fps=24)
+    applied = comfy_driver.apply_params(workflow, spec, values)
+    classes = {node["class_type"] for node in applied.values()}
+    assert "TextGenerateLTX2Prompt" not in classes and "LoraLoader" not in classes
+    if template == "ltx23_i2v":
+        assert applied["320:295"]["inputs"] == {"width": 768, "height": 512, "length": 73, "batch_size": 1}
+        assert applied["320:290"]["inputs"]["resize_type.width"] == 768
+        assert applied["320:290"]["inputs"]["resize_type.height"] == 512
+        assert applied["320:305"]["inputs"]["frames_number"] == 73
+        assert applied["320:305"]["inputs"]["frame_rate"] == applied["320:310"]["inputs"]["fps"] == 24
+    else:
+        assert applied["control_length"]["inputs"]["value"] == 73
+        assert applied["guide_trim"]["inputs"]["length"] == ["control_length", 0]
+        assert applied["129:108"]["inputs"]["length"] == applied["129:101"]["inputs"]["frames_number"] == ["control_length", 0]
+        assert applied["129:113"]["inputs"]["value"] == 768
+        assert applied["129:98"]["inputs"]["value"] == 512
+        assert applied["129:115"]["inputs"]["iclora_parameters"] == ["129:196", 0]
+
+
+def test_ltx_catalog_requires_its_text_encoder_and_control_lora(backend_with_comfy):
+    info = model_inventory(backend_with_comfy)
+    loras = info["LoraLoaderModelOnly"]["input"]["required"]["lora_name"][0]
+    loras.remove("ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors")
+    entries = {e["id"]: e for e in video_engines.catalog(backend_with_comfy, info)["engines"]}
+    assert entries["ltx23"]["available"] and not entries["ltx23_control"]["available"]
+    info["LTXAVTextEncoderLoader"]["input"]["required"]["text_encoder"][0].clear()
+    entries = {e["id"]: e for e in video_engines.catalog(backend_with_comfy, info)["engines"]}
+    assert not entries["ltx23"]["available"] and not entries["ltx23_control"]["available"]
+
+
+@pytest.mark.parametrize("template,height,length,code", [
+    ("ltx23_control", 480, 121, "bad_video_size"),
+    ("ltx23_i2v", 481, 121, "bad_video_size"),
+    ("ltx23_i2v", 480, 120, "bad_video_length"),
+    ("ltx23_i2v", 480, True, "bad_video_length"),
+])
+def test_ltx_invalid_shapes_fail_before_the_renderer(store, monkeypatch, template, height, length, code):
+    from prosperos_hoard import engine
+    def unexpected(*args, **kwargs):
+        pytest.fail("Invalid LTX shape reached the renderer")
+    monkeypatch.setattr(engine, "run_template", unexpected)
+    with pytest.raises(engine.EngineError) as error:
+        engine.generate_image(store, None, {"params": {"template": template,
+            "positive_prompt": "Move", "width": 832, "height": height, "length": length}}, lambda *a: None)
+    assert error.value.code == code
 
 
 def model_inventory(backend):
@@ -94,6 +165,27 @@ def test_auto_executes_the_same_complete_engine_the_catalog_announces(client, mo
     assert result.status_code == 200, result.text
     job = app.state.store.get_job(result.json()["job"]["id"])
     assert job["params"]["template"] == "wan22_ti2v"
+
+
+def test_ltx_camera_request_reaches_the_video_prompt(client, monkeypatch):
+    from prosperos_hoard import engine, cinema
+    c, app, _ = client
+    monkeypatch.setattr(engine, "_object_info", lambda *a, **k: model_inventory(app.state.backend))
+    seen = []
+    def camera_prompt(camera, video=False):
+        seen.append(video)
+        return "clockwise camera arc" if video else "still frame"
+    monkeypatch.setattr(cinema, "camera_prompt", camera_prompt)
+    pid = c.post("/api/projects", json={"name": "LTX camera"}).json()["id"]
+    image = io.BytesIO()
+    Image.new("RGB", (64, 64), "blue").save(image, "PNG")
+    aid = c.post(f"/api/projects/{pid}/import-upload", files={"file": ("reference.png", image.getvalue(), "image/png")}).json()["id"]
+    result = c.post(f"/api/projects/{pid}/generate", json={"prompt": "Walk", "reference_asset_id": aid,
+        "template": "ltx23_i2v", "camera": {"move": "arc"}})
+    assert result.status_code == 200, result.text
+    job = app.state.store.get_job(result.json()["job"]["id"])
+    assert seen == [True]
+    assert "clockwise camera arc" in job["params"]["positive_prompt"]
 
 
 def test_new_productions_continue_without_review_and_review_stays_opt_in():

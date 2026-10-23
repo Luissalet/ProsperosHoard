@@ -462,6 +462,8 @@ def studio_generate_image(
     model: Optional[str] = None, camera: Optional[dict[str, str]] = None, end_asset_id: Optional[str] = None,
     audio_asset_id: Optional[str] = None, audio_start_s: Optional[float] = None, audio_seconds: Optional[float] = None,
     composition_asset_id: Optional[str] = None,
+    driving_asset_id: Optional[str] = None, driving_start_s: Optional[float] = None,
+    template_params: Optional[dict[str, Any]] = None,
 ) -> Any:
     """Queue image generation on ComfyUI (txt2img; an edit when a reference is given).
     composition_asset_id takes an immutable layout saved with studio_spatial: its boxes, exact texts,
@@ -506,6 +508,10 @@ def studio_generate_image(
     character has one.
     Clips: template "auto_clip" with reference_asset_id = the start picture (Wan 2.2 14B when installed);
     end_asset_id = the picture the clip must end on (Wan 2.2 14B first+last frame, template wan22_flf2v).
+    template="ltx23_i2v": LTX2.3 distilled image-to-video. template="ltx23_control" with driving_asset_id:
+    the reference supplies appearance and the guide supplies structure/camera/action through Canny IC-LoRA.
+    driving_start_s chooses the guide offset; template_params carries the template's declared knobs such as
+    length(8*n+1 frames at24fps) and control_strength(default1). Neither runs a local prompt-generating LLM.
     Lip sync: template "auto_sing" (or "wan22_s2v" / "wan21_infinitetalk") with reference_asset_id = the
     singer, audio_asset_id = the song, audio_start_s and audio_seconds = the line (S2V up to 20 s,
     InfiniteTalk up to 90 s; auto picks InfiniteTalk past 10 s when installed); the clip is trimmed to the line.
@@ -527,6 +533,8 @@ def studio_generate_image(
         "use_adapters": use_adapters, "prefer_adapter": prefer_adapter, "camera": camera, "end_asset_id": end_asset_id,
         "audio_asset_id": audio_asset_id, "audio_start_s": audio_start_s, "audio_seconds": audio_seconds,
         "composition_asset_id": composition_asset_id,
+        "driving_asset_id": driving_asset_id, "driving_start_s": driving_start_s,
+        "template_params": template_params,
     }
     return _with_preview(_call("POST", "/api/agent/studio_generate_image", params={"project": project}, json=body),
                          include_image)

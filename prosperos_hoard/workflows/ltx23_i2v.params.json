@@ -1,0 +1,52 @@
+{
+  "template": "ltx23_i2v",
+  "kind": "video",
+  "vram_class": "wan14b",
+  "requires_reference": true,
+  "reference_node": "269.image",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "output_node": "75",
+  "map": {
+    "positive_prompt": "320:303.text",
+    "negative_prompt": "320:313.text",
+    "checkpoint": "320:316.ckpt_name",
+    "seed": "320:277.noise_seed",
+    "width": "320:295.width",
+    "height": "320:295.height",
+    "length": "320:295.length",
+    "fps": "320:310.fps",
+    "sampler": "320:291.sampler_name",
+    "cfg": "320:314.cfg"
+  },
+  "linked_params": {
+    "width": [
+      "320:290.resize_type.width"
+    ],
+    "height": [
+      "320:290.resize_type.height"
+    ],
+    "length": [
+      "320:305.frames_number"
+    ],
+    "fps": [
+      "320:304.frame_rate",
+      "320:305.frame_rate"
+    ]
+  },
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "length": 121,
+    "fps": 24,
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "denoise": 1.0
+  },
+  "notes": "LTX-2.3 fully distilled FP8, one full-resolution stage, 8 fixed sigmas/CFG1, silent video. Width/height must be multiples of32 and frames8*n+1. Same graph as the real 1190 local 5s test, without dev weights, extra LoRA, upscaler or local prompt LLM. Source: Comfy-Org/workflow_templates video_ltx2_3_i2v.json, adapted; LTX-2 Community License applies to weights.",
+  "workflow_license": {
+    "source": "https://github.com/Comfy-Org/workflow_templates",
+    "notice": "MIT License\n\nCopyright (c) 2023-present Comfy Org\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  }
+}

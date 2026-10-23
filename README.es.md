@@ -986,6 +986,19 @@ artística ni reproducción completa. La revisión es opcional y no detiene la
 generación. Los secundarios identificables siguen necesitando sus referencias
 individuales mediante las herramientas de reparto y referencias existentes.
 
+El selector de vídeo ofrece también **LTX 2.3 distilled** de forma explícita.
+Al conectar movimiento, su selector permite elegir **LTX 2.3 · Structure control**
+junto a Animate2: copia la estructura de bordes del vídeo, incluida cámara y
+acción, y toma la apariencia de la imagen. Usa24fps y aproxima la duración a
+su rejilla de ocho fotogramas. Offset y fuerza siguen dentro del nodo; Automático
+conserva su selección anterior. Requiere checkpoint LTX2.3 distilled FP8, encoder
+Gemma3 FP4 y, para control, LoRA Union Control ref0.5. El encoder codifica el
+prompt; no se arranca un LLM local para redactarlo. Las mismas entradas llegan
+por `studio_spaces` o `studio_generate_image` (`driving_asset_id`,
+`driving_start_s`, `template_params`). La coreografía e identidad se comprueban
+en los clips reales. Los pesos usan LTX-2 Community License; las especificaciones
+conservan los avisos de los workflows adaptados.
+
 ## Licencia
 
 MIT - ver [LICENSE](LICENSE). Las tipografías incluidas conservan sus

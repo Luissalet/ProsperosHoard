@@ -37,9 +37,18 @@ the full schedule. Explicit modes, seeds and durations remain editable.
 ## MCP
 
 `studio_spaces(action="create", project=..., template="quick_video")` creates
-the same graph. A video node accepts `engine: auto|wan14b|wan|svd`,
+the same graph. A video node accepts `engine: auto|wan14b|wan|svd|ltx23`,
 `lightning: true|false`, `seconds`, `prompt`, `seed` and its existing inputs.
 Use `edit`, `run`, `get` and `stop` through the existing Spaces API.
+With motion connected, `motion_engine: animate|ltx23_control` chooses pose
+transfer or Canny structure control; Animate2 remains the default. LTX retains
+the image reference, guide offset, `motion_prompt` and `pose_strength`, rounds
+duration to8*n+1frames at24fps, and records both media IDs. MCP
+`studio_generate_image` also accepts `driving_asset_id`, `driving_start_s` and
+the template's declared `template_params`. LTX's image-only workflow uses a
+fixed eight-sigma schedule; the control workflow exposes its native sampler.
+Image-only dimensions are multiples of32; structure control needs multiples
+of64 (896x512 by default), because its guide uses half-sized latent dimensions.
 `studio_video_from_plan(autopilot=false)` opts into review; its default continues.
 
 ## Verification scope

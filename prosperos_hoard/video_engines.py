@@ -5,13 +5,15 @@ from . import comfy_driver, engine
 CHOICES = (
     ("wan14b", "Wan 2.2 14B", "wan22_i2v_14b", "image"),
     ("wan", "Wan 2.2 5B", "wan22_ti2v", "image"),
+    ("ltx23", "LTX 2.3 distilled", "ltx23_i2v", "image"),
     ("svd", "SVD XT", "svd_img2vid", "image"),
     ("animate", "Wan Animate 2", "wan_animate2", "motion"),
+    ("ltx23_control", "LTX 2.3 · Structure control", "ltx23_control", "motion"),
     ("flf", "Wan 2.2 · First / last frame", "wan22_flf2v", "end"),
     ("s2v", "Wan 2.2 S2V", "wan22_s2v", "audio"),
     ("infinitetalk", "InfiniteTalk", "wan21_infinitetalk", "audio"),
 )
-MODEL_FIELDS = {"ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name", "audio_encoder_name"}
+MODEL_FIELDS = {"ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name", "audio_encoder_name", "text_encoder"}
 
 
 def catalog(backend, object_info=None):

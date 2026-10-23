@@ -45,6 +45,7 @@
       "openingFailure": "Visible error and Retry.",
       "sourceConversion": "Convert source to image generator and preserve existing images in a connected upstream reference node.",
       "engineCatalog": "Exact workflow nodes and model-file choices determine live availability. Cached inventory remains offline. Auto chooses available Wan 14B then Wan 5B.",
+      "ltxModels": "Explicit LTX2.3 distilled image-to-video and motion-wired Union Control IC-LoRA. Motion selector preserves Animate2; guide offset/action/strength stay in the node. Hide the inapplicable reference-strength knob and Wan four-step checkbox; no new page or review gate.",
       "output": "Native inline playback, download, enlargement, saved runs and selected takes; previous-run comparison appears below the current output at matching output position.",
       "regeneration": "Existing node-level generation and run scopes remain available.",
       "productionReview": "New music-video productions continue by default; explicit song/animatic review remains optional."

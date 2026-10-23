@@ -75,6 +75,13 @@ is selectable for the 14B path. Readiness describes dependencies, not successful
 generation or artistic quality. Motion, end-frame and audio connections retain
 their corresponding engine controls.
 
+LTX2.3 distilled is an explicit image-to-video option. Motion-wired nodes expose
+a model selector for Animate2 or LTX2.3 structure control, with actual dependency
+readiness; Auto keeps its previous selection. Structure control keeps the guide
+offset, action text and motion strength, while its appearance anchor is fixed
+to the first image. Hide only the inapplicable Animate2 reference-strength knob
+and four-step Wan checkbox in that mode. No new page, gate or mandatory review.
+
 Play the selected output inline using native controls. Download, Enlarge, run
 selection and take selection stay with the result. Compare takes adds a second
 player below the current output when the previous run has an output in the same
