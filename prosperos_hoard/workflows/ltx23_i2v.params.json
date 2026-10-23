@@ -31,6 +31,10 @@
     "fps": [
       "320:304.frame_rate",
       "320:305.frame_rate"
+    ],
+    "checkpoint": [
+      "320:317.ckpt_name",
+      "320:279.ckpt_name"
     ]
   },
   "defaults": {
@@ -41,7 +45,7 @@
     "steps": 8,
     "cfg": 1.0,
     "sampler": "euler",
-    "scheduler": "simple",
+    "scheduler": "manual_sigmas",
     "denoise": 1.0
   },
   "notes": "LTX-2.3 fully distilled FP8, one full-resolution stage, 8 fixed sigmas/CFG1, silent video. Width/height must be multiples of32 and frames8*n+1. Same graph as the real 1190 local 5s test, without dev weights, extra LoRA, upscaler or local prompt LLM. Source: Comfy-Org/workflow_templates video_ltx2_3_i2v.json, adapted; LTX-2 Community License applies to weights.",

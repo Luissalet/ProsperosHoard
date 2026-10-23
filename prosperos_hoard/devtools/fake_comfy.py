@@ -130,14 +130,19 @@ MOTION_FILES = {
     ("VAELoader", "vae_name"): ["wan_2.1_vae.safetensors", "Wan2_1_VAE_bf16.safetensors"],
     ("CLIPVisionLoader", "clip_name"): ["clip_vision_h.safetensors"],
     ("ModelPatchLoader", "name"): ["wan2.1_infiniteTalk_single_fp16.safetensors"],
-    ("CheckpointLoaderSimple", "ckpt_name"): ["sdpose_wholebody_fp16.safetensors"],
+    ("CheckpointLoaderSimple", "ckpt_name"): ["sdpose_wholebody_fp16.safetensors",
+                                              "ltx-2.3-22b-distilled-fp8.safetensors"],
+    ("LTXVAudioVAELoader", "ckpt_name"): ["ltx-2.3-22b-distilled-fp8.safetensors"],
+    ("LTXAVTextEncoderLoader", "ckpt_name"): ["ltx-2.3-22b-distilled-fp8.safetensors"],
+    ("LTXAVTextEncoderLoader", "text_encoder"): ["gemma_3_12B_it_fp4_mixed.safetensors"],
     ("LoadDA3Model", "model_name"): ["depth_anything_3_mono_large.safetensors"],
     ("LoraLoaderModelOnly", "lora_name"): ["wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
                                            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
                                            "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
                                            "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
                                            "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
-                                           "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors"],
+                                           "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+                                           "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors"],
 }
 
 
