@@ -306,6 +306,8 @@ def parse_scores(text: str, keys: tuple[str, ...] = ("bible", "prompt", "referen
             value = float(m.group(1)) if m else None
         try:
             number = float(value) if value is not None and not isinstance(value, bool) else None
+            if require_json and (not isinstance(value, (int, float)) or number is None or not 0 <= number <= 10):
+                number = None
             out[key] = max(0.0, min(10.0, number)) if number is not None and math.isfinite(number) else None
         except (TypeError, ValueError):
             out[key] = None
@@ -518,14 +520,15 @@ class QA:
         if not reference_labels or missing_refs:
             model["reference"] = None
         wants_cast = bool(shot.get("crowd") or shot.get("cast"))
-        if missing_refs:
+        cast_scored = model.get("supporting_cast") is not None
+        if missing_refs or not reference_labels:
             model["supporting_cast"] = None
         item["model"] = model
         assessed = [k for k in keys if isinstance(model.get(k), (int, float))]
         required = ["prompt", "motion", "anatomy", "scene"]
-        if reference_labels or missing_refs:
+        if reference_labels or missing_refs or wants_cast or cast_scored:
             required.append("reference")
-        if wants_cast:
+        if wants_cast or cast_scored:
             required.append("supporting_cast")
         item["visual_review"].update(status="sampled" if all(k in assessed for k in required) else "incomplete",
                                      unassessed=[k for k in required if k not in assessed])
