@@ -19,7 +19,7 @@ from pathlib import Path
 import sys
 from prosperos_hoard.studio import Studio
 s = Studio(Path(sys.argv[1]))
-assert len(s.tools) == 181
+assert len(s.tools) == 182
 assert all(m.phase == 'off' for m in s.modules.values())
 assert 'prosperos_hoard.api' not in sys.modules
 assert 'prosperos_hoard.editing.main' not in sys.modules
@@ -89,7 +89,7 @@ async def test_stream_disconnect_and_off_leave_other_module_responsive(tmp_path)
 async def test_http_discovery_and_projects_do_not_enable_modules(tmp_path):
     app = create_app(tmp_path, port=64239)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:64239') as client:
-        assert len((await client.get('/api/agent/tools')).json()['tools']) == 181
+        assert len((await client.get('/api/agent/tools')).json()['tools']) == 182
         assert not tmp_path.joinpath('prosperos.sqlite3').exists()
         project = (await client.post('/api/studio/projects', json={'title': 'Corte'})).json()
         assert project['title'] == 'Corte'

@@ -4729,7 +4729,7 @@
     },
     {
       "name": "studio_review_clip",
-      "description": "Review a video against its requested action and references, without regenerating or pausing it.\n\nReturns technical checks and, when the family vision service is available, a chronological sample\nscored for action, physical motion, anatomy, scene and secondary identity. Give the concrete action\nin prompt and the canonical character/location/secondary images in reference_asset_ids. No vision\nor incomplete scores are explicit; a technically valid MP4 is not an artistic approval. At most24\nsampled frames, so this never certifies full playback. The asset and original recipe stay unchanged.\n\nKeywords: motion quality, continuity, review clip, anatomy, physics, scene consistency, revisar video,\ncalidad del movimiento, continuidad, deformaciones, secundarios",
+      "description": "Review a video against its requested action and references, without regenerating or pausing it.\n\nReturns technical checks and, when the family vision service is available, a chronological sample\nscored for action, physical motion, anatomy, scene and secondary identity. Give the concrete action\nin prompt and the canonical character/location/secondary images in reference_asset_ids. No vision\nor incomplete scores are explicit; a technically valid MP4 is not an artistic approval. At most24\nsampled frames, so this never certifies full playback. The asset and original recipe stay unchanged.\n\nKeywords: motion quality, continuity, review clip, anatomy, physics, scene consistency, revisar video,\ncalidad del movimiento, continuidad, deformaciones, secundarios\n\nSet check_supporting_cast when secondary identities must be assessed: an\nunassessed cast then leaves the review incomplete. An observed low cast\nscore is retained even without this flag. Empty prompt uses the selected\nasset's own appearance AND motion recipe, not the node's current edits.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4748,6 +4748,11 @@
             },
             "title": "Reference Asset Ids",
             "type": "array"
+          },
+          "check_supporting_cast": {
+            "default": false,
+            "title": "Check Supporting Cast",
+            "type": "boolean"
           }
         },
         "required": [

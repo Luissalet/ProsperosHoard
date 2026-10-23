@@ -703,6 +703,7 @@ class ClipReviewBody(BaseModel):
     asset_id: str
     prompt: str = ""
     reference_asset_ids: list[str] = Field(default_factory=list)
+    check_supporting_cast: bool = False
 
 
 class ProductionShotsBody(BaseModel):
@@ -3762,8 +3763,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         for aid in body.reference_asset_ids:
             if store.get_asset(aid)["kind"] != "image":
                 raise engine.EngineError("needs_image_reference", "review references must be images")
-        shot = {"key": "1", "prompt": body.prompt or (asset.get("recipe") or {}).get("prompt", ""),
-                "motion": "move", "lead": True}
+        recipe = asset.get("recipe") or {}
+        params = recipe.get("params") or {}
+        actual_prompt = "\n".join(dict.fromkeys(p for p in
+            [recipe.get("prompt") or params.get("positive_prompt"), params.get("pose_prompt")] if p))
+        shot = {"key": "1", "prompt": body.prompt or actual_prompt,
+                "motion": "move", "lead": True, "crowd": body.check_supporting_cast}
         if body.reference_asset_ids:
             shot["review_reference_asset_ids"] = body.reference_asset_ids
         state = {"spec": {"lead": {"name": "reference character", "look": "as drawn in the supplied references"},

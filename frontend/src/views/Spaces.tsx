@@ -264,7 +264,7 @@ function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boole
   );
 }
 
-function VideoResult({ id, previous, onOpen, reviewPrompt }: { id: string; previous?: string; onOpen: () => void; reviewPrompt?: string }) {
+function VideoResult({ id, previous, onOpen, canReview }: { id: string; previous?: string; onOpen: () => void; canReview?: boolean }) {
   const { lang } = useT();
   const [compare, setCompare] = useState(false);
   const [review, setReview] = useState<Awaited<ReturnType<typeof api.reviewClip>> | null>(null);
@@ -273,7 +273,7 @@ function VideoResult({ id, previous, onOpen, reviewPrompt }: { id: string; previ
   const currentReview = review?.asset_id === id ? review : null;
   const inspect = async () => {
     setReviewBusy(true); setReviewError("");
-    try { setReview(await api.reviewClip(id, reviewPrompt || "")); }
+    try { setReview(await api.reviewClip(id)); }
     catch (e) { setReviewError((e as Error).message); }
     finally { setReviewBusy(false); }
   };
@@ -284,7 +284,7 @@ function VideoResult({ id, previous, onOpen, reviewPrompt }: { id: string; previ
       <a className="btn sm" href={`${fileUrl(id)}?download=true`}><Download size={14} />{lang === "es" ? "Descargar" : "Download"}</a>
       <button className="btn sm ghost" onClick={onOpen}><Maximize size={14} />{lang === "es" ? "Ampliar" : "Enlarge"}</button>
       {previous && <button className="btn sm ghost" aria-pressed={compare} onClick={() => setCompare(v => !v)}>{lang === "es" ? "Comparar tomas" : "Compare takes"}</button>}
-      {reviewPrompt !== undefined && <button className="btn sm ghost" disabled={reviewBusy} onClick={inspect}>
+      {canReview && <button className="btn sm ghost" disabled={reviewBusy} onClick={inspect}>
         {reviewBusy && <Loader2 size={14} className="spin" />}{lang === "es" ? "Revisar movimiento" : "Review motion"}</button>}
     </div>
     {reviewError && <p className="sp-error" role="alert">{reviewError}</p>}
@@ -786,7 +786,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         {list.length > 0 && <div className={`sp-thumbs${list.length === 1 ? " sp-single-result" : ""}`}>
           {list.map((a) => (
             <div key={a} className="sp-thumb-wrap">
-              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} reviewPrompt={kind === "video" ? [data.prompt, data.motion_prompt].filter(Boolean).join("\n") : undefined} />
+              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} canReview={kind === "video"} />
                 : <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />}
               <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")} aria-pressed={!ex.has(a)}
                 onClick={() => ctx.setExcluded(id, ex.has(a) ? [...ex].filter((x) => x !== a) : [...ex, a])}><Check size={11} /></button>

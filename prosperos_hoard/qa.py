@@ -285,20 +285,24 @@ def model_prompt(lead: dict[str, Any], shot_prompt: str, lead_in_frame: bool, ha
     return "\n".join(p for p in parts if p)
 
 
-def parse_scores(text: str, keys: tuple[str, ...] = ("bible", "prompt", "reference")) -> dict[str, Any]:
+def parse_scores(text: str, keys: tuple[str, ...] = ("bible", "prompt", "reference"), *, reason_limit: int = 200,
+                 require_json: bool = False) -> dict[str, Any]:
     """The model's JSON answer, tolerating prose or code fences around it."""
     match = re.search(r"\{.*\}", text or "", re.DOTALL)
     data: dict[str, Any] = {}
+    parsed = False
     if match:
         try:
-            data = json.loads(match.group(0))
+            candidate = json.loads(match.group(0))
+            if isinstance(candidate, dict):
+                data, parsed = candidate, True
         except json.JSONDecodeError:
             data = {}
     out: dict[str, Any] = {}
     for key in keys:
         value = data.get(key)
-        if value is None:
-            m = re.search(rf'"?{key}"?\s*[:=]\s*(\d+(?:\.\d+)?)', text or "", re.IGNORECASE)
+        if not parsed and not require_json:
+            m = re.search(rf'(?<![\w])"?{re.escape(key)}"?\s*[:=]\s*(\d+(?:\.\d+)?)', text or "", re.IGNORECASE)
             value = float(m.group(1)) if m else None
         try:
             number = float(value) if value is not None and not isinstance(value, bool) else None
@@ -306,7 +310,7 @@ def parse_scores(text: str, keys: tuple[str, ...] = ("bible", "prompt", "referen
         except (TypeError, ValueError):
             out[key] = None
     reason = data.get("reason") if isinstance(data.get("reason"), str) else None
-    out["reason"] = (reason or re.sub(r"\s+", " ", text or "")[:160]).strip()[:200]
+    out["reason"] = (reason or re.sub(r"\s+", " ", text or "")[:160]).strip()[:reason_limit]
     return out
 
 
@@ -507,14 +511,14 @@ class QA:
                   '"supporting_cast":n or null,"reason":"brief observed defects with seconds, or uncertainty"}.')
         self.model_calls += 1
         try:
-            model = parse_scores(self.vision(images, prompt), keys)
+            model = parse_scores(self.vision(images, prompt), keys, reason_limit=1200, require_json=True)
         except Exception as exc:  # noqa: BLE001
             item["model"] = {"skipped": f"vision call failed: {str(exc)[:160]}"}
             return
         if not reference_labels or missing_refs:
             model["reference"] = None
         wants_cast = bool(shot.get("crowd") or shot.get("cast"))
-        if not wants_cast or missing_refs:
+        if missing_refs:
             model["supporting_cast"] = None
         item["model"] = model
         assessed = [k for k in keys if isinstance(model.get(k), (int, float))]

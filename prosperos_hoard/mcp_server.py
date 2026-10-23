@@ -1819,7 +1819,8 @@ def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str]
 
 
 @tool(_ro(readOnlyHint=True))
-def studio_review_clip(asset_id: str, prompt: str = "", reference_asset_ids: Optional[list[str]] = None) -> dict[str, Any]:
+def studio_review_clip(asset_id: str, prompt: str = "", reference_asset_ids: Optional[list[str]] = None,
+                       check_supporting_cast: bool = False) -> dict[str, Any]:
     """Review a video against its requested action and references, without regenerating or pausing it.
 
     Returns technical checks and, when the family vision service is available, a chronological sample
@@ -1830,9 +1831,14 @@ def studio_review_clip(asset_id: str, prompt: str = "", reference_asset_ids: Opt
 
     Keywords: motion quality, continuity, review clip, anatomy, physics, scene consistency, revisar video,
     calidad del movimiento, continuidad, deformaciones, secundarios
+
+    Set check_supporting_cast when secondary identities must be assessed: an
+    unassessed cast then leaves the review incomplete. An observed low cast
+    score is retained even without this flag. Empty prompt uses the selected
+    asset's own appearance AND motion recipe, not the node's current edits.
     """
     return _call("POST", "/api/agent/studio_review_clip", json={"asset_id": asset_id, "prompt": prompt,
-                 "reference_asset_ids": reference_asset_ids or []})
+                 "reference_asset_ids": reference_asset_ids or [], "check_supporting_cast": check_supporting_cast})
 
 
 @tool(_ro(readOnlyHint=True))
