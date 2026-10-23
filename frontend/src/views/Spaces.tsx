@@ -25,6 +25,7 @@ import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
 import { EditHistory, SaveQueue, freeNodePosition } from "../spaceEditing";
 import { NODE_TOOLS, TOOL_SECTIONS, acceptsToolInput, searchNodeTools, type ToolChoice } from "../nodeTools";
+import { frameTimeAtPlayhead } from "../frameTime";
 
 // ------------------------------------------------------------ the node model
 
@@ -452,10 +453,10 @@ function FramePicker({ clip, at, onChange }: { clip?: string; at: number; onChan
         aria-label={words("Vídeo de origen", "Source video")} onLoadedMetadata={seek} />
       <button className="btn sm ghost" onClick={() => {
         const v = video.current;
-        if (v) { v.pause(); onChange(Number(v.currentTime.toFixed(3))); }
+        if (v) { v.pause(); onChange(frameTimeAtPlayhead(v.currentTime, v.duration)); }
       }}>{words("Usar instante del reproductor", "Use playhead time")}</button>
     </> : <p className="small muted">{words("Conecta un vídeo a la entrada Clip.", "Connect a video to the Clip input.")}</p>}
-    <label className="sp-num">{words("Segundo", "Time (seconds)")}<input type="number" min={0} step={0.001} value={at}
+    <label className="sp-num">{words("Segundo", "Time (seconds)")}<input type="number" min={0} step="any" value={at}
       onChange={e => onChange(Number(e.target.value))} /></label>
     <p className="small muted">{words("Extrae una imagen por clip en ese segundo, sin modelo. La vista previa muestra el primer clip conectado.",
       "Extracts one image per clip at this time, without a model. The preview shows the first connected clip.")}</p>
