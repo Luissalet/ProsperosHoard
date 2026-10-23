@@ -557,7 +557,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             <label className="sp-engine-select">{words("Modelo", "Model")}
               <select aria-label={words("Modelo de vídeo", "Video model")} value={data.engine || (data.quality === "draft" ? "wan" : "auto")} onChange={e => set({ engine: e.target.value })}>
                 <option value="auto">{words("Automático", "Automatic")}{ctx.videoEngines?.auto_resolves_to ? ` · ${ctx.videoEngines.engines.find(e => e.id === ctx.videoEngines?.auto_resolves_to)?.label}` : ""}</option>
-                {(ctx.videoEngines?.engines.filter(e => e.mode === "image") || [{ id: "wan14b", label: "Wan 2.2 14B" }, { id: "wan", label: "Wan 2.2 5B" }, { id: "svd", label: "SVD XT" }]).map(e => <option key={e.id} value={e.id}>{e.label}{"available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
+                {(ctx.videoEngines?.engines.filter(e => e.mode === "image") || [{ id: "wan14b", label: "Wan 2.2 14B" }, { id: "wan", label: "Wan 2.2 5B" }, { id: "svd", label: "SVD XT" }]).map(e => <option key={e.id} value={e.id}>{e.label}{ctx.videoEngines?.live && "available" in e && !e.available ? words(" · No disponible", " · Unavailable") : ""}</option>)}
               </select>
             </label>
           )}
