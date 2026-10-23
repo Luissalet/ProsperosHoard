@@ -130,6 +130,37 @@ def test_native_queue_passes_the_server_card_to_the_lease_and_clears_binding(cli
     assert releases == [True] and app.state.backend._bound.lease_gpu is None
 
 
+def test_imported_video_reserves_its_declared_class_without_consulting_an_image_model(client, monkeypatch):
+    from prosperos_hoard import comfy_driver, gpu_lease
+    c, app, _ = client
+    app.state.queue.stop()
+    workflow, _ = comfy_driver.load_template("wan22_ti2v")
+    imported = c.post("/api/workflows/import", json={"name": "Imported video class", "workflow": workflow})
+    assert imported.status_code == 200, imported.text
+    template = imported.json()["template"]
+    patched = c.patch(f"/api/workflows/{template}", json={"vram_class": "wan"})
+    assert patched.status_code == 200, patched.text
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    monkeypatch.setattr(app.state.backend, "comfy_gpu", lambda: 3)
+    def unexpected(*args, **kwargs):
+        pytest.fail("A declared workflow class needs no image-engine or live model lookup")
+    monkeypatch.setattr(engine, "resolve_image_engine", unexpected)
+    monkeypatch.setattr(engine, "_object_info", unexpected)
+    calls, releases = [], []
+    class FakeLease:
+        gpu = 3
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            releases.append(True)
+    monkeypatch.setattr(gpu_lease, "default_lease", lambda **kw: calls.append(kw) or FakeLease())
+    job = {"id": "imported-video-test", "lane": "gpu", "type": "generate_image", "params": {"template": template}}
+    with app.state.queue._guard(job):
+        assert calls[0]["gpu"] == 3
+        assert calls[0]["vram_mb"] == app.state.backend.vram_estimates_mb()["wan"] == 12000
+    assert releases == [True]
+
+
 def test_two_servers_render_two_jobs_at_once(store, project, data_dir, fake_comfy, second_comfy):
     main, main_port = fake_comfy
     extra, extra_port = second_comfy
