@@ -505,7 +505,7 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                 templates = {"auto": "auto_clip", "wan14b": "wan22_i2v_14b", "wan": "wan22_ti2v", "svd": "svd_img2vid", "ltx23": "ltx23_i2v"}
                 if selected not in templates:
                     raise SpaceError("unknown_video_engine", "choose auto, wan14b, wan, ltx23 or svd")
-                body["template"] = templates[selected]
+                body["template"] = "ltx23_i2v_hq" if selected == "ltx23" and data.get("refine") is True else templates[selected]
                 body["template_params"] = ({"length": int(round(seconds * 24)) + 1} if selected == "wan"
                     else {"length": int(round(seconds * 24 / 8)) * 8 + 1} if selected == "ltx23"
                     else {"frames": 25, "fps": 25 / seconds} if selected == "svd"
@@ -893,11 +893,12 @@ def _wait(studio: Any, jobs: list[str], poll_s: float, timeout_s: float,
 DEFAULT_SECONDS = {"qwen21_txt2img": 60, "qwen21_edit": 90, "wan22_ti2v": 180, "wan22_i2v_14b": 300, "wan22_flf2v": 320,
                    "wan22_s2v": 380, "wan21_infinitetalk": 700, "ace15_song": 60, "esrgan_upscale": 15,
                    "birefnet_remove_background": 15, "control_pose": 20, "control_depth": 20, "wan21_bernini_edit": 240,
-                   "wan22_bernini_edit": 420}
+                   "wan22_bernini_edit": 420, "ltx23_i2v": 180, "ltx23_i2v_hq": 240, "ltx23_control": 240}
 TEMPLATE_VRAM = {"qwen21_txt2img": "qwen21", "qwen21_edit": "qwen21", "wan22_ti2v": "wan", "wan22_i2v_14b": "wan14b",
                  "wan22_flf2v": "wan14b", "wan22_s2v": "wan_s2v", "wan21_infinitetalk": "wan14b", "ace15_song": "ace",
                  "esrgan_upscale": "esrgan", "birefnet_remove_background": "birefnet", "control_pose": "control",
-                 "control_depth": "control", "wan21_bernini_edit": "wan", "wan22_bernini_edit": "wan14b"}
+                 "control_depth": "control", "wan21_bernini_edit": "wan", "wan22_bernini_edit": "wan14b", "ltx23_i2v": "wan14b",
+                 "ltx23_i2v_hq": "wan14b", "ltx23_control": "wan14b"}
 _EDIT_OP_TEMPLATE = {"upscale": "esrgan_upscale", "remove_background": "birefnet_remove_background",
                      "pose_map": "control_pose", "depth_map": "control_depth"}
 

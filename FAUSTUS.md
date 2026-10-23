@@ -72,3 +72,5 @@ Clicking an image-shot storyboard card opens its own connected frame/video works
 Shot readiness follows its frame/clip records independently of a production job finishing. The visible References node adds, uploads, replaces, describes and removes up to six image references through the existing `studio_production_shots` payload; no new MCP contract is introduced. Production failures retain their concrete message or log fallback.
 
 No user media, lyrics, production specifications, model configuration or GPU services are changed by this interface update. Model quality is outside the synthetic interaction checks.
+
+Spaces LTX image-to-video also accepts `refine=true`: optional native2x latent upscaling and3 fixed refinement steps after the8-step base, exposed by the node checkbox. Direct API/MCP template: `ltx23_i2v_hq`. Requires the LTX2.3 spatial-upscaler-x2-1.1 weight; catalog availability checks it separately, without hiding the base model. Both stages reuse the caller seed/sampler; immutable recipes record `video_refinement`. This improves the detail workflow, not a guarantee of artistic continuity or dynamic camera.

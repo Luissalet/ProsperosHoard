@@ -1,0 +1,56 @@
+{
+  "template": "ltx23_i2v_hq",
+  "kind": "video",
+  "vram_class": "wan14b",
+  "requires_reference": true,
+  "reference_node": "269.image",
+  "checkpoint_node": "CheckpointLoaderSimple",
+  "output_node": "75",
+  "map": {
+    "positive_prompt": "320:303.text",
+    "negative_prompt": "320:313.text",
+    "checkpoint": "320:316.ckpt_name",
+    "seed": "320:277.noise_seed",
+    "width": "320:295.width",
+    "height": "320:295.height",
+    "length": "320:295.length",
+    "fps": "320:310.fps",
+    "sampler": "320:291.sampler_name",
+    "cfg": "320:314.cfg"
+  },
+  "linked_params": {
+    "width": [
+      "320:290.resize_type.width"
+    ],
+    "height": [
+      "320:290.resize_type.height"
+    ],
+    "length": [
+      "320:305.frames_number"
+    ],
+    "fps": [
+      "320:304.frame_rate",
+      "320:305.frame_rate"
+    ],
+    "checkpoint": [
+      "320:317.ckpt_name",
+      "320:279.ckpt_name"
+    ]
+  },
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "length": 121,
+    "fps": 24,
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler": "euler",
+    "scheduler": "manual_sigmas",
+    "denoise": 1.0
+  },
+  "notes": "LTX-2.3 distilled two-stage image-to-video: base8 fixed Euler sigmas, native latent upscaler2x, original first-frame anchoring at strength1, then3 fixed refinement steps (sigmas0.85,0.725,0.4219,0; CFG1). Silent output has twice the base width and height. Both samplers reuse the caller seed and sampler; base CFG remains caller-controlled. Needs ltx-2.3-spatial-upscaler-x2-1.1.safetensors in a native latent_upscale_models path. Optional detail refinement, not a guarantee of identity, anatomy or camera quality. Adapted from the MIT Comfy-Org LTX2.3 I2V workflow; weights use the LTX-2 Community License.",
+  "workflow_license": {
+    "source": "https://github.com/Comfy-Org/workflow_templates",
+    "notice": "MIT License\n\nCopyright (c) 2023-present Comfy Org\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  }
+}
