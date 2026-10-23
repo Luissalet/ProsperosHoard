@@ -370,6 +370,7 @@ Prospero joins the other Hoard apps through the shared family contract (the vend
 - **GPU lease.** A job in the GPU lane holds the hub's lease for its class of model (`hoard_link.lease`) on top of the existing VRAM
   check (sized by edit operation - pose and depth maps 3 GB, upscale, background removal - and by clip template - InfiniteTalk, first-last-frame 14B, S2V - rather than by the image engine), so the editor's transcription and the language models do not load at the same moment. With no hub it changes nothing; when the
   hub keeps the lease queued past two minutes the job goes to `waiting_gpu` and retries. `PROSPERO_GPU_LEASE=0` turns it off.
+  Managed local ComfyUI servers reserve their actual card, including render-pool workers; a cold server starts on the card granted by the lease.
 - **For Lumiere.** On a production's page, **Export to Lumiere** (also the tool `production_export_lumiere`) writes the cut's XML and EDL
   to `data/exports/lumiere/` and asks Lumiere's Hoard to open it as a project; if it is not running or may not read that folder, the
   answer says so and the files stay there. Lumiere may only read some folders (`LUMIERE_FILE_ROOTS`): allow Prospero's data folder.

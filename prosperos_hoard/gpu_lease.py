@@ -69,7 +69,8 @@ def _purpose(job: dict[str, Any]) -> str:
 
 @contextlib.contextmanager
 def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, lease_fn: Optional[Callable[..., Any]] = None,
-         resolve_image_engine: Optional[Callable[[], str]] = None, on_gpu: Optional[Callable[[str, Optional[int]], None]] = None) -> Iterator[Any]:
+         resolve_image_engine: Optional[Callable[[], str]] = None, on_gpu: Optional[Callable[[str, Optional[int]], None]] = None,
+         gpu: Optional[int] = None) -> Iterator[Any]:
     """Hold the hub's lease while the body runs (nothing when it is off or cannot be had). ``on_gpu(job_id, gpu)`` hears which card."""
     if not enabled():
         yield None
@@ -77,7 +78,8 @@ def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, l
     lease_cm: Any = None
     try:
         mb = estimate_mb(job, vram_estimates(), resolve_image_engine)
-        lease_cm = (lease_fn or default_lease)(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S)
+        lease_cm = (lease_fn or default_lease)(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S,
+                                              **({"gpu": gpu} if gpu is not None else {}))
         lease_cm.__enter__()
     except WaitingForResources:
         raise

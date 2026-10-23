@@ -1068,11 +1068,21 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     family_settings = FamilySettings(data_dir)
     job_events = jobevents.JobEvents(store, family.emit, base_url=lambda: f"http://127.0.0.1:{port}{url_prefix}",
                                      notifier=jobevents.Notifier(store, family_settings))
+    @contextlib.contextmanager
+    def gpu_guard(job):
+        def assigned(job_id, gpu):
+            backend.bind_lease_gpu(gpu)
+            job_events.set_gpu(job_id, gpu)
+        try:
+            with gpu_lease.hold(job, backend.vram_estimates_mb, on_gpu=assigned,
+                                gpu=backend.comfy_gpu() if gpu_lease.enabled() else None,
+                                resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto")) as held:
+                yield held
+        finally:
+            backend.bind_lease_gpu(None)
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
                      target_ready=backend.pool_server_ready, accepts=backend.accepts_job, events=job_events,
-                     gpu_guard=None if demo else (lambda job: gpu_lease.hold(
-                         job, backend.vram_estimates_mb, on_gpu=job_events.set_gpu,
-                         resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto"))))
+                     gpu_guard=None if demo else gpu_guard)
     queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
     queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))
