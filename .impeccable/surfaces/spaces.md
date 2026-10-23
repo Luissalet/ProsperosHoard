@@ -31,6 +31,28 @@ no artistic/model quality follows from these captures. Batch desktop/mobile
 inspection once, fix material findings together and confirm once. Root historical
 Studio comp gates remain outside this extension; no exact-comp approval claim.
 
+### R19 completion evidence — 23 October2026
+
+Forward wire-drop choices match media type and declared starter inputs. Start
+and prompt stay shared; motion/audio/end guides stay exclusive to their presets.
+Valid presets keep their references and one-step undo. Light port names use
+text-2; handles, cables and dark port text retain their semantic colors.
+
+Fresh finish review requested only light-port contrast F1; its verdict resolves
+F1 at8.26:1 and returns scoped visual SHIP. Separate code review CAS19 approves
+1a3c824. The documenter inspected that source and eight supplied captures;
+r19-ports-light-confirmed.png is final F1 evidence. r18-nodes-light.png and the
+three r18 first captures retain their earlier, explicitly limited states.
+The incorrectly framed r19-ports-light.png is excluded. Montage order rows are
+below the capture crop: source and native receipts establish their behavior,
+not a visual inspection of those rows. Tall readable nodes/panning and toolbar
+wrapping are intentional. Reports reside in research-inbox/prospero-quality1190.
+
+Supplied validation:26 Node checks and build pass; exact R18 Python1212 passed,
+4 skipped,3 warnings in1212.51s. R19 changes no Python/backend. No documenter
+tests, shipping raster assets, artistic approval, exact-comp, comprehensive
+accessibility or whole-product gate closure are claimed.
+
 The video result's Continue from last frame action adds and focuses a wired
 successor when one output is included. It retains model/duration/quality/fast
 mode/refinement, leaves the next action blank, and starts no render. Use the

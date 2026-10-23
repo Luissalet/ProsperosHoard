@@ -2,6 +2,17 @@
   "schemaVersion": 2,
   "title": "Design System: Prospero — Spaces video workspace",
   "extensions": {
+    "nodeLibraryR19": {
+      "task": 1190,
+      "source": "1a3c824f664bc5c23afb5e08f53f8a1d3e9241f4",
+      "forwardCompatibility": "Require media type and declared starter inputs; start/prompt shared, motion/audio/end exclusive; retain references and undo.",
+      "portLabels": "Light .sp-node labels use text-2, #4a3f55 on #efe9f3, 8.26:1; handles, cables and dark text retain colors.",
+      "evidenceDirectory": "D:/LocalAI/research-inbox/prospero-quality1190",
+      "documenterReport": "r19-documenter-report.txt",
+      "finalContrastCapture": "r19-ports-light-confirmed.png",
+      "review": "r18-finish-review.txt FIX F1; r19-finish-verdict.txt RESOLVED/scoped SHIP; independent code CAS19 APPROVE.",
+      "limits": "Historical captures retain original scope; exclude wrongly framed r19-ports-light.png. Order rows are below crop; source and native receipts establish behavior. No artistic, exact-comp, whole-product or comprehensive accessibility approval. No shipping raster assets. Historical metadata preserved."
+    },
     "scope": {
       "surface": "spaces",
       "mode": "Operate",
