@@ -1765,7 +1765,9 @@ def studio_spaces(
     count, engine, seed, camera} with inputs prompt (text), refs (image), pose (a pose map: the body pose to
     copy) and layout (a depth map: the composition to keep); video {prompt, engine "auto"|"wan14b"|"wan"|"svd",
     lightning (true: 4-step 14B, false: full schedule), quality "draft"|"final", seconds,
-    audio_start_s, motion_start_s, seed, camera, sing_engine "auto"|"s2v"|"infinitetalk"} with inputs start
+    audio_start_s, motion_start_s, motion_prompt (the action, separate from appearance/setting),
+    pose_strength, reference_image_strength (0-10, trained default 1; higher is not necessarily better),
+    seed, camera, sing_engine "auto"|"s2v"|"infinitetalk"} with inputs start
     (image: one clip per image), end (image: the frame the clip ends on, Wan 2.2 14B), prompt, motion (video:
     copy its moves) and audio (audio: the character sings it, lip sync; S2V up to 19 s, InfiniteTalk up to
     90 s, "auto" takes InfiniteTalk past 10 s when installed), and two outputs: the clips, and source_handle "last" = each clip's last frame (wire it into another
@@ -1814,6 +1816,23 @@ def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str]
     Keywords: enhance prompt, improve prompt, rewrite prompt, mejorar prompt, reescribir prompt
     """
     return _call("POST", "/api/agent/studio_prompt_enhance", json={"text": text, "kind": kind, "project": project})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_review_clip(asset_id: str, prompt: str = "", reference_asset_ids: Optional[list[str]] = None) -> dict[str, Any]:
+    """Review a video against its requested action and references, without regenerating or pausing it.
+
+    Returns technical checks and, when the family vision service is available, a chronological sample
+    scored for action, physical motion, anatomy, scene and secondary identity. Give the concrete action
+    in prompt and the canonical character/location/secondary images in reference_asset_ids. No vision
+    or incomplete scores are explicit; a technically valid MP4 is not an artistic approval. At most24
+    sampled frames, so this never certifies full playback. The asset and original recipe stay unchanged.
+
+    Keywords: motion quality, continuity, review clip, anatomy, physics, scene consistency, revisar video,
+    calidad del movimiento, continuidad, deformaciones, secundarios
+    """
+    return _call("POST", "/api/agent/studio_review_clip", json={"asset_id": asset_id, "prompt": prompt,
+                 "reference_asset_ids": reference_asset_ids or []})
 
 
 @tool(_ro(readOnlyHint=True))

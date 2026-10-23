@@ -4,6 +4,15 @@ import { errorText } from "./messages";
 
 export type Kind = "image" | "video" | "audio" | "lyrics" | "font" | "layout";
 
+export interface ClipReview {
+  asset_id: string;
+  vision: string;
+  notice: string;
+  item: { verdict: string; reasons: string[]; score?: number;
+    model?: { skipped?: string; reason?: string; [key: string]: string | number | null | undefined };
+    visual_review?: { status: string; sample_count?: number; full_playback_reviewed: false } };
+}
+
 export interface SpatialItem { id: string; kind: "object" | "text"; caption: string; text?: string; box: [number, number, number, number]; reference_asset_id?: string; fill?: string; colour?: string }
 export interface SpatialDocument { format: "prospero.composition/1"; width: number; height: number; caption: string; items: SpatialItem[] }
 export interface SpatialSource { id: string; project_id: string; name: string; parent_id: string | null; document: SpatialDocument }
@@ -1306,6 +1315,7 @@ export const api = {
     request<Composed>("POST", `/generation/api/projects/${pid}/compose-prompt`, { prompt, negative: negative || null, style, ...opts }),
   imageEngines: (pid?: string) => request<ImageEngines>("GET", `/generation/api/image-engines${pid ? `?project=${encodeURIComponent(pid)}` : ""}`),
   videoEngines: () => request<{ live: boolean; problem: string | null; auto_resolves_to: string | null; engines: { id: string; label: string; template: string; mode: string; installed: boolean; available: boolean; missing: string[]; models: string[]; vram_mb: number }[] }>("GET", "/generation/api/video-engines"),
+  reviewClip: (assetId: string, prompt: string) => request<ClipReview>("POST", `/generation/api/assets/${assetId}/review`, { asset_id: assetId, prompt }),
   generate: (pid: string, body: Record<string, unknown>) =>
     request<{ job: Job; final_prompt: string; seed: number; unknown_mentions: string[] }>("POST", `/generation/api/projects/${pid}/generate`, body),
   edit: (assetId: string, body: Record<string, unknown>) =>

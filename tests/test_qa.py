@@ -232,7 +232,8 @@ def test_clip_checks_and_model_scores(store, project):
 
     def vision(images, prompt):
         prompts.append(prompt)
-        assert len(images) == 2 and images[0][:2] == b"\xff\xd8"  # the frame and its source still, as JPEG
+        assert len(images) > 3 and all(image[:2] == b"\xff\xd8" for image in images)
+        assert "chronological order at seconds" in prompt and "planted feet" in prompt
         return '{"bible": 4, "prompt": 9, "reference": 8, "reason": "the palette drifted to blue"}'
 
     check = qa.QA(store, state, vision, "fake-vision")
@@ -244,6 +245,7 @@ def test_clip_checks_and_model_scores(store, project):
     assert "palette drifted" in "; ".join(items["1"]["reasons"])
     assert "WISP, a moth spirit" in prompts[0] and "should be in this shot" in prompts[0]
     assert "should NOT be in this shot" in prompts[1]
+    assert items["1"]["visual_review"]["status"] == "incomplete"  # no motion/anatomy/scene scores in the legacy answer
 
     def broken(images, prompt):
         raise RuntimeError("model crashed")
@@ -252,6 +254,60 @@ def test_clip_checks_and_model_scores(store, project):
     assert item["model"]["skipped"].startswith("vision call failed")
     card = qa.compact_scorecard(qa.scorecard("x", "clips", list(items.values()), "fake-vision", True))
     assert card["failed"] == 3 and card["items"][0]["why"]
+
+
+def test_temporal_review_catches_an_off_middle_failure_and_keeps_uncertainty(store, project):
+    reference = _save(store, project["id"], scene())
+    frames = np.full((96, 36, 64), 70, np.uint8)
+    frames[1::2] = 75
+    frames[18:26] = 90  # 0.75–1.08s, absent from the old single midpoint at2s
+    aid = _clip(store, project["id"], frames, reference)
+    state = _production(store, project, [{"key": "1", "prompt": "a quick planted-foot pivot", "lead": True}])
+    seen = []
+
+    def vision(images, prompt):
+        import io
+        means = [np.asarray(Image.open(io.BytesIO(b))).mean() for b in images[:-1]]
+        assert min(means) < 73 and max(means) > 85
+        assert "chronological order" in prompt and "0.742" in prompt
+        seen.append(len(images))
+        return json.dumps({"bible": 9, "prompt": 9, "reference": 9, "motion": 2,
+                           "anatomy": 3, "scene": 4, "supporting_cast": None, "reason": "defect at0.99s"})
+
+    item = qa.QA(store, state, vision).check_clip("1", aid)
+    assert seen and item["verdict"] == "fail" and item["score"] == 2
+    assert "motion, anatomy, scene" in "; ".join(item["reasons"])
+    assert item["visual_review"]["status"] == "sampled"
+    assert item["visual_review"]["full_playback_reviewed"] is False
+    # Model-free checks can pass, but cannot be represented as a visual assessment.
+    unchecked = qa.QA(store, state).check_clip("1", aid)
+    assert unchecked["verdict"] == "pass"
+    assert unchecked["visual_review"]["status"] == "unavailable"
+    compact = qa.compact_scorecard(qa.scorecard("test", "clips", [unchecked], "no vision model", True))
+    assert compact["items"][0]["model"] == "no vision model"
+    assert compact["items"][0]["visual_review"]["full_playback_reviewed"] is False
+
+
+def test_invalid_visual_scores_cannot_turn_into_positive_scores():
+    scores = qa.parse_scores('{"motion":NaN,"anatomy":true,"scene":Infinity}', ("motion", "anatomy", "scene"))
+    assert scores["motion"] is scores["anatomy"] is scores["scene"] is None
+
+
+def test_standalone_clip_review_is_available_without_a_production_and_is_read_only(client):
+    c, app, _ = client
+    store = app.state.store
+    pid = store.create_project("Standalone review")["id"]
+    reference = _save(store, pid, scene())
+    aid = _clip(store, pid, RNG.integers(40, 150, (30, 36, 64), dtype=np.uint8), reference)
+    before = store.get_asset(aid)
+    app.state.qa_vision = (None, "no vision model")
+    response = c.post("/api/agent/studio_review_clip", json={"asset_id": aid, "prompt": "quick footwork", "reference_asset_ids": [reference]})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["asset_id"] == aid and result["item"]["model"] == {"skipped": "no vision model"}
+    assert result["item"]["visual_review"]["status"] == "unavailable"
+    assert store.get_asset(aid) == before
+    assert c.post("/api/agent/studio_review_clip", json={"asset_id": reference}).status_code == 400
 
 
 def test_qa_over_the_api_and_the_report(client):

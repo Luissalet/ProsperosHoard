@@ -11,6 +11,21 @@ A video node's optional final-frame input also preserves the fast/full
 schedule. Switching fast generation off requests twenty steps for the
 first-and-last-frame workflow, as it does for a start-only clip.
 
+Motion-wired video nodes accept `motion_prompt` separately from the appearance
+and setting in `prompt`, plus native `pose_strength` and
+`reference_image_strength` (0–10, trained default 1). Do not assume stronger
+conditioning yields better results. Inspect actual takes and keep failed ones.
+
+`studio_review_clip(asset_id, prompt?, reference_asset_ids?)` reviews a video
+without a production, through the same optional action available in its node.
+It reports technical checks and, if vision is available, a chronological sample
+of up to 24 frames with motion, anatomy, setting and cast scores. Respect
+`visual_review.status`, `unassessed`, missing references and
+`full_playback_reviewed=false`: neither job completion nor a technical pass is
+an artistic approval. It does not pause or gate generation. Named secondary
+characters still use the existing individual cast/reference controls; this
+change adds no multi-reference video model.
+
 Real video comparisons are separate from simulated interaction checks: one
 four-second walking/waving scene took 250.60 s at four-step 14B versus 951.09 s
 at the full schedule, with both subject continuity and the action observed.

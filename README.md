@@ -958,6 +958,20 @@ Connecting a final frame keeps the clip's fast/full sampling choice: four
 steps by default, or the full twenty-step schedule with fast generation off.
 The same setting is preserved when the graph is run through `studio_spaces`.
 
+With a motion guide connected, the video node separates appearance/setting from
+`motion_prompt`. `pose_strength` and `reference_image_strength` expose Animate2's
+native 0–10 controls (trained default 1); increasing either is an experiment,
+not a fidelity guarantee. Existing graphs retain their previous prompt fallback.
+
+**Review motion** checks the selected output in place. MCP `studio_review_clip`
+also reviews any library video without creating a production. Technical checks
+are supplemented, when a vision model is available, by up to 24 chronological
+frames and image references, with separate motion, anatomy, scene and cast
+scores. Missing vision or incomplete assessments remain explicit. A technical
+pass or sampled assessment does not certify full playback or artistic quality;
+review never blocks generation. Image references for named secondary characters
+still need to be supplied through the existing cast/reference tools.
+
 ## License
 
 MIT - see [LICENSE](LICENSE). Bundled fonts keep their own licences: SIL

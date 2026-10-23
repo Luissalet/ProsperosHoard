@@ -264,9 +264,19 @@ function Thumb({ id, port, dim, onClick }: { id: string; port: Port; dim?: boole
   );
 }
 
-function VideoResult({ id, previous, onOpen }: { id: string; previous?: string; onOpen: () => void }) {
+function VideoResult({ id, previous, onOpen, reviewPrompt }: { id: string; previous?: string; onOpen: () => void; reviewPrompt?: string }) {
   const { lang } = useT();
   const [compare, setCompare] = useState(false);
+  const [review, setReview] = useState<Awaited<ReturnType<typeof api.reviewClip>> | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const currentReview = review?.asset_id === id ? review : null;
+  const inspect = async () => {
+    setReviewBusy(true); setReviewError("");
+    try { setReview(await api.reviewClip(id, reviewPrompt || "")); }
+    catch (e) { setReviewError((e as Error).message); }
+    finally { setReviewBusy(false); }
+  };
   return <div className="sp-video-result nodrag nowheel">
     <video key={id} src={fileUrl(id)} controls playsInline preload="metadata" aria-label={lang === "es" ? "Vídeo generado" : "Generated video"} />
     {compare && previous && <video key={previous} src={fileUrl(previous)} controls playsInline preload="metadata" aria-label={lang === "es" ? "Toma anterior" : "Previous take"} />}
@@ -274,7 +284,25 @@ function VideoResult({ id, previous, onOpen }: { id: string; previous?: string; 
       <a className="btn sm" href={`${fileUrl(id)}?download=true`}><Download size={14} />{lang === "es" ? "Descargar" : "Download"}</a>
       <button className="btn sm ghost" onClick={onOpen}><Maximize size={14} />{lang === "es" ? "Ampliar" : "Enlarge"}</button>
       {previous && <button className="btn sm ghost" aria-pressed={compare} onClick={() => setCompare(v => !v)}>{lang === "es" ? "Comparar tomas" : "Compare takes"}</button>}
+      {reviewPrompt !== undefined && <button className="btn sm ghost" disabled={reviewBusy} onClick={inspect}>
+        {reviewBusy && <Loader2 size={14} className="spin" />}{lang === "es" ? "Revisar movimiento" : "Review motion"}</button>}
     </div>
+    {reviewError && <p className="sp-error" role="alert">{reviewError}</p>}
+    {currentReview && <div className="small" aria-live="polite">
+      <strong>{lang === "es" ? "Revisión de la toma seleccionada" : "Selected take review"}</strong>
+      {currentReview.item.model && <p>{[
+        ["prompt", "Acción", "Action"], ["reference", "Identidad", "Identity"],
+        ["motion", "Movimiento", "Motion"], ["anatomy", "Anatomía", "Anatomy"],
+        ["scene", "Escenario", "Setting"], ["supporting_cast", "Secundarios", "Supporting cast"],
+      ].filter(([key]) => typeof currentReview.item.model?.[key] === "number")
+        .map(([key, es, en]) => `${lang === "es" ? es : en}: ${currentReview.item.model?.[key]}/10`).join(" · ")}</p>}
+      <p>{currentReview.item.model?.skipped === "no vision model"
+        ? (lang === "es" ? "Sin modelo de visión: solo se han comprobado los aspectos técnicos. " : "No vision model: only technical checks were performed. ")
+        : currentReview.item.model?.skipped || (currentReview.item.visual_review?.status === "incomplete"
+        ? (lang === "es" ? "Valoración visual incompleta. " : "Incomplete visual assessment. ") : "")}{currentReview.item.model?.reason}</p>
+      {currentReview.item.visual_review?.sample_count !== undefined && <p className="hint">{currentReview.item.visual_review.sample_count} {lang === "es" ? "fotogramas muestreados; no acredita la reproducción completa." : "sampled frames; does not verify full playback."}</p>}
+      {currentReview.item.reasons.length > 0 && <p>{currentReview.item.reasons.join(" · ")}</p>}
+    </div>}
   </div>;
 }
 
@@ -507,7 +535,23 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
   } else if (kind === "video") {
     body = (
       <>
-        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={t("spVideoPh")} />
+        {wired.has("motion") && <div className="small muted">{words("Aspecto del personaje y escenario", "Character appearance and setting")}</div>}
+        <PromptBox value={data.prompt || ""} onChange={(v) => set({ prompt: v })} kind="video" placeholder={wired.has("motion")
+          ? words("Describe la apariencia y el lugar; el vídeo conectado aporta el movimiento.", "Describe the appearance and setting; the connected video supplies the movement.") : t("spVideoPh")} />
+        {wired.has("motion") && <>
+          <label className="small">{words("Movimiento de la guía", "Guide movement")}
+            <textarea className="nodrag nowheel" rows={2} value={data.motion_prompt || ""}
+              placeholder={words("Ej.: pasos rápidos con cambios de apoyo y giro", "E.g. quick footwork with weight shifts and a pivot")}
+              onChange={e => set({ motion_prompt: e.target.value })} />
+          </label>
+          <div className="sp-opts nodrag">
+            <label className="sp-num">{words("Fuerza del movimiento", "Motion strength")}<input type="number" min={0} max={10} step={0.1}
+              value={data.pose_strength ?? 1} onChange={e => set({ pose_strength: Number(e.target.value) })} /></label>
+            <label className="sp-num">{words("Fuerza de la referencia", "Reference strength")}<input type="number" min={0} max={10} step={0.1}
+              value={data.reference_image_strength ?? 1} onChange={e => set({ reference_image_strength: Number(e.target.value) })} /></label>
+          </div>
+          <p className="hint">{words("1 es el valor de entrenamiento. Una fuerza mayor no garantiza más fidelidad; compara las tomas.", "1 is the training value. Higher strength does not guarantee better fidelity; compare the takes.")}</p>
+        </>}
         <div className="sp-opts nodrag">
           {!wired.has("audio") && !wired.has("motion") && !wired.has("end") && (
             <label className="sp-engine-select">{words("Modelo", "Model")}
@@ -742,7 +786,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
         {list.length > 0 && <div className={`sp-thumbs${list.length === 1 ? " sp-single-result" : ""}`}>
           {list.map((a) => (
             <div key={a} className="sp-thumb-wrap">
-              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} />
+              {port === "video" ? <VideoResult id={a} previous={current > 0 ? runs[current - 1].outputs[list.indexOf(a)] : undefined} onOpen={() => ctx.open(a, list)} reviewPrompt={kind === "video" ? [data.prompt, data.motion_prompt].filter(Boolean).join("\n") : undefined} />
                 : <Thumb id={a} port={port} dim={ex.has(a)} onClick={() => ctx.open(a, list)} />}
               <button className={`sp-tick nodrag${ex.has(a) ? "" : " on"}`} title={t("spTick")} aria-pressed={!ex.has(a)}
                 onClick={() => ctx.setExcluded(id, ex.has(a) ? [...ex].filter((x) => x !== a) : [...ex, a])}><Check size={11} /></button>
@@ -1038,7 +1082,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
   const focusNode = (id: string) => {
     const bounds = wrap.current?.getBoundingClientRect();
     const node = flow.getInternalNode(id);
-    if (bounds && bounds.width <= 600 && node) {
+    if (bounds && node) {
       // A tall card must stay readable: focus by width and pan vertically,
       // rather than shrinking every control to fit the available height.
       const width = node.measured.width || node.width || 340;
@@ -1046,7 +1090,7 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       const visibleLeft = Math.max(0, bounds.left);
       const visibleWidth = Math.min(bounds.right, window.innerWidth) - visibleLeft;
       // Include the handles and selection outline, not just the card body.
-      const zoom = Math.max(.3, Math.min(1.15, (visibleWidth - 48) / (width + 8)));
+      const zoom = Math.max(.3, Math.min(bounds.width <= 600 ? 1.15 : 1, (visibleWidth - 48) / (width + 8)));
       const left = visibleLeft - bounds.left + (visibleWidth - width * zoom) / 2;
       const top = Math.max(16, (bounds.height - height * zoom) / 2);
       const position = node.internals.positionAbsolute;
