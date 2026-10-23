@@ -78,4 +78,13 @@ Shot readiness follows its frame/clip records independently of a production job 
 
 No user media, lyrics, production specifications, model configuration or GPU services are changed by this interface update. Model quality is outside the synthetic interaction checks.
 
+Spaces has a searchable library with27 shortcuts across all15 native node types.
+Three video starters prepare asset nodes and wires: motion=start:image plus
+motion:video, lip sync=start:image plus audio:audio, between-frames=start:image
+plus end:image. Creation starts no render and is one undo step. Agents use the
+existing studio_spaces add_node/connect operations and ordinary data fields.
+Combine displays clip wires in execution order with up/down controls; agents
+reorder via disconnect/connect in the desired order. Each wire contributes its
+included takes. No new model installation or quality guarantee is implied.
+
 Spaces LTX image-to-video also accepts `refine=true`: optional native2x latent upscaling and3 fixed refinement steps after the8-step base, exposed by the node checkbox. Direct API/MCP template: `ltx23_i2v_hq`. Requires the LTX2.3 spatial-upscaler-x2-1.1 weight; catalog availability checks it separately, without hiding the base model. Both stages reuse the caller seed/sampler; immutable recipes record `video_refinement`. This improves the detail workflow, not a guarantee of artistic continuity or dynamic camera.

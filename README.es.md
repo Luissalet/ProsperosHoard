@@ -1023,3 +1023,10 @@ se explican antes de generar. Investigación y recibos en
 El séptimo adaptador de voz conecta con un servicio local Yovoice/audio.cpp ya instalado. Configura `YOVOICE_URL`, `YOVOICE_MODEL` y `YOVOICE_API_TOKEN` (32+ caracteres) o `YOVOICE_TOKEN_FILE`. `studio_voices` consulta el estado real del motor y del modelo. Usa identificadores de trabajo, espera, cancelación y validación WAV. Opciones y licencias varían por modelo; no se descargan modelos automáticamente. Las pruebas del protocolo no acreditan calidad de audio de un modelo instalado.
 
 En LTX imagen a vídeo, **Refinar · 2× resolución** añade opcionalmente escalado de latentes y tres pasos de refinamiento tras los ocho de base. Duplica ambas dimensiones, requiere `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` en una ruta nativa `latent_upscale_models` y registra la etapa adicional en la receta. La base sigue siendo la opción inicial; refinar no garantiza anatomía, identidad ni movimiento de cámara correctos. API/MCP: `template="ltx23_i2v_hq"`; Spaces: `engine="ltx23", refine=true`.
+
+La biblioteca lateral agrupa27 accesos por referencias, generación,
+transformación, montaje y organización. Busca en español o inglés, con o sin
+acentos. Copiar movimiento, Sincronizar labios y Entre dos fotogramas preparan
+sus entradas y conexiones sin generar; un deshacer retira el conjunto.
+El montaje permite subir/bajar conexiones de clips. Se conservan los15 tipos
+nativos, sus operaciones y sus requisitos de modelos.

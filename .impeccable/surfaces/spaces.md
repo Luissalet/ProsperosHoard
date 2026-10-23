@@ -1,5 +1,36 @@
 # Spaces editor
 
+## Node library and assembly extension — task1190, 23 October2026
+
+Operate, code-led local extension of the established graph editor. The user's
+explicit instruction is to continue implementing a clear, clean interface with
+effective nodes for different functions; no further design interview or identity
+replacement. Keep the pinned plum/magenta brand, all fifteen native node types,
+typed connections, existing graphs, both themes/languages and the existing tools.
+
+Use a docked 286px node library at desktop widths1100px and above. Below that,
+the same library overlays the canvas and closes after adding a node. Search
+recognizes Spanish/English, accents and multiple terms. Five functional sections
+group27 shortcuts: references/text, generation, transformation, assembly and
+organization. These configure existing native operations rather than inventing
+new render engines or claiming more installed models.
+
+Transfer motion, Lip sync and Between two frames create the necessary source
+nodes and typed connections together, focus the video and start no generation.
+One undo removes that addition and its wires. Wire-drop palettes filter shortcuts
+by their actual media output/input types and retain preset operation data.
+Node purposes follow connected video mode, ports name their input/output, and
+connected inputs are marked. Prompt fields have visible accessible labels.
+Assembly lists incoming clip connections in execution order, with up/down controls
+that swap only those edges and participate in existing history/save semantics.
+Each wire contributes the included outputs of its source, in their native order.
+
+Verify adding/undo/redo, mobile focus, search/no-results, saved graphs and ordering
+through browser and native MCP. Use explicit demo content for interaction proof;
+no artistic/model quality follows from these captures. Batch desktop/mobile
+inspection once, fix material findings together and confirm once. Root historical
+Studio comp gates remain outside this extension; no exact-comp approval claim.
+
 The video result's Continue from last frame action adds and focuses a wired
 successor when one output is included. It retains model/duration/quality/fast
 mode/refinement, leaves the next action blank, and starts no render. Use the
