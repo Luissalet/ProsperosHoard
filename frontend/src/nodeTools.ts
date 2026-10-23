@@ -8,6 +8,10 @@ export type NodeTool = {
 };
 export type ToolChoice = { kind: SpaceNodeType; handle?: string; tool?: NodeTool; data?: Record<string, unknown> };
 
+export function acceptsToolInput(tool: NodeTool | undefined, handle: string): boolean {
+  return !tool?.inputs || handle === "prompt" || tool.inputs.some(input => input.port === handle);
+}
+
 export const TOOL_SECTIONS: { id: string; label: Words }[] = [
   { id: "sources", label: ["Referencias y texto", "References and text"] },
   { id: "generate", label: ["Generar", "Generate"] },
