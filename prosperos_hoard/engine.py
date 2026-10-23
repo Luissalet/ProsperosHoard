@@ -1244,8 +1244,9 @@ def frame_at(store: Store, asset_id: str, at_s: float, project_id: Optional[str]
     if probe.returncode or not base or not frames:
         raise EngineError("no_frames", "no frame timestamps could be read from that video")
     time_base = Fraction(int(base[1]), int(base[2]))
-    requested = Fraction(str(at_s))
-    presented = [(int(n), int(pts) * time_base) for n, pts in frames if int(pts) * time_base <= requested]
+    # The browser/API and recipe expose IEEE-754 seconds. Compare in that
+    # same representation, so a returned PTS such as 1/3 round-trips exactly.
+    presented = [(int(n), int(pts) * time_base) for n, pts in frames if float(int(pts) * time_base) <= at_s]
     if not presented:
         raise EngineError("no_frames", "no frame could be read at that time")
     index, frame_time = max(presented, key=lambda item: (item[1], item[0]))

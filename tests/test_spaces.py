@@ -502,3 +502,26 @@ def test_frame_time_uses_variable_timestamps_with_a_nonzero_stream_start(client,
         pixel = Image.open(store.data_dir / out["file_path"]).convert("RGB").getpixel((20, 20))
         assert pixel[channel] > 100 and pixel[channel] > max(v for i, v in enumerate(pixel) if i != channel) + 80
         assert out["recipe"]["frame_time_s"] == pytest.approx(expected_pts)
+
+
+def test_frame_timestamp_roundtrips_at_one_third_without_crossing_adjacent_times(client, tmp_path):
+    import math
+    from PIL import Image
+    from prosperos_hoard import engine, procutil
+    from prosperos_hoard.backend import ffmpeg_path
+
+    exe = ffmpeg_path()
+    if not exe:
+        pytest.skip("no ffmpeg")
+    store = _store(client)
+    pid = store.create_project("Third-second boundary")["id"]
+    path = tmp_path / "thirds.mp4"
+    procutil.run([exe, "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=96x64:d=0.333333:r=3",
+                  "-f", "lavfi", "-i", "color=c=blue:s=96x64:d=0.666666:r=3", "-filter_complex",
+                  "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-pix_fmt", "yuv420p", str(path)], timeout=30)
+    clip = engine.import_asset(store, pid, path, "video")
+    for at, channel in [(math.nextafter(1 / 3, 0), 0), (1 / 3, 2), (math.nextafter(1 / 3, 1), 2)]:
+        frame = engine.frame_at(store, clip["id"], at)
+        pixel = Image.open(store.data_dir / frame["file_path"]).convert("RGB").getpixel((20, 20))
+        assert pixel[channel] > 150
+        assert frame["recipe"]["frame_time_s"] == (0 if channel == 0 else 1 / 3)
