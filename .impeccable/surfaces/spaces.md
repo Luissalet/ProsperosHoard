@@ -219,3 +219,36 @@ output feeds references or another clip's start. No new navigation, modal,
 model download or approval step. Verify the selected time against real decoded
 pixels, downstream input resolution, invalid times and original preservation;
 UI evidence covers desktop and mobile separately from generation quality.
+
+### Frame extraction completion evidence — task1190, R22
+
+The current library adds Extract frame under Transform: 28 shortcuts over
+16 native node types. Earlier R18/R19 counts describe their original pass.
+The frame node keeps the existing 340px card and typed Clip input → image
+output. Its source monitor is full width, contains the whole frame on inspection
+black, has a 190px maximum height and 6px corners. Native playback controls,
+Use playhead time and a labelled seconds input stay together with 10px gaps;
+Extract remains in the standard node action row. The preview shows the first
+connected clip; the hint explains that extraction uses the same second for each
+clip without a model. A missing input shows the connection instruction in place.
+
+The playhead action pauses the source and retains its numeric precision; an
+ended player selects the representable instant immediately before its duration.
+The image result follows the picker in the same node and can feed references
+or another clip's start. Existing Focus preserves readable width and both port
+edges on mobile; the lower result continues through vertical panning.
+
+The documenter inspected Spaces.tsx, nodeTools.ts, frameTime.ts, studio.css and
+docs/video-workspace.md, and opened all three supplied R21 captures under
+D:/LocalAI/research-inbox/prospero-quality1190: r21-frame-desktop.png and
+r21-frame-desktop-dark.png at 1280×720, and r21-frame-mobile.png at 390×844.
+They show the completed node at 1.2 seconds in both desktop themes and mobile
+dark mode. Demo backend is declared; the displayed source is a real task1190
+take without artistic approval. The supplied r22-finish-review.txt returns ship
+only for this local Operate extension and identifies no material visual fix.
+The supplied r22-detector.json is empty. The documenter ran no tests or live app
+operations. Static captures do not establish extraction accuracy, keyboard focus,
+all loading/error states, comprehensive accessibility or generated-media quality.
+Historical evidence retains its original attribution. No shipping raster assets,
+exact-comp approval, Studio gate closure or whole-product approval are added;
+task1190 remains open for artistic quality.

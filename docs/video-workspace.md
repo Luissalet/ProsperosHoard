@@ -91,7 +91,7 @@ each contributes its source's included outputs in native order. MCP callers can
 disconnect the relevant clip inputs and reconnect them in the desired order in
 one edit request. Other edges remain unchanged.
 
-## Verification scope
+## Extract a frame
 
 Extract frame is a native `frame` node: video input `clip` (many), image output
 `out`, and `data.at_s` in seconds (default0). Its source player previews the first
@@ -106,6 +106,12 @@ MCP/API: `studio_spaces(action="edit", ops=[{"op":"add_node","id":"still",
 "target":"still","target_handle":"clip"}])`, then run the still node. This
 uses the existing local `engine.frame_at` operation; no GPU or model download.
 It selects a frame from existing footage and does not improve its anatomy.
+The selected frame is the one presented at the requested instant, using actual
+timestamps rather than an assumed constant FPS. The recipe keeps the requested
+`at_s` and the selected frame's `frame_time_s`, which can be used again as a time.
+The playhead button retains precision and handles the end of playback.
+
+## Verification scope
 
 Isolated simulated-generator checks prove interaction and transport, not model
 quality. Separate real GPU comparisons retain sources, prompts, seeds, jobs,

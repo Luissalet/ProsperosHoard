@@ -53,7 +53,7 @@
       { "name": "workspace-mobile", "value": "700px", "purpose": "Wrap toolbar and hide secondary module/vitals regions in the workspace shell." }
     ],
     "behavior": {
-      "nodeLibrary": "27 shortcuts over all15 native types, grouped by function; Spanish/English accent-insensitive search. Docked286px at widths1100px and above, overlay below with close on pick.",
+      "nodeLibrary": "28 shortcuts over all16 native types, including Extract frame; grouped by function; Spanish/English accent-insensitive search. Docked286px at widths1100px and above, overlay below with close on pick. The nodeLibraryR19 entry retains the earlier pass's evidence and attribution.",
       "wiredStarters": "Motion, lip sync and first/last starters add native asset inputs and wires in one undo group, focus the video and never render automatically. Incoming wire replaces the corresponding empty input.",
       "assemblyOrder": "Combine lists incoming clip wires in execution order with up/down; each wire contributes included takes. Existing history/save and native MCP disconnect/connect preserve the ordering.",
       "ltxRefinement": "Optional image-only LTX checkbox before status/text; off by default, doubles output dimensions with native refinement. Availability checks the upscaler independently. Desktop/mobile390 and reload persistence in research-inbox/prospero-quality1190/r14-refine-* and r14-ui-persistence.json; demo does not prove output quality.",
@@ -100,7 +100,65 @@
       "Static evidence does not establish job transitions, comprehensive accessibility or real model quality.",
       "Historical continuation measurements belong to their original pass.",
       "Separate Studio composition gates and root metadata remain unchanged; no exact-comp or whole-product approval."
-    ]
+    ],
+    "frameExtractionR22": {
+      "task": 1190,
+      "mode": "Operate",
+      "scope": "Local frame extraction extension R20–R22 within the inherited graph editor.",
+      "nodeLibrary": "Current:28 shortcuts over16 native types; earlier R18/R19 counts retain their historical scope.",
+      "geometry": {
+        "nodeWidth": "340px in graph coordinates",
+        "sourceMonitor": "width:100%; max-height:190px; object-fit:contain; background:var(--monitor-black,#08090a); border-radius:6px",
+        "picker": "display:grid; gap:10px",
+        "mobile": "Existing Focus retains readable width and both port edges; lower image output continues through vertical panning.",
+        "tokenStatus": "Local surface geometry; no new global tokens."
+      },
+      "behavior": {
+        "entry": "Extract frame in Transform, native frame node with at_s default0.",
+        "ports": "Many video inputs on clip; image output on out.",
+        "source": "Native source player previews the first resolved connected clip; a missing clip shows a connection instruction.",
+        "time": "Labelled seconds input, min0 and step any; source seeks to valid edited time on change/metadata. Use playhead time pauses and retains numeric precision; ended playback selects the adjacent double below duration.",
+        "action": "Extract remains in the ordinary node action row; hint explains one image per clip at the same second without a model.",
+        "output": "Image result follows picker in the same card and can feed references or a video's start."
+      },
+      "evidence": {
+        "directory": "D:/LocalAI/research-inbox/prospero-quality1190",
+        "openedCaptures": [
+          {
+            "file": "r21-frame-desktop.png",
+            "size": "1280x720",
+            "state": "Light theme; Done frame node at1.2 seconds; typed connections and lower image result."
+          },
+          {
+            "file": "r21-frame-desktop-dark.png",
+            "size": "1280x720",
+            "state": "Same completed node in inherited dark theme."
+          },
+          {
+            "file": "r21-frame-mobile.png",
+            "size": "390x844",
+            "state": "Dark theme; both edges/ports, source and time controls visible; lower output continues below viewport."
+          }
+        ],
+        "sourcesInspected": [
+          "frontend/src/views/Spaces.tsx",
+          "frontend/src/nodeTools.ts",
+          "frontend/src/frameTime.ts",
+          "frontend/src/studio.css",
+          "docs/video-workspace.md"
+        ],
+        "backend": "Demo backend explicitly visible; displayed source/output use a real task1190 take without artistic approval.",
+        "review": "r22-finish-review.txt:ship for scoped Operate extension, no material visual fix; historical Studio gates remain open.",
+        "detector": "r22-detector.json:[]",
+        "documenterVerification": "Source inspection and all three supplied captures opened; no own tests, MCP or live app operation."
+      },
+      "limits": [
+        "Historical1167/R18/R19 evidence keeps its original scope and attribution.",
+        "Static captures do not certify extraction accuracy, all dynamic states, keyboard focus or comprehensive accessibility.",
+        "Mobile lower output requires the intended vertical pan.",
+        "No shipping raster assets, artistic approval, exact-comp approval, root gate closure or whole-product approval; task1190 remains artistically open."
+      ]
+    }
   },
   "components": [],
   "narrative": {
