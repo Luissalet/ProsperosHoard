@@ -489,9 +489,10 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
                 if motion_engine == "ltx23_control":
                     motion_params = {"length": int(round(seconds * 24 / 8)) * 8 + 1,
                                      "control_strength": motion_params.get("pose_strength", 1)}
+                    body["prompt"] = prompt[:4000]
                     if data.get("motion_prompt"):
-                        action = str(data["motion_prompt"])[:3900]
-                        appearance = body["prompt"][:4000 - len(action) - 2]
+                        action = str(data["motion_prompt"])[:4000]
+                        appearance = prompt[:max(0, 4000 - len(action) - 2)]
                         body["prompt"] = f"{appearance}. {action}" if appearance else action
                 body.update({"template": "ltx23_control" if motion_engine == "ltx23_control" else "auto_clip", "driving_asset_id": motion,
                              "driving_start_s": max(0.0, float(data.get("motion_start_s") or 0)),

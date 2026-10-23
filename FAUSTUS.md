@@ -28,6 +28,10 @@ MCP `studio_generate_image` exposes the same `driving_asset_id`,
 in the resulting recipe. LTX weights use the LTX-2 Community License.
 Image-only dimensions must be multiples of32; ref0.5 structure control requires
 multiples of64 (896x512 default). Invalid sizes/frame counts fail before rendering.
+The image-only graph records its effective eight-step `manual_sigmas` schedule
+and denoise1; incompatible sampling overrides return an explicit explanation.
+Control maps its denoise setting to the sampler. Managed local servers reserve
+their physical GPU; cold starts use the granted card, including pool workers.
 
 Imported UI workflows preserve numeric union widgets such as `FLOAT,INT`,
 declared input order and named widget values. The node-schema cache keeps

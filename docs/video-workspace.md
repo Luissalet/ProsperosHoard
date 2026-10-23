@@ -47,6 +47,12 @@ duration to8*n+1frames at24fps, and records both media IDs. MCP
 `studio_generate_image` also accepts `driving_asset_id`, `driving_start_s` and
 the template's declared `template_params`. LTX's image-only workflow uses a
 fixed eight-sigma schedule; the control workflow exposes its native sampler.
+The recipe records the effective `8/manual_sigmas/denoise1` image-only settings;
+incompatible overrides are explained before rendering. Control accepts denoise.
+Appearance and guide action are combined within the API's4000-character budget
+without discarding either field when both fit. GPU reservations follow the
+managed local server's physical card; cold starts use the granted card. A remote
+or unowned server's physical card remains unknown when the launcher cannot identify it.
 Image-only dimensions are multiples of32; structure control needs multiples
 of64 (896x512 by default), because its guide uses half-sized latent dimensions.
 `studio_video_from_plan(autopilot=false)` opts into review; its default continues.

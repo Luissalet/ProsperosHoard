@@ -65,6 +65,21 @@ def test_ltx_control_preserves_the_whole_action_with_a_long_appearance(monkeypat
         assert prompt == appearance + ". " + action
 
 
+@pytest.mark.parametrize("appearance_length,action_length", [(20, 3950), (3950, 20), (0, 4000), (3950, 3950)])
+def test_ltx_control_budgets_full_fields_only_after_combining_them(monkeypatch, appearance_length, action_length):
+    monkeypatch.setattr(spaces, "inputs_of", lambda *args: {
+        "start": [("image", "reference")], "motion": [("video", "guide")],
+    })
+    appearance, action = "A" * appearance_length, "M" * (action_length - 4) + "TURN"
+    graph = {"nodes": [{"id": "clip", "type": "video", "data": {
+        "motion_engine": "ltx23_control", "prompt": appearance, "motion_prompt": action,
+    }}], "edges": []}
+    prompt = spaces.plan_node(None, graph, {}, "clip")[0]["body"]["prompt"]
+    assert len(prompt) <= 4000 and prompt.endswith(action)
+    if appearance_length and appearance_length + action_length + 2 <= 4000:
+        assert prompt == appearance + ". " + action
+
+
 @pytest.mark.parametrize("template", ["ltx23_i2v", "ltx23_control"])
 def test_ltx_checkpoint_override_reaches_all_three_loaders(template):
     from prosperos_hoard import comfy_driver

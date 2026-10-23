@@ -39,6 +39,77 @@ def _params(seed):
             "seed": seed, "count": 1, "template": "sdxl_txt2img"}
 
 
+def test_worker_lease_targets_the_owned_server_card_and_does_not_guess_remote_cards(data_dir, monkeypatch):
+    backend = _pool_backend(data_dir, 8188, ["http://127.0.0.1:8190"])
+    monkeypatch.setattr(backend.launcher, "get", lambda sid: sid)
+    monkeypatch.setattr(backend.launcher, "status", lambda sid: {
+        "state": "running", "gpu": 1 if sid == "comfyui@8188" else 3,
+    })
+    assert backend.comfy_gpu() == 1
+    backend.bind_comfy("http://127.0.0.1:8190")
+    assert backend.comfy_gpu() == 3
+    backend.bind_comfy("http://example.invalid:8190")
+    assert backend.comfy_gpu() is None
+    backend.close()
+
+
+def test_unowned_running_server_gpu_stays_unknown_and_only_a_stopped_main_uses_config(data_dir, monkeypatch):
+    backend = _pool_backend(data_dir, 8188, ["http://127.0.0.1:8190"])
+    monkeypatch.setattr(backend.launcher, "get", lambda sid: sid)
+    monkeypatch.setattr(backend.launcher, "config", lambda: {"comfyui": {"gpu": "2"}})
+    state = {"state": "running", "gpu": None}
+    monkeypatch.setattr(backend.launcher, "status", lambda sid: state)
+    assert backend.comfy_gpu() is None
+    state["state"] = "down"
+    assert backend.comfy_gpu() == 2
+    backend.bind_comfy("http://127.0.0.1:8190")
+    assert backend.comfy_gpu() is None
+    backend.close()
+
+
+def test_cold_server_starts_on_the_card_granted_by_the_lease(data_dir, monkeypatch):
+    backend = _pool_backend(data_dir, 8188, [])
+    calls = []
+    monkeypatch.setattr(backend.launcher, "start", lambda sid, **kwargs:
+        calls.append((sid, kwargs)) or {"ok": True, "ready": True})
+    monkeypatch.setattr(backend, "_after_service_change", lambda: None)
+    backend.bind_lease_gpu(3)
+    assert backend.ensure_comfy(timeout_s=12)
+    assert calls == [("comfyui@8188", {"gpu": 3, "wait_s": 12})]
+    backend.bind_lease_gpu(None)
+    backend.close()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_native_queue_passes_the_server_card_to_the_lease_and_clears_binding(client, monkeypatch, fails):
+    from prosperos_hoard import gpu_lease
+    _, app, _ = client
+    app.state.queue.stop()
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    monkeypatch.setattr(app.state.backend, "comfy_gpu", lambda: 3)
+    calls, releases = [], []
+    class FakeLease:
+        gpu = 3
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            releases.append(True)
+    def fake_lease(**kwargs):
+        calls.append(kwargs)
+        return FakeLease()
+    monkeypatch.setattr(gpu_lease, "default_lease", fake_lease)
+    job = {"id": "physical-card-test", "lane": "gpu", "type": "generate_image", "params": {"template": "ltx23_i2v"}}
+    try:
+        with app.state.queue._guard(job):
+            assert calls[0]["gpu"] == 3 and calls[0]["vram_mb"] == 10000
+            assert app.state.backend._bound.lease_gpu == 3
+            if fails:
+                raise ValueError("test render failed")
+    except ValueError:
+        assert fails
+    assert releases == [True] and app.state.backend._bound.lease_gpu is None
+
+
 def test_two_servers_render_two_jobs_at_once(store, project, data_dir, fake_comfy, second_comfy):
     main, main_port = fake_comfy
     extra, extra_port = second_comfy

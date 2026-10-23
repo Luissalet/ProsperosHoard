@@ -337,6 +337,23 @@ class Backend:
         self._bound.url = url.rstrip("/") if url else None
         self._bound.worker = True
 
+    def comfy_gpu(self) -> Optional[int]:
+        """Physical card of this worker's local server, when the launcher knows it."""
+        target = getattr(self._bound, "url", None)
+        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        if port is None:
+            return None
+        state = self.launcher.status(self.launcher.get(f"comfyui@{port}"))
+        gpu = state.get("gpu")
+        if gpu is None and not target and state.get("state") in ("down", "unavailable"):
+            gpu = (self.launcher.config().get("comfyui") or {}).get("gpu")
+        if not isinstance(gpu, bool) and str(gpu).isdigit():
+            return int(gpu)
+        return None
+
+    def bind_lease_gpu(self, gpu: Optional[int]) -> None:
+        self._bound.lease_gpu = gpu
+
     def _pool_client(self, url: str):
         # A client's connections belong to the event loop it was created on.
         # Saving the backend settings rebuilds the Link (and its loop), so a
@@ -914,7 +931,7 @@ class Backend:
         if port is None:
             return False
         with self._autostart_lock:
-            res = self.launcher.start(f"comfyui@{port}", wait_s=timeout_s)
+            res = self.launcher.start(f"comfyui@{port}", gpu=getattr(self._bound, "lease_gpu", None), wait_s=timeout_s)
         ok = bool(res.get("ok") and (res.get("ready") or res.get("state") == "running"))
         if ok:
             self._after_service_change()
