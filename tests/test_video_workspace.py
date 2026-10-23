@@ -370,7 +370,7 @@ def test_optional_ltx_refinement_plans_the_actual_two_stage_template(monkeypatch
     assert body["reference_asset_id"]=="ref"
 
 
-def test_ltx_refinement_reuses_caller_seed_and_records_the_extra_stage(store,monkeypatch):
+def test_ltx_refinement_reuses_caller_seed_for_both_stages(store,monkeypatch):
     from prosperos_hoard import comfy_driver,engine
     captured=[]
     monkeypatch.setattr(engine,"run_template",lambda *a,**k:captured.append(k) or {})
@@ -383,7 +383,39 @@ def test_ltx_refinement_reuses_caller_seed_and_records_the_extra_stage(store,mon
     assert applied["up_anchor"]["inputs"]["strength"]==1
     assert applied["up_sigmas"]["inputs"]["sigmas"]=="0.85, 0.7250, 0.4219, 0.0"
     assert applied["320:315"]["inputs"]["samples"]==["up_crop",2]
-    assert captured[0]["extra_recipe"]["video_refinement"]=={"scale":2,"steps":3,"cfg":1,"sigmas":[0.85,0.725,0.4219,0],"sampler":"euler","seed":917}
+
+
+@pytest.mark.parametrize("initial_seed,count,expected_seeds", [(None,1,[123456]),(917,2,[917,918])])
+def test_ltx_refinement_recipe_matches_each_rendered_seed(store,monkeypatch,initial_seed,count,expected_seeds):
+    import copy
+    from prosperos_hoard import comfy_driver,engine
+    project=store.create_project("Refinement recipe")['id']
+    path=store.path_for_asset_file("a_refine_ref",".png")
+    Image.new("RGB",(832,480),"navy").save(path)
+    ref=store.create_asset(project_id=project,kind="image",file_path=path.relative_to(store.data_dir).as_posix(),width=832,height=480)
+    actual,recipes=[],[]
+    def render(_backend,graph,*args,**kwargs):
+        actual.append(graph["320:277"]["inputs"]["noise_seed"])
+        return [{"filename":"fixture.mp4"}]
+    def importer(_store,_project,_data,_kind,recipe,values,_name):
+        recipes.append(copy.deepcopy(recipe))
+        return {"id":f"fixture-{len(recipes)}"}
+    monkeypatch.setattr(engine,"check_vram_or_wait",lambda *a:None)
+    monkeypatch.setattr(engine,"_object_info",lambda *a,**k:{})
+    monkeypatch.setattr(comfy_driver,"validate_against_object_info",lambda spec,values,*a:values)
+    monkeypatch.setattr(engine,"_run_comfy_workflow",render)
+    monkeypatch.setattr(engine,"_download_output",lambda *a:b"fixture")
+    monkeypatch.setattr(engine,"_import_comfy_output",importer)
+    monkeypatch.setattr(engine,"free_after",lambda *a:None)
+    monkeypatch.setattr(engine,"random_seed",lambda:123456)
+    engine.generate_image(store,None,{"id":"fixture-job","project_id":project,"params":{
+        "template":"ltx23_i2v_hq","positive_prompt":"Wave","reference_asset_id":ref['id'],
+        "count":count,"seed":initial_seed}},lambda *a:None)
+    assert actual==expected_seeds
+    assert [r["params"]["seed"] for r in recipes]==expected_seeds
+    assert [r["video_refinement"]["seed"] for r in recipes]==expected_seeds
+    assert all(r["video_refinement"]=={"scale":2,"steps":3,"cfg":1,"sigmas":[0.85,0.725,0.4219,0],"sampler":"euler","seed":s}
+               for r,s in zip(recipes,expected_seeds))
 
 
 def test_optional_refinement_checks_its_upscaler_without_hiding_base_model(backend_with_comfy):
