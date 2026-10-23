@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { NODE_TOOLS, searchNodeTools } from '../src/nodeTools.ts';
+import { NODE_TOOLS, acceptsToolInput, searchNodeTools } from '../src/nodeTools.ts';
 
 const choices = NODE_TOOLS.map(tool => ({kind: tool.kind, tool, data: tool.data}));
 
@@ -17,4 +17,15 @@ test('search accepts accents, both languages and multiple words regardless of or
   assert.deepEqual(searchNodeTools(choices, '   ', 'assemble').map(c => c.tool.id), ['composite', 'combine']);
   assert.deepEqual(searchNodeTools(choices, 'lighting', 'sources'), []);
   assert.deepEqual(searchNodeTools(choices, 'no-such-tool'), []);
+});
+
+test('a wired starter accepts its own guide and shared prompt but never a conflicting guide', () => {
+  const tool = id => NODE_TOOLS.find(t => t.id === id);
+  for (const [id, guide] of [['motion','motion'],['sing','audio'],['first-last','end']]) {
+    assert.equal(acceptsToolInput(tool(id),'start'),true);
+    assert.equal(acceptsToolInput(tool(id),'prompt'),true);
+    for (const port of ['motion','audio','end']) assert.equal(acceptsToolInput(tool(id),port),port === guide);
+  }
+  assert.equal(acceptsToolInput(tool('video'),'audio'),true);
+  assert.equal(acceptsToolInput(undefined,'image'),true);
 });

@@ -24,7 +24,7 @@ import { AssetPicker, ConfirmButton, Empty, timeAgo, useApp, useAsync } from "..
 import { useCinemaGuide, useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
 import { EditHistory, SaveQueue, freeNodePosition } from "../spaceEditing";
-import { NODE_TOOLS, TOOL_SECTIONS, searchNodeTools, type ToolChoice } from "../nodeTools";
+import { NODE_TOOLS, TOOL_SECTIONS, acceptsToolInput, searchNodeTools, type ToolChoice } from "../nodeTools";
 
 // ------------------------------------------------------------ the node model
 
@@ -883,7 +883,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
                 const source = ctx.nodes.find(n => n.id === e.source); return source?.data.data.title || (source ? t(TYPE_LABEL[source.data.kind]) : e.source);
               }).join(", ")}>
                 <Handle type="target" position={Position.Left} id={h} aria-label={`${words("Entrada", "Input")}: ${t(`spIn_${h}` as MessageKey)}`} style={{ background: PORT_COLOR[port] }} />
-                <span style={{ color: PORT_COLOR[port] }}>{t(`spIn_${h}` as MessageKey)}</span>
+                <span style={{ color: `var(--sp-port-label-color, ${PORT_COLOR[port]})` }}>{t(`spIn_${h}` as MessageKey)}</span>
                 {wired.has(h) ? <Check size={12} aria-label={words("Conectada", "Connected")} /> : !many && <span className="sp-one">1</span>}
               </div>
             ))}
@@ -891,7 +891,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
           <div className="sp-outs">
             {outs.map(([h, port]) => (
               <div key={h} className="sp-port out">
-                <span style={{ color: PORT_COLOR[port] }}>{t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}</span>
+                <span style={{ color: `var(--sp-port-label-color, ${PORT_COLOR[port]})` }}>{t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}</span>
                 <Handle type="source" position={Position.Right} id={h} aria-label={`${words("Salida", "Output")}: ${t(h === "last" ? "spOut_last" : `spOut_${port}` as MessageKey)}`} style={{ background: PORT_COLOR[port] }} />
               </div>
             ))}
@@ -1338,7 +1338,8 @@ function Editor({ spaceId, onBack }: { spaceId: string; onBack: () => void }) {
       const produced = outputPort(from.data.kind, from.data.data, menu.from.handle === "out" ? null : menu.from.handle);
       const out: ToolChoice[] = [];
       for (const choice of libraryChoices) {
-        const spec = (INPUTS[choice.kind] || []).find(([, port]) => port === produced || port === "any" || produced === "any");
+        const spec = (INPUTS[choice.kind] || []).find(([handle, port]) =>
+          (port === produced || port === "any" || produced === "any") && acceptsToolInput(choice.tool, handle));
         if (spec) out.push({ ...choice, handle: spec[0] });
       }
       return out;

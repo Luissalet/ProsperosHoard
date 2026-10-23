@@ -339,6 +339,7 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 .sp-node-purpose { margin: 0; padding: 0 12px 10px; color: var(--text-2); font-size: 12px; line-height: 1.4; }
 .sp-field-label { display: block; margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 600; }
 .sp-node .sp-ports { padding: 6px 0; background: var(--bg-2); }
+:root[data-theme="light"] .sp-node { --sp-port-label-color: var(--text-2); }
 .sp-clip-order { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .sp-clip-order li { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .sp-clip-number { color: var(--muted); font-variant-numeric: tabular-nums; }
