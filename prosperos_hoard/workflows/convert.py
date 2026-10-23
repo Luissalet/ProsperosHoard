@@ -121,8 +121,14 @@ def _links_from_subgraph(raw_links: list) -> dict[Any, dict[str, Any]]:
     return {entry["id"]: entry for entry in raw_links or []}
 
 
+def _is_scalar_type(type_: Any, allowed: set[str]) -> bool:
+    # ComfyUI MultiType joins alternatives with commas (e.g. FLOAT,INT).
+    # Tensor unions such as IMAGE,MASK remain sockets and consume no widget.
+    return isinstance(type_, str) and all(part.strip() in allowed for part in type_.split(","))
+
+
 def _is_widget_type(type_: Any) -> bool:
-    return isinstance(type_, list) or type_ in _WIDGET_SCALARS
+    return isinstance(type_, list) or _is_scalar_type(type_, _WIDGET_SCALARS)
 
 
 def _resolve(scope: _Scope, node_id: Any, slot: int) -> Optional[Resolved]:
@@ -237,14 +243,21 @@ def _entry(raw: Any) -> tuple[Any, dict]:
     return type_, cfg
 
 
-def _ordered_entries(spec: dict) -> list[tuple[str, Any]]:
-    return list((spec.get("required") or {}).items()) + list((spec.get("optional") or {}).items())
+def _ordered_entries(spec: dict, order: Optional[dict] = None) -> list[tuple[str, Any]]:
+    out = []
+    for section in ("required", "optional"):
+        fields = spec.get(section) or {}
+        names = (order or {}).get(section) or []
+        out.extend((name, fields[name]) for name in names if name in fields)
+        out.extend((name, value) for name, value in fields.items() if name not in names)
+    return out
 
 
 def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict) -> dict[str, Any]:
     spec = (object_info.get(class_type) or {}).get("input") or {}
     ui_inputs_by_name = {i["name"]: i for i in (node.get("inputs") or [])}
     widget_values = list(node.get("widgets_values") or [])
+    named_values = node.get("widgets_values_named") or {}
     cursor = {"i": 0}
     out: dict[str, Any] = {}
 
@@ -254,12 +267,15 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
             return None
         return _resolve(scope, link["origin_id"], link["origin_slot"])
 
-    def take() -> tuple[bool, Any]:
+    def take(name: str) -> tuple[bool, Any]:
+        consumed, value = False, None
         if cursor["i"] < len(widget_values):
             value = widget_values[cursor["i"]]
             cursor["i"] += 1
-            return True, value
-        return False, None
+            consumed = True
+        if isinstance(named_values, dict) and name in named_values:
+            return True, named_values[name]
+        return consumed, value
 
     def walk(entries: list[tuple[str, Any]], prefix: str) -> None:
         for short, raw in entries:
@@ -285,7 +301,7 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
                     if resolved is not None:
                         _assign(out, name, resolved)
                 continue
-            consumed, value = take()
+            consumed, value = take(name)
             if consumed and (short in SEED_NAMES or cfg.get("control_after_generate")) \
                     and cursor["i"] < len(widget_values) and isinstance(widget_values[cursor["i"]], str):
                 cursor["i"] += 1  # the UI-only control_after_generate widget ("fixed"/"randomize"...)
@@ -313,7 +329,7 @@ def _build_inputs(scope: _Scope, node: dict, class_type: str, object_info: dict)
                 if chosen is not None:
                     walk(_ordered_entries(chosen.get("inputs") or {}), f"{name}.")
 
-    walk(_ordered_entries(spec), "")
+    walk(_ordered_entries(spec, (object_info.get(class_type) or {}).get("input_order")), "")
     return out
 
 
@@ -470,7 +486,7 @@ def validate_values(api_workflow: dict[str, Any], object_info: dict[str, Any]) -
                                         f"{value!r}; download it, or choose one of: {shown}")
                     else:
                         problems.append(f"node {node_id} ({class_type}): '{name}' = {value!r} is not available (choices: {shown})")
-                elif type_ in ("INT", "FLOAT") and isinstance(value, (int, float)) and not isinstance(value, bool):
+                elif _is_scalar_type(type_, {"INT", "FLOAT"}) and isinstance(value, (int, float)) and not isinstance(value, bool):
                     if "min" in cfg and value < cfg["min"]:
                         problems.append(f"node {node_id} ({class_type}): '{name}' = {value} is below the minimum {cfg['min']}")
                     if "max" in cfg and value > cfg["max"]:

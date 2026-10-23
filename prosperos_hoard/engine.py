@@ -761,7 +761,9 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
                                     "Local services (or studio_service_start), or turn on autostart"]) from exc
     try:
         if info:
-            blob = json.dumps(info, sort_keys=True)
+            # Schema order determines positional widgets, including dynamic
+            # combo children that have no separate input_order metadata.
+            blob = json.dumps(info)
             digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
             path = object_info_cache_path(backend.data_dir)
             if _object_info_cache_hash.get(str(path)) != digest:

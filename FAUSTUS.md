@@ -16,6 +16,11 @@ and setting in `prompt`, plus native `pose_strength` and
 `reference_image_strength` (0–10, trained default 1). Do not assume stronger
 conditioning yields better results. Inspect actual takes and keep failed ones.
 
+Imported UI workflows preserve numeric union widgets such as `FLOAT,INT`,
+declared input order and named widget values. The node-schema cache keeps
+nested field order: an audio frame rate must not silently become a batch count,
+and cached resize controls must not exchange width and height.
+
 `studio_review_clip(asset_id, prompt?, reference_asset_ids?, check_supporting_cast?)` reviews a video
 without a production, through the same optional action available in its node.
 It reports technical checks and, if vision is available, a chronological sample
