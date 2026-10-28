@@ -13,7 +13,7 @@ def scoped(value, module, port):
 
 
 URL_FIELDS = frozenset({
-    'url', 'href', 'thumbnail', 'thumbnail_url', 'thumb_url', 'preview_url', 'proxy_url',
+    'url', 'href', 'thumbnail', 'thumbnail_url', 'thumb', 'thumb_url', 'preview_url', 'proxy_url',
     'waveform_url', 'download_url', 'file_url', 'project_url', 'native_url',
     'render_url', 'media_receive_url', 'image_url', 'audio_url', 'video_url',
     'events_url', 'stream_url', 'source_url', 'poster_url',

@@ -114,3 +114,21 @@ def test_package_json_scripts():
     assert pkg["scripts"]["build"] == "vite build"
     assert re.match(r"\d+\.\d+\.\d+", pkg["version"])
     assert Path(ROOT / "editing_frontend" / "vite.config.js").exists()
+
+
+@needs_ffmpeg
+def test_project_card_links_a_poster_only_once_it_exists(client, media_dir):
+    cache = client.svc.config.cache_dir
+    video = client.post("/api/media/import", json={"path": str(media_dir / "talk.mp4")}).json()["id"]
+    picture = client.post("/api/media/import", json={"path": str(media_dir / "pic.png")}).json()["id"]
+    cards = {m: client.post("/api/projects", json={"name": m, "media": [m]}).json()["id"] for m in (video, picture)}
+
+    def thumb(media):
+        return next(p for p in client.get("/api/projects").json()["projects"] if p["id"] == cards[media])["thumb"]
+
+    assert thumb(video) == f"/api/media/{video}/poster" and client.get(thumb(video)).status_code == 200
+    (cache / video / "poster.jpg").unlink()  # a video has none until its preparation job draws it
+    assert thumb(video) is None
+    assert client.get(f"/api/media/{video}").json()["urls"]["poster"] is None
+    (cache / picture / "poster.jpg").unlink(missing_ok=True)  # an image is its own poster
+    assert thumb(picture) == f"/api/media/{picture}/poster" and client.get(thumb(picture)).status_code == 200

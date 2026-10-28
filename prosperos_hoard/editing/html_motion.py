@@ -29,6 +29,9 @@ _ID = re.compile(r"^[0-9a-f]{32}$")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+_STARTUP_TIMEOUT_S = 30.0
+
+
 class HtmlFrameWorker:
     """An owned browser process: cancellation can interrupt even a stuck seek."""
     def __init__(self, manifest: dict, ctx=None):
@@ -62,14 +65,14 @@ class HtmlFrameWorker:
         try:
             self.process.stdin.write(json.dumps(self.manifest) + "\n")
             self.process.stdin.flush()
-            self._receive()
+            self._receive(max(self.timeout, _STARTUP_TIMEOUT_S))  # browser launch and page load are not a frame
             return self
         except BaseException:
             self.__exit__(None, None, None)
             raise
 
-    def _receive(self):
-        deadline = time.monotonic() + self.timeout
+    def _receive(self, timeout: float | None = None):
+        deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while True:
             if self.ctx:
                 self.ctx.check()

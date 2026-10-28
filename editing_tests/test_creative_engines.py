@@ -16,9 +16,10 @@ from prosperos_hoard.editing.creative_engines import CreativeEngineError, Creati
 
 
 def test_incorporated_discovery_ignores_external_configuration(tmp_path, monkeypatch):
-    import prosperos_hoard.editing.creative_engines as module
+    import prosperos_hoard.resources as resources
     product=tmp_path/"product"
-    monkeypatch.setattr(module,"__file__",str(product/"prosperos_hoard/editing/creative_engines.py"))
+    # Engines are resolved through prosperos_hoard.resources, so the fixture product tree is injected there.
+    monkeypatch.setattr(resources,"PACKAGE",product/"prosperos_hoard")
     binary=product/"native/editing/bin"/("lumiere-compositor.exe" if os.name=="nt" else "lumiere-compositor")
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"owned engine fixture")

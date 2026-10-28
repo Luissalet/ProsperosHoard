@@ -98,7 +98,7 @@ def summary(svc: "Services", row) -> dict[str, Any]:
 def _thumb(svc: "Services", p: Project) -> Optional[str]:
     main = p.main_track()
     for c in (main.clips if main else []):
-        if c.media and c.type == "media":
+        if c.media and c.type == "media" and media_store.has_poster(svc, c.media):
             return f"/api/media/{c.media}/poster"
     return None
 

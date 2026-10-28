@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from .errors import FfmpegFailed, FfmpegMissing, LumiereError
+from . import proctree
 from .hoard_link import proc as hlproc
 from .hoard_link.errors import Unavailable
 from .hoard_link.media import ffmpeg as shared
@@ -57,7 +58,7 @@ class RunHandle:
         self.event.set()
         proc = self.proc
         if proc is not None and proc.poll() is None:
-            hlproc.kill_tree(proc, grace_s=1.0)
+            proctree.kill_tree(proc, grace_s=1.0)
 
 
 def _event(handle: Optional[RunHandle]) -> Optional[threading.Event]:

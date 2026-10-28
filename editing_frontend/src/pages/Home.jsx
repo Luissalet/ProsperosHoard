@@ -160,7 +160,7 @@ function MediaCard({ m, onChanged }) {
 }
 
 export default function Home() {
-  const { t, fail } = useApp();
+  const { t, fail, jobs } = useApp();
   const [projects, setProjects] = useState(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -175,7 +175,8 @@ export default function Home() {
   const load = useCallback(async () => {
     try { setProjects((await api.projects()).projects.filter((p) => !p.is_template)); } catch (e) { fail(e); }
   }, [fail]);
-  useEffect(() => { load(); }, [load]);
+  // a finished preparation job draws the poster a project card shows, so the cards are read again then
+  useEffect(() => { load(); }, [load, jobs.doneTick]);
   useCopilotRefresh(load);
 
   return (
