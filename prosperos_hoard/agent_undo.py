@@ -402,7 +402,7 @@ def undo_cast(ctx: Any, record: dict, dry_run: bool = False) -> dict:
 
 def capture_style_card(ctx: Any, args: dict) -> dict:
     action = _s(args, "action") or "list"
-    if action in ("list", "get"):
+    if action in ("list", "get", "search", "import"):  # an import adds many cards from a folder: it is not one undoable edit
         return {"noop": True}
     if action == "create":
         return {"action": "create"}
@@ -414,7 +414,7 @@ def capture_style_card(ctx: Any, args: dict) -> dict:
 
 
 def track_style_card(args: dict, result: dict, ctx: Any = None) -> dict:
-    if (_s(args, "action") or "list") in ("list", "get"):
+    if (_s(args, "action") or "list") in ("list", "get", "search", "import"):
         return {"objects": [], "etag": ""}
     card_id = str(result.get("id") or result.get("deleted") or "")
     return {"objects": [f"style:{card_id}"], "ids": [f"style_id={card_id}"], "etag": _row_etag(_row(ctx.store, "style_presets", card_id))}

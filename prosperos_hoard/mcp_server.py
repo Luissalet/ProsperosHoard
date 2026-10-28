@@ -1388,26 +1388,41 @@ def studio_style_cards(action: str = "list", id: Optional[str] = None, name: Opt
                        motion: Optional[dict[str, Any]] = None, signature_transition: Optional[str] = None,
                        quality: Optional[int] = None, pitfalls: Optional[str] = None, typography: Optional[dict[str, Any]] = None,
                        prompt_prefix: Optional[str] = None, prompt_suffix: Optional[str] = None, negative: Optional[str] = None,
-                       notes: Optional[str] = None) -> dict[str, Any]:
-    """List, read and make style cards: image prompt plus how titles are drawn and moved / fichas de estilo.
+                       notes: Optional[str] = None, query: Optional[str] = None, source: Optional[str] = None, category: Optional[str] = None,
+                       library: Optional[bool] = None, limit: Optional[int] = None, section: Optional[str] = None,
+                       changes: Optional[dict[str, str]] = None, accept_character_change: Optional[bool] = None,
+                       allow_essence_change: Optional[bool] = None, path: Optional[str] = None, kind: Optional[str] = None) -> dict[str, Any]:
+    """Style cards: list, search, read, make; 74 written film styles. Fichas de estilo.
 
-    action "list" (id, name, palette, signature transition, quality stars, technique), "get" (id or name: every field),
-    "create" (name; from_card copies a card, a built-in one is read-only so copy it first), "update", "delete" (custom
-    cards only). A card holds technique (how it is drawn, in words), palette (#hex: background, ink, accent, accent 2,
-    muted), motion {easing, bezier [x1,y1,x2,y2], stagger_s, stepped_fps, pop}, signature_transition (fade, slide_up,
-    wipe, scale_pop, glitch, flicker, mask_reveal), quality 0-3 (how well it turns out), pitfalls (what to avoid), typography
-    {fonts, weight, case, tracking, align, background, fx} and the usual prompt_prefix / prompt_suffix / negative for
-    generated stills. Built in: "Neón nocturno", "Papel recortado", "VHS terror", "Tipografía suiza". Use one in a
-    graphic shot (studio_graphic_shot style=...) or for the whole production (spec.graphics.style).
+    action "list" (id, name, palette, signature transition, quality stars, technique; library=true adds the imported direction
+    cards, source="lemo-opuscar"|"mg-styles-15" one library), "search" (query words, category, source: the direction cards by what
+    they are for, e.g. "evidence archive", "kinetic type", "paper"), "get" (id, name or source/slug: every field; section="essence"
+    gives one section of a direction card), "create" (name; from_card copies a card, a built-in one is read-only so copy it first),
+    "update", "import" (path = a local checkout, kind = the library), "delete" (custom cards only).
 
-    Keywords: style card, style preset, palette, typography, motion style, signature transition, look, ficha de estilo,
-    estilo, paleta, tipografia, estilo visual, transicion
+    A direction card has fixed sections (essence and what it is not, materials, colour, type, motion, camera, sound, native moves,
+    pitfalls, engine, variation space; or output, technical route, creative seed, signature features) and a partition of them into
+    what is safe to change in a variant, what changes the character and the essence. create with from_card and changes
+    {section: text} makes a variant: a change to the essence is refused (that is another style) and one to the materials or camera
+    needs accept_character_change=true. Every card keeps its licence and attribution (MIT; the films are not included).
+
+    A card also holds technique (how it is drawn, in words), palette (#hex: background, ink, accent, accent 2, muted), motion
+    {easing, bezier [x1,y1,x2,y2], stagger_s, stepped_fps, pop}, signature_transition (fade, slide_up, wipe, scale_pop, glitch,
+    flicker, mask_reveal), quality 0-3, pitfalls, typography {fonts, weight, case, tracking, align, background, fx} and the usual
+    prompt_prefix / prompt_suffix / negative for generated stills. Built in: "Neon nocturno", "Papel recortado", "VHS terror",
+    "Tipografia suiza". Use one in a graphic shot (studio_graphic_shot style=...) or for the whole production (spec.graphics.style).
+    The animations of Montaje start from the same direction cards (motion_styles, motion_from_style).
+
+    Keywords: style card, style preset, direction card, film style, palette, typography, motion style, signature transition, look,
+    variant, ficha de estilo, estilo, paleta, tipografia, estilo visual, transicion, variante
     """
     return _call("POST", "/api/agent/studio_style_cards", json={
         "action": action, "id": id, "name": name, "from_card": from_card, "project": project, "technique": technique,
         "palette": palette, "motion": motion, "signature_transition": signature_transition, "quality": quality,
         "pitfalls": pitfalls, "typography": typography, "prompt_prefix": prompt_prefix, "prompt_suffix": prompt_suffix,
-        "negative": negative, "notes": notes})
+        "negative": negative, "notes": notes, "query": query, "source": source, "category": category, "library": library,
+        "limit": limit, "section": section, "changes": changes, "accept_character_change": accept_character_change,
+        "allow_essence_change": allow_essence_change, "path": path, "kind": kind})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

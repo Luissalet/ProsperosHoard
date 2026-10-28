@@ -15,6 +15,7 @@ from pathlib import Path
 import threading
 from typing import Any, Iterable, Optional
 
+from . import style_cards
 from .db import connect, dumps, loads, row_to_dict
 from .ids import new_id
 from .util import now_iso
@@ -189,6 +190,7 @@ class Store:
         for d in (self.assets_dir, self.thumbs_dir, self.projects_dir):
             d.mkdir(parents=True, exist_ok=True)
         self._seed_builtin_presets()
+        self._seed_library_cards()
         self._space_lock = threading.Lock()  # runs patch a space's state from worker threads
 
     @property
@@ -227,6 +229,41 @@ class Store:
                     preset["negative"], dumps(preset["defaults"]), preset.get("notes", ""), now_iso(), *card,
                 ),
             )
+        self.conn.commit()
+
+    def _seed_library_cards(self) -> None:
+        """Put the packaged direction cards (two open style libraries) in the table, read-only, once per library version.
+        They carry their licence and attribution; custom cards are never touched."""
+        library = style_cards.load_library()
+        if not library["cards"]:
+            return
+        have = self.conn.execute("SELECT value FROM schema_meta WHERE key='style_library'").fetchone()
+        if have and have[0] == library["version"]:
+            return
+        stamp = now_iso()
+        keep = set()
+        for card in library["cards"]:
+            row_id = "sp_lib_" + re.sub(r"[^a-z0-9]+", "_", style_cards.card_id(card).lower()).strip("_")
+            keep.add(row_id)
+            meta = {k: v for k, v in {**(card.get("meta") or {}), "line": card.get("line"), "uses": card.get("uses"),
+                                      "summary": card.get("summary"), "name_alt": card.get("name_alt"), "lang": card.get("lang"),
+                                      "extra": card.get("extra"), "source_commit": card.get("source_commit")}.items() if v not in (None, "", [], {})}
+            values = (card["name"], card.get("technique") or None, dumps(card.get("palette") or []), card.get("pitfalls") or None,
+                      card["slug"], card["source"], card.get("category"), card["license"], card["attribution"], card.get("source_url"),
+                      dumps(card["sections"]), dumps(card.get("variants") or {}), dumps(meta))
+            if self.conn.execute("SELECT 1 FROM style_presets WHERE id=?", (row_id,)).fetchone():
+                self.conn.execute("UPDATE style_presets SET name=?, technique=?, palette_json=?, pitfalls=?, slug=?, source=?, category=?, license=?, "
+                                  "attribution=?, source_url=?, sections_json=?, variants_json=?, meta_json=? WHERE id=?", (*values, row_id))
+            else:
+                self.conn.execute(
+                    """INSERT INTO style_presets (name, technique, palette_json, pitfalls, slug, source, category, license, attribution, source_url,
+                       sections_json, variants_json, meta_json, id, project_id, prompt_prefix, prompt_suffix, negative, defaults_json, notes,
+                       is_builtin, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'','','','{}','',1,?)""", (*values, row_id, stamp))
+        # a card the library no longer ships goes away; a variant made from it keeps working (it carries its own sections)
+        for row in self.conn.execute("SELECT id FROM style_presets WHERE source IS NOT NULL AND source != '' AND is_builtin=1").fetchall():
+            if row["id"] not in keep:
+                self.conn.execute("DELETE FROM style_presets WHERE id=?", (row["id"],))
+        self.conn.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('style_library', ?)", (library["version"],))
         self.conn.commit()
 
     def path_for_asset_file(self, asset_id: str, ext: str) -> Path:
@@ -914,15 +951,54 @@ class Store:
         d["motion"] = loads(d.pop("motion_json", None), {})
         d["typography"] = loads(d.pop("typography_json", None), {})
         d["quality"] = int(d.get("quality") or 0)
+        d["sections"] = loads(d.pop("sections_json", None), {})
+        d["variants"] = loads(d.pop("variants_json", None), {})
+        d["meta"] = loads(d.pop("meta_json", None), {})
         return d
 
-    def list_style_presets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+    def list_style_presets(self, project_id: str | None = None, *, library: str | bool | None = None) -> list[dict[str, Any]]:
+        """The studio's cards (built-in, custom and variants). ``library`` adds the imported direction cards: True for all of
+        them, a source name ("lemo-opuscar", "mg-styles-15") for one library; they are left out by default so the pickers
+        that existed before keep their short list."""
         rows = self.conn.execute(
             "SELECT * FROM style_presets WHERE is_builtin=1 OR project_id=? OR (project_id IS NULL AND is_builtin=0) "
             "ORDER BY is_builtin DESC, created_at ASC",
             (project_id,),
         ).fetchall()
-        return [self._preset_view(r) for r in rows]
+        cards = [self._preset_view(r) for r in rows]
+        if library is True:
+            return cards
+        if isinstance(library, str) and library:
+            return [c for c in cards if not c.get("source") or c.get("source") == library]
+        return [c for c in cards if not c.get("source")]
+
+    def search_style_cards(self, query: str = "", *, source: str | None = None, category: str | None = None, project_id: str | None = None,
+                           limit: int = 100) -> list[dict[str, Any]]:
+        """Cards of every kind that mention each word of ``query`` (name, category, line, uses, sections), best first."""
+        words = [w for w in re.split(r"\s+", (query or "").lower().strip()) if w]
+        found: list[tuple[int, dict[str, Any]]] = []
+        for card in self.list_style_presets(project_id, library=True):
+            if source and card.get("source") != source:
+                continue
+            if category and category.lower() not in (card.get("category") or "").lower():
+                continue
+            meta = card.get("meta") or {}
+            head = " ".join([card["name"], meta.get("name_alt", ""), card.get("category") or "", meta.get("line", ""), " ".join(meta.get("uses", [])),
+                             card.get("slug") or "", card.get("technique") or ""]).lower()
+            body = " ".join(s.get("text", "") for s in card["sections"].values()).lower() if words else ""
+            score, ok = 0, True
+            for w in words:
+                if w in head:
+                    score += 10 if w in card["name"].lower() else 4
+                elif w in body:
+                    score += 1
+                else:
+                    ok = False
+                    break
+            if ok:
+                found.append((score, card))
+        found.sort(key=lambda item: (-item[0], item[1].get("source") or "", item[1]["name"].lower()))
+        return [c for _, c in found[:limit]]
 
     def get_style_preset(self, preset_id: str) -> dict[str, Any]:
         row = self.conn.execute("SELECT * FROM style_presets WHERE id=?", (preset_id,)).fetchone()
@@ -946,11 +1022,14 @@ class Store:
         preset_id = new_id("sp")
         self.conn.execute(
             """INSERT INTO style_presets (id, project_id, name, prompt_prefix, prompt_suffix, negative, defaults_json, notes,
-               is_builtin, created_at, technique, palette_json, motion_json, signature_transition, quality, pitfalls, typography_json)
-               VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)""",
+               is_builtin, created_at, technique, palette_json, motion_json, signature_transition, quality, pitfalls, typography_json,
+               slug, source, category, license, attribution, source_url, sections_json, variants_json, meta_json, based_on)
+               VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (preset_id, project_id, name, prompt_prefix, prompt_suffix, negative, dumps(defaults or {}), notes, now_iso(),
              card.get("technique"), dumps(card.get("palette") or []), dumps(card.get("motion") or {}), card.get("signature_transition"),
-             int(card.get("quality") or 0), card.get("pitfalls"), dumps(card.get("typography") or {})),
+             int(card.get("quality") or 0), card.get("pitfalls"), dumps(card.get("typography") or {}),
+             card.get("slug"), card.get("source"), card.get("category"), card.get("license"), card.get("attribution"), card.get("source_url"),
+             dumps(card.get("sections") or {}), dumps(card.get("variants") or {}), dumps(card.get("meta") or {}), card.get("based_on")),
         )
         self.conn.commit()
         return self.get_style_preset(preset_id)
@@ -961,8 +1040,10 @@ class Store:
         if current["is_builtin"]:
             raise ValueError("a built-in style card cannot be edited: create your own from it (studio_style_cards action 'create' with from_card)")
         columns = {"name": "name", "prompt_prefix": "prompt_prefix", "prompt_suffix": "prompt_suffix", "negative": "negative", "notes": "notes",
-                   "technique": "technique", "signature_transition": "signature_transition", "quality": "quality", "pitfalls": "pitfalls"}
-        json_columns = {"palette": "palette_json", "motion": "motion_json", "typography": "typography_json", "defaults": "defaults_json"}
+                   "technique": "technique", "signature_transition": "signature_transition", "quality": "quality", "pitfalls": "pitfalls",
+                   "category": "category", "based_on": "based_on"}
+        json_columns = {"palette": "palette_json", "motion": "motion_json", "typography": "typography_json", "defaults": "defaults_json",
+                        "sections": "sections_json", "variants": "variants_json", "meta": "meta_json"}
         sets, values = [], []
         for key, value in fields.items():
             if key in columns:
@@ -981,6 +1062,42 @@ class Store:
             self.conn.execute(f"UPDATE style_presets SET {', '.join(sets)} WHERE id=?", (*values, preset_id))
             self.conn.commit()
         return self.get_style_preset(preset_id)
+
+    def import_direction_cards(self, cards: list[dict[str, Any]], *, project_id: str | None = None) -> dict[str, Any]:
+        """Add direction cards parsed from a local checkout of a style library (see style_cards.parse_*_folder). The packaged
+        library already holds its own copy of the same cards, so a card whose source and slug are packaged is skipped; others are
+        added as editable cards (or updated when imported before). Returns {added, updated, skipped: [slug]}."""
+        packaged = {style_cards.card_id(c) for c in style_cards.load_library()["cards"]}
+        added, updated, skipped = [], [], []
+        for card in cards:
+            if style_cards.card_id(card) in packaged:
+                skipped.append(card["slug"])
+                continue
+            meta = {k: v for k, v in {**(card.get("meta") or {}), "line": card.get("line"), "uses": card.get("uses"), "summary": card.get("summary"),
+                                      "name_alt": card.get("name_alt"), "lang": card.get("lang"), "extra": card.get("extra"),
+                                      "source_commit": card.get("source_commit")}.items() if v not in (None, "", [], {})}
+            existing = self.conn.execute("SELECT id FROM style_presets WHERE source=? AND slug=? AND is_builtin=0 AND project_id IS ?",
+                                         (card["source"], card["slug"], project_id)).fetchone()
+            if existing:
+                self.conn.execute("UPDATE style_presets SET name=?, technique=?, pitfalls=?, category=?, license=?, attribution=?, source_url=?, "
+                                  "sections_json=?, variants_json=?, meta_json=? WHERE id=?",
+                                  (card["name"], card.get("technique"), card.get("pitfalls"), card.get("category"), card["license"], card["attribution"],
+                                   card.get("source_url"), dumps(card["sections"]), dumps(card.get("variants") or {}), dumps(meta), existing["id"]))
+                updated.append(card["slug"])
+                continue
+            taken = self.conn.execute("SELECT 1 FROM style_presets WHERE lower(name)=lower(?) AND (is_builtin=1 OR project_id IS ?)",
+                                      (card["name"], project_id)).fetchone()
+            name = card["name"] if not taken else f"{card['name']} ({card['source']})"
+            self.conn.execute(
+                """INSERT INTO style_presets (id, project_id, name, prompt_prefix, prompt_suffix, negative, defaults_json, notes, is_builtin, created_at,
+                   technique, palette_json, pitfalls, slug, source, category, license, attribution, source_url, sections_json, variants_json, meta_json)
+                   VALUES (?,?,?,'','','','{}','',0,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (new_id("sp"), project_id, name[:80], now_iso(), card.get("technique"), dumps([]), card.get("pitfalls"), card["slug"], card["source"],
+                 card.get("category"), card["license"], card["attribution"], card.get("source_url"), dumps(card["sections"]),
+                 dumps(card.get("variants") or {}), dumps(meta)))
+            added.append(card["slug"])
+        self.conn.commit()
+        return {"added": added, "updated": updated, "skipped": skipped}
 
     def delete_style_preset(self, preset_id: str) -> None:
         current = self.get_style_preset(preset_id)

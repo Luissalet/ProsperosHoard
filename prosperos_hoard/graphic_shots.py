@@ -94,10 +94,15 @@ def style_card(store: Store, project_id: Optional[str], ref: Any) -> Optional[di
     if not ref:
         return None
     try:
-        cards = store.list_style_presets(project_id)
+        cards = store.list_style_presets(project_id, library=True)
     except Exception:  # noqa: BLE001 - cards are an extra: without them the other layers decide
         return None
-    return next((c for c in cards if c["id"].lower() == ref or c["name"].lower() == ref), None)
+    exact = next((c for c in cards if c["id"].lower() == ref or c["name"].lower() == ref
+                  or (c.get("source") and f"{c['source']}/{c.get('slug')}".lower() == ref)), None)
+    if exact:
+        return exact
+    # a bare slug names the packaged direction card (a variant keeps its base's slug but is found by name)
+    return next((c for c in cards if c.get("source") and c.get("is_builtin") and (c.get("slug") or "").lower() == ref), None)
 
 
 def lead_palette(state: dict[str, Any]) -> list[str]:
