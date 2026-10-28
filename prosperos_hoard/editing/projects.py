@@ -319,6 +319,14 @@ def edit(svc: "Services", project_id: str, ops: list[dict[str, Any]], *, label: 
         raise LumiereError("No operations.")
     if not isinstance(request_id, str) or len(request_id) > 100:
         raise LumiereError('request_id must be a string of at most 100 characters.')
+    for op in ops:  # a sound placed by its sync point needs the points: measure them now if the library has none yet
+        if isinstance(op, dict) and op.get("align") and isinstance(op.get("media"), str):
+            from . import audio_sync
+
+            try:
+                audio_sync.ensure(svc, op["media"])
+            except (LumiereError, NotFound):
+                pass  # the operation reports why it cannot align
     # Keep read/apply/save together. A keyed retry returns the stored effect;
     # an edit without a key retains its ordinary apply-again semantics.
     with svc.db.transaction() as conn:

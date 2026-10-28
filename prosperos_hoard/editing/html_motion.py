@@ -18,6 +18,8 @@ import threading
 import time
 import uuid
 
+from . import ffmpeg as ff
+from . import motion_sound
 from .errors import Conflict, LumiereError, NotFound
 from .ffmpeg import Cancelled
 
@@ -165,7 +167,7 @@ class HtmlMotion:
 
     def save(self, *, html: str, name: str = "HTML motion", width: int = 1280, height: int = 720,
              fps: float = 30, duration: float = 3, composition: str | None = None,
-             expected_revision: int | None = None, project_id: str | None = None) -> dict:
+             expected_revision: int | None = None, project_id: str | None = None, sound: dict | None = None) -> dict:
         if not html.strip() or not name.strip():
             raise LumiereError("HTML source and composition name cannot be empty.", code="html_motion")
         if width < 1 or height < 1 or not math.isfinite(fps) or fps <= 0 or not math.isfinite(duration) or duration <= 0:
@@ -174,6 +176,10 @@ class HtmlMotion:
             current = self.get(composition) if composition else None
             if current and expected_revision != current["revision"]:
                 raise Conflict("The composition changed. Reload it before saving.", code="revision_conflict")
+            declared = motion_sound.normalise(sound, duration) if sound is not None else None
+            if sound is None:
+                found = motion_sound.declared_in_html(html)
+                declared = motion_sound.normalise(found, duration) if found is not None else (current or {}).get("sound")
             composition = composition or uuid.uuid4().hex
             revision = current["revision"] + 1 if current else 1
             folder = self.folder(composition) / str(revision)
@@ -185,6 +191,8 @@ class HtmlMotion:
                         "fps": fps, "duration": duration, "project_id": project_id, "updated_ts": time.time(),
                         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "source_path": str(source),
                         "source_url": base + "/source", "frame_url": base + "/frame", "render_url": None}
+            if declared:
+                manifest["sound"] = declared
             self._write(folder / "manifest.json", manifest)
             self._write(folder.parent / "current.json", manifest)
             return manifest
@@ -195,6 +203,7 @@ class HtmlMotion:
     def restore(self, composition: str, revision: int, expected_revision: int) -> dict:
         old = self.get(composition, revision)
         return self.save(composition=composition, expected_revision=expected_revision, html=self.source(old),
+                         sound=old.get("sound") or {},
                          **{k: old[k] for k in ("name", "width", "height", "fps", "duration", "project_id")})
 
     @contextmanager
@@ -345,13 +354,42 @@ class HtmlMotion:
             raise LumiereError('Captured HTML no longer matches its recorded hash.', code='html_motion_integrity')
         return data
 
-    def queue_render(self, svc, composition: str, revision: int | None = None) -> dict:
+    def queue_render(self, svc, composition: str, revision: int | None = None, audio: bool = True) -> dict:
         manifest = self.get(composition, revision)
         if manifest["width"] % 2 or manifest["height"] % 2:
             raise LumiereError("H.264 4:2:0 needs even canvas dimensions. Save an even width and height before rendering.", code="html_motion_canvas")
-        job = svc.jobs.submit("html_motion", {"composition": composition, "revision": manifest["revision"]},
-                              label=manifest["name"], project_id=manifest["project_id"])
-        return {"job": job["id"], "state": job["state"], "composition": composition, "revision": manifest["revision"]}
+        params = {"composition": composition, "revision": manifest["revision"]}
+        if not audio:
+            params["audio"] = False  # absent = with the declared sound; the key only appears when it was switched off
+        job = svc.jobs.submit("html_motion", params, label=manifest["name"], project_id=manifest["project_id"])
+        return {"job": job["id"], "state": job["state"], "composition": composition, "revision": manifest["revision"],
+                "audio": bool(audio and (manifest.get("sound") or {}).get("audio", True) and manifest.get("sound"))}
+
+    def sound_preview(self, svc, composition: str, revision: int | None = None, ctx=None) -> dict:
+        """Mix and master the declared sound of one revision into a WAV next to it, without rendering any picture."""
+        manifest = self.get(composition, revision)
+        sound = manifest.get("sound")
+        if not sound:
+            raise LumiereError("This composition declares no sound. Add events with motion_sound_events.", code="no_sound")
+        folder = self.folder(manifest["id"]) / str(manifest["revision"]) / "sound"
+        folder.mkdir(parents=True, exist_ok=True)
+        fps = Fraction(str(manifest["fps"]))
+        duration = float(Fraction(math.ceil(Fraction(str(manifest["duration"])) * fps), 1) / fps)
+        digest = hashlib.sha256(json.dumps([sound, duration], sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        destination = folder / f"preview-{digest}.wav"
+        report = motion_sound.build_soundtrack(svc, sound, duration, destination, ctx)
+        self._write(folder / f"preview-{digest}.json", report)
+        base = f"/api/html-motion/{manifest['id']}/revisions/{manifest['revision']}/sound/{digest}"
+        return {"composition": manifest["id"], "revision": manifest["revision"], "id": digest, "url": base + "/audio",
+                **{k: v for k, v in report.items() if k != "path"}}
+
+    def sound_file(self, composition: str, revision: int, digest: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{16}", digest):
+            raise LumiereError("Invalid sound id.", code="html_motion")
+        path = self.folder(composition) / str(revision) / "sound" / f"preview-{digest}.wav"
+        if not path.is_file():
+            raise NotFound("Sound preview not found.")
+        return path
 
     def render(self, svc, ctx) -> dict:
         manifest = self.get(ctx.params["composition"], ctx.params["revision"])
@@ -388,10 +426,16 @@ class HtmlMotion:
                      and abs(float(metadata["format"]["duration"]) - float(Fraction(count, 1) / fps)) < .01)
             if not valid:
                 raise LumiereError("Encoded video does not match the composition canvas, frame rate or frame count.", code="html_motion_verify")
+            sound = manifest.get("sound")
+            audio_report = None
+            if sound and sound.get("audio", True) and ctx.params.get("audio", True):
+                audio_report = self._add_sound(svc, ctx, sound, temporary, folder, count / float(fps))
             temporary.replace(output)
             result = {**manifest, "render_path": str(output), "render_url": f"/api/html-motion/{manifest['id']}/revisions/{manifest['revision']}/render/{ctx.id}",
-                      "frames": count, "render_duration": count / float(fps), "codec": "h264", "audio": False,
+                      "frames": count, "render_duration": count / float(fps), "codec": "h264", "audio": audio_report is not None,
                       "render_sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
+            if audio_report is not None:
+                result["sound_report"] = audio_report
             with _LOCK:
                 self._write(folder / "manifest.json", result)
                 if self.get(manifest["id"])["revision"] == manifest["revision"]:
@@ -411,6 +455,69 @@ class HtmlMotion:
                 process.wait(timeout=10)
             if temporary.exists():
                 temporary.unlink()
+
+
+    def _add_sound(self, svc, ctx, sound: dict, video: Path, folder: Path, duration: float) -> dict:
+        """Build the declared soundtrack and mux it into the encoded video (the picture is copied, not encoded again).
+        AAC can overshoot the true peak a little: the delivered file is measured and the mix redone with more headroom if needed."""
+        wav = folder / f"render-{ctx.id}.wav"
+        muxed = folder / f"render-{ctx.id}.sound.mp4"
+        kept = folder / f"render-{ctx.id}.best.mp4"
+        tools = svc.tools()
+        # ffmpeg prints the true peak with one decimal: asking for half of that under the ceiling keeps the claim true
+        ceiling = float(sound.get("true_peak_db", motion_sound.TRUE_PEAK_DB)) - .05
+        tried: list[tuple[float, float]] = []  # (headroom, delivered true peak) of every attempt
+        best, report = None, None
+        try:
+            headroom = 0.0
+            for _attempt in range(5):
+                ctx.progress(.96, "sound")
+                report = motion_sound.build_soundtrack(svc, {**sound, "_headroom": headroom}, duration, wav, ctx)
+                ctx.check()
+                ff.run(tools, ["-i", str(video), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                               "-ar", "48000", "-shortest", "-movflags", "+faststart", str(muxed)], handle=ctx.handle())
+                measured = ff.loudness(tools, muxed)
+                peak = measured.get("true_peak_dbtp")
+                report["delivered"] = {"lufs": measured.get("integrated_lufs"), "true_peak_db": peak}
+                tried.append((headroom, peak if peak is not None else ceiling))
+                if peak is None or peak <= ceiling:
+                    if best is None or (report["delivered"]["lufs"] or -99) > (best["delivered"]["lufs"] or -99):
+                        muxed.replace(kept)
+                        best = report
+                    if peak is None or peak >= ceiling - .4 or not any(p > ceiling for _h, p in tried):
+                        break  # at the ceiling, or never over it: nothing to win back
+                # AAC overshoots a little; walk the headroom towards the ceiling instead of overcorrecting
+                over = [(h, p) for h, p in tried if p > ceiling]
+                under = [(h, p) for h, p in tried if p <= ceiling]
+                if over and under:
+                    (h0, p0), (h1, p1) = max(over), min(under, key=lambda item: -item[1])
+                    headroom = h0 + (p0 - (ceiling - .05)) / max(p0 - p1, .05) * (h1 - h0)
+                else:
+                    last_h, last_p = tried[-1]
+                    headroom = last_h + (last_p - ceiling) + .1 if last_p > ceiling else max(0.0, last_h - .3)
+                if best is not None and under and len(tried) >= 4:
+                    break
+            if best is None:
+                muxed.replace(kept)       # nothing met the ceiling after every attempt: deliver the last one, the report says what was measured
+                best = report
+            report = best
+            kept.replace(muxed)
+            probe = subprocess.run([tools.ffprobe, "-v", "error", "-show_streams", "-of", "json", str(muxed)],
+                                   capture_output=True, text=True, check=True, timeout=60, creationflags=_NO_WINDOW)
+            streams = json.loads(probe.stdout)["streams"]
+            audio = next((s for s in streams if s["codec_type"] == "audio"), None)
+            picture = next(s for s in streams if s["codec_type"] == "video")
+            if audio is None or audio["codec_name"] != "aac" or picture["codec_name"] != "h264":
+                raise LumiereError("The exported video does not carry the expected H.264 picture and AAC sound.", code="html_motion_verify")
+            report["audio_codec"] = audio["codec_name"]
+            report["audio_duration_s"] = float(audio.get("duration") or 0)
+            muxed.replace(video)
+            report.pop("path", None)
+            return report
+        finally:
+            for leftover in (wav, muxed, kept):
+                if leftover.exists():
+                    leftover.unlink()
 
 
 def run_render_job(svc, ctx) -> dict:

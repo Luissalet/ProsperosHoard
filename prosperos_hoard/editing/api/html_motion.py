@@ -7,8 +7,8 @@ from .. import family_events, projects
 from ..errors import NotFound
 from ..html_motion import HtmlMotion
 from ..html_starters import HtmlStarterArgs, catalogue as starters_catalogue, save_args as starter_source
-from ..html_motion_args import HtmlMotionSaveArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs
-from .deps import services
+from ..html_motion_args import HtmlMotionSaveArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, MotionSoundEventsArgs
+from .deps import services, tool
 
 router = APIRouter(prefix="/api/html-motion", tags=["HTML motion"])
 
@@ -66,8 +66,36 @@ def frame(request: Request, composition: str, revision: int, at: float = Query(0
 
 
 @router.post("/{composition}/render")
-def render(request: Request, composition: str, revision: int | None = Query(None, ge=1)):
-    return _store(request).queue_render(services(request), composition, revision)
+def render(request: Request, composition: str, revision: int | None = Query(None, ge=1), audio: bool = Query(True)):
+    return _store(request).queue_render(services(request), composition, revision, audio=audio)
+
+
+@router.get("/sound/roles")
+def sound_roles(request: Request, kit: str = Query("launch")):
+    return tool(request, "motion_sound_roles", kit=kit)
+
+
+@router.get("/{composition}/sound")
+def sound_get(request: Request, composition: str, revision: int | None = Query(None, ge=1)):
+    return tool(request, "motion_sound_events", composition=composition, revision=revision)
+
+
+@router.post("/{composition}/sound")
+def sound_change(request: Request, composition: str, body: MotionSoundEventsArgs):
+    if body.composition != composition:
+        raise NotFound("Sound composition does not match the request.")
+    return tool(request, "motion_sound_events", **body.model_dump(exclude_none=True))
+
+
+@router.post("/{composition}/sound/preview")
+def sound_preview(request: Request, composition: str, revision: int | None = Query(None, ge=1)):
+    return tool(request, "motion_sound_preview", composition=composition, revision=revision)
+
+
+@router.get("/{composition}/revisions/{revision}/sound/{digest}/audio")
+def sound_audio(request: Request, composition: str, revision: int, digest: str):
+    path = _store(request).sound_file(composition, revision, digest)
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.post('/{composition}/storyboard')
@@ -101,7 +129,7 @@ def video(request: Request, composition: str, revision: int, job: str):
     store = _store(request)
     store.get(composition, revision)
     result = services(request).jobs.get(job)
-    if result["state"] != "done" or result["kind"] != "html_motion" or result["params"] != {"composition": composition, "revision": revision}:
+    if result["state"] != "done" or result["kind"] != "html_motion" or {k: v for k, v in result["params"].items() if k != "audio"} != {"composition": composition, "revision": revision}:
         raise NotFound("This HTML video export is not ready.")
     path = store.folder(composition) / str(revision) / f"render-{job}.mp4"
     if not path.is_file():

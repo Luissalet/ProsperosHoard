@@ -50,6 +50,8 @@ include-package-data = false
 "*" = ["_data/*.json", "ui/*.css", "LICENSE", "VENDORED.txt"]
 "prosperos_hoard" = ["studio*.json", "fonts/**/*", "workflows/*.json", "studio_ui/**/*"]
 "prosperos_hoard.editing" = ["static/**/*"]
+"prosperos_hoard.editing.foley" = ["NOTICE", "LICENSE.earshot"]
+"prosperos_hoard.editing.foley.forge" = ["bank/*.json", "kits/*.json"]
 "prosperos_hoard.devtools" = ["comfy_object_info.json"]
 
 [tool.setuptools.exclude-package-data]

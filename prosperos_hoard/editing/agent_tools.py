@@ -93,7 +93,7 @@ class MediaDeleteArgs(MediaRef):
 
 
 class AnalyzeArgs(MediaRef):
-    kinds: list[Literal["scenes", "beats", "loudness", "motion", "focus", "transcript", "speakers"]] = Field(..., min_length=1)
+    kinds: list[Literal["scenes", "beats", "loudness", "motion", "focus", "transcript", "speakers", "sync"]] = Field(..., min_length=1, description="sync: where the sound is first heard, loudest and over (onset, peak, end), to place it by that point.")
     force: bool = False
     num_speakers: Optional[int] = Field(None, ge=1, le=12, description="speakers: how many people talk (empty = detected automatically).")
     speakers: bool = Field(False, description="transcript: also separate the speakers right after transcribing.")
@@ -1001,7 +1001,9 @@ def run_creative_film(svc: Services,a: CreativeFilmArgs):
 
 from .html_motion import HtmlMotion
 from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotionGetArgs,
-                               HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs)
+                               HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, HtmlMotionRenderArgs,
+                               MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs)
+from . import audio_sync, motion_sound
 
 
 def run_html_motion_list(svc: Services, a: Empty):
@@ -1047,6 +1049,66 @@ def run_html_motion_render(svc: Services, a: HtmlMotionRefArgs):
     return HtmlMotion(svc.config.data_dir).queue_render(svc, a.composition, a.revision)
 
 
+def run_motion_export(svc: Services, a: HtmlMotionRenderArgs):
+    return HtmlMotion(svc.config.data_dir).queue_render(svc, a.composition, a.revision, audio=a.audio)
+
+
+def run_motion_sound_roles(svc: Services, a: MotionSoundRolesArgs):
+    library = motion_sound.Library(svc.config.data_dir, a.kit)
+    return {"kit": a.kit, "kits": motion_sound.foley_kit.presets(), "roles": library.roles(),
+            "how": "Each event {t, role} puts the role's sync point (onset, peak or end of the take) at t + offset_ms; taps and knocks lead the picture, "
+                   "whoosh peaks follow it. The mix is mastered to -14 LUFS with a true peak under -1 dBTP; with music, it steps down before hits."}
+
+
+def run_motion_sound_events(svc: Services, a: MotionSoundEventsArgs):
+    store = HtmlMotion(svc.config.data_dir)
+    manifest = store.get(a.composition, a.revision)
+    current = dict(manifest.get("sound") or {})
+    changing = a.action != "get" or any(v is not None for v in (a.music, a.kit, a.lufs, a.true_peak_db, a.audio, a.clear_music))
+    if not changing:
+        return {"composition": manifest["id"], "revision": manifest["revision"], "changed": False, "sound": current or None,
+                "events": len(current.get("events", [])), "duration": manifest["duration"]}
+    latest = store.get(a.composition)
+    if a.revision not in (None, latest["revision"]):
+        raise LumiereError(f"Revision {a.revision} is not the current one ({latest['revision']}): read the current revision to change its sound.", code="revision_conflict")
+    if a.expected_revision is None:
+        raise LumiereError("expected_revision is required to change the sound: pass the revision you read.", code="revision_conflict")
+    new = dict(current)
+    events = list(new.get("events", []))
+    if a.action == "clear":
+        new = {}
+    elif a.action == "set":
+        events = [e.model_dump(exclude_none=True) for e in (a.events or [])]
+    elif a.action == "add":
+        events += [e.model_dump(exclude_none=True) for e in (a.events or [])]
+    elif a.action == "remove":
+        if a.times is None and a.role is None:
+            raise LumiereError("remove needs times and/or role.", code="bad_args")
+        role = motion_sound.canonical_role(a.role, new.get("kit", motion_sound.DEFAULT_KIT)) if a.role else None
+        events = [e for e in events if not ((a.times is None or any(abs(e["t"] - t) < 1e-3 for t in a.times)) and (role is None or e["role"] == role))]
+    if a.action != "clear":
+        if a.clear_music:
+            new.pop("music", None)
+        new["events"] = events
+        new.setdefault("kit", motion_sound.DEFAULT_KIT)
+        for key, value in (("music", a.music.model_dump(exclude_none=True) if a.music else None), ("kit", a.kit), ("lufs", a.lufs),
+                           ("true_peak_db", a.true_peak_db), ("audio", a.audio)):
+            if value is not None:
+                new[key] = value
+    saved = store.save(composition=manifest["id"], expected_revision=a.expected_revision, html=store.source(latest), sound=new if new else {},
+                       **{k: latest[k] for k in ("name", "width", "height", "fps", "duration", "project_id")})
+    return {"composition": saved["id"], "revision": saved["revision"], "changed": True, "sound": saved.get("sound"),
+            "events": len((saved.get("sound") or {}).get("events", [])), "duration": saved["duration"]}
+
+
+def run_motion_sound_preview(svc: Services, a: MotionSoundPreviewArgs):
+    return HtmlMotion(svc.config.data_dir).sound_preview(svc, a.composition, a.revision)
+
+
+def run_audio_sync_points(svc: Services, a: AudioSyncPointsArgs):
+    return audio_sync.points(svc, a.media, a.path, a.force)
+
+
 def run_html_motion_storyboard(svc: Services, a: HtmlMotionStoryboardArgs):
     store = HtmlMotion(svc.config.data_dir)
     result = store.storyboard(a.composition, a.times, a.revision)
@@ -1068,7 +1130,12 @@ TOOLS: list[Tool] = [
     Tool("html_motion_get", "Read an HTML composition and its editable source by character pages. Leer fuente HTML.\nUse next_offset for the complete source. Keywords: source, revision, composition, motion graphics.", HtmlMotionGetArgs, _ann(True), run_html_motion_get),
     Tool("html_motion_frame", "Render an exact-time PNG from an HTML composition. Revisar fotograma HTML.\nTime is seconds; returns an MCP image, source revision and frame hash. Keywords: snapshot, visual critique, storyboard, seek.", HtmlMotionFrameArgs, _ann(True), run_html_motion_frame),
     Tool('html_motion_storyboard', 'Review multiple exact-time frames from one HTML revision. Revisar varios momentos.\nReturns a real contact-sheet MCP image, original PNG links, times and source/frame hashes. Keywords: storyboard, contact sheet, motion review, visual critique.', HtmlMotionStoryboardArgs, _ann(True), run_html_motion_storyboard),
-    Tool("html_motion_render", "Queue an HTML composition as verified silent H264 MP4. Exportar animacion HTML a video.\nFollow job_status; use media_receive(path=result.render_path) to add the video to a timeline. Keywords: render, export, MP4, motion graphics.", HtmlMotionRefArgs, _ann(False, False, True), run_html_motion_render),
+    Tool("html_motion_render", "Queue an HTML animation as verified H264 MP4, with its sound. Exportar animacion HTML a video.\nFollow job_status; use media_receive(path=result.render_path) to add the video to a timeline. Keywords: render, export, MP4, motion graphics.", HtmlMotionRefArgs, _ann(False, False, True), run_html_motion_render),
+    Tool("motion_export", "Queue an HTML animation as H264 + AAC MP4 with its declared sound. Exportar animacion con sonido.\nThe mix is -14 LUFS under -1 dBTP. Effects are placed by their measured sync point; result.sound_report lists every placement, the loudness delivered and the measured sync error. audio=false for a silent file. Keywords: export, render, sound effects, music, soundtrack, sfx, animation with audio.", HtmlMotionRenderArgs, _ann(False, False, True), run_motion_export),
+    Tool("motion_sound_roles", "List the sound roles of a kit with their sound, sync point and offset. Roles de sonido.\nUse the names (or Spanish/English aliases: tap, golpe, clic, whoosh) in motion_sound_events. Keywords: sfx, sound effects, foley, kit, launch, roles, offsets.", MotionSoundRolesArgs, _ann(True), run_motion_sound_roles),
+    Tool("motion_sound_events", "Read or change the sound events {t, role} and music of an HTML animation. Eventos de sonido.\nChanging saves a new revision (expected_revision). Events are picture moments in seconds; the effect is generated from code and placed by its sync point. Keywords: sound events, sfx, cues, sound design, music, audio for animation.", MotionSoundEventsArgs, _ann(False, False, False), run_motion_sound_events),
+    Tool("motion_sound_preview", "Mix and master the declared sound of an animation into a WAV without rendering the picture. Oir el sonido.\nReturns the placements, the loudness reached, and the sync error measured on every effect; url plays it. Keywords: preview, listen, mix, loudness, LUFS, true peak.", MotionSoundPreviewArgs, _ann(False, False, True), run_motion_sound_preview),
+    Tool("audio_sync_points", "Measure where a sound is first heard, loudest and over (onset, peak, end). Puntos de sincronía.\nOf a library media or a file. Place it with timeline_edit add_media {align: 'peak', at: ms} so that point lands on the picture event. Keywords: sync point, onset, peak, align audio, sound effect timing, hit.", AudioSyncPointsArgs, _ann(True), run_audio_sync_points),
     Tool("html_motion_restore", "Restore a saved HTML composition revision as a new revision. Recuperar una animacion anterior.\nLater versions remain available. Keywords: undo, restore, revisions, HTML motion.", HtmlMotionRestoreArgs, _ann(False, False, False), run_html_motion_restore),
     Tool('creative_render_title_video','Render an editable Lumiere Motion title to verified H264 video. Renderizar cartela animada.\nReturns actual video path, metadata and media_receive_url. Keywords: animation, render title, mp4, motion graphics.',CreativeRenderArgs,_ann(False,False,True),run_creative_render),
     Tool('creative_tools','Discover Lumiere motion or editing operations. Herramientas nativas.\nKeywords: motion graphics, layers, compositing, editing, effects.',CreativeToolsArgs,_ann(True),run_creative_tools),

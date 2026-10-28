@@ -167,6 +167,12 @@ def run_analyze(request: Request, media_id: str, body: AnalyzeBody):
                                      num_speakers=body.num_speakers, speakers=body.speakers, engine=body.engine)}
 
 
+@router.get("/{media_id}/sync")
+def sync_points(request: Request, media_id: str, force: bool = False):
+    """Where the sound is first heard, loudest and over (ms): the points a clip can be placed by."""
+    return tool(request, "audio_sync_points", media=media_id, force=force)
+
+
 @router.get("/{media_id}/speakers")
 def get_speakers(request: Request, media_id: str):
     """Speakers of the transcript; before there is a transcript, an empty answer (with the engine status) instead of an error."""

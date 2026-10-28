@@ -1,0 +1,8 @@
+Prospero's Hoard bundles third-party material. Each item keeps its own license and attribution.
+
+Sound-effects engine (prosperos_hoard/editing/foley/)
+  Procedural sound-effect bank, kit presets and take-measurement code, vendored and adapted
+  (own module names, a numpy-only WAV reader/writer, no dependency on the original repository).
+  Source: Earshot v0.4.0, commit 591fa3e028032e6dce56620a20e932e35667e8d8, by Leon Lin.
+  License: MIT. The original license text is kept in prosperos_hoard/editing/foley/LICENSE.earshot
+  and the details of what changed in prosperos_hoard/editing/foley/NOTICE.

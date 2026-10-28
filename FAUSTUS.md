@@ -96,3 +96,6 @@ including the last interval and variable frame timings. Recipes retain requested
 before batch work. The UI offers source playback, seconds and Use playhead time.
 
 Spaces LTX image-to-video also accepts `refine=true`: optional native2x latent upscaling and3 fixed refinement steps after the8-step base, exposed by the node checkbox. Direct API/MCP template: `ltx23_i2v_hq`. Requires the LTX2.3 spatial-upscaler-x2-1.1 weight; catalog availability checks it separately, without hiding the base model. Both stages reuse the caller seed/sampler; immutable recipes record `video_refinement`. This improves the detail workflow, not a guarantee of artistic continuity or dynamic camera.
+
+
+HTML animations in Montaje can carry sound: `motion_sound_events` declares events `{t, role}` and a music bed, `motion_sound_preview` mixes them and reports the sync error measured on every effect, and `motion_export` (or `html_motion_render`) returns an H.264 + AAC MP4 at -14 LUFS under -1 dBTP. Effects are generated from code and placed by their measured onset/peak/end; `audio_sync_points` and `timeline_edit add_media {align, at}` do the same for any imported sound. A mix of a few sparse effects without music reports `reached: false` instead of faking the loudness. See `docs/HTML_MOTION.md`.

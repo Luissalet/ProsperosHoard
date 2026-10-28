@@ -18,3 +18,11 @@
 .html-motion-file:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .html-motion .field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .html-motion ::selection { background: var(--accent); color: var(--bg); }
+.html-motion-sound { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 16px 0; min-width: 0; }
+.html-motion-sound legend { padding: 0 6px; font-weight: 600; }
+.html-motion-sound-table { width: 100%; border-collapse: collapse; }
+.html-motion-sound-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 0 8px 4px 0; }
+.html-motion-sound-table td { padding: 3px 8px 3px 0; vertical-align: middle; }
+.html-motion-check { display: flex; align-items: center; gap: 6px; }
+.html-motion-mix audio { display: block; width: 100%; max-width: 520px; margin-top: 10px; }
+@media (max-width: 640px) { .html-motion-sound-table { display: block; overflow-x: auto; } }

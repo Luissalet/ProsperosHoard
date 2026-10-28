@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("lumiere.analyze")
 
-KINDS = ("scenes", "beats", "loudness", "motion", "focus", "transcript", "speakers")
-LABELS = {"scenes": "Escenas", "beats": "Ritmo", "loudness": "Sonoridad", "motion": "Movimiento", "focus": "Encuadre", "transcript": "Transcripción", "speakers": "Hablantes"}
+KINDS = ("scenes", "beats", "loudness", "motion", "focus", "transcript", "speakers", "sync")
+LABELS = {"scenes": "Escenas", "beats": "Ritmo", "loudness": "Sonoridad", "motion": "Movimiento", "focus": "Encuadre", "transcript": "Transcripción", "speakers": "Hablantes", "sync": "Puntos de sincronía"}
 
 
 def schedule(svc: "Services", media_id: str, kinds: list[str], *, force: bool = False, language: str = "", model: str = "",
@@ -31,7 +31,7 @@ def schedule(svc: "Services", media_id: str, kinds: list[str], *, force: bool = 
     for kind in kinds:
         if kind not in KINDS:
             raise LumiereError(f"Unknown analysis {kind!r}. Known: {', '.join(KINDS)}.")
-        if kind in ("beats", "loudness", "transcript", "speakers") and not info["has_audio"]:
+        if kind in ("beats", "loudness", "transcript", "speakers", "sync") and not info["has_audio"]:
             raise LumiereError(f"{info['name']} has no sound: {kind} needs audio.")
         if kind in ("scenes", "motion", "focus") and not info["has_video"]:
             raise LumiereError(f"{info['name']} has no picture: {kind} needs video.")
@@ -73,6 +73,10 @@ def analyze_job(svc: "Services", ctx: "JobCtx") -> dict[str, Any]:
         result = audio_an.beats(tools, src, handle=ctx.handle())
     elif kind == "loudness":
         result = audio_an.loudness(tools, src, handle=ctx.handle())
+    elif kind == "sync":
+        from . import audio_sync
+
+        result = audio_sync.measure_file(svc, src, ctx.handle())
     elif kind == "motion":
         result = {"per_second": video_an.motion_per_second(tools, fast, src_w=info["width"], src_h=info["height"], duration_ms=dur, progress=prog,
                                                            handle=ctx.handle())}
@@ -118,6 +122,8 @@ def summarize(kind: str, result: dict[str, Any]) -> dict[str, Any]:
         return {"bpm": result.get("bpm"), "beats": len(result.get("beats", []))}
     if kind == "loudness":
         return {k: result.get(k) for k in ("integrated_lufs", "range_lu", "true_peak_dbtp")}
+    if kind == "sync":
+        return {k: result.get(k) for k in ("onset_ms", "peak_ms", "end_ms")}
     if kind == "motion":
         ps = result.get("per_second", [])
         return {"seconds": len(ps), "mean": round(sum(ps) / len(ps), 4) if ps else 0}
