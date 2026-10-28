@@ -29,6 +29,7 @@ from . import audio as audio_mod
 from . import comfy_driver
 from . import design
 from . import procutil
+from . import style_cards
 from . import templates as design_templates
 from . import timeline as timeline_mod
 from . import video as video_mod
@@ -3062,16 +3063,37 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
             "song_name": re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac|opus)$", "", song.get("name") or song["id"], flags=re.I)}
 
 
-def style_card_view(card: dict[str, Any], brief: bool = False) -> dict[str, Any]:
+def style_card_view(card: dict[str, Any], brief: bool = False, section: Optional[str] = None) -> dict[str, Any]:
     """A style card for the API: the image prompt parts and the graphic fields (palette, motion, signature
-    transition, typography, quality, technique, pitfalls). `brief` leaves out the long texts."""
+    transition, typography, quality, technique, pitfalls) and, for a direction card, its source, licence and fixed sections.
+    `brief` leaves out the long texts; `section` gives only that one section of the card (a direction card is long)."""
     out = {"id": card["id"], "name": card["name"], "builtin": bool(card.get("is_builtin")), "quality": int(card.get("quality") or 0),
            "palette": card.get("palette") or [], "signature_transition": card.get("signature_transition"),
            "motion": card.get("motion") or {}, "project_id": card.get("project_id")}
+    sections = card.get("sections") or {}
+    if sections or card.get("source") or card.get("based_on"):
+        meta = card.get("meta") or {}
+        out.update(slug=card.get("slug"), source=card.get("source"), category=card.get("category"), name_alt=meta.get("name_alt", ""),
+                   line=meta.get("line", ""), uses=meta.get("uses", []), swatches=meta.get("swatches", []), lang=meta.get("lang", "en"),
+                   license=card.get("license"), attribution=card.get("attribution"), source_url=card.get("source_url"),
+                   based_on=card.get("based_on"), section_names=[k for k in style_cards.SECTION_KEYS if k in sections])
+        if card.get("variants"):
+            out["variants"] = card["variants"] if not brief else {k: v.get("sections", []) for k, v in card["variants"].items()}
+        if meta.get("changes"):
+            out["changes"] = meta["changes"]
+    if section is not None:
+        chosen = sections.get(section)
+        if chosen is None:
+            raise EngineError("unknown_section", f"this card has no section '{section}'; it has: {', '.join(sections) or 'none'}")
+        out["section"] = {"key": section, **chosen}
+        return out
     if not brief:
         out.update(technique=card.get("technique") or "", pitfalls=card.get("pitfalls") or "", typography=card.get("typography") or {},
                    prompt_prefix=card.get("prompt_prefix") or "", prompt_suffix=card.get("prompt_suffix") or "",
                    negative=card.get("negative") or "", notes=card.get("notes") or "", defaults=card.get("defaults") or {})
+        if sections:
+            out["summary"] = (card.get("meta") or {}).get("summary", "")
+            out["sections"] = sections
     else:
         out["technique"] = (card.get("technique") or "")[:160]
     return out

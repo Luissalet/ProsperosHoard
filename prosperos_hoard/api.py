@@ -56,6 +56,7 @@ from . import auk_retake
 from . import voice_pipelines as vp
 from . import voices as voices_mod
 from . import style_profiles as style_profiles_mod
+from . import style_cards
 from . import shot_review as shot_review_mod
 from .backend import Backend, ffmpeg_path
 from .design import DesignError
@@ -772,6 +773,17 @@ class StyleCardBody(BaseModel):
     quality: Optional[int] = None
     pitfalls: Optional[str] = None
     typography: Optional[dict[str, Any]] = None
+    query: Optional[str] = None                 # search: words every result mentions
+    source: Optional[str] = None                # list/search: only this library ("lemo-opuscar", "mg-styles-15")
+    category: Optional[str] = None              # list/search: only this category
+    library: Optional[bool] = None              # list: include the imported direction cards
+    limit: Optional[int] = None
+    section: Optional[str] = None               # get: only this section (essence, materials, color, type, motion, camera, sound, moves, ...)
+    changes: Optional[dict[str, str]] = None    # create from_card: {section: new text}, checked against the card's safe / character / essence partition
+    accept_character_change: Optional[bool] = None  # create: allow changes to sections that change the style's character
+    allow_essence_change: Optional[bool] = None     # create: allow changes to the essence (then it is a different style)
+    path: Optional[str] = None                  # import: a local checkout of a style library
+    kind: Optional[str] = None                  # import: "lemo-opuscar" or "mg-styles-15"
 
 
 class ReframeBody(BaseModel):
@@ -2240,8 +2252,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_cinema", f"{category or ''}:{q}"[:80], run)
 
     @app.get("/api/style-presets")
-    def style_presets(project: Optional[str] = None):
+    def style_presets(project: Optional[str] = None, library: Optional[bool] = None, q: Optional[str] = None, source: Optional[str] = None,
+                      category: Optional[str] = None, limit: Optional[int] = None):
+        if library or q or source or category:  # the imported direction cards: a short view of each, searched by words
+            return op_style_cards(StyleCardBody(action="search", query=q or "", source=source, category=category, project=project, limit=limit or 200))
         return {"items": store.list_style_presets(project)}
+
+    @app.get("/api/style-presets/{card_id}")
+    def style_preset_get(card_id: str, section: Optional[str] = None, project: Optional[str] = None):
+        return op_style_cards(StyleCardBody(action="get", id=card_id, section=section, project=project))
 
     @app.post("/api/projects/{project_id}/compose-prompt")
     def compose(project_id: str, body: ComposePromptBody):
@@ -4966,11 +4985,53 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise NotFound("style_card", str(ref))
         return card
 
+    def _variant_sections(base: dict[str, Any], body: StyleCardBody) -> dict[str, Any]:
+        """The sections of a variant of `base` with `body.changes` applied, and the report on what each change means."""
+        sections = {k: dict(v) for k, v in (base.get("sections") or {}).items()}
+        changes = {str(k).strip().lower(): str(v) for k, v in (body.changes or {}).items()}
+        unknown = [k for k in changes if k not in style_cards.SECTION_KEYS]
+        if unknown:
+            raise engine.EngineError("unknown_section", f"unknown section(s): {', '.join(unknown)}; sections are {', '.join(style_cards.SECTION_KEYS)}")
+        report = style_cards.classify_change(base, list(changes))
+        if report["breaks_essence"] and not body.allow_essence_change:
+            raise engine.EngineError("changes_essence", f"{', '.join(report['breaks_essence'])} is the essence of this style: changing it makes a different style, "
+                                     "not a variant. Start a new card instead, or pass allow_essence_change=true if you really mean it.")
+        if report["changes_character"] and not body.accept_character_change:
+            raise engine.EngineError("changes_character", f"{', '.join(report['changes_character'])} would change the character of this style "
+                                     "(its materials or camera grammar). Say so with accept_character_change=true, or keep to: "
+                                     + ", ".join((base.get("variants") or {}).get("safe", {}).get("sections", [])) + ".")
+        for key, text in changes.items():
+            title = (sections.get(key) or {}).get("title") or style_cards.SECTION_LABELS.get(key, key)
+            sections[key] = {"title": title, "text": text.strip()}
+        return {"sections": sections, "report": {"changed": list(changes), **report, "accepted_character_change": bool(report["changes_character"]),
+                                                  "accepted_essence_change": bool(report["breaks_essence"])}}
+
     def op_style_cards(body: StyleCardBody) -> dict[str, Any]:
         if body.action == "list":
-            return {"items": [engine.style_card_view(c, brief=True) for c in store.list_style_presets(body.project)]}
+            cards = store.list_style_presets(body.project, library=(body.source or True) if (body.library or body.source) else None)
+            if body.category:
+                cards = [c for c in cards if body.category.lower() in (c.get("category") or "").lower()]
+            return {"items": [engine.style_card_view(c, brief=True) for c in cards[: body.limit or 400]]}
+        if body.action == "search":
+            cards = store.search_style_cards(body.query or "", source=body.source, category=body.category, project_id=body.project,
+                                             limit=body.limit or 40)
+            return {"query": body.query or "", "count": len(cards), "items": [engine.style_card_view(c, brief=True) for c in cards],
+                    "sources": style_cards.SOURCES and {k: {"name": v["name"], "url": v["url"], "license": v["license"]} for k, v in style_cards.SOURCES.items()}}
         if body.action == "get":
-            return engine.style_card_view(_card_ref(body.id, body.project))
+            return engine.style_card_view(_card_ref(body.id, body.project), section=body.section)
+        if body.action == "import":
+            if not body.path or body.kind not in style_cards.SOURCES:
+                raise engine.EngineError("bad_import", f"import needs path (a local checkout) and kind, one of: {', '.join(style_cards.SOURCES)}")
+            folder = Path(body.path).expanduser()
+            if not folder.is_dir():
+                raise engine.EngineError("bad_import", f"{body.path} is not a folder")
+            try:
+                parsed = style_cards.parse_lemo_folder(folder) if body.kind == "lemo-opuscar" else style_cards.parse_mg_folder(folder)[0]
+            except OSError as exc:
+                raise engine.EngineError("bad_import", f"could not read {body.path}: {exc}") from None
+            if not parsed:
+                raise engine.EngineError("bad_import", f"no styles found in {body.path} (expected {'styles/<slug>/STYLE.md' if body.kind == 'lemo-opuscar' else 'prompts/NN-name.md'})")
+            return {"kind": body.kind, "found": len(parsed), **store.import_direction_cards(parsed, project_id=body.project)}
         if body.action == "delete":
             card = _card_ref(body.id, body.project)
             store.delete_style_preset(card["id"])
@@ -4983,23 +5044,38 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                   "notes": body.notes}.items() if v is not None}
         if body.action == "create":
             base: dict[str, Any] = {}
+            variant: dict[str, Any] = {}
             if body.from_card:
                 src = _card_ref(body.from_card, body.project)
                 base = {k: src[k] for k in ("technique", "palette", "motion", "signature_transition", "quality", "pitfalls", "typography")
                         if src.get(k) not in (None, "", [], {})}
                 base.update({k: src.get(k) or "" for k in ("prompt_prefix", "prompt_suffix", "negative")})
                 base["defaults"] = src.get("defaults") or {}
+                if src.get("sections"):
+                    # a variant of a direction card keeps its sections, its licence and its attribution, and records what was changed
+                    made = _variant_sections(src, body)
+                    meta = {k: v for k, v in (src.get("meta") or {}).items() if k != "changes"}
+                    meta["changes"] = made["report"]
+                    variant = {"sections": made["sections"], "variants": src.get("variants") or {}, "meta": meta, "category": src.get("category"),
+                              "license": src.get("license"), "attribution": src.get("attribution"), "source_url": src.get("source_url"),
+                              "slug": src.get("slug"), "based_on": src.get("id")}
+            elif body.changes:
+                raise engine.EngineError("from_card_required", "changes apply to a card: give from_card")
             if not body.name:
                 raise engine.EngineError("name_required", "a style card needs a name")
-            created = store.create_style_preset(body.name, project_id=body.project, **{**base, **text, **card_fields})
+            created = store.create_style_preset(body.name, project_id=body.project, **{**base, **variant, **text, **card_fields})
             return engine.style_card_view(created)
         if body.action == "update":
             card = _card_ref(body.id, body.project)
             patch = {**text, **card_fields}
             if body.name is not None:
                 patch["name"] = body.name
+            if body.changes and card.get("sections"):
+                made = _variant_sections(card, body)
+                patch["sections"] = made["sections"]
+                patch["meta"] = {**(card.get("meta") or {}), "changes": made["report"]}
             return engine.style_card_view(store.update_style_preset(card["id"], **patch))
-        raise engine.EngineError("bad_action", "action is list, get, create, update or delete")
+        raise engine.EngineError("bad_action", "action is list, search, get, create, update, import or delete")
 
     @app.post("/api/style-presets")
     def style_card_create(body: StyleCardBody):

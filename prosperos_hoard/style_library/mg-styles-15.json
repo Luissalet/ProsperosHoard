@@ -1,0 +1,1083 @@
+{
+ "source": "mg-styles-15",
+ "cards": [
+  {
+   "slug": "flat-vector",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Flat / Vector 2D Motion Graphics",
+   "name_alt": "扁平矢量动画",
+   "category": "Motion graphics",
+   "line": "popwise「One Dot」一个点的一镜到底",
+   "uses": [],
+   "summary": "MG 动画最主流的基本盘风格，源自 Google Material/企业解释视频（explainer）传统。纯色几何化的人物与场景、无描边或极简描边、大色块撞色，一切元素都是矢量形状。常见于 SaaS 产品宣传、科普解说、企业年报视频。 视觉特征 纯色大色块, 几何化角色, 无渐变或极少渐变, 干净留白, 高饱和品牌色板, 元素弹性入退场 关键技法 AE Shape Layer + 父子级 null 控制层级，人物四肢用锚点旋转做 rig 弹性缓动是灵魂：overshoot 用 cubic-bezier(0.34,1.56,0.64,1) 或 AE 里 70~85% influence 的贝…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: SVG + GSAP (CustomEase/CustomBounce/MorphSVG); motion blur mb=4 for fast moves\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「一镜到底的扁平世界」One-continuous-shot brand explainer, the canonical Motion-Ocean/Google-explainer form, pushed to showreel polish.\n- 0.0–1.2s HOOK: empty bold color field; a single saturated circle drops in with the three-phase anticipation → stretch → squash → overshoot → settle. Immediately readable craft.\n- 1.2–3.0s: the circle becomes the sun; a flat city pops up building-by-building with 2–4 frame stagger (each with its own mini overshoot), clouds slide, birds flap.\n- 3.0–5.5s: camera pushes into one window → a geometric character at a desk (limb rig with anchor rotations, head bob, blink) reacts; phone pings.\n- 5.5–8.0s: the notification bubble expands to fill the frame as a SHAPE WIPE transition; inside, icons burst in a choreographed rhythm (bar chart grows, check mark draws, heart pops, coin flips).\n- 8.0–10.0s: element-driven transition — everything collapses/flies into a logo lockup for an invented brand (e.g. \"Popwise\") + tagline, elastic settle, 1s hold with micro-motion.\nRules: one hero moves at a time; squash&stretch ~10%; secondary action & follow-through; element-driven transitions (an object flies out and carries the cut); strictly flat (no gradients), bold 5–6 color palette (e.g. ultramarine #2B2BFF, coral #FF5A4E, sunflower #FFC62B, mint #2EE6A8, cream #FFF6E9, ink #151433).\nSound: upbeat future-bass/pop ~120 BPM; pop/boing/whoosh on each entry, synced to the frame."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "MG 动画最主流的基本盘风格，源自 Google Material/企业解释视频（explainer）传统。纯色几何化的人物与场景、无描边或极简描边、大色块撞色，一切元素都是矢量形状。常见于 SaaS 产品宣传、科普解说、企业年报视频。\n视觉特征 纯色大色块, 几何化角色, 无渐变或极少渐变, 干净留白, 高饱和品牌色板, 元素弹性入退场\n关键技法 AE Shape Layer + 父子级 null 控制层级，人物四肢用锚点旋转做 rig\n弹性缓动是灵魂：overshoot 用 cubic-bezier(0.34,1.56,0.64,1) 或 AE 里 70~85% influence 的贝塞尔手柄；入场'预备-冲出-回弹'三段式\n元素错峰入场（stagger 2~4 帧），同一时刻只让一个主体动\n30fps 居多；位移动画带 10% 左右 squash&stretch 增加弹性\n转场常用色块擦除（shape wipe）或元素飞出带动整场切换"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 1,
+    "film": "popwise「One Dot」一个点的一镜到底",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": [
+     "#2B2BFF",
+     "#FF5A4E",
+     "#FFC62B",
+     "#2EE6A8",
+     "#FFF6E9"
+    ]
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: SVG + GSAP (CustomEase/CustomBounce/MorphSVG); motion blur mb=4 for fast moves (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/01-flat-vector.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "line-art",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Line Art / Line Animation",
+   "name_alt": "线条动画",
+   "category": "Motion graphics",
+   "line": "ATELIER LINEA「一笔画 One Line」",
+   "uses": [],
+   "summary": "以单色细线为唯一造型语言，线条自我描绘（draw-on）、延伸、转折并变形为下一个图形，一笔连成整支片子。极简高级感强，常见于奢侈品、金融、建筑类品牌片和 logo 动画。 视觉特征 等宽细线, 单色或双色, 大量负空间, 线条连续生长, 线面转换瞬间 关键技法 核心是 stroke 描绘：AE 用 Trim Paths 0→100%，Web 端用 SVG stroke-dasharray/dashoffset 线宽全片恒定（2~4px），转角处让描绘速度略减速，用 easeInOut cubic-bezier(0.65,0,0.35,1) '一笔画'叙事：上一图形的尾线即下一图形的起线，路…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: SVG paths + stroke-dashoffset (getTotalLength) + GSAP; a virtual camera that follows the pen tip\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「一笔画」One-line narrative for a luxury / architecture brand — the whole film is ONE continuous line.\n- Deep midnight ground (#0B1320 or near-black) + a single champagne-gold line (#E9D7A5), constant ~3px, round caps, a softly glowing pen tip that leads the draw.\n- Story (continuous path, the tail of each figure is the start of the next): a seed → sprouts into a sapling → branches become the structural lines of a building → the building outline extends into a skyline/horizon → the horizon line lifts and loops into a monogram logo → LINE-TO-FILL moment (logo fills with gold from its anchor) → thin letter-spaced serif wordmark (e.g. \"ATELIER LINEA\") fades up.\n- Draw speed eases into corners (cubic-bezier(0.65,0,0.35,1)); the virtual camera drifts/pushes to keep the tip in frame, then dollies out at the end to reveal the whole drawing composed as a poster; older line segments dim to ~35% as the camera moves on.\nSound: minimal felt piano + soft string swell; a pen-on-paper whisper whose loudness follows tip speed; delicate chime on the fill."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "以单色细线为唯一造型语言，线条自我描绘（draw-on）、延伸、转折并变形为下一个图形，一笔连成整支片子。极简高级感强，常见于奢侈品、金融、建筑类品牌片和 logo 动画。\n视觉特征 等宽细线, 单色或双色, 大量负空间, 线条连续生长, 线面转换瞬间\n关键技法 核心是 stroke 描绘：AE 用 Trim Paths 0→100%，Web 端用 SVG stroke-dasharray/dashoffset\n线宽全片恒定（2~4px），转角处让描绘速度略减速，用 easeInOut cubic-bezier(0.65,0,0.35,1)\n'一笔画'叙事：上一图形的尾线即下一图形的起线，路径提前在 Illustrator 里连好\n线转面：描完轮廓后用同路径的 fill 从锚点扩展填充\n配合微小的端点圆头（round cap）与路径抖动可增加手绘感"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 2,
+    "film": "ATELIER LINEA「一笔画 One Line」",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": [
+     "#0B1320",
+     "#E9D7A5"
+    ]
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: SVG paths + stroke-dashoffset (getTotalLength) + GSAP; a virtual camera that follows the pen tip (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/02-line-art.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "isometric",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Isometric / 2.5D",
+   "name_alt": "等轴 2.5D",
+   "category": "Motion graphics",
+   "line": "ISOPOLIS「让城市自己生长」",
+   "uses": [],
+   "summary": "以 30° 等轴测投影展示微缩世界：小城市、办公室切片、数据机房，无灭点、处处等比。信息密度高又不失可爱，是科技公司架构图动画和 App 功能演示的标配。School of Motion 有专门的 isometric mograph 教程系列。 视觉特征 30°等角投影, 无透视灭点, 微缩场景, 楼房生长动画, 平行滑轨式运镜 关键技法 SSR 公式造等轴面：Scale 纵向 86.6% → Shear/skew ±30° → Rotate ∓30°，三个面分别做后拼合 假 3D 靠图层排序：Z 序=画面 y 坐标，物体沿等轴网格移动时保持 2:1 像素斜率 楼房'生长'：底面先落位，立面…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: Three.js OrthographicCamera at true isometric angle + soft shadows + AO (three/addons postprocessing), or SVG with SSR matrix faces\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「微缩智慧城」An isometric miniature city / data campus that builds itself — the School-of-Motion isometric mograph showpiece.\n- True isometric camera (orthographic, 35.264° elevation, 45° azimuth), no perspective, pastel studio palette (lavender ground, mint, peach, sky blue, white) with soft shadows + ambient occlusion so it reads like a premium Dribbble/Behance hero.\n- 0–2s: ground tiles flip/drop in as a wave from the centre (tiny bounce each);\n- 2–5s: buildings GROW — base lands, walls scaleY from 0 with overshoot, roof caps 2–3 frames later; trees pop; windows light up in sequence;\n- 5–8s: life — cars loop along roads, a little train, drones carrying packets, glowing data streams pulse between buildings, a wind turbine spins; camera does parallel slides (no rotation) with 1 : 0.8 : 0.6 parallax layers (foreground clouds);\n- 8–10s: pull back to reveal the whole island floating in a pastel void; title card set ON the isometric plane (text skewed into iso space) e.g. \"SMART CITY OS\".\nSound: bright plucky tech melody (FM marimba/pluck), soft clicks/pops for every tile/building landing, airy whoosh on the pull-back."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "以 30° 等轴测投影展示微缩世界：小城市、办公室切片、数据机房，无灭点、处处等比。信息密度高又不失可爱，是科技公司架构图动画和 App 功能演示的标配。School of Motion 有专门的 isometric mograph 教程系列。\n视觉特征 30°等角投影, 无透视灭点, 微缩场景, 楼房生长动画, 平行滑轨式运镜\n关键技法 SSR 公式造等轴面：Scale 纵向 86.6% → Shear/skew ±30° → Rotate ∓30°，三个面分别做后拼合\n假 3D 靠图层排序：Z 序=画面 y 坐标，物体沿等轴网格移动时保持 2:1 像素斜率\n楼房'生长'：底面先落位，立面用 scaleY 从 0 拉起 + 顶面延迟 2~3 帧盖上\n运镜是整组平移（无旋转），配合前中后景 1:0.8:0.6 的视差速度\nAE 里可用真 3D 图层+正交相机（无透视）偷懒，Motion Design School 的 Isometric Camera 技巧即此路"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 3,
+    "film": "ISOPOLIS「让城市自己生长」",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: Three.js OrthographicCamera at true isometric angle + soft shadows + AO (three/addons postprocessing), or SVG with SSR matrix faces (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/03-isometric.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "3d-render",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "3D Render / CGI Motion Design",
+   "name_alt": "3D 渲染系（C4D/Blender 质感）",
+   "category": "Motion graphics",
+   "line": "soft.「Soft Landing 柔软着陆」",
+   "uses": [],
+   "summary": "Cinema 4D + Redshift/Octane 或 Blender 渲染的实体质感动画：软胶、玻璃、金属、布料，配合克隆阵列和物理模拟。是高端产品片（手机、饮料、球鞋）和品牌 ident 的主流，Maxon 官方 Demo Reel 就是该风格的年度风向标。 视觉特征 PBR真实材质, 浅景深, 柔和棚拍布光, 克隆器阵列, 软体碰撞, 糖果色软胶质感 关键技法 MoGraph 核心：Cloner 克隆器 + Random/Plain Effector 做群体波浪式动画 质感三件套：SSS 次表面散射（软胶感）+ AO + HDRI 三点布光 运动多用长尾 ease：位移曲线前 20…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 24 fps, exactly 10.000 s (240 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "Blender 5.1.2 CLI (bpy script → Cycles on Metal GPU with OIDN denoise, or EEVEE if it holds quality) → PNG sequence → ffmpeg; optional HTML overlay pass for typography\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「Soft & Satisfying」The C4D/Octane pastel product-ident look (Maxon demo-reel vibe): soft candy materials, cloner arrays, physics-feel motion.\n- Pastel studio: infinite cyc backdrop, big soft area lights + HDRI (see /assets/hdri), shallow DOF (f/1.8 feel), 24 fps, real motion blur.\n- A MoGraph-style cloner field (geometry-nodes grid of glossy rounded pills/spheres) ripples with an effector wave; a hero object — inflated/bevelled 3D wordmark (e.g. \"SOFT\" or an invented brand) or a glossy jelly logo — drops in, squash-and-stretch jiggle (damped spring), collides with and displaces the cloner field.\n- Material trio: SSS gummy (candy pink / peach), glossy plastic (cream / lilac), frosted glass or chrome accent — with AO, soft reflections, subtle subsurface glow.\n- Camera: long-tail ease (80% of the move in the first 20%), ends on a clean hero composition held ~1s.\nSound: ASMR-satisfying soft thuds, squishes, bubbly pops, airy cinematic pad; hits frame-synced to impacts."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "Cinema 4D + Redshift/Octane 或 Blender 渲染的实体质感动画：软胶、玻璃、金属、布料，配合克隆阵列和物理模拟。是高端产品片（手机、饮料、球鞋）和品牌 ident 的主流，Maxon 官方 Demo Reel 就是该风格的年度风向标。\n视觉特征 PBR真实材质, 浅景深, 柔和棚拍布光, 克隆器阵列, 软体碰撞, 糖果色软胶质感\n关键技法 MoGraph 核心：Cloner 克隆器 + Random/Plain Effector 做群体波浪式动画\n质感三件套：SSS 次表面散射（软胶感）+ AO + HDRI 三点布光\n运动多用长尾 ease：位移曲线前 20% 完成 80% 路程，收尾极慢，配 motion blur\n24/25fps 电影帧率 + 浅景深（f/1.8 感）区别于 2D 系的 30fps 利落感\n常见结构：产品为轴心，粒子/流体/布料围绕它做物理模拟编排"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 4,
+    "film": "soft.「Soft Landing 柔软着陆」",
+    "size": "1920×1080",
+    "fps": 24,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "Blender 5.1.2 CLI (bpy script → Cycles on Metal GPU with OIDN denoise, or EEVEE if it holds quality) → PNG sequence → ffmpeg; optional HTML overlay pass for typography (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/04-3d-render.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "cel-boil",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Cel Animation / Frame-by-Frame & Line Boil",
+   "name_alt": "逐帧手绘 / 线条沸腾",
+   "category": "Motion graphics",
+   "line": "手作 HAND MADE",
+   "uses": [],
+   "summary": "手绘逐帧或在矢量动画上叠加逐帧质感，标志性特征是 line boil——线条每隔几帧轻微抖动，仿佛画面在'呼吸'。Giant Ant、Buck 等工作室大量使用 cel 元素（烟、水花、速度线）点缀主动画，反数字精致感的核心手段。 视觉特征 线条持续微抖(boil), 一拍二/一拍三节奏, smear拖影帧, 手绘烟火水花点缀, 纸纹底 关键技法 打帧节奏：24fps 下'一拍二'（实际12fps）为主，快动作切'一拍一'，静止镜头'一拍三' line boil 伪造法：AE 用 Turbulent Displace（数量2~5、大小50）+ 每 2 帧随机化 evolution + Pos…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 24 fps, exactly 10.000 s (240 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML Canvas2D: custom variable-width brush renderer (centreline + pressure → outline polygon), boil = 3–4 jitter variants cycled every 2 frames; paper texture multiply\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「手作魔法」Hand-made frame-by-frame magic, Buck/Giant-Ant hybrid (clean shapes + hand-drawn cel FX), animated on 2s at 24 fps.\n- Warm paper ground; ink linework that BOILS (lines redrawn with slight variation every 2 frames); fills slightly off-register like hand colouring.\n- Story: a matchstick strikes (SMEAR frame, on 1s for the fast action) → a flame spirit character jumps out, anticipation + squash, dances (on 2s) → it bursts into cel FX: smoke puffs curling, sparks, star bursts, speed lines → the FX re-form into hand-lettered title (e.g. \"HAND MADE\" or 手作) that keeps boiling on a 1s hold (on 3s for the hold).\n- Palette 3–4 colours: ink black, tomato red, sunny yellow, cream paper; paper grain multiply 10–15%.\nSound: playful jazzy pizzicato/xylophone bed + cartoon SFX: strike, fwoosh, pop, poof, sparkle — synced to the frame."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "手绘逐帧或在矢量动画上叠加逐帧质感，标志性特征是 line boil——线条每隔几帧轻微抖动，仿佛画面在'呼吸'。Giant Ant、Buck 等工作室大量使用 cel 元素（烟、水花、速度线）点缀主动画，反数字精致感的核心手段。\n视觉特征 线条持续微抖(boil), 一拍二/一拍三节奏, smear拖影帧, 手绘烟火水花点缀, 纸纹底\n关键技法 打帧节奏：24fps 下'一拍二'（实际12fps）为主，快动作切'一拍一'，静止镜头'一拍三'\nline boil 伪造法：AE 用 Turbulent Displace（数量2~5、大小50）+ 每 2 帧随机化 evolution + Posterize Time 12fps；真 boil 则画 3~4 张微差线稿循环\nsmear frame：快速位移的中间帧把物体拉长 150%~300% 只保留 1 帧\ncel FX 点缀层：烟/水花/闪电用纯手绘逐帧叠在矢量主体上（Buck 式 hybrid）\n整体叠纸纹（multiply 10~15%）统一手作气质"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 5,
+    "film": "手作 HAND MADE",
+    "size": "1920×1080",
+    "fps": 24,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML Canvas2D: custom variable-width brush renderer (centreline + pressure → outline polygon), boil = 3–4 jitter variants cycled every 2 frames; paper texture multiply (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/05-cel-boil.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "collage",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Collage / Cutout Animation",
+   "name_alt": "拼贴剪贴",
+   "category": "Motion graphics",
+   "line": "NOGGIN 脑洞季刊「脑洞大开 The Mind Is a Collage」",
+   "uses": [],
+   "summary": "把老照片、报纸、手撕纸片剪出来重新拼装的复古超现实风格，源头是 Monty Python 和苏联构成主义海报。人物头身比例失衡、嘴巴单独开合、半调网点纹理是标志。近年与'杂志风'合流，成为音乐类、街头潮流类短视频的高频风格。 视觉特征 照片剪影白描边, 半调网点, 报纸纹理, 比例失衡的超现实拼装, 定格式抽帧运动 关键技法 素材处理：人物/物件抠图后加 2~4px 白描边（剪刀剪出来的感觉）+ 半调 halftone 滤镜 关节动画：锚点设在肩/肘/颌，做 puppet 式分段旋转，嘴巴用两三张替换帧开合 刻意降帧：主体运动 12fps 甚至 6fps（stop-motion 感），位置加…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: DOM/Canvas with PNG cutouts from /assets/images (rembg), SVG/CSS white-edge + halftone filters; stepped 12 fps (render 30 fps, hold motion on 12 fps grid)\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「脑洞拼贴」Surreal Dada/Monty-Python cutout collage in a modern editorial magazine finish.\n- Newsprint/kraft paper ground; a public-domain Victorian portrait cutout with rough white scissor edge + halftone; the top of the head FLIPS OPEN like a lid (Terry Gilliam homage) revealing deep space (NASA PD imagery) from which flowers, birds, planets, pointing hands and a vintage rocket spill out.\n- Jaw/mouth on a separate cut flaps with the sound; hands slap elements onto the page; torn-paper strips; bold constructivist red/black diagonal typography (e.g. \"THE MIND IS A COLLAGE\" / 脑洞大开).\n- Motion on 12 fps (even 6 fps for some holds) with ±2px hand-placement jitter; paper-flip / torn-paper transition to the end card.\nSound: vinyl crackle, jazzy boom-bap bed, paper rustles, scissors snips, slaps and a comic 'pop' when the lid opens."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "把老照片、报纸、手撕纸片剪出来重新拼装的复古超现实风格，源头是 Monty Python 和苏联构成主义海报。人物头身比例失衡、嘴巴单独开合、半调网点纹理是标志。近年与'杂志风'合流，成为音乐类、街头潮流类短视频的高频风格。\n视觉特征 照片剪影白描边, 半调网点, 报纸纹理, 比例失衡的超现实拼装, 定格式抽帧运动\n关键技法 素材处理：人物/物件抠图后加 2~4px 白描边（剪刀剪出来的感觉）+ 半调 halftone 滤镜\n关节动画：锚点设在肩/肘/颌，做 puppet 式分段旋转，嘴巴用两三张替换帧开合\n刻意降帧：主体运动 12fps 甚至 6fps（stop-motion 感），位置加 ±2px 随机抖动模拟手摆\n图层结构：背景纸纹 → 大形色块 → 照片剪影 → 手写涂鸦/胶带贴纸 → 颗粒调整层\n转场用'手把元素拍上来'或整页翻纸"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 6,
+    "film": "NOGGIN 脑洞季刊「脑洞大开 The Mind Is a Collage」",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: DOM/Canvas with PNG cutouts from /assets/images (rembg), SVG/CSS white-edge + halftone filters; stepped 12 fps (render 30 fps, hold motion on 12 fps grid) (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/06-collage.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "liquid",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Liquid Motion",
+   "name_alt": "液态流动",
+   "category": "Motion graphics",
+   "line": "drop.「万物始于一滴」",
+   "uses": [],
+   "summary": "图形像液体一样流动、拉丝、滴落、融合：转场是一泼颜料漫过屏幕，logo 从一滴液体聚合成形。有机、解压、高能量，广泛用于音乐视频、食品饮料广告和转场包装。 视觉特征 波浪边缘转场, 拉丝与滴落, metaball融合, 次级液滴跟随, 有机曲线永不直线 关键技法 液态转场：遮罩路径手 K 波浪形前沿扫过画面，前沿加 3~5 个错相位的凸起 metaball 融合的通用伪造法：高斯模糊(20px+) → 提高对比度阈值（AE 用 Levels 收紧、Web 用 feColorMatrix alpha 阈值），两球靠近即自动'粘连' 拉丝-断裂-回弹：主形离开时留一条细颈，断裂瞬间两端各回弹 2…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML WebGL2 fragment shader: 2D SDF metaballs (smooth-min) + fake 3D lighting from field gradient normals, text SDF for the logo\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「液态创世」Liquid logo genesis — glossy, organic, high energy.\n- Deep plum ground; glossy candy liquid (hot orange → pink → violet) with specular highlights and fresnel rim so it reads like thick 3D liquid, not flat blobs.\n- 0–2s: droplets fall and splash with squash on landing; 2–4s: blobs merge via metaball fusion — stretched necks, snap, 2–3 frame rebound; secondary droplets follow 2–3 frames late;\n- 4–6s: a big liquid wave floods across the frame as a transition (wavy front with 3–5 phase-offset bulges);\n- 6–8.5s: the liquid coalesces into a wordmark (e.g. \"FLUX\") — text SDF blended with the metaballs;\n- 8.5–10s: a last drip falls from the logo and ripples; hold.\nEase: flung, never uniform (cubic-bezier(0.22,1,0.36,1)).\nSound: bubbly gloops, pour, splash, drip, deep bass swell under a glossy synth bed."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "图形像液体一样流动、拉丝、滴落、融合：转场是一泼颜料漫过屏幕，logo 从一滴液体聚合成形。有机、解压、高能量，广泛用于音乐视频、食品饮料广告和转场包装。\n视觉特征 波浪边缘转场, 拉丝与滴落, metaball融合, 次级液滴跟随, 有机曲线永不直线\n关键技法 液态转场：遮罩路径手 K 波浪形前沿扫过画面，前沿加 3~5 个错相位的凸起\nmetaball 融合的通用伪造法：高斯模糊(20px+) → 提高对比度阈值（AE 用 Levels 收紧、Web 用 feColorMatrix alpha 阈值），两球靠近即自动'粘连'\n拉丝-断裂-回弹：主形离开时留一条细颈，断裂瞬间两端各回弹 2~3 帧\n缓动前快后慢 cubic-bezier(0.22,1,0.36,1)，液体只会被'甩'出去不会匀速\n次级液滴延迟主体 2~3 帧跟随（follow-through），落地做扁平化 squash"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 7,
+    "film": "drop.「万物始于一滴」",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML WebGL2 fragment shader: 2D SDF metaballs (smooth-min) + fake 3D lighting from field gradient normals, text SDF for the logo (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/07-liquid.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "morph",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Morphing / Shape Morph",
+   "name_alt": "形变动画",
+   "category": "Motion graphics",
+   "line": "一形万象 One Shape, Every Story",
+   "uses": [],
+   "summary": "一个图形丝滑连续地变成另一个图形：手机变成地图钉、咖啡杯变成落日。是图形叙事（visual storytelling）的核心语法，苹果发布会动效和高端 explainer 里最见功力的部分。 视觉特征 轮廓连续过渡无跳变, 中介形状桥接, 形变伴随位移旋转, 变形瞬间的挤压拉伸 关键技法 路径对齐是前提：两形状顶点数一致、首顶点方位对应（AE 里重设 first vertex），否则会打结 复杂 A→B 不直接变：先收敛为中介简形（圆/胶囊）再展开，'A→圆→B'两段各 8~12 帧 形变全程叠加 10~15% squash & stretch 与轻微旋转，掩盖插值的机械感 速度曲线中段最快…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: SVG + flubber or GSAP MorphSVGPlugin (tune shapeIndex), color-field wipes\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「万物相连」Apple-keynote-grade morph chain: one hero shape continuously becomes 6–8 meaningful icons, on the beat.\n- Chain example: coffee cup → (circle) → sun → sunset over sea → gull → paper plane → location pin → heart → invented brand logo \"morphe\" with wordmark.\n- Every A→B goes through a simple intermediate (circle/capsule) with rotation and 10–15% squash&stretch; sub-parts morph in sync (steam → sun rays → waves).\n- Background color fields change with each morph (clean color-block wipes); ease cubic-bezier(0.7,0,0.3,1), 3-frame cushions at start/end; no knotting/tangling ever (check every morph mid-point stills).\nSound: rhythmic plucky arpeggio; a pitched whoosh per morph landing on the beat."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "一个图形丝滑连续地变成另一个图形：手机变成地图钉、咖啡杯变成落日。是图形叙事（visual storytelling）的核心语法，苹果发布会动效和高端 explainer 里最见功力的部分。\n视觉特征 轮廓连续过渡无跳变, 中介形状桥接, 形变伴随位移旋转, 变形瞬间的挤压拉伸\n关键技法 路径对齐是前提：两形状顶点数一致、首顶点方位对应（AE 里重设 first vertex），否则会打结\n复杂 A→B 不直接变：先收敛为中介简形（圆/胶囊）再展开，'A→圆→B'两段各 8~12 帧\n形变全程叠加 10~15% squash & stretch 与轻微旋转，掩盖插值的机械感\n速度曲线中段最快 cubic-bezier(0.7,0,0.3,1)：起止各留 3 帧缓冲\nWeb 端用 flubber/polymorph 库做最优顶点匹配插值，效果远好于朴素 SMIL"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 8,
+    "film": "一形万象 One Shape, Every Story",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: SVG + flubber or GSAP MorphSVGPlugin (tune shapeIndex), color-field wipes (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/08-morph.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "bauhaus",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Geometric / Bauhaus Motion",
+   "name_alt": "几何构成 / 包豪斯",
+   "category": "Motion graphics",
+   "line": "KONSTRUKTION",
+   "uses": [],
+   "summary": "圆、三角、矩形在严格网格上做精确的平移、旋转、缩放，三原色+黑白的限定色板，机械理性的秩序美。源自包豪斯与瑞士国际主义平面传统（Adobe 曾与 Bauhaus 档案馆合作 Hidden Treasures 项目），也是动态海报（kinetic poster）的主流语言，与音乐节拍天然合拍。 视觉特征 基础几何形, 红黄蓝黑限定色, 严格网格对齐, 旋转以几何中心为轴, 节拍驱动的模块化运动 关键技法 一切运动锚定网格：位移距离=网格模数整数倍，落点必在网格线上 缓动克制：easeInOutQuad 或干脆匀速，禁用 overshoot——机械感是特征不是缺陷 节拍驱动：每个几何元素在节拍点…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: SVG/Canvas + GSAP on a strict modular grid, beat grid at 120 BPM\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「包豪斯动态海报」Bauhaus 1919 kinetic poster — mechanical, rational, musical.\n- Cream paper (#F1E9DA), primaries red #E03C31, yellow #F2B705, blue #1E4FA3, black #111; strict modular grid (e.g. 240px modules); every move is an integer number of modules; every landing on a grid line.\n- 120 BPM (0.5 s/beat): each beat a module acts — quarter circles rotate 90° about a corner pivot, semicircles slide one module, triangles flip, squares split; rotation pivots alternate (own centre / corner / frame centre).\n- 0–2s grid lines draw & the first red circle lands; 2–6s the composition assembles into a Kandinsky/Bauhaus poster; 6–8s phase-shifted cascade wave across the grid on the drop; 8–10s freeze into a perfect poster with Swiss typography: \"BAUHAUS\" set vertically in heavy geometric sans + small caps \"FORM · FARBE · FUNKTION\".\n- Easing: power2.inOut or linear — NO overshoot; subtle paper tooth + slight print misregistration allowed.\nSound: minimal techno/click — each flip = a pitched click/blip, kick on quarters."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "圆、三角、矩形在严格网格上做精确的平移、旋转、缩放，三原色+黑白的限定色板，机械理性的秩序美。源自包豪斯与瑞士国际主义平面传统（Adobe 曾与 Bauhaus 档案馆合作 Hidden Treasures 项目），也是动态海报（kinetic poster）的主流语言，与音乐节拍天然合拍。\n视觉特征 基础几何形, 红黄蓝黑限定色, 严格网格对齐, 旋转以几何中心为轴, 节拍驱动的模块化运动\n关键技法 一切运动锚定网格：位移距离=网格模数整数倍，落点必在网格线上\n缓动克制：easeInOutQuad 或干脆匀速，禁用 overshoot——机械感是特征不是缺陷\n节拍驱动：每个几何元素在节拍点瞬时出现/翻转，一拍一个动作，类似我们已做的卡点逻辑\n旋转轴心玩法：绕自身中心、绕边缘顶点、绕画面中心三种交替制造韵律\n生成式变体：Processing/p5.js 用三角函数相位差批量驱动几何阵列（国内动态海报圈主流做法）"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 9,
+    "film": "KONSTRUKTION",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": [
+     "#F1E9DA",
+     "#E03C31",
+     "#F2B705",
+     "#1E4FA3",
+     "#111111"
+    ]
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: SVG/Canvas + GSAP on a strict modular grid, beat grid at 120 BPM (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/09-bauhaus.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "synthwave",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Retro: 80s Synthwave / VHS / Y2K",
+   "name_alt": "复古系（80s Synthwave / Y2K 千禧）",
+   "category": "Motion graphics",
+   "line": "NEON DRIVE",
+   "uses": [],
+   "summary": "对特定年代媒介美学的整体引用：80s synthwave 是霓虹网格+日落渐变+镀铬字；VHS 是扫描线+色偏+磁带噪声；Y2K 千禧风是液态镀铬金属、酸性绿紫、拟物系统窗口和低保真 3D。近两年 Y2K 在音乐视频与潮流品牌片中强势回潮，B站模板市场大量供应'酸性镀铬'素材。 视觉特征 霓虹辉光, 透视网格地平线, 扫描线与RGB色偏, 镀铬金属字, 酸性配色, 拟物窗口UI 关键技法 synthwave 三件套：透视网格滚动（一点透视 grid + 纵向位移循环）、日落多层渐变球、双层辉光（内层紧 4px 高亮+外层散 30px 低透明） VHS 做旧链：RGB split（红蓝通道各偏…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML WebGL (perspective grid, sun, mountains shader) + canvas chrome text + CSS/SVG glow; VHS pass\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「OUTRUN 1986」The quintessential 80s synthwave title sequence.\n- Starry night, striped retro sun (horizontal band cut-outs, magenta→orange→yellow), wireframe mountains, palm silhouettes, neon magenta/cyan perspective grid rushing toward the camera.\n- 0–1s: VHS tracking noise + 'PLAY ▶' OSD; 1–4s: camera flies low over the grid, sun rises; 4–6s: CHROME title (e.g. \"NEON DRIVE\", multi-stop metallic gradient, bevel highlight, star glint sweeping across) SLAMS in with a lens flare; 6–7.5s: pink neon script word (e.g. \"Midnight\") writes on like a neon tube with flicker; 7.5–10s: sustained ride, subtle VHS chroma bleed/scanlines, end on the hero frame.\n- Double glow (tight ~4px + wide ~30px), deep purple sky gradient.\nSound: synthwave — gated-reverb snare, arpeggiated saw bass, lush pads, big chord + crash on the title slam."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "对特定年代媒介美学的整体引用：80s synthwave 是霓虹网格+日落渐变+镀铬字；VHS 是扫描线+色偏+磁带噪声；Y2K 千禧风是液态镀铬金属、酸性绿紫、拟物系统窗口和低保真 3D。近两年 Y2K 在音乐视频与潮流品牌片中强势回潮，B站模板市场大量供应'酸性镀铬'素材。\n视觉特征 霓虹辉光, 透视网格地平线, 扫描线与RGB色偏, 镀铬金属字, 酸性配色, 拟物窗口UI\n关键技法 synthwave 三件套：透视网格滚动（一点透视 grid + 纵向位移循环）、日落多层渐变球、双层辉光（内层紧 4px 高亮+外层散 30px 低透明）\nVHS 做旧链：RGB split（红蓝通道各偏 1~2px）→ 扫描线（2px 间隔 10% 黑条）→ 波浪扭曲抖动（每秒 1~2 次随机 glitch 抽帧）→ 4:3 圆角遮罩\nY2K 镀铬字：极高对比的多段金属渐变 + bevel 高光 + 环境映射感反光，配 lens flare\nY2K 运动语言：弹窗式 pop 出现、光标点击、窗口拖拽，界面拟物即动画叙事\n帧率故意不稳：关键段落抽帧到 15fps 或倒放 2 帧制造磁带卡顿"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 10,
+    "film": "NEON DRIVE",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML WebGL (perspective grid, sun, mountains shader) + canvas chrome text + CSS/SVG glow; VHS pass (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/10-synthwave.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "aurora-glass",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Gradient Blur (Aurora) & Glassmorphism",
+   "name_alt": "弥散渐变 / 玻璃拟态",
+   "category": "Motion graphics",
+   "line": "Aurora — think in light「思考，自有光」",
+   "uses": [],
+   "summary": "大面积高斯模糊的彩色光斑（aurora/mesh gradient）缓慢漂移作底，磨砂半透明玻璃卡片浮在其上。苹果 iOS 26 Liquid Glass 与各家 AI 产品发布把这一风格推成 2024-2026 科技品牌片的默认视觉，气质是'慢、透、高级'。 视觉特征 大色斑高斯模糊漂移, 磨砂玻璃卡片, 1px高光描边, 邻近色低对比配色, 缓慢呼吸感节奏 关键技法 底层 aurora：3~5 个纯色大圆 blur 80~150px，各自沿贝塞尔路径 20~40 秒漂移循环，彼此 blend 出 mesh gradient 感 玻璃卡片配方：backdrop-filter blur(20…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML WebGL: aurora mesh-gradient shader + glass refraction (SDF lens, chromatic dispersion) + DOM/CSS backdrop-filter glass cards\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「Liquid Glass」2025–26 AI-product-launch aesthetic: slow, translucent, expensive.\n- Deep indigo-black base; 4–5 aurora blobs (violet/blue/cyan/magenta, adjacent hues only) drifting on bezier paths, blending into a mesh gradient, 3–5% noise dithering (no banding).\n- Frosted glass cards (backdrop blur ~30px, 5–10% white fill, 1px 30% white inner highlight, large radius) float in with parallax depth and slight 3D tilt; micro-UI inside (chat bubble, voice waveform, toggles) animates with opacity + 8px rise.\n- WOW: a Liquid-Glass lens (true refraction, chromatic dispersion on the rim, specular edge) glides across and magnifies the aurora and the cards.\n- Title (invented product, e.g. \"Aurora — think in light\") in a light elegant sans; sine/breathing easing everywhere; nothing fast.\nSound: ambient cinematic pad, soft shimmer, very subtle UI ticks."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "大面积高斯模糊的彩色光斑（aurora/mesh gradient）缓慢漂移作底，磨砂半透明玻璃卡片浮在其上。苹果 iOS 26 Liquid Glass 与各家 AI 产品发布把这一风格推成 2024-2026 科技品牌片的默认视觉，气质是'慢、透、高级'。\n视觉特征 大色斑高斯模糊漂移, 磨砂玻璃卡片, 1px高光描边, 邻近色低对比配色, 缓慢呼吸感节奏\n关键技法 底层 aurora：3~5 个纯色大圆 blur 80~150px，各自沿贝塞尔路径 20~40 秒漂移循环，彼此 blend 出 mesh gradient 感\n玻璃卡片配方：backdrop-filter blur(20~40px) + 白色 5~10% 填充 + 1px 白色 30% 内描边 + 大半径圆角\n配色用邻近色 2~3 色（紫蓝青/橙粉红），撞色会脏；暗底亮斑比亮底更出效果\n全局叠 3~5% 噪点防 banding（与颗粒质感技法交叉）\n缓动接近 linear 或 sine 呼吸曲线，一切都慢——快动作会立刻破坏气质；文字入场也只用 opacity+8px 位移"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 12,
+    "film": "Aurora — think in light「思考，自有光」",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML WebGL: aurora mesh-gradient shader + glass refraction (SDF lens, chromatic dispersion) + DOM/CSS backdrop-filter glass cards (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/12-aurora-glass.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "hanazi",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Variety Show Kinetic Captions (Hanazi)",
+   "name_alt": "综艺花字",
+   "category": "Motion graphics",
+   "line": "喵呜日记 EP.07「今日份快乐」",
+   "uses": [],
+   "summary": "源自电视综艺后期的情绪化装饰字幕：多层描边圆体字带弹性入场，跟随人物情绪变色变形，配打击音效。现已下沉为 vlog、萌宠、访谈、搞笑二创的通用包装语言，剪映内置大量花字模板，B 站也有免费花字样式包流通。 视觉特征 多层描边圆体/胖体字, 高饱和撞色+白边+投影, 弹性 pop 入场, 配合音效出现, 手绘装饰符号（爆炸框/汗滴/闪光） 关键技法 字体三层结构：填充色+粗白描边+彩色外描边/投影（CSS 可用多层 text-shadow 或 SVG stroke 模拟） 入场 overshoot：scale 0→1.15→1.0（约 8 帧），或逐字弹跳错帧 2 帧 情绪匹配：吐槽用歪斜手写…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1080×1920, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML DOM/SVG: multi-layer text-stroke 花字 components + spring pops + SVG burst/sweat/sparkle decorations over a pet-vlog footage layer (CC0 photos with Ken Burns + handheld shake + punch-ins)\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「萌宠综艺感 vlog」综艺花字 in its native habitat — reactive captions over a pet vlog.\n- Base layer that feels like footage: CC0/PD cat or dog photos from /assets/images with slow Ken Burns, subtle handheld shake, snap punch-in zooms on 'moments' (you may also build a stylised scene if photos look weak).\n- 花字 moments synced to beats: title \"今日份快乐\" (fill gradient + thick white stroke + coloured outer stroke + drop shadow, rounded heavy font), \"？？？\" bouncing question marks, \"震惊!!\" inside a radial 爆炸框 with speed lines + 放射线 flash, \"（小声）\" small aside, \"绝绝子\" with sparkles, sweat drops, a \"猫主子认证\" stamp.\n- Motion: pop 0 → 1.15 → 1.0 in ~8 frames, per-character bounce with 2-frame stagger, slight rotation, gentle wiggle while holding; appear 2–3 frames after the audio/visual moment. High-saturation pink/yellow/cyan with white strokes.\nSound: bouncy variety-show bed (pizzicato/bass/claps) + boing, pop, ding, slide whistle, record scratch on '？？？'."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "源自电视综艺后期的情绪化装饰字幕：多层描边圆体字带弹性入场，跟随人物情绪变色变形，配打击音效。现已下沉为 vlog、萌宠、访谈、搞笑二创的通用包装语言，剪映内置大量花字模板，B 站也有免费花字样式包流通。\n视觉特征 多层描边圆体/胖体字, 高饱和撞色+白边+投影, 弹性 pop 入场, 配合音效出现, 手绘装饰符号（爆炸框/汗滴/闪光）\n关键技法 字体三层结构：填充色+粗白描边+彩色外描边/投影（CSS 可用多层 text-shadow 或 SVG stroke 模拟）\n入场 overshoot：scale 0→1.15→1.0（约 8 帧），或逐字弹跳错帧 2 帧\n情绪匹配：吐槽用歪斜手写体、惊讶用放射线爆炸框、尴尬用汗滴符号\n出现时机对齐笑点/音效，比语音晚 2~3 帧更自然\n长时间驻留花字加轻微 wiggle 保持活性"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 18,
+    "film": "喵呜日记 EP.07「今日份快乐」",
+    "size": "1080×1920",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML DOM/SVG: multi-layer text-stroke 花字 components + spring pops + SVG burst/sweat/sparkle decorations over a pet-vlog footage layer (CC0 photos with Ken Burns + handheld shake + punch-ins) (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/18-hanazi.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "paperclip",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Bold-outline Sticker Explainer MG (PaperClip / Lin Chao style)",
+   "name_alt": "粗描边贴纸人科普 MG（回形针/林超风格）",
+   "category": "Motion graphics",
+   "line": "一部手机里，藏着多少种元素？ 70/118",
+   "uses": [],
+   "summary": "回形针 PaperClip 带火的知识区标准包装：实拍图片抠图后加粗白描边变成『贴纸』，与扁平图标、数据图表一起铺在大画布上，镜头平移缩放串联信息点；林超等财经/跨学科 UP 主将其与手写板书、公式卡片结合。至今仍是硬核科普、财经知识区、企业宣传片的主流范式。 视觉特征 照片贴纸化（粗白描边）, 蓝灰/米白冷静底色, 扁平图标+精确数据图表, 大画布镜头平移缩放, 信息密度极高的节拍化叙事 关键技法 素材照片抠图 + 8~12px 白描边统一质感，消除图片来源差异 超宽大画布布局，摄像机层做平移/缩放（ease 长曲线），一镜串多个信息点 图表动效：柱状图生长、数字滚动计数、路径描边生长 解…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: one huge canvas (e.g. 6000×3000 px) with a camera transform (long eases), SVG charts, photo stickers with 10px white outline\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「回形针式硬核科普」The PaperClip-style knowledge-video look: sticker-ized photos + flat icons + precise charts on a giant canvas with continuous camera moves.\n- Topic (write your own tight copy), e.g. 「一部手机里，藏着多少种元素？」.\n- Calm blue-grey/off-white canvas (#E9EEF2 + slate), 2–3 colours + one accent (e.g. #FF5A36); equal-weight sans typography, strict alignment.\n- One continuous camera path: sticker phone photo (white 10px outline, soft shadow) → exploded-parts stickers with leader-line labels → periodic-table grid where element tiles light up → bar chart grows with count-up \"70+\" → world map with supply routes drawing → pull out to a bold typographic title card in the 回形针 manner (heavy sans, huge number, small caption).\n- Every beat introduces a new visual element; charts are exact (bars to scale, numbers consistent).\nSound: clean tech-explainer bed, UI clicks, ticking during count-up, soft whoosh on camera moves."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "回形针 PaperClip 带火的知识区标准包装：实拍图片抠图后加粗白描边变成『贴纸』，与扁平图标、数据图表一起铺在大画布上，镜头平移缩放串联信息点；林超等财经/跨学科 UP 主将其与手写板书、公式卡片结合。至今仍是硬核科普、财经知识区、企业宣传片的主流范式。\n视觉特征 照片贴纸化（粗白描边）, 蓝灰/米白冷静底色, 扁平图标+精确数据图表, 大画布镜头平移缩放, 信息密度极高的节拍化叙事\n关键技法 素材照片抠图 + 8~12px 白描边统一质感，消除图片来源差异\n超宽大画布布局，摄像机层做平移/缩放（ease 长曲线），一镜串多个信息点\n图表动效：柱状图生长、数字滚动计数、路径描边生长\n解说词逐句驱动画面元素入场，语速快、每句必有新视觉元素\n克制配色（2~3 色）+ 等线字体，保持『严肃感』"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 19,
+    "film": "一部手机里，藏着多少种元素？ 70/118",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": [
+     "#E9EEF2",
+     "#FF5A36"
+    ]
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: one huge canvas (e.g. 6000×3000 px) with a camera transform (long eases), SVG charts, photo stickers with 10px white outline (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/19-paperclip.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "pixel",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Pixel Art / 8-bit",
+   "name_alt": "像素风",
+   "category": "Motion graphics",
+   "line": "PIXEL QUEST 像素冒险",
+   "uses": [],
+   "summary": "低分辨率大颗粒像素 + 有限色板 + 低帧率精灵动画的复古游戏美学，在 B 站游戏区（MC、泰拉瑞亚、独立游戏）、8-bit 音乐 MV 和品牌怀旧营销中常见；Aseprite 教程在 B 站有 10 万+ 播放的稳定学习生态。 视觉特征 大颗粒像素与硬边缘, 有限色板(8~32色), 8~12fps 精灵帧动画, 抖动渐变 dithering, CRT 扫描线滤镜 关键技法 Aseprite 绘制精灵表（sprite sheet）+ 序列帧循环（走路 6~8 帧、呼吸 2~4 帧） 缩放必须最近邻插值（CSS image-rendering: pixelated），杜绝抗锯齿糊边 动画用…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML Canvas at 320×180 internal resolution, integer-scaled ×6 with nearest-neighbour; sprites authored as pixel arrays in code; limited palette\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「像素冒险 PIXEL QUEST」A retro side-scroller title/attract sequence.\n- Internal 320×180, ×6 nearest-neighbour; limited palette (PICO-8-like 16–32 colours) with dithered sky gradient; 3–4 parallax layers (sky, far mountains, mid forest/city, near ground tiles) moving by whole pixels.\n- Hero sprite (hand-authored 16×16–24×24, 6–8 frame run cycle at ~10–12 fps) runs, jumps, collects coins (sparkle), bops a slime; the palette shifts day → sunset; a treasure chest opens with a light burst.\n- Dialogue box with pixel CJK font typing 「欢迎来到像素世界！」; chunky pixel logo \"PIXEL QUEST\" drops in with shine sweep; optional CRT pass (scanlines, slight barrel, phosphor glow) that doesn't blur pixels into mush.\n- Strictly: nearest-neighbour, integer pixel positions, stepped timing (no smooth easing on sprites).\nSound: chiptune (pulse lead, triangle bass, noise drums) + jump/coin/chest SFX."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "低分辨率大颗粒像素 + 有限色板 + 低帧率精灵动画的复古游戏美学，在 B 站游戏区（MC、泰拉瑞亚、独立游戏）、8-bit 音乐 MV 和品牌怀旧营销中常见；Aseprite 教程在 B 站有 10 万+ 播放的稳定学习生态。\n视觉特征 大颗粒像素与硬边缘, 有限色板(8~32色), 8~12fps 精灵帧动画, 抖动渐变 dithering, CRT 扫描线滤镜\n关键技法 Aseprite 绘制精灵表（sprite sheet）+ 序列帧循环（走路 6~8 帧、呼吸 2~4 帧）\n缩放必须最近邻插值（CSS image-rendering: pixelated），杜绝抗锯齿糊边\n动画用 steps() 阶梯时序而非平滑缓动，保持逐帧感\n视差卷轴背景：远中近三层不同速度整像素平移\n可选 CRT 后处理：扫描线+桶形畸变+磷光辉光"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 20,
+    "film": "PIXEL QUEST 像素冒险",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": []
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML Canvas at 320×180 internal resolution, integer-scaled ×6 with nearest-neighbour; sprites authored as pixel arrays in code; limited palette (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/20-pixel.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  },
+  {
+   "slug": "hud",
+   "source": "mg-styles-15",
+   "lang": "zh",
+   "name": "Cyberpunk HUD / FUI (Fictional UI)",
+   "name_alt": "赛博朋克 HUD / FUI",
+   "category": "Motion graphics",
+   "line": "隼眼-9",
+   "uses": [],
+   "summary": "模拟科幻电影/游戏界面的抬头显示包装：青橙霓虹线框、目标锁定框、雷达扫描、数据流小字。在科技数码测评、游戏剪辑（赛博朋克2077、EVA 二创）、军事航天科普和 AI 产品演示中作为『科技感』的默认皮肤，B 站 AE HUD 案例教程播放量达 20 万。 视觉特征 青色/橙色霓虹线框, 目标锁定框与十字准星, 雷达/环形扫描 loop, 等宽小字数据流与打字机文字, 六边形网格与辉光 关键技法 线框生长：SVG stroke-dasharray/dashoffset 描边动画，元素按层级错帧展开 环形雷达：conic-gradient 扫描扇区旋转 loop + 目标点闪烁 数字滚动：随机数…",
+   "sections": {
+    "output": {
+     "title": "Output (fixed)",
+     "text": "- 1920×1080, 30 fps, exactly 10.000 s (300 frames), H.264 MP4 with stereo AAC audio (48 kHz), mastered to −14 LUFS\n  integrated, true peak ≤ −1 dBTP. Final file: video.mp4."
+    },
+    "route": {
+     "title": "Suggested technical route",
+     "text": "HTML: SVG/Canvas FUI layers + Three.js wireframe hologram; seeded random data; glow/scanline post pass\n(You may choose a better route if it clearly raises quality; say why.)"
+    },
+    "seed": {
+     "title": "Creative seed",
+     "text": "「目标锁定 TARGET ACQUIRED」Cyberpunk HUD / FUI, film-UI grade (Territory Studio-level density & restraint).\n- Deep teal-black; cyan #00E5FF linework with orange/red #FF6A00 alert state; hex grid, concentric rotating rings with ticks, radar sweep (conic) with blips, data columns (monospace numbers rolling 3–5 frames then settling), typewriter status lines with cursor, sparkline graphs, a central Three.js wireframe hologram (globe or drone) with scanlines.\n- Layered build-up: lines draw on in hierarchical staggered order → data comes alive → a target is found → lock brackets snap 1.4 → 1.0 (fast-out slow-in) → everything flips to alert orange with 'TARGET LOCKED / 目标锁定', coordinates \"N31°14′ E121°29′\".\n- Glow, slight chromatic aberration, scanlines, restrained micro-glitches.\nSound: darksynth pulse + HUD beeps, scan sweeps, ascending lock-on tone, alarm on lock."
+    },
+    "signature": {
+     "title": "Signature features and key techniques",
+     "text": "模拟科幻电影/游戏界面的抬头显示包装：青橙霓虹线框、目标锁定框、雷达扫描、数据流小字。在科技数码测评、游戏剪辑（赛博朋克2077、EVA 二创）、军事航天科普和 AI 产品演示中作为『科技感』的默认皮肤，B 站 AE HUD 案例教程播放量达 20 万。\n视觉特征 青色/橙色霓虹线框, 目标锁定框与十字准星, 雷达/环形扫描 loop, 等宽小字数据流与打字机文字, 六边形网格与辉光\n关键技法 线框生长：SVG stroke-dasharray/dashoffset 描边动画，元素按层级错帧展开\n环形雷达：conic-gradient 扫描扇区旋转 loop + 目标点闪烁\n数字滚动：随机数快速跳变 3~5 帧后落定真实值；文字打字机 + 光标闪烁\n锁定框：四角括号从大到小收缩吸附目标（scale 1.4→1.0 + 快出缓入）\n全局外发光（glow）+ 轻微色差 + 扫描线叠加统一质感"
+    }
+   },
+   "extra": {},
+   "meta": {
+    "num": 22,
+    "film": "隼眼-9",
+    "size": "1920×1080",
+    "fps": 30,
+    "dur": 10,
+    "swatches": [
+     "#00E5FF",
+     "#FF6A00"
+    ]
+   },
+   "variants": {
+    "safe": {
+     "sections": [
+      "seed",
+      "output"
+     ],
+     "note": "Change the story, the invented brand, the copy, the palette and the size (a vertical 1080x1920, for example)."
+    },
+    "character": {
+     "sections": [
+      "route"
+     ],
+     "note": "A different technical route is allowed if it clearly raises quality; say why."
+    },
+    "essence": {
+     "sections": [
+      "signature"
+     ],
+     "note": "Never remove the signature features: they are what makes the style recognisable."
+    },
+    "free": {
+     "sections": [],
+     "note": ""
+    }
+   },
+   "palette": [],
+   "technique": "HTML: SVG/Canvas FUI layers + Three.js wireframe hologram; seeded random data; glow/scanline post pass (You may choose a better route if it clearly raises quality; say why.)",
+   "pitfalls": "",
+   "license": "MIT (code, prompts and docs). The films and third-party files keep their own licences and are not included.",
+   "attribution": "Style prompt from mg-styles-15 by Vincentwei1021, MIT License. https://github.com/Vincentwei1021/mg-styles-15",
+   "source_url": "https://github.com/Vincentwei1021/mg-styles-15/blob/49052d80bfaf9fa8412cc9710530e5e95a3b8d8c/prompts/22-hud.md",
+   "source_commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c"
+  }
+ ],
+ "common": {
+  "how": "1. Treatment. Write down one clear idea: a hook in the first 0.5 s (never open on more than 0.3 s of empty or black), an\n   escalation, one unmistakable hero moment at ~60–75 % of the runtime, and a composed end frame held ~0.8–1.2 s with living\n   micro-motion. Map every signature feature above to a moment. Keep one cue sheet (beats and hit times) that both the\n   picture and the sound read from.\n2. Key frames before motion. Build the look, render stills at 6–10 key times and actually look at them. Each still should be\n   poster-worthy: composition, hierarchy, negative space, type set properly (kerning, line-height, weight contrast, CJK\n   punctuation, ~5 % safe margins). Iterate until nothing looks default, generic, cramped or \"AI-template\".\n3. Motion. Build the choreography and preview at low resolution. Step through the fastest moves frame by frame: spacing,\n   easing, arcs, overlap, anticipation and follow-through, motion blur. No unintended dead spans; the energy follows the music.\n4. Sound. Write genre-correct music and sound design locked to the cue sheet. Check that visual hits land on audio onsets.\n   Master to the output spec.\n5. Final. Render at full resolution (motion blur where apt), then check: exactly 10.00 s, resolution, fps, audio present and at\n   the right loudness, no black frames, no fallback fonts or tofu, no clipped elements at the frame edges, no shimmer on thin\n   lines, no gradient banding. Fix and repeat until you would submit it to a festival.\n6. Write an honest self-critique: what is strongest, what is weakest, what you would do with more time.",
+  "rules": "- Rendering must be deterministic: every frame is a pure function of time t. Seeded randomness only; physics and particles\n  precomputed or closed-form; no real-time clocks; no state-triggered CSS transitions. A reliable route: a web page that can\n  draw any time t on request, captured frame by frame with a headless browser and encoded with ffmpeg (or a Blender script\n  that renders a PNG sequence).\n- Assets: only CC0 / public domain / OFL / Apache / free-for-commercial-use. Record each source and licence in CREDITS.md.\n  No real brand trademarks; invent brand names.\n- On-screen text must be correct and natural: idiomatic Chinese, proper CJK punctuation, no typos.",
+  "craft": "- Style authenticity: an expert names the style in one second; every signature technique is present and executed correctly.\n- Motion craft: purposeful easing (no linear unless mechanical by design), overlap and stagger, anticipation and\n  follow-through, arcs, squash and stretch where the style allows, consistent physics, motion blur where apt; transitions\n  carried by elements, not crossfades.\n- Rhythm: hits locked to the music; contrast between busy and calm; no monotony.\n- Design: strong composition, grid, typographic hierarchy, controlled palette; texture and finishing (grain, glow, vignette)\n  only where the style wants it; nothing looks accidental.\n- Technical polish: no jitter (unless intended), no popping, no aliasing, no banding, no fallback fonts, no half-loaded images.\n- Sound: genre-correct, musical, synced, mastered.",
+  "score": "1–10 on style fidelity, concept wow, motion craft, design & typography, finish & texture, sound & sync, technical\n(6 = template-level, 8 = high-end agency, 9 = award shortlist). Aim for 9; fix whatever scores lowest first.",
+  "deliver": "video.mp4, plus a short report: the concept in two sentences; a beat sheet with timecodes; how each signature feature is\nrealised; the tech route; check numbers (duration, resolution, fps, loudness, true peak); your honest top-3 weaknesses."
+ }
+}

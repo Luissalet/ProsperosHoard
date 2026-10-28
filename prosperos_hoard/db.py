@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Columns added after v1: (table, column, declaration). Applied with ALTER
 # TABLE on databases created by an older version.
@@ -36,6 +36,17 @@ _ADDED_COLUMNS = [
     ("style_presets", "quality", "INTEGER NOT NULL DEFAULT 0"),  # 0-3 stars
     ("style_presets", "pitfalls", "TEXT"),
     ("style_presets", "typography_json", "TEXT NOT NULL DEFAULT '{}'"),  # {fonts, weight, case, tracking, align, background, fx}
+    # direction cards (v13): a look written as fixed sections, imported from open style libraries or derived as a variant
+    ("style_presets", "slug", "TEXT"),
+    ("style_presets", "source", "TEXT"),  # the library an imported card comes from; NULL for the studio's own cards
+    ("style_presets", "category", "TEXT"),
+    ("style_presets", "license", "TEXT"),
+    ("style_presets", "attribution", "TEXT"),
+    ("style_presets", "source_url", "TEXT"),
+    ("style_presets", "sections_json", "TEXT NOT NULL DEFAULT '{}'"),  # {essence, materials, color, type, motion, camera, sound, moves, ...: {title, text}}
+    ("style_presets", "variants_json", "TEXT NOT NULL DEFAULT '{}'"),  # {safe, character, essence, free: {sections, note}}
+    ("style_presets", "meta_json", "TEXT NOT NULL DEFAULT '{}'"),  # {line, uses, summary, swatches, film, ...} and, on a variant, its changes
+    ("style_presets", "based_on", "TEXT"),  # the card a variant was made from
 ]
 
 _SCHEMA = """
@@ -125,7 +136,17 @@ CREATE TABLE IF NOT EXISTS style_presets (
     signature_transition TEXT,
     quality INTEGER NOT NULL DEFAULT 0,
     pitfalls TEXT,
-    typography_json TEXT NOT NULL DEFAULT '{}'
+    typography_json TEXT NOT NULL DEFAULT '{}',
+    slug TEXT,
+    source TEXT,
+    category TEXT,
+    license TEXT,
+    attribution TEXT,
+    source_url TEXT,
+    sections_json TEXT NOT NULL DEFAULT '{}',
+    variants_json TEXT NOT NULL DEFAULT '{}',
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    based_on TEXT
 );
 
 CREATE TABLE IF NOT EXISTS boards (

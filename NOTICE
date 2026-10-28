@@ -6,3 +6,17 @@ Sound-effects engine (prosperos_hoard/editing/foley/)
   Source: Earshot v0.4.0, commit 591fa3e028032e6dce56620a20e932e35667e8d8, by Leon Lin.
   License: MIT. The original license text is kept in prosperos_hoard/editing/foley/LICENSE.earshot
   and the details of what changed in prosperos_hoard/editing/foley/NOTICE.
+
+Direction style cards (prosperos_hoard/style_library/)
+  Seventy-four written film styles used as style cards: sections (essence, materials, colour, type, motion,
+  camera, sound, native moves, pitfalls) and the prompts of a second collection, kept as text and split by the
+  parsers in prosperos_hoard/style_cards.py. Every card carries its licence, attribution and source link.
+  Source 1: Lemo-Opuscar by LemoLab, commit 413a6bd6d78ebd3bdd5abaec9538a26867f890df, 59 styles.
+    https://github.com/lemomo-ai/lemo-opuscar
+    License: MIT for the code and the style texts (LICENSE.lemo-opuscar). The demo films and stills of that
+    project are CC BY 4.0 and are NOT included here.
+  Source 2: MG Styles 15 by Vincentwei1021, commit 49052d80bfaf9fa8412cc9710530e5e95a3b8d8c, 15 prompts.
+    https://github.com/Vincentwei1021/mg-styles-15
+    License: MIT for the code, prompts and docs (LICENSE.mg-styles-15). Its films and third-party files keep
+    their own licences and are NOT included here.
+  A variant made from a card keeps the licence, the attribution and the link of the card it comes from.
