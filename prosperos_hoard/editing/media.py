@@ -52,6 +52,17 @@ def _check_root(svc: "Services", path: Path) -> None:
     raise Refused(f"{path} is outside the folders this app may read (LUMIERE_FILE_ROOTS).", code="outside_roots")
 
 
+def has_poster(svc: "Services", media_id: str, kind: Optional[str] = None) -> bool:
+    """True when ``/api/media/<id>/poster`` answers: the poster still exists, or the media is an image (served as its own poster).
+    A video has none until its preparation job has drawn it, so callers must not link to it before."""
+    if (svc.config.cache_dir / media_id / "poster.jpg").exists():
+        return True
+    if kind is None:
+        row = svc.db.one("SELECT kind FROM media WHERE id = ?", (media_id,))
+        kind = row["kind"] if row else None
+    return kind == "image"
+
+
 def view(svc: "Services", row) -> dict[str, Any]:
     path = Path(row["path"])
     probe = json.loads(row["probe"] or "{}")
@@ -72,7 +83,7 @@ def view(svc: "Services", row) -> dict[str, Any]:
         "color_space": probe.get("color_space"),
         "urls": {
             "play": f"/api/media/{mid}/play", "file": f"/api/media/{mid}/file",
-            "poster": f"/api/media/{mid}/poster" if (cdir / "poster.jpg").exists() or row["kind"] == "image" else None,
+            "poster": f"/api/media/{mid}/poster" if has_poster(svc, mid, row["kind"]) else None,
             "sprite": f"/api/media/{mid}/sprite" if (cdir / "sprite.jpg").exists() else None,
             "waveform": f"/api/media/{mid}/waveform" if (cdir / "wave.bin").exists() else None,
         },

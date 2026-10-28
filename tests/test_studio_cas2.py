@@ -130,13 +130,14 @@ async def test_json_scopes_known_links_only_and_keeps_native_content_exact():
         'manifest':{'download_url':'/api/original'}, 'params':{'url':'/api/source'},
         'media':{'m1':{'urls':{'play':'/api/media/m1/play','file':'http://localhost:8815/api/media/m1/file',
             'poster':'/editing/api/media/m1/poster','label':'/assets/exact'}}},
-        'thumbnail':'/api/thumbnail','download_url':'http://127.0.0.1:8815/api/export/a',
+        'thumbnail':'/api/thumbnail','thumb':'/api/media/m1/poster','download_url':'http://127.0.0.1:8815/api/export/a',
         'items':[{'preview_url':'/api/preview','title':'/api/exact'}]}
     result = scoped_json(native, 'editing', 8815)
     for key in ('title','prompt','file_path','path','id','snapshot','doc','manifest','params'):
         assert result[key] == native[key]
     assert result['media']['m1']['urls'] == {'play':'/editing/api/media/m1/play',
         'file':'/editing/api/media/m1/file','poster':'/editing/api/media/m1/poster','label':'/assets/exact'}
+    assert result['thumb'] == '/editing/api/media/m1/poster'
     assert result['download_url'] == '/editing/api/export/a'
     assert result['items'][0] == {'preview_url':'/editing/api/preview','title':'/api/exact'}
     assert scoped_json(result, 'editing', 8815) == result

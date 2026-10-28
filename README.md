@@ -878,6 +878,14 @@ golden hashes, bleed and text fitting; thread safety of the store; and the
 Faustus manifest check.
 
 `npm run build` in `frontend/` passes with zero TypeScript errors.
+
+The editor has its own suite, `python -m pytest editing_tests`. A development checkout has no
+`prosperos_hoard/studio_ui/fonts/` (it is git-ignored; `scripts/build_studio_assets.py` fills it): the studio
+answers 404 for those four font files and the pages fall back to the system fonts. Cancelling a browser worker
+stops its whole process tree directly (`editing/proctree.py`), since `taskkill` can take seconds on a PC with many
+processes. A project card in the editor shows a video's poster only once its preparation job has drawn it, and the
+card list is read again when a job finishes.
+
 [CI](.github/workflows/ci.yml) runs the tests on Ubuntu and Windows with
 Python 3.11, 3.12 and 3.13 and builds the interface with Node.js 22.
 

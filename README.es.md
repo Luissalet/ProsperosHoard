@@ -899,6 +899,13 @@ del almacén desde varios hilos y la comprobación del manifiesto de Faustus.
 [CI](.github/workflows/ci.yml) ejecuta las pruebas en Ubuntu y Windows con
 Python 3.11, 3.12 y 3.13 y compila la interfaz con Node.js 22.
 
+El editor tiene su propia suite, `python -m pytest editing_tests`. Un checkout de desarrollo no tiene
+`prosperos_hoard/studio_ui/fonts/` (está en .gitignore; lo rellena `scripts/build_studio_assets.py`): el estudio
+responde 404 a esos cuatro ficheros de fuente y las páginas usan las fuentes del sistema. Al cancelar un worker de
+navegador se detiene todo su árbol de procesos directamente (`editing/proctree.py`), porque `taskkill` puede tardar
+segundos en un PC con muchos procesos. La tarjeta de un proyecto en el editor muestra el póster de un vídeo solo
+cuando su trabajo de preparación ya lo ha dibujado, y la lista de tarjetas se vuelve a leer al terminar un trabajo.
+
 ## Personajes que no cambian
 
 El kit es lo que mantiene a un personaje igual en muchos planos, motores y
