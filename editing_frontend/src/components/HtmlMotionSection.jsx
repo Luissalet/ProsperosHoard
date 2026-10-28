@@ -4,6 +4,7 @@ import { api as appApi } from "../api.js";
 import { useCopilotForm, useCopilotRefresh } from "../copilot-hooks.js";
 import { Spinner } from "./ui.jsx";
 import HtmlMotionSound from "./HtmlMotionSound.jsx";
+import HtmlMotionDirection, { StylePicker } from "./HtmlMotionDirection.jsx";
 
 const initial = { name: "", html: "", width: 1280, height: 720, fps: 30, duration: 3 };
 const words = {
@@ -39,6 +40,10 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
   const [restoreRevision, setRestoreRevision] = useState(1);
   const [received, setReceived] = useState(false);
   const [exportAudio, setExportAudio] = useState(true);
+  const [cueCount, setCueCount] = useState(0);
+  const [reviewMode, setReviewMode] = useState("sheet");
+  const [span, setSpan] = useState({ from: "", to: "" });
+  const [crop, setCrop] = useState({ x: "", y: "", selector: "" });
   const current = useRef({ draft, saved });
   current.current = { draft, saved };
   const active = job && !["done", "failed", "canceled"].includes(job.state);
@@ -107,8 +112,15 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
   const reviewMoments = () => operate(async () => {
     const times = moments.trim() ? moments.trim().split(/[\s,;]+/).map(Number) : undefined;
     if (times?.some((value) => !Number.isFinite(value))) throw new Error(String(lang).startsWith('es') ? 'Introduce tiempos en segundos.' : 'Enter times in seconds.');
-    const result = await request(`/editing/api/html-motion/${saved.id}/storyboard`, { method: 'POST',
-      body: JSON.stringify({ composition: saved.id, revision: saved.revision, times }) });
+    const body = { composition: saved.id, revision: saved.revision, mode: reviewMode };
+    if (reviewMode !== "strip" && times) body.times = times;
+    if (reviewMode === "strip" && (span.from !== "" || span.to !== "")) body.span = [Number(span.from || 0), Number(span.to === "" ? saved.duration : span.to)];
+    if (reviewMode === "crop-at") {
+      if (crop.selector.trim()) body.selector = crop.selector.trim();
+      else if (crop.x !== "" && crop.y !== "") { body.x = Number(crop.x); body.y = Number(crop.y); }
+      else throw new Error(String(lang).startsWith('es') ? 'Indica un punto x, y o un selector CSS.' : 'Give a point x, y or a CSS selector.');
+    }
+    const result = await request(`/editing/api/html-motion/${saved.id}/storyboard`, { method: 'POST', body: JSON.stringify(body) });
     if (current.current.saved?.id === result.composition) setStoryboard(result);
   });
   const render = () => operate(async () => {
@@ -126,9 +138,15 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
   });
   const change = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
 
+  const created = async (id) => { await refresh(); await load(id); };
+  const dir = lang && String(lang).startsWith("es")
+    ? { mode: "Tipo de revisión", sheet: "Hoja de momentos", strip: "Tira de fotogramas", crop: "Detalle ampliado", from: "Tramo desde (s)", to: "hasta (s)", point: "Punto x", pointY: "y", selector: "o selector CSS" }
+    : { mode: "Review type", sheet: "Moments sheet", strip: "Frame strip", crop: "Enlarged detail", from: "Span from (s)", to: "to (s)", point: "Point x", pointY: "y", selector: "or CSS selector" };
+
   return (
     <section className="html-motion" aria-labelledby="html-motion-title">
       <h3 id="html-motion-title">{t.title}</h3>
+      <StylePicker lang={lang} busy={busy || active} projectId={projectId} operate={operate} onCreated={created} />
       <label className="field-label"><span>{t.choose}</span>
         <select className="field" value={saved?.id || ""} disabled={busy || active} onChange={(e) => load(e.target.value)}>
           <option value="">{t.blank}</option>{catalogue?.compositions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -158,8 +176,22 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
           <button type="button" className="btn" disabled={busy || dirty || active} onClick={render}>{t.render}</button>
           <a href={saved.source_url} download>{t.download}</a>
         </div>
-        <HtmlMotionSound saved={saved} dirty={dirty} busy={busy || active} lang={lang} exportAudio={exportAudio} setExportAudio={setExportAudio} onChanged={refresh} operate={operate} />
+        <HtmlMotionSound saved={saved} dirty={dirty} busy={busy || active} lang={lang} exportAudio={exportAudio} setExportAudio={setExportAudio} onChanged={refresh} operate={operate} cuesOwn={cueCount > 0} />
+        <HtmlMotionDirection saved={saved} dirty={dirty} busy={busy || active} lang={lang} operate={operate} onChanged={refresh} onCueCount={setCueCount} />
         {preview && <figure><img src={preview.url} alt={`${t.preview} · ${preview.at} s · ${t.saved} ${preview.revision}`} /><figcaption>{preview.at} s · {t.saved}: {preview.revision}</figcaption></figure>}
+        <div className="html-motion-review-mode">
+          <label className="field-label"><span>{dir.mode}</span>
+            <select className="field" value={reviewMode} onChange={(e) => setReviewMode(e.target.value)}>
+              <option value="sheet">{dir.sheet}</option><option value="strip">{dir.strip}</option><option value="crop-at">{dir.crop}</option>
+            </select></label>
+          {reviewMode === "strip" && <>
+            <label className="field-label"><span>{dir.from}</span><input className="field" type="number" min="0" step="any" value={span.from} onChange={(e) => setSpan({ ...span, from: e.target.value })} /></label>
+            <label className="field-label"><span>{dir.to}</span><input className="field" type="number" min="0" step="any" value={span.to} onChange={(e) => setSpan({ ...span, to: e.target.value })} /></label></>}
+          {reviewMode === "crop-at" && <>
+            <label className="field-label"><span>{dir.point}</span><input className="field" type="number" step="any" value={crop.x} onChange={(e) => setCrop({ ...crop, x: e.target.value })} /></label>
+            <label className="field-label"><span>{dir.pointY}</span><input className="field" type="number" step="any" value={crop.y} onChange={(e) => setCrop({ ...crop, y: e.target.value })} /></label>
+            <label className="field-label"><span>{dir.selector}</span><input className="field" value={crop.selector} placeholder="#title" onChange={(e) => setCrop({ ...crop, selector: e.target.value })} /></label></>}
+        </div>
         <div className="html-motion-actions">
           <label className="field-label"><span>{String(lang).startsWith('es') ? 'Momentos (segundos)' : 'Moments (seconds)'}</span>
             <input className="field" value={moments} aria-describedby="html-motion-moments-help" placeholder="0, 0.5, 1" onChange={(e) => setMoments(e.target.value)} /></label>

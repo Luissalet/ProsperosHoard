@@ -7,7 +7,8 @@ from .. import family_events, projects
 from ..errors import NotFound
 from ..html_motion import HtmlMotion
 from ..html_starters import HtmlStarterArgs, catalogue as starters_catalogue, save_args as starter_source
-from ..html_motion_args import HtmlMotionSaveArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, MotionSoundEventsArgs
+from ..html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, MotionSoundEventsArgs, MotionTreatmentArgs,
+                                MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionFactsArgs, MotionFromStyleArgs)
 from .deps import services, tool
 
 router = APIRouter(prefix="/api/html-motion", tags=["HTML motion"])
@@ -37,6 +38,22 @@ def starters():
 @router.post("/starters")
 def create_starter(request: Request, body: HtmlStarterArgs):
     return save(request, starter_source(body))
+
+
+@router.get("/styles")
+def styles(request: Request, q: str | None = Query(None), source: str | None = Query(None), category: str | None = Query(None),
+           limit: int = Query(20, ge=1, le=100)):
+    return tool(request, "motion_styles", action="search", query=q, source=source, category=category, limit=limit)
+
+
+@router.get("/styles/{card_id:path}")
+def style(request: Request, card_id: str, section: str | None = Query(None)):
+    return tool(request, "motion_styles", action="get", id=card_id, section=section)
+
+
+@router.post("/from-style")
+def from_style(request: Request, body: MotionFromStyleArgs):
+    return tool(request, "motion_from_style", **body.model_dump(exclude_none=True))
 
 
 @router.get("/{composition}")
@@ -102,7 +119,56 @@ def sound_audio(request: Request, composition: str, revision: int, digest: str):
 def storyboard(request: Request, composition: str, body: HtmlMotionStoryboardArgs):
     if body.composition != composition:
         raise NotFound('Storyboard composition does not match the request.')
-    return _store(request).storyboard(composition, body.times, body.revision)
+    return _store(request).storyboard(composition, body.times, body.revision, mode=body.mode, span=tuple(body.span) if body.span else None,
+                                      x=body.x, y=body.y, selector=body.selector, size=tuple(body.size) if body.size else None, scale=body.scale)
+
+
+@router.get("/{composition}/treatment")
+def treatment_get(request: Request, composition: str):
+    return tool(request, "motion_treatment", action="get", composition=composition)
+
+
+@router.post("/{composition}/treatment")
+def treatment_change(request: Request, composition: str, body: MotionTreatmentArgs):
+    return tool(request, "motion_treatment", **{**body.model_dump(exclude_none=True), "composition": composition})
+
+
+@router.get("/{composition}/cues")
+def cues_get(request: Request, composition: str):
+    return tool(request, "motion_cues", composition=composition)
+
+
+@router.post("/{composition}/cues")
+def cues_change(request: Request, composition: str, body: MotionCuesArgs):
+    if body.composition != composition:
+        raise NotFound("Cues composition does not match the request.")
+    return tool(request, "motion_cues", **body.model_dump(exclude_none=True))
+
+
+@router.post("/{composition}/cuecheck")
+def cuecheck(request: Request, composition: str, body: MotionCuecheckArgs):
+    if body.composition != composition:
+        raise NotFound("Cuecheck composition does not match the request.")
+    return tool(request, "motion_cuecheck", **body.model_dump(exclude_none=True))
+
+
+@router.post("/{composition}/readcheck")
+def readcheck(request: Request, composition: str, body: MotionReadcheckArgs):
+    if body.composition != composition:
+        raise NotFound("Readcheck composition does not match the request.")
+    return tool(request, "motion_readcheck", **body.model_dump(exclude_none=True))
+
+
+@router.get("/{composition}/facts")
+def facts_get(request: Request, composition: str):
+    return tool(request, "motion_facts", action="get", composition=composition)
+
+
+@router.post("/{composition}/facts")
+def facts_change(request: Request, composition: str, body: MotionFactsArgs):
+    if body.composition != composition:
+        raise NotFound("Facts composition does not match the request.")
+    return tool(request, "motion_facts", **body.model_dump(exclude_none=True))
 
 
 @router.get('/{composition}/revisions/{revision}/storyboards/{storyboard}/image')

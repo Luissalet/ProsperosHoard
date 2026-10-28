@@ -314,12 +314,13 @@ def save(svc: "Services", project_id: str, p: Project, label: str, actor: str = 
 
 
 def edit(svc: "Services", project_id: str, ops: list[dict[str, Any]], *, label: str = "", actor: str = "ui",
-         base_rev: Optional[int] = None, request_id: str = "") -> dict[str, Any]:
+         base_rev: Optional[int] = None, request_id: str = "", dry_run: bool = False) -> dict[str, Any]:
+    """Apply operations as one undo step. ``dry_run`` runs them on a copy and reports what would happen without saving anything."""
     if not ops:
         raise LumiereError("No operations.")
     if not isinstance(request_id, str) or len(request_id) > 100:
         raise LumiereError('request_id must be a string of at most 100 characters.')
-    for op in ops:  # a sound placed by its sync point needs the points: measure them now if the library has none yet
+    for op in ([] if dry_run else ops):  # a sound placed by its sync point needs the points: measure them now if the library has none yet
         if isinstance(op, dict) and op.get("align") and isinstance(op.get("media"), str):
             from . import audio_sync
 
@@ -332,7 +333,7 @@ def edit(svc: "Services", project_id: str, ops: list[dict[str, Any]], *, label: 
     with svc.db.transaction() as conn:
         row = _row(svc, project_id)
         digest = ''
-        if request_id:
+        if request_id and not dry_run:
             try:
                 encoded = json.dumps({'ops': ops, 'label': label, 'base_rev': base_rev},
                                      sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
@@ -350,6 +351,12 @@ def edit(svc: "Services", project_id: str, ops: list[dict[str, Any]], *, label: 
         new, results = apply_ops(current, ops, look, project_id=project_id, docs=doc_lookup(svc))
         result = {'project': project_id, 'results': results, 'duration_ms': new.duration,
                   'duration': ms_to_tc(new.duration), 'issues': validate(new, look)}
+        if dry_run:
+            if base_rev is not None and base_rev != row['rev']:
+                raise Conflict(f"The project changed (revision {row['rev']}, you sent {base_rev}). Read it again and repeat the edit.")
+            from . import timeline_text
+            return {**result, 'rev': row['rev'], 'dry_run': True, 'applied': False, 'would_be_rev': row['rev'] + 1,
+                    'changes': timeline_text.changes(current, new)}
         receipt = (request_id, digest, result) if request_id else None
         rev = save(svc, project_id, new, label or describe(ops), actor, base_rev, _receipt=receipt, _conn=conn)
         return {**result, 'rev': rev, **({'replayed': False, 'current_rev': rev} if request_id else {})}

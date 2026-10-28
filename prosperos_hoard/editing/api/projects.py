@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from .. import commands, derive, multicam, timeline_import
+from .. import commands, derive, multicam, timeline_import, timeline_text
 from ..errors import LumiereError
 from .. import subtitles as subs
 from .. import plan as plan_mod
@@ -428,3 +428,67 @@ def plan_apply(request: Request, plan_id: str):
 @router.post("/plans/{plan_id}/discard")
 def plan_discard(request: Request, plan_id: str):
     return plan_mod.discard(services(request), plan_id)
+
+
+# ---- the timeline as text, and cut proposals (the same code as the timeline_text / cut_proposals tools)
+class TextBody(BaseModel):
+    replacements: Optional[list[dict[str, str]]] = Field(None, max_length=200)
+    text: Optional[str] = Field(None, max_length=400_000, description="The whole edited text (the screen sends this; assistants send replacements).")
+    expected_revision: int
+    dry_run: bool = False
+    ripple: bool = False
+
+
+class ProposalBody(BaseModel):
+    proposal: Optional[str] = Field(None, pattern=r"^cp_[0-9a-f]{8}$")
+    kinds: list[Literal["fillers", "pauses"]] = Field(["fillers", "pauses"], min_length=1)
+    min_pause_ms: int = Field(700, ge=200, le=10000)
+    keep_pause_ms: int = Field(250, ge=0, le=2000)
+    ids: Optional[list[str]] = Field(None, max_length=2000)
+    min_confidence: Optional[float] = Field(None, ge=0, le=1)
+    max_confidence: Optional[float] = Field(None, ge=0, le=1)
+    kind: Optional[Literal["filler", "pause"]] = None
+    expected_revision: Optional[int] = None
+    dry_run: bool = False
+
+
+@router.get("/projects/{project_id}/text")
+def timeline_as_text(request: Request, project_id: str, track: Optional[str] = None):
+    return tool(request, "timeline_text", project=project_id, track=track)
+
+
+@router.post("/projects/{project_id}/text/check")
+def timeline_text_check(request: Request, project_id: str, body: TextBody):
+    if body.text is not None:
+        done = timeline_text.prepare(services(request), project_id, text=body.text, expected_revision=body.expected_revision, ripple=body.ripple)
+        done.pop("text", None)
+        return {"ok": True, **done, "applied": False}
+    return timeline_text.check(services(request), project_id, replacements=body.replacements, expected_revision=body.expected_revision, ripple=body.ripple)
+
+
+@router.post("/projects/{project_id}/text/apply")
+def timeline_text_apply(request: Request, project_id: str, body: TextBody):
+    return timeline_text.apply(services(request), project_id, replacements=body.replacements, text=body.text, expected_revision=body.expected_revision,
+                               dry_run=body.dry_run, ripple=body.ripple)
+
+
+@router.get("/projects/{project_id}/cut-proposals")
+def cut_proposals_get(request: Request, project_id: str, proposal: Optional[str] = None, min_confidence: Optional[float] = None, limit: int = 200):
+    if proposal == "all":
+        return tool(request, "cut_proposals", project=project_id, action="list")
+    return tool(request, "cut_proposals", project=project_id, action="get", proposal=proposal, min_confidence=min_confidence, limit=limit)
+
+
+@router.post("/projects/{project_id}/cut-proposals")
+def cut_proposals_create(request: Request, project_id: str, body: ProposalBody):
+    return tool(request, "cut_proposals", project=project_id, action="create", kinds=body.kinds, min_pause_ms=body.min_pause_ms, keep_pause_ms=body.keep_pause_ms)
+
+
+@router.post("/projects/{project_id}/cut-proposals/accept")
+def cut_proposals_accept(request: Request, project_id: str, body: ProposalBody):
+    return tool(request, "cut_proposals", project=project_id, action="accept", **body.model_dump(exclude={"kinds", "min_pause_ms", "keep_pause_ms", "max_confidence"}))
+
+
+@router.post("/projects/{project_id}/cut-proposals/reject")
+def cut_proposals_reject(request: Request, project_id: str, body: ProposalBody):
+    return tool(request, "cut_proposals", project=project_id, action="reject", proposal=body.proposal, ids=body.ids, max_confidence=body.max_confidence)

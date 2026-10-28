@@ -73,6 +73,14 @@ def test_fillers_and_cut_ranges():
     assert 300 < a <= 700 and 1000 <= b < 1100
 
 
+def test_drawn_out_hesitations_are_fillers_without_being_listed():
+    spoken = ["Hola,", "eeeh,", "esto", "es", "ejm,", "sigo", "ehmm", "aaah", "mmmm", "e", "ese", "he"]
+    words = [{"id": f"w{i}", "t0": i * 400, "t1": i * 400 + 300, "text": t} for i, t in enumerate(spoken)]
+    found = {h["text"] for h in speech.find_fillers(words, "es", repeats=False)}
+    assert {"eeeh,", "ejm,", "ehmm", "aaah", "mmmm"} <= found
+    assert not {"Hola,", "sigo", "e", "ese", "he"} & found
+
+
 def test_smooth_path_stable_within_scene_and_clamped():
     samples = [[i * 333, 0.7 + 0.01 * ((i % 3) - 1), 0.5, 1.0, 1] for i in range(30)]
     path = video_an.smooth_path(samples, [], aspect_in=16 / 9, aspect_out=9 / 16)
