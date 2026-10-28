@@ -8187,6 +8187,19 @@
             "default": null,
             "title": "Project Id"
           },
+          "sound": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sound declaration {kit, events:[{t, role}], music:{media|path}, lufs, true_peak_db}. Omitted = the one in the HTML's lumiere-sound block, else the one the composition already had; {} removes it. See motion_sound_events.",
+            "title": "Sound"
+          },
           "reason": {
             "type": "string",
             "minLength": 3,
@@ -8384,7 +8397,7 @@
     },
     {
       "name": "html_motion_render",
-      "description": "Queue an HTML composition as verified silent H264 MP4. Exportar animacion HTML a video.\nFollow job_status; use media_receive(path=result.render_path) to add the video to a timeline. Keywords: render, export, MP4, motion graphics.",
+      "description": "Queue an HTML animation as verified H264 MP4, with its sound. Exportar animacion HTML a video.\nFollow job_status; use media_receive(path=result.render_path) to add the video to a timeline. Keywords: render, export, MP4, motion graphics.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -8424,6 +8437,527 @@
           "reason"
         ],
         "title": "HtmlMotionRefArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_export",
+      "description": "Queue an HTML animation as H264 + AAC MP4 with its declared sound. Exportar animacion con sonido.\nThe mix is -14 LUFS under -1 dBTP. Effects are placed by their measured sync point; result.sound_report lists every placement, the loudness delivered and the measured sync error. audio=false for a silent file. Keywords: export, render, sound effects, music, soundtrack, sfx, animation with audio.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "audio": {
+            "default": true,
+            "description": "With the sound the composition declares (events, music); false exports the picture only.",
+            "title": "Audio",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "HtmlMotionRenderArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_sound_roles",
+      "description": "List the sound roles of a kit with their sound, sync point and offset. Roles de sonido.\nUse the names (or Spanish/English aliases: tap, golpe, clic, whoosh) in motion_sound_events. Keywords: sfx, sound effects, foley, kit, launch, roles, offsets.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "kit": {
+            "default": "launch",
+            "description": "Kit preset: launch, calm, crisp or minimal.",
+            "title": "Kit",
+            "type": "string"
+          }
+        },
+        "title": "MotionSoundRolesArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_sound_events",
+      "description": "Read or change the sound events {t, role} and music of an HTML animation. Eventos de sonido.\nChanging saves a new revision (expected_revision). Events are picture moments in seconds; the effect is generated from code and placed by its sync point. Keywords: sound events, sfx, cues, sound design, music, audio for animation.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "SoundEvent": {
+            "properties": {
+              "t": {
+                "description": "Seconds into the composition where the picture event happens.",
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "role": {
+                "description": "A kit role or an alias (tap, golpe, clic, whoosh...). See motion_sound_roles.",
+                "maxLength": 40,
+                "minLength": 1,
+                "title": "Role",
+                "type": "string"
+              },
+              "gain_db": {
+                "default": 0,
+                "maximum": 12.0,
+                "minimum": -30.0,
+                "title": "Gain Db",
+                "type": "number"
+              },
+              "take": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Which take of the role (0-based); omitted = taken in turn, so a run of the same role varies.",
+                "title": "Take"
+              },
+              "offset_ms": {
+                "anyOf": [
+                  {
+                    "maximum": 500.0,
+                    "minimum": -500.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Replaces the role's own offset between picture event and sync point.",
+                "title": "Offset Ms"
+              },
+              "pitch": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Pitched roles (bell, text): a note name (C5) or Hz.",
+                "title": "Pitch"
+              },
+              "label": {
+                "default": "",
+                "maxLength": 80,
+                "title": "Label",
+                "type": "string"
+              }
+            },
+            "required": [
+              "t",
+              "role"
+            ],
+            "title": "SoundEvent",
+            "type": "object"
+          },
+          "SoundMusic": {
+            "properties": {
+              "media": {
+                "anyOf": [
+                  {
+                    "maxLength": 40,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "A media id of the library (an audio file or a song received from the song module).",
+                "title": "Media"
+              },
+              "path": {
+                "anyOf": [
+                  {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Path"
+              },
+              "gain_db": {
+                "default": 0,
+                "description": "Against the usual bed level.",
+                "maximum": 12.0,
+                "minimum": -24.0,
+                "title": "Gain Db",
+                "type": "number"
+              },
+              "start_s": {
+                "default": 0,
+                "description": "Where in the music the composition starts.",
+                "minimum": 0.0,
+                "title": "Start S",
+                "type": "number"
+              },
+              "loop": {
+                "default": false,
+                "title": "Loop",
+                "type": "boolean"
+              },
+              "fade_in_s": {
+                "default": 0.02,
+                "maximum": 10.0,
+                "minimum": 0.0,
+                "title": "Fade In S",
+                "type": "number"
+              },
+              "fade_out_s": {
+                "default": 0.4,
+                "maximum": 10.0,
+                "minimum": 0.0,
+                "title": "Fade Out S",
+                "type": "number"
+              },
+              "stop_down": {
+                "default": true,
+                "description": "The music steps down before a hit, drop, long whoosh or swell and comes back on it.",
+                "title": "Stop Down",
+                "type": "boolean"
+              }
+            },
+            "title": "SoundMusic",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "action": {
+            "default": "get",
+            "description": "get: read the declared sound; set: replace the events; add: append events; remove: drop the events at the given times (t) or of the given role; clear: no sound. Changing saves a new revision of the composition (same picture).",
+            "enum": [
+              "get",
+              "set",
+              "add",
+              "remove",
+              "clear"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "events": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/SoundEvent"
+                },
+                "maxItems": 400,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "set/add: [{t: seconds, role: tap|golpe|clic|whoosh|hit|pop|key|bell..., gain_db, take, offset_ms, pitch}].",
+            "title": "Events"
+          },
+          "times": {
+            "anyOf": [
+              {
+                "items": {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "remove: the times (s) of the events to drop.",
+            "title": "Times"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "remove: drop every event of this role.",
+            "title": "Role"
+          },
+          "music": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SoundMusic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Music bed: {media: id | path, gain_db, start_s, loop, stop_down}. The music steps down before big hits."
+          },
+          "clear_music": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "true drops the music bed and keeps the effects.",
+            "title": "Clear Music"
+          },
+          "kit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kit"
+          },
+          "lufs": {
+            "anyOf": [
+              {
+                "maximum": -8.0,
+                "minimum": -30.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lufs"
+          },
+          "true_peak_db": {
+            "anyOf": [
+              {
+                "maximum": -0.1,
+                "minimum": -6.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "True Peak Db"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "false keeps the declaration but exports without sound.",
+            "title": "Audio"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision (required to change something).",
+            "title": "Expected Revision"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "MotionSoundEventsArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_sound_preview",
+      "description": "Mix and master the declared sound of an animation into a WAV without rendering the picture. Oir el sonido.\nReturns the placements, the loudness reached, and the sync error measured on every effect; url plays it. Keywords: preview, listen, mix, loudness, LUFS, true peak.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "MotionSoundPreviewArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "audio_sync_points",
+      "description": "Measure where a sound is first heard, loudest and over (onset, peak, end). Puntos de sincronía.\nOf a library media or a file. Place it with timeline_edit add_media {align: 'peak', at: ms} so that point lands on the picture event. Keywords: sync point, onset, peak, align audio, sound effect timing, hit.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "media": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A media id of the library (its sound).",
+            "title": "Media"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Or a file the user named (not imported).",
+            "title": "Path"
+          },
+          "force": {
+            "default": false,
+            "description": "Measure again even when the library has the points.",
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "AudioSyncPointsArgs",
         "type": "object"
       }
     },
@@ -9029,6 +9563,7 @@
             "type": "string"
           },
           "kinds": {
+            "description": "sync: where the sound is first heard, loudest and over (onset, peak, end), to place it by that point.",
             "items": {
               "enum": [
                 "scenes",
@@ -9037,7 +9572,8 @@
                 "motion",
                 "focus",
                 "transcript",
-                "speakers"
+                "speakers",
+                "sync"
               ],
               "type": "string"
             },

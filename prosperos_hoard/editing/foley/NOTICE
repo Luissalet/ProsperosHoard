@@ -1,0 +1,15 @@
+Foley: sound effects as code
+============================
+
+This folder is a detached fork of the model-free sound-effects part of "earshot"
+(https://github.com/Leonxlnx/earshot, version 0.4.0, commit 591fa3e028032e6dce56620a20e932e35667e8d8),
+Copyright (c) 2026 Leon Lin, released under the MIT License (LICENSE.earshot in this folder).
+
+What was taken: the sound bank (252 effects as recipes, fitted models and parameters), the recipes and dsp/fx
+helpers behind it, the knobs (duration, apex, pitch), the audit (sfx.check), the measuring of onset / peak / end
+(bank.times) and the kits with their presets (forge/kits/*.json, including the "launch" preset with its per-role
+offsets). What was left out: the listening models, the search and critic loops, the command line and the reference
+sets. The package was renamed, the reporting and audio helpers replaced by small local ones (report.py, audio.py,
+wavio.py, config.py) and the recipe module path adapted. The fork evolves on its own.
+
+The mixing, mastering and export code that uses it lives outside this folder (editing/motion_sound.py).

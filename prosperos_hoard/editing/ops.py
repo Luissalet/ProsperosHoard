@@ -62,6 +62,8 @@ class AddMedia(OpBase):
     mode: Literal["insert", "overwrite", "append"] = "append"
     label: str = ""
     fit: Optional[Literal["contain", "cover", "fill", "none", "blur"]] = None
+    align: Optional[Literal["onset", "peak", "end"]] = Field(None, description="Put this sync point of the sound (where it is first heard, loudest or over; "
+                                                              "see audio_sync_points) at `at`, instead of its first sample. Needs `at`.")
 
 
 class AddText(OpBase):
@@ -678,6 +680,13 @@ def _add_media(ctx: Ctx, o: AddMedia) -> dict:
     if info.get("kind") == "sequence":
         ctx.check_nesting(o.media)
     a, b = _media_span(ctx, info, _t(o.src_in), _t(o.src_out), _t(o.length))
+    at = _t(o.at)
+    mode = o.mode
+    snap = ctx.snap
+    if o.align:
+        at, a = _aligned_start(info, o.align, at, a, b)
+        mode = "insert" if mode == "insert" else "overwrite"
+        snap = int  # a sound is placed by its measured point, to the millisecond: no frame grid
     clip = Clip(type="sequence" if info.get("kind") == "sequence" else "media", media=o.media, src_in=a, src_out=b,
                 label=o.label or str(info.get("name") or "")[:120])
     if o.fit:
@@ -687,22 +696,43 @@ def _add_media(ctx: Ctx, o: AddMedia) -> dict:
         mw, mh = int(info.get("width") or cw), int(info.get("height") or ch)
         # Same orientation: fill the frame; a horizontal video on a vertical canvas: keep it whole (reframe crops it on request).
         clip.transform.fit = "cover" if (mw >= mh) == (cw >= ch) and abs(mw / max(1, mh) - cw / ch) < 0.15 else "contain"
-    at = _t(o.at)
-    if at is None or o.mode == "append":
-        clip.start = _track_end(track) if at is None else ctx.snap(at)
+    if at is None or mode == "append":
+        clip.start = _track_end(track) if at is None else snap(at)
         if at is not None:
             _clear_range(track, clip.start, clip.end)
-    elif o.mode == "insert":
-        clip.start = ctx.snap(at)
+    elif mode == "insert":
+        clip.start = snap(at)
         hit = next((c for c in track.clips if c.start < clip.start < c.end), None)
         if hit:
             _split_clip(track, hit, clip.start)
         _shift(track, clip.start, clip.duration)
     else:
-        clip.start = ctx.snap(at)
+        clip.start = snap(at)
         _clear_range(track, clip.start, clip.end)
     track.clips.append(clip)
-    return {"clip": clip.id, "track": track.id, "start": clip.start, "end": clip.end}
+    result = {"clip": clip.id, "track": track.id, "start": clip.start, "end": clip.end}
+    if o.align:
+        result["sync"] = {"point": o.align, "at": clip.start + (info["sync"][f"{o.align}_ms"] - a)}
+    return result
+
+
+def _aligned_start(info: dict[str, Any], point: str, at: Optional[int], a: int, b: int) -> tuple[int, int]:
+    """(timeline start, source in) that put the sound's sync point `point` at `at`."""
+    if at is None:
+        raise LumiereError("align needs `at`: the timeline time (ms) where the sound's sync point goes.", code="align_needs_at")
+    sync = info.get("sync")
+    if not sync or sync.get("silent"):
+        raise LumiereError(f"{info.get('name')} has no sync points: run media_analyze kinds=['sync'] (or audio_sync_points) first.", code="no_sync_points")
+    mark = int(sync[f"{point}_ms"])
+    if not a <= mark <= b:
+        raise LumiereError(f"The {point} of {info.get('name')} is at {mark} ms, outside the part used ({a}-{b} ms): choose another point or a wider range.", code="sync_out_of_range")
+    start = int(round(at - (mark - a)))
+    if start < 0:
+        a -= start  # the sound would start before the timeline does: skip that much of its beginning
+        start = 0
+        if mark < a:
+            raise LumiereError(f"The {point} of the sound would fall before the start of the timeline.", code="sync_out_of_range")
+    return start, a
 
 
 def _add_text(ctx: Ctx, o: AddText) -> dict:

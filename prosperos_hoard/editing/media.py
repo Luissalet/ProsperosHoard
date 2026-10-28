@@ -58,7 +58,9 @@ def view(svc: "Services", row) -> dict[str, Any]:
     mid = row["id"]
     analyses = {r["kind"]: r["updated_ts"] for r in svc.db.query("SELECT kind, updated_ts FROM analysis WHERE media_id = ?", (mid,))}
     cdir = svc.config.cache_dir / mid
+    sync_row = svc.db.one("SELECT result FROM analysis WHERE media_id = ? AND kind = 'sync'", (mid,)) if "sync" in analyses else None
     return {
+        "sync": json.loads(sync_row["result"]) if sync_row else None,
         "id": mid, "name": row["name"], "path": str(path), "kind": row["kind"], "origin": row["origin"],
         "duration_ms": row["duration_ms"], "width": row["width"], "height": row["height"], "fps": row["fps"],
         "has_video": bool(row["has_video"]), "has_audio": bool(row["has_audio"]), "bytes": row["bytes"],
@@ -351,6 +353,13 @@ def prepare_job(svc: "Services", ctx: "JobCtx") -> dict[str, Any]:
                                           "auto_threshold_db": round(audio_an.auto_threshold(levels), 1),
                                           "speech_level_db": round(float(np.percentile(levels, 80)), 1) if levels.size else None})
         done["waveform"] = int(peaks.size)
+        try:  # where the sound starts, peaks and ends: a clip can then be placed by that point (add_media align)
+            from . import audio_sync
+
+            audio_sync.compute(svc, mid, ctx.handle())
+            done["sync"] = True
+        except Exception:  # noqa: BLE001 - the points are a convenience; a file ffmpeg cannot decode twice must not fail its preparation
+            ctx.check()
     svc.emit("lumiere.media.ready", {"id": mid, "name": clip(info["name"], 80)})
     return done
 
