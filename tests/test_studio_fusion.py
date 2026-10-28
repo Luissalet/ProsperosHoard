@@ -99,6 +99,16 @@ async def test_http_discovery_and_projects_do_not_enable_modules(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_font_missing_from_a_development_checkout_answers_404(tmp_path):
+    from pathlib import Path
+    app = create_app(tmp_path, port=64239)
+    font = Path(__file__).resolve().parents[1] / 'prosperos_hoard' / 'studio_ui' / 'fonts' / 'cinzel-latin-400-normal.woff2'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:64239') as client:
+        response = await client.get('/studio-assets/fonts/cinzel-latin-400-normal.woff2')
+    assert response.status_code == (200 if font.exists() else 404)
+
+
+@pytest.mark.asyncio
 async def test_common_writes_preserve_native_profiles_and_compact_journal(tmp_path):
     from prosperos_hoard.hoard_link.tokens import mint_agent_token
     studio = Studio(tmp_path, port=64239)

@@ -333,8 +333,12 @@ class Studio:
                 return await self.json(send, {'error': 'not_found'}, 404)
             file = app_icon() if filename == 'app-icon.png' else Path(__file__).with_name('studio_ui') / filename
             from mimetypes import guess_type
+            try:
+                body = await asyncio.to_thread(file.read_bytes)
+            except FileNotFoundError:  # a development checkout has no fonts folder: answer 404, never drop the connection
+                return await self.json(send, {'error': 'not_found'}, 404)
             await send({'type': 'http.response.start', 'status': 200, 'headers': [(b'content-type', (guess_type(file)[0] or 'application/octet-stream').encode())]})
-            return await send({'type': 'http.response.body', 'body': await asyncio.to_thread(file.read_bytes)})
+            return await send({'type': 'http.response.body', 'body': body})
         # Old generation paths remain callable when generation is explicitly ON.
         return await self.native('generation', scope, receive, send, path)
 
