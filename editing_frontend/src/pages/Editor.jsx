@@ -12,6 +12,7 @@ import Inspector from "../editor/Inspector.jsx";
 import { Playback } from "../editor/playback.js";
 import Player from "../editor/Player.jsx";
 import TextView from "../editor/TextView.jsx";
+import MontageText from "../editor/MontageText.jsx";
 import Timeline from "../editor/Timeline.jsx";
 import { clipEnd, projectDuration, trackRows } from "../editor/time.js";
 import { useMediaInfo, useProject } from "../editor/useProject.js";
@@ -267,8 +268,9 @@ function EditorInner({ proj }) {
           <div className="tabs" role="tablist" style={{ padding: "0 8px", borderBottom: "1px solid var(--line)", flex: "none" }}>
             <button type="button" role="tab" className="tab" aria-selected={bottomTab === "timeline"} onClick={() => setBottomTab("timeline")} data-tab="timeline"><Icon name="clip" size={13} /> {t("tab_timeline")}</button>
             <button type="button" role="tab" className="tab" aria-selected={bottomTab === "text"} onClick={() => setBottomTab("text")} data-tab="textview"><Icon name="type" size={13} /> {t("tab_transcript")}</button>
+            <button type="button" role="tab" className="tab" aria-selected={bottomTab === "montage"} onClick={() => setBottomTab("montage")} data-tab="montagetext"><Icon name="type" size={13} /> {t("tab_montage_text")}</button>
           </div>
-          {bottomTab === "timeline" ? <Timeline /> : <TextView />}
+          {bottomTab === "timeline" ? <Timeline /> : bottomTab === "montage" ? <MontageText /> : <TextView />}
         </div>
         {jobsOpen ? <JobsDrawer onClose={() => setJobsOpen(false)} /> : null}
         {exportOpen ? <ExportDialog onClose={() => setExportOpen(false)} /> : null}

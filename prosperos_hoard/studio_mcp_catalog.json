@@ -4518,7 +4518,7 @@
     },
     {
       "name": "studio_style_cards",
-      "description": "List, read and make style cards: image prompt plus how titles are drawn and moved / fichas de estilo.\n\naction \"list\" (id, name, palette, signature transition, quality stars, technique), \"get\" (id or name: every field),\n\"create\" (name; from_card copies a card, a built-in one is read-only so copy it first), \"update\", \"delete\" (custom\ncards only). A card holds technique (how it is drawn, in words), palette (#hex: background, ink, accent, accent 2,\nmuted), motion {easing, bezier [x1,y1,x2,y2], stagger_s, stepped_fps, pop}, signature_transition (fade, slide_up,\nwipe, scale_pop, glitch, flicker, mask_reveal), quality 0-3 (how well it turns out), pitfalls (what to avoid), typography\n{fonts, weight, case, tracking, align, background, fx} and the usual prompt_prefix / prompt_suffix / negative for\ngenerated stills. Built in: \"Neón nocturno\", \"Papel recortado\", \"VHS terror\", \"Tipografía suiza\". Use one in a\ngraphic shot (studio_graphic_shot style=...) or for the whole production (spec.graphics.style).\n\nKeywords: style card, style preset, palette, typography, motion style, signature transition, look, ficha de estilo,\nestilo, paleta, tipografia, estilo visual, transicion\n",
+      "description": "Style cards: list, search, read, make; 74 written film styles. Fichas de estilo.\n\naction \"list\" (id, name, palette, signature transition, quality stars, technique; library=true adds the imported direction\ncards, source=\"lemo-opuscar\"|\"mg-styles-15\" one library), \"search\" (query words, category, source: the direction cards by what\nthey are for, e.g. \"evidence archive\", \"kinetic type\", \"paper\"), \"get\" (id, name or source/slug: every field; section=\"essence\"\ngives one section of a direction card), \"create\" (name; from_card copies a card, a built-in one is read-only so copy it first),\n\"update\", \"import\" (path = a local checkout, kind = the library), \"delete\" (custom cards only).\n\nA direction card has fixed sections (essence and what it is not, materials, colour, type, motion, camera, sound, native moves,\npitfalls, engine, variation space; or output, technical route, creative seed, signature features) and a partition of them into\nwhat is safe to change in a variant, what changes the character and the essence. create with from_card and changes\n{section: text} makes a variant: a change to the essence is refused (that is another style) and one to the materials or camera\nneeds accept_character_change=true. Every card keeps its licence and attribution (MIT; the films are not included).\n\nA card also holds technique (how it is drawn, in words), palette (#hex: background, ink, accent, accent 2, muted), motion\n{easing, bezier [x1,y1,x2,y2], stagger_s, stepped_fps, pop}, signature_transition (fade, slide_up, wipe, scale_pop, glitch,\nflicker, mask_reveal), quality 0-3, pitfalls, typography {fonts, weight, case, tracking, align, background, fx} and the usual\nprompt_prefix / prompt_suffix / negative for generated stills. Built in: \"Neon nocturno\", \"Papel recortado\", \"VHS terror\",\n\"Tipografia suiza\". Use one in a graphic shot (studio_graphic_shot style=...) or for the whole production (spec.graphics.style).\nThe animations of Montaje start from the same direction cards (motion_styles, motion_from_style).\n\nKeywords: style card, style preset, direction card, film style, palette, typography, motion style, signature transition, look,\nvariant, ficha de estilo, estilo, paleta, tipografia, estilo visual, transicion, variante\n",
       "inputSchema": {
         "properties": {
           "action": {
@@ -4708,6 +4708,141 @@
             ],
             "default": null,
             "title": "Notes"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Query"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "library": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Library"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Changes"
+          },
+          "accept_character_change": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Accept Character Change"
+          },
+          "allow_essence_change": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Allow Essence Change"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
           },
           "reason": {
             "anyOf": [
@@ -8386,6 +8521,104 @@
             "description": "Include the actual contact sheet as one MCP PNG image.",
             "title": "Show",
             "type": "boolean"
+          },
+          "mode": {
+            "default": "sheet",
+            "description": "sheet: the given moments, shrunk. strip: every frame of span at the composition's frame rate (up to 48, thinned evenly), to see the motion between two moments. crop-at: the given moments cropped around (x, y) or a CSS selector and enlarged, to see detail.",
+            "enum": [
+              "sheet",
+              "strip",
+              "crop-at"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "span": {
+            "anyOf": [
+              {
+                "items": {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "strip: [start_s, end_s]; default the whole composition.",
+            "title": "Span"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "crop-at: centre x in composition pixels.",
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "crop-at: centre y in composition pixels.",
+            "title": "Y"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "crop-at: a CSS selector to follow instead of a fixed point (its box at each moment).",
+            "title": "Selector"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "items": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 4096,
+                  "type": "integer"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "crop-at with (x, y): [width, height] of the crop in composition pixels; default a quarter of the canvas.",
+            "title": "Size"
+          },
+          "scale": {
+            "default": 2.0,
+            "description": "crop-at: enlargement of each crop (the tile is at most 640 px wide).",
+            "exclusiveMinimum": 0.0,
+            "maximum": 8.0,
+            "title": "Scale",
+            "type": "number"
           }
         },
         "required": [
@@ -8958,6 +9191,1066 @@
           }
         },
         "title": "AudioSyncPointsArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_styles",
+      "description": "Search the style cards for a film look, or read one. Estilos de animacion.\nSeventy-four cards from two open libraries (MIT; films not included): essence, materials, colour, type, motion, camera, sound, native moves, pitfalls, and what is safe to change. Keywords: style, look, direction, card, estilo, ficha, visual identity, evidence film, motion graphics.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "default": "search",
+            "description": "search: find style cards by what they are for; get: read one card (or one of its sections).",
+            "enum": [
+              "search",
+              "get"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "search: words about the look, the use or the name; omit to list.",
+            "title": "Query"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "lemo-opuscar",
+                  "mg-styles-15"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "get: 'source/slug' or the slug of a card.",
+            "title": "Id"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "get: one section only (essence, materials, color, type, motion, camera, sound, moves, pitfalls, variation...).",
+            "title": "Section"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "MotionStylesArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_treatment",
+      "description": "Write, check or draft the treatment of an animation before its page. Tratamiento.\nThree different structures (and why one), the shots one by one with why each is there, and the cue map. motion_from_style refuses to start without one. Keywords: treatment, structure, shot list, storyboard plan, cue map, tratamiento.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "CueMapItem": {
+            "properties": {
+              "t": {
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "visual": {
+                "description": "What the picture does at this moment.",
+                "maxLength": 300,
+                "minLength": 3,
+                "title": "Visual",
+                "type": "string"
+              },
+              "sound": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The sound role heard (tap, whoosh, hit, clic...), or none for a silent hit.",
+                "title": "Sound"
+              }
+            },
+            "required": [
+              "t",
+              "visual"
+            ],
+            "title": "CueMapItem",
+            "type": "object"
+          },
+          "Shot": {
+            "properties": {
+              "t": {
+                "description": "Where the shot starts, in seconds.",
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "what": {
+                "description": "What the viewer sees.",
+                "maxLength": 500,
+                "minLength": 3,
+                "title": "What",
+                "type": "string"
+              },
+              "why": {
+                "description": "Why the shot is there: what it does for the story or the style.",
+                "maxLength": 500,
+                "minLength": 8,
+                "title": "Why",
+                "type": "string"
+              },
+              "text": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Caption shown on screen in this shot (the scaffold writes it; read by readcheck).",
+                "title": "Text"
+              }
+            },
+            "required": [
+              "t",
+              "what",
+              "why"
+            ],
+            "title": "Shot",
+            "type": "object"
+          },
+          "Structure": {
+            "properties": {
+              "name": {
+                "description": "A short name for this way of telling it.",
+                "maxLength": 80,
+                "minLength": 2,
+                "title": "Name",
+                "type": "string"
+              },
+              "idea": {
+                "description": "How the film is built if this structure is chosen.",
+                "maxLength": 800,
+                "minLength": 8,
+                "title": "Idea",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "idea"
+            ],
+            "title": "Structure",
+            "type": "object"
+          },
+          "Treatment": {
+            "properties": {
+              "card": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The style card this film follows: 'source/slug' or just the slug.",
+                "title": "Card"
+              },
+              "structures": {
+                "description": "Exactly three different ways to tell it.",
+                "items": {
+                  "$ref": "#/$defs/Structure"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "title": "Structures",
+                "type": "array"
+              },
+              "chosen": {
+                "description": "Index (0-2) of the structure that was chosen.",
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Chosen",
+                "type": "integer"
+              },
+              "reason": {
+                "description": "Why that structure over the other two.",
+                "maxLength": 800,
+                "minLength": 8,
+                "title": "Reason",
+                "type": "string"
+              },
+              "shots": {
+                "description": "The shots one by one, each with why it is there.",
+                "items": {
+                  "$ref": "#/$defs/Shot"
+                },
+                "maxItems": 60,
+                "minItems": 1,
+                "title": "Shots",
+                "type": "array"
+              },
+              "cue_map": {
+                "description": "What happens and what is heard, moment by moment.",
+                "items": {
+                  "$ref": "#/$defs/CueMapItem"
+                },
+                "maxItems": 200,
+                "minItems": 1,
+                "title": "Cue Map",
+                "type": "array"
+              },
+              "draft": {
+                "default": false,
+                "description": "True when the treatment was drafted from the card and not written for this film.",
+                "title": "Draft",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "structures",
+              "chosen",
+              "reason",
+              "shots",
+              "cue_map"
+            ],
+            "title": "Treatment",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "action": {
+            "default": "get",
+            "description": "get: read the saved treatment; set: save one (checked); check: verify without saving; draft: a starting treatment from a card (not saved).",
+            "enum": [
+              "get",
+              "set",
+              "check",
+              "draft"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "composition": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Composition"
+          },
+          "treatment": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Treatment"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "set/check: three structures, the chosen one and why, shots with why each is there, and the cue map."
+          },
+          "card": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "draft: the style card ('source/slug' or slug).",
+            "title": "Card"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "draft/check without a composition: the length in seconds.",
+            "title": "Duration"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "draft: the first caption shown.",
+            "title": "Caption"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "title": "MotionTreatmentArgs",
+        "type": "object",
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "motion_cues",
+      "description": "Read or set the cues: the moments picture and sound hang on. Hitos de imagen y sonido.\nOne list for both: the sound events are derived from it. Changing saves a new revision (expected_revision). Keywords: cues, hits, sync, sound events, cue map, hitos.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "Cue": {
+            "properties": {
+              "id": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9_-]{1,24}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Stable name; omitted = c1, c2... in time order.",
+                "title": "Id"
+              },
+              "t": {
+                "description": "Seconds: the frame where the picture hits and the sound lands.",
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "visual": {
+                "description": "What the picture does there.",
+                "maxLength": 300,
+                "minLength": 2,
+                "title": "Visual",
+                "type": "string"
+              },
+              "sound": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Sound role (tap, golpe, clic, whoosh, hit...). None: a silent visual hit.",
+                "title": "Sound"
+              },
+              "gain_db": {
+                "anyOf": [
+                  {
+                    "maximum": 12.0,
+                    "minimum": -24.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Gain Db"
+              }
+            },
+            "required": [
+              "t",
+              "visual"
+            ],
+            "title": "Cue",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "action": {
+            "default": "get",
+            "description": "get: the cues; set: replace them (and derive the sound events from them); clear: no cues.",
+            "enum": [
+              "get",
+              "set",
+              "clear"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "cues": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/Cue"
+                },
+                "maxItems": 400,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "set: [{t, visual, sound (role or none), gain_db}] - the moments picture and sound hang on.",
+            "title": "Cues"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision (required to change).",
+            "title": "Expected Revision"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "MotionCuesArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_cuecheck",
+      "description": "Check that every cue has its visual hit in its frame, and every hit its cue. Comprobar sincronia.\nRenders the real page; reports each cue's measured offset in ms, unclear or missing hits, and visual hits with no cue. retime moves cues to the true frame. Keywords: sync check, cue check, audio visual sync, hit, offset.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "window_s": {
+            "default": 0.3,
+            "description": "How far from a cue, either side, its picture hit is looked for.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2.0,
+            "title": "Window S",
+            "type": "number"
+          },
+          "scan": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Render every frame to find visual hits that have no cue (default: yes for up to 1500 frames).",
+            "title": "Scan"
+          },
+          "min_change": {
+            "default": 0.3,
+            "description": "Mean grey change between two frames that counts as the picture reacting.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 50.0,
+            "title": "Min Change",
+            "type": "number"
+          },
+          "retime": {
+            "default": false,
+            "description": "Move cues that are a frame or more away to the frame where the picture really hits (needs expected_revision).",
+            "title": "Retime",
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "MotionCuecheckArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_readcheck",
+      "description": "Check that every text stays fully visible long enough to be read. Comprobar lectura.\nLetters/15 s plus 1.5 s (CJK characters/4.5 s); partly outside the frame or never opaque counts as never readable. Uses window.TEXTS(t) or the DOM text. Keywords: reading time, subtitles, legibility, text duration, readcheck.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sampling step in seconds (default: every frame, at most 1200 samples).",
+            "title": "Step"
+          },
+          "min_s": {
+            "default": 0.0,
+            "description": "Shortest time any text must stay, on top of the reading rule.",
+            "maximum": 30.0,
+            "minimum": 0.0,
+            "title": "Min S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "composition"
+        ],
+        "title": "MotionReadcheckArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_facts",
+      "description": "Keep FACTS.md of an informative animation and check the numbers shown against it. Hechos y fuentes.\nget/set the claims with their sources; check lists numbers on screen that no fact backs. Keywords: facts, sources, fact check, informative video, evidence, hechos.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "action": {
+            "default": "get",
+            "description": "get: FACTS.md; set: write it; check: every number the video shows must be in it.",
+            "enum": [
+              "get",
+              "set",
+              "check"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 60000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "set: the claims, one per line, each with where it comes from. Empty removes the file.",
+            "title": "Content"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "MotionFactsArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_from_style",
+      "description": "Start an animation from a style card and its treatment. Crear desde un estilo.\nRefuses without a treatment (three structures, shots with why, cue map). Writes a working page with captions and a sharp hit on every cue, the cues and the sound events; then review, cuecheck and readcheck. Keywords: style card, create animation, scaffold, treatment, start from style.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "CueMapItem": {
+            "properties": {
+              "t": {
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "visual": {
+                "description": "What the picture does at this moment.",
+                "maxLength": 300,
+                "minLength": 3,
+                "title": "Visual",
+                "type": "string"
+              },
+              "sound": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The sound role heard (tap, whoosh, hit, clic...), or none for a silent hit.",
+                "title": "Sound"
+              }
+            },
+            "required": [
+              "t",
+              "visual"
+            ],
+            "title": "CueMapItem",
+            "type": "object"
+          },
+          "Shot": {
+            "properties": {
+              "t": {
+                "description": "Where the shot starts, in seconds.",
+                "minimum": 0.0,
+                "title": "T",
+                "type": "number"
+              },
+              "what": {
+                "description": "What the viewer sees.",
+                "maxLength": 500,
+                "minLength": 3,
+                "title": "What",
+                "type": "string"
+              },
+              "why": {
+                "description": "Why the shot is there: what it does for the story or the style.",
+                "maxLength": 500,
+                "minLength": 8,
+                "title": "Why",
+                "type": "string"
+              },
+              "text": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Caption shown on screen in this shot (the scaffold writes it; read by readcheck).",
+                "title": "Text"
+              }
+            },
+            "required": [
+              "t",
+              "what",
+              "why"
+            ],
+            "title": "Shot",
+            "type": "object"
+          },
+          "Structure": {
+            "properties": {
+              "name": {
+                "description": "A short name for this way of telling it.",
+                "maxLength": 80,
+                "minLength": 2,
+                "title": "Name",
+                "type": "string"
+              },
+              "idea": {
+                "description": "How the film is built if this structure is chosen.",
+                "maxLength": 800,
+                "minLength": 8,
+                "title": "Idea",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "idea"
+            ],
+            "title": "Structure",
+            "type": "object"
+          },
+          "Treatment": {
+            "properties": {
+              "card": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The style card this film follows: 'source/slug' or just the slug.",
+                "title": "Card"
+              },
+              "structures": {
+                "description": "Exactly three different ways to tell it.",
+                "items": {
+                  "$ref": "#/$defs/Structure"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "title": "Structures",
+                "type": "array"
+              },
+              "chosen": {
+                "description": "Index (0-2) of the structure that was chosen.",
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Chosen",
+                "type": "integer"
+              },
+              "reason": {
+                "description": "Why that structure over the other two.",
+                "maxLength": 800,
+                "minLength": 8,
+                "title": "Reason",
+                "type": "string"
+              },
+              "shots": {
+                "description": "The shots one by one, each with why it is there.",
+                "items": {
+                  "$ref": "#/$defs/Shot"
+                },
+                "maxItems": 60,
+                "minItems": 1,
+                "title": "Shots",
+                "type": "array"
+              },
+              "cue_map": {
+                "description": "What happens and what is heard, moment by moment.",
+                "items": {
+                  "$ref": "#/$defs/CueMapItem"
+                },
+                "maxItems": 200,
+                "minItems": 1,
+                "title": "Cue Map",
+                "type": "array"
+              },
+              "draft": {
+                "default": false,
+                "description": "True when the treatment was drafted from the card and not written for this film.",
+                "title": "Draft",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "structures",
+              "chosen",
+              "reason",
+              "shots",
+              "cue_map"
+            ],
+            "title": "Treatment",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "card": {
+            "description": "The style card ('source/slug' or slug); find it with motion_styles.",
+            "maxLength": 120,
+            "title": "Card",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "width": {
+            "default": 1280,
+            "exclusiveMinimum": 0,
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "default": 720,
+            "exclusiveMinimum": 0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "fps": {
+            "default": 30,
+            "exclusiveMinimum": 0.0,
+            "title": "Fps",
+            "type": "number"
+          },
+          "duration": {
+            "default": 8,
+            "exclusiveMinimum": 0.0,
+            "title": "Duration",
+            "type": "number"
+          },
+          "treatment": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Treatment"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Required: three structures, shots with why, the cue map. See motion_treatment."
+          },
+          "draft_treatment": {
+            "default": false,
+            "description": "Accept a treatment drafted from the card instead of writing one (marked draft).",
+            "title": "Draft Treatment",
+            "type": "boolean"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Caption"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project Id"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "card",
+          "reason"
+        ],
+        "title": "MotionFromStyleArgs",
         "type": "object"
       }
     },
@@ -10947,6 +12240,25 @@
             "description": "Fail if the project changed since this revision.",
             "title": "Base Rev"
           },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Same as base_rev (the revision you read with project_get / timeline_text); the name the other timeline tools use.",
+            "title": "Expected Revision"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Run the operations on a copy and report what would change (changes, duration, issues, would_be_rev) without saving or using an undo step.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
           "request_id": {
             "default": "",
             "description": "Optional unique edit key: retry identical ops/label/base_rev after an interrupted response without applying twice. A new edit needs a new key.",
@@ -10967,6 +12279,448 @@
           "reason"
         ],
         "title": "EditArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "timeline_text",
+      "description": "The timeline as stable plain text with its revision, one line per clip. Montaje como texto.\nTimes in whole ms; edit it with timeline_apply_text (exact old/new replacements). Keywords: timeline text, serialize, read edit, clips as text, texto del montaje.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "description": "Project id (prj_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Project",
+            "type": "string"
+          },
+          "track": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this track (id, name or kind).",
+            "title": "Track"
+          },
+          "max_chars": {
+            "default": 60000,
+            "maximum": 300000,
+            "minimum": 1000,
+            "title": "Max Chars",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "TimelineTextArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "timeline_apply_text",
+      "description": "Change the timeline with exact text replacements, all or nothing. Editar montaje por texto.\nEach old must match once; the result is proved before saving (the text you wrote must be what is there); revision conflict if it changed; dry_run reports. One undo step. Keywords: text edit, replace, start, src, volume, fade, label, delete clip, retime.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "draftSafeHint": true
+      },
+      "inputSchema": {
+        "$defs": {
+          "TextReplacement": {
+            "properties": {
+              "old": {
+                "description": "Text copied exactly from timeline_text; it must appear once (include the clip id of the line).",
+                "maxLength": 20000,
+                "minLength": 1,
+                "title": "Old",
+                "type": "string"
+              },
+              "new": {
+                "description": "What takes its place. A whole clip line replaced by nothing deletes the clip.",
+                "maxLength": 20000,
+                "title": "New",
+                "type": "string"
+              }
+            },
+            "required": [
+              "old",
+              "new"
+            ],
+            "title": "TextReplacement",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "project": {
+            "description": "Project id (prj_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Project",
+            "type": "string"
+          },
+          "replacements": {
+            "description": "Applied in order to the text of timeline_text; each old must match exactly once. All or nothing.",
+            "items": {
+              "$ref": "#/$defs/TextReplacement"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Replacements",
+            "type": "array"
+          },
+          "expected_revision": {
+            "description": "The revision of the text you edited: a different one is refused.",
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Report the operations and what would change; save nothing.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "ripple": {
+            "default": false,
+            "description": "With true, deleting a clip or changing a length closes or opens the gap after it; default false: other clips stay where they are.",
+            "title": "Ripple",
+            "type": "boolean"
+          },
+          "label": {
+            "default": "",
+            "description": "Name of the undo step.",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "replacements",
+          "expected_revision",
+          "reason"
+        ],
+        "title": "TimelineApplyTextArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "timeline_check",
+      "description": "Try an edit without saving it: text replacements or operations. Simular edicion.\nReports whether it applies to the revision, the operations, what changes, the new duration and issues. Never saves. Keywords: dry run, simulate, validate edit, preview edit, check.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TextReplacement": {
+            "properties": {
+              "old": {
+                "description": "Text copied exactly from timeline_text; it must appear once (include the clip id of the line).",
+                "maxLength": 20000,
+                "minLength": 1,
+                "title": "Old",
+                "type": "string"
+              },
+              "new": {
+                "description": "What takes its place. A whole clip line replaced by nothing deletes the clip.",
+                "maxLength": 20000,
+                "title": "New",
+                "type": "string"
+              }
+            },
+            "required": [
+              "old",
+              "new"
+            ],
+            "title": "TextReplacement",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "project": {
+            "description": "Project id (prj_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Project",
+            "type": "string"
+          },
+          "replacements": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextReplacement"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A text edit to try (as timeline_apply_text).",
+            "title": "Replacements"
+          },
+          "ops": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Or timeline_edit operations to try.",
+            "title": "Ops"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The revision you read: a different one is reported as a conflict.",
+            "title": "Expected Revision"
+          },
+          "ripple": {
+            "default": false,
+            "title": "Ripple",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "TimelineCheckArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cut_proposals",
+      "description": "Propose filler-word and pause cuts with confidence and reason; accept in bulk. Propuestas de corte.\nNames words by transcript id, never times. The document expires if the transcript changes. Accepting is one edit, one undo step. Keywords: fillers, muletillas, pauses, silences, cut proposals, confidence, jump cuts.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "draftSafeHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "description": "Project id (prj_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Project",
+            "type": "string"
+          },
+          "action": {
+            "default": "get",
+            "description": "create: find filler words and pauses; get: read the proposals; accept: cut them in one edit; reject: drop some; list: all documents.",
+            "enum": [
+              "create",
+              "get",
+              "list",
+              "accept",
+              "reject"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "pattern": "^cp_[0-9a-f]{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Proposal document id; omitted = the latest.",
+            "title": "Proposal"
+          },
+          "kinds": {
+            "default": [
+              "fillers",
+              "pauses"
+            ],
+            "description": "create: what to look for.",
+            "items": {
+              "enum": [
+                "fillers",
+                "pauses"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Kinds",
+            "type": "array"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "create: only this media (default: those on the main track).",
+            "title": "Media"
+          },
+          "min_pause_ms": {
+            "default": 700,
+            "description": "create: shortest silence between two words that counts as a pause.",
+            "maximum": 10000,
+            "minimum": 200,
+            "title": "Min Pause Ms",
+            "type": "integer"
+          },
+          "keep_pause_ms": {
+            "default": 250,
+            "description": "create: how much of a pause stays when it is cut.",
+            "maximum": 2000,
+            "minimum": 0,
+            "title": "Keep Pause Ms",
+            "type": "integer"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 2000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "accept/reject: proposal ids (f1, p3...). accept without ids takes every open one.",
+            "title": "Ids"
+          },
+          "min_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "get/accept: only proposals at least this sure.",
+            "title": "Min Confidence"
+          },
+          "max_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "reject: drop the open proposals less sure than this.",
+            "title": "Max Confidence"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "filler",
+                  "pause"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "get/accept: only this kind.",
+            "title": "Kind"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "accept: the revision you read; a different one is refused.",
+            "title": "Expected Revision"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "accept: report what would be cut without saving.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 80,
+            "description": "get/create: proposals shown.",
+            "maximum": 500,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "reason"
+        ],
+        "title": "CutProposalsArgs",
         "type": "object"
       }
     },
@@ -11012,6 +12766,19 @@
             "default": null,
             "description": "restore: the history step to go back to.",
             "title": "Seq"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Undo/redo/restore only if the project is still at this revision.",
+            "title": "Expected Revision"
           },
           "reason": {
             "type": "string",

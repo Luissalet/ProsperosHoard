@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from fractions import Fraction
+import base64
 import hashlib
 import importlib.util
 import json
@@ -88,18 +89,21 @@ class HtmlFrameWorker:
                 raise LumiereError(data["error"], code=data.get("code", "html_motion_browser"))
             return data
 
-    def frame(self, at: float) -> bytes:
+    def call(self, command: dict) -> dict:
         if self.ctx:
             self.ctx.check()
         try:
-            self.process.stdin.write(json.dumps({"at": at}) + "\n")
+            self.process.stdin.write(json.dumps(command) + "\n")
             self.process.stdin.flush()
         except OSError:
             if self.ctx:
                 self.ctx.check()
             raise LumiereError("HTML browser worker stopped.", code="html_motion_browser") from None
+        return self._receive()
+
+    def frame(self, at: float) -> bytes:
         import base64
-        return base64.b64decode(self._receive()["png"])
+        return base64.b64decode(self.call({"at": at})["png"])
 
     def __exit__(self, *_):
         if self.process is not None:
@@ -110,6 +114,48 @@ class HtmlFrameWorker:
             for pipe in (self.process.stdin, self.process.stdout):
                 if pipe is not None:
                     pipe.close()
+
+
+_TEXTS_JS = """async times => {
+  const out = [];
+  const W = innerWidth, H = innerHeight;
+  const alpha = c => { const m = /rgba?\\(([^)]+)\\)/.exec(c || ''); if (!m) return 1; const p = m[1].split(/[ ,\\/]+/).filter(Boolean); return p.length > 3 ? parseFloat(p[3]) : 1; };
+  const pathOf = el => { const parts = []; for (let e = el; e && e !== document.body && e.parentElement; e = e.parentElement) { if (e.id) { parts.unshift('#' + e.id); break; } parts.unshift(e.tagName.toLowerCase() + ':' + [...e.parentElement.children].indexOf(e)); } return parts.join('>'); };
+  const dom = () => {
+    const list = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.nodeValue.replace(/\\s+/g, ' ').trim();
+      const el = node.parentElement;
+      if (!text || !el || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TITLE'].includes(el.tagName)) continue;
+      const range = document.createRange(); range.selectNodeContents(node);
+      const r = range.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      let opacity = alpha(getComputedStyle(el).color), hidden = false, x0 = r.left, y0 = r.top, x1 = r.right, y1 = r.bottom, clip = 1;
+      for (let e = el; e; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (cs.display === 'none' || cs.visibility === 'hidden') hidden = true;
+        opacity *= parseFloat(cs.opacity);
+        if (e !== document.documentElement && (cs.overflow !== 'visible' || cs.overflowX !== 'visible' || cs.overflowY !== 'visible' || cs.clipPath !== 'none')) {
+          const b = e.getBoundingClientRect();
+          const w = Math.max(0, Math.min(x1, b.right) - Math.max(x0, b.left)), h = Math.max(0, Math.min(y1, b.bottom) - Math.max(y0, b.top));
+          clip = Math.min(clip, (w * h) / Math.max(1e-9, (x1 - x0) * (y1 - y0)));
+        }
+      }
+      const index = [...el.childNodes].indexOf(node);
+      list.push({id: pathOf(el) + (index > 0 ? '~' + index : ''), text, x0, y0, x1, y1, opacity: hidden ? 0 : opacity, frac: clip});
+    }
+    return list;
+  };
+  const custom = typeof window.TEXTS === 'function';
+  for (const t of times) {
+    await window.seek(t); await document.fonts.ready;
+    out.push(custom ? (window.TEXTS(t) || []).map(o => ({id: String(o.id), text: String(o.text), x0: +o.x0, y0: +o.y0, x1: +o.x1, y1: +o.y1,
+      opacity: o.opacity === undefined ? 1 : +o.opacity, frac: o.frac === undefined ? 1 : +o.frac})) : dom());
+  }
+  return {source: custom ? 'TEXTS' : 'dom', frames: out, width: W, height: H};
+}"""
 
 
 def browser_executable() -> str | None:
@@ -248,6 +294,33 @@ class HtmlMotion:
             raise LumiereError("HTML script failed: " + "; ".join(errors), code="html_motion_script")
         return page.screenshot(type="png", animations="disabled")
 
+    @staticmethod
+    def texts(page, errors: list, times: list[float]) -> dict:
+        """The texts on screen at each time: window.TEXTS(t) when the page defines it, else the visible text of the DOM."""
+        result = page.evaluate(_TEXTS_JS, times)
+        if errors:
+            raise LumiereError("HTML script failed: " + "; ".join(errors), code="html_motion_script")
+        return result
+
+    @staticmethod
+    def box(page, errors: list, at: float, selector: str) -> dict | None:
+        page.evaluate("async t => { await window.seek(t); await document.fonts.ready; }", at)
+        if errors:
+            raise LumiereError("HTML script failed: " + "; ".join(errors), code="html_motion_script")
+        return page.evaluate("""s => { const e = document.querySelector(s); if (!e) return null;
+            const r = e.getBoundingClientRect(); return {x0: r.left, y0: r.top, x1: r.right, y1: r.bottom}; }""", selector)
+
+    @staticmethod
+    def pinned(manifest: dict) -> dict:
+        """The manifest with its source captured in memory, so every frame of one review comes from the same bytes."""
+        import base64
+        try:
+            captured = Path(manifest['source_path']).read_bytes()
+        except OSError:
+            raise LumiereError('HTML source could not be read.', code='html_motion_source') from None
+        return {**manifest, 'source_sha256': hashlib.sha256(captured).hexdigest(),
+                'captured_source_b64': base64.b64encode(captured).decode('ascii')}
+
     def frame(self, composition: str, at: float, revision: int | None = None) -> tuple[bytes, dict]:
         manifest = self.get(composition, revision)
         if not math.isfinite(at) or at < 0 or at > manifest["duration"]:
@@ -257,43 +330,90 @@ class HtmlMotion:
         return data, {"id": composition, "revision": manifest["revision"], "at_s": at,
                       "source_sha256": manifest["source_sha256"], "frame_sha256": hashlib.sha256(data).hexdigest()}
 
-    def storyboard(self, composition: str, times: list[float] | None = None, revision: int | None = None) -> dict:
-        """Capture one pinned revision/session and publish a real image review sheet."""
-        from io import BytesIO
+    @staticmethod
+    def _sheet(previews: list, labels: list[str], columns: int, minimum: int = 192):
+        """A contact sheet: each preview with its label underneath."""
         from PIL import Image, ImageDraw, ImageFont
-        manifest = self.get(composition, revision)
-        moments = list(times) if times is not None else [manifest['duration']*i/3 for i in range(4)]
-        if not moments or any(not math.isfinite(t) or t < 0 or t > manifest['duration'] for t in moments):
-            raise LumiereError('Storyboard times must be within the composition, in seconds.', code='html_motion_time')
-        try:
-            captured_source = Path(manifest['source_path']).read_bytes()
-        except OSError:
-            raise LumiereError('HTML source could not be read.', code='html_motion_source') from None
-        source_hash = hashlib.sha256(captured_source).hexdigest()
-        import base64
-        worker_manifest = {**manifest, 'source_sha256':source_hash, 'captured_source_b64':base64.b64encode(captured_source).decode('ascii')}
-        originals, previews = [], []
-        with HtmlFrameWorker(worker_manifest) as worker:
-            for at in moments:
-                data = worker.frame(at)
-                originals.append(data)
-                with Image.open(BytesIO(data)) as image:
-                    preview = image.convert('RGB')
-                    preview.thumbnail((512, 288), Image.Resampling.LANCZOS)
-                    previews.append(preview)
-        cell_width = max(192, max(image.width for image in previews))
+        cell_width = max(minimum, max(image.width for image in previews))
         cell_height = max(image.height for image in previews) + 32
-        columns = min(2, len(previews))
         sheet = Image.new('RGB', (cell_width*columns, cell_height*math.ceil(len(previews)/columns)), '#17191e')
         draw = ImageDraw.Draw(sheet)
         try:
             font = ImageFont.load_default(size=16)
         except TypeError:  # Pillow 10.0 keeps its original bitmap default.
             font = ImageFont.load_default()
-        for i, (at, image) in enumerate(zip(moments, previews)):
+        for i, (image, label) in enumerate(zip(previews, labels)):
             x, y = (i%columns)*cell_width, (i//columns)*cell_height
             sheet.paste(image, (x+(cell_width-image.width)//2, y))
-            draw.text((x+8, y+cell_height-24), f'{at:.6g} s | r{manifest["revision"]}', fill='#ebe4ec', font=font)
+            draw.text((x+8, y+cell_height-24), label, fill='#ebe4ec', font=font)
+        return sheet
+
+    def storyboard(self, composition: str, times: list[float] | None = None, revision: int | None = None, *, mode: str = 'sheet',
+                   span: tuple[float, float] | None = None, x: float | None = None, y: float | None = None,
+                   selector: str | None = None, size: tuple[int, int] | None = None, scale: float = 2.0) -> dict:
+        """Capture one pinned revision/session and publish a real image review sheet.
+
+        ``sheet``: the given moments, each shrunk. ``strip``: every frame of a span at the composition's frame rate
+        (at most 48, evenly thinned), small, to see the motion between two moments. ``crop-at``: the given moments
+        cropped around a point (x, y) or a CSS selector and enlarged, to see detail."""
+        from io import BytesIO
+        from PIL import Image
+        if mode not in ('sheet', 'strip', 'crop-at'):
+            raise LumiereError('Review mode must be sheet, strip or crop-at.', code='html_motion_mode')
+        manifest = self.get(composition, revision)
+        duration, fps = manifest['duration'], manifest['fps']
+        step_frames = 1
+        if mode == 'strip':
+            start, end = span if span else (0.0, duration)
+            if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end > duration or end < start:
+                raise LumiereError('Strip span must be inside the composition, in seconds.', code='html_motion_time')
+            total = int((end - start) * fps + 1e-9) + 1
+            step_frames = max(1, math.ceil(total / 48))
+            moments = [round(start + k / fps, 6) for k in range(0, total, step_frames)]
+        else:
+            moments = list(times) if times is not None else [duration*i/3 for i in range(4)]
+        if not moments or any(not math.isfinite(t) or t < 0 or t > duration for t in moments):
+            raise LumiereError('Storyboard times must be within the composition, in seconds.', code='html_motion_time')
+        if mode == 'crop-at' and selector is None and (x is None or y is None):
+            raise LumiereError('crop-at needs a point (x, y) or a CSS selector.', code='html_motion_crop')
+        worker_manifest = self.pinned(manifest)
+        captured_source = base64.b64decode(worker_manifest['captured_source_b64'])
+        source_hash = worker_manifest['source_sha256']
+        originals, previews, labels, crops = [], [], [], []
+        with HtmlFrameWorker(worker_manifest) as worker:
+            for at in moments:
+                data = worker.frame(at)
+                originals.append(data)
+                with Image.open(BytesIO(data)) as image:
+                    full = image.convert('RGB')
+                if mode == 'sheet':
+                    preview = full.copy(); preview.thumbnail((512, 288), Image.Resampling.LANCZOS)
+                    labels.append(f'{at:.6g} s | r{manifest["revision"]}')
+                elif mode == 'strip':
+                    preview = full.copy(); preview.thumbnail((240, 135), Image.Resampling.BOX)
+                    labels.append(f'{at:.3f}')
+                else:
+                    if selector is not None:
+                        box = worker.call({'op': 'box', 'at': at, 'selector': selector})['box']
+                        if box is None:
+                            raise LumiereError(f'No element matches {selector!r} at {at:g} s.', code='html_motion_crop')
+                        pad_x, pad_y = (box['x1']-box['x0'])*.08+4, (box['y1']-box['y0'])*.08+4
+                        rect = [box['x0']-pad_x, box['y0']-pad_y, box['x1']+pad_x, box['y1']+pad_y]
+                    else:
+                        w, h = size or (max(64, manifest['width']//4), max(36, manifest['height']//4))
+                        rect = [x-w/2, y-h/2, x+w/2, y+h/2]
+                    left = max(0, min(manifest['width']-1, int(rect[0]))); top = max(0, min(manifest['height']-1, int(rect[1])))
+                    right = max(left+1, min(manifest['width'], int(math.ceil(rect[2])))); bottom = max(top+1, min(manifest['height'], int(math.ceil(rect[3]))))
+                    preview = full.crop((left, top, right, bottom))
+                    wide = min(640, max(64, int(preview.width*scale)))
+                    preview = preview.resize((wide, max(1, round(preview.height*wide/preview.width))), Image.Resampling.LANCZOS)
+                    crops.append({'at_s': at, 'x0': left, 'y0': top, 'x1': right, 'y1': bottom})
+                    labels.append(f'{at:.6g} s | {left},{top}-{right},{bottom}')
+                previews.append(preview)
+        columns = 8 if mode == 'strip' and len(previews) > 8 else min(2, len(previews))
+        if mode == 'strip' and len(previews) <= 8:
+            columns = len(previews)
+        sheet = self._sheet(previews, labels, columns, 120 if mode == 'strip' else 192)
         output = BytesIO();sheet.save(output, format='PNG');png=output.getvalue()
         identity = uuid.uuid4().hex
         destination = (self.folder(composition)/str(manifest['revision'])/'storyboards'/identity).resolve()
@@ -306,6 +426,13 @@ class HtmlMotion:
                   'source_matches_revision':source_hash==manifest['source_sha256'], 'source_url':base+'/source',
                   'image_sha256':hashlib.sha256(png).hexdigest(),
                   'width':sheet.width, 'height':sheet.height, 'url':base+'/image', 'frames':[]}
+        if mode != 'sheet':
+            result['mode'] = mode
+        if mode == 'strip':
+            result['every_frames'] = step_frames
+            result['fps'] = fps
+        if crops:
+            result['crops'] = crops
         # The receipt is the publication marker; failures remove only these new derived files.
         try:
             (destination/'source.html').write_bytes(captured_source)

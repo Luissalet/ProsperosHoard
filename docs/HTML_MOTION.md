@@ -55,3 +55,62 @@ library through `media_import` / `media_receive` like any other audio.
 
 What the proof measured (synthetic animation, six events, real browser): every effect peak within 0.5 ms of its event in the
 exported AAC file, delivered -14.1 LUFS with music and a true peak of -1.1 dBTP.
+
+
+## Direction: style cards, treatment, cues and the checks
+
+A film that has to look like something starts from a **style card** and goes through one flow. Each step leaves a file next to
+the composition (`<data>/editing/creative/html/<id>/`), so the next revision, and the next assistant, start from it.
+
+1. **Choose a card.** `motion_styles` (`search` by words, category or collection; `get` with an optional `section`) reads the
+   74 imported direction cards (59 from one collection, 15 motion-graphics styles from another; both MIT, the demo films they
+   mention are CC BY and are not copied) and the 4 built-in ones. Every card keeps its licence, attribution and source link, and
+   its sections are split by what a variant may touch: **safe to change** (colour logic, type, motion quality, sound palette,
+   native moves), **changes the character** (materials, camera), **essence** (what the style is and is not, the engine) and the
+   **variation space** left free in every film. `studio_style_cards` (generation module) lists, searches and copies cards;
+   `create` with `from_card` and `changes={section: text}` makes a variant, refusing an essence change without
+   `allow_essence_change` and a character change without `accept_character_change`.
+2. **Write the treatment first.** `motion_treatment` (`get`, `set`, `check`, `draft`) stores `treatment.json` *before* any HTML:
+   three structures with the reason one was chosen, the shots one by one with **why each is there**, and the **cue map** (what the
+   picture does at each moment and what is heard). `check` refuses three structures that are the same, shots out of order or past the end, shots that all give
+   the same *why*, and cues past the end or with an unknown sound role. `draft` writes a first treatment from the card; it is marked `draft` and is a starting point.
+3. **Make the page.** `motion_from_style` (card, name, size, duration, treatment or `draft_treatment`) creates the
+   composition with the card's palette, a caption per shot sized to the reading rule, and a visual hit (flash, rule, bar) on
+   every cue. It is a starting scaffold for an assistant to rewrite, not a finished film.
+4. **Cues.** `motion_cues` (`get`, `set`, `clear`) owns `cues.json`: `{id, t, visual, sound}`. The sound events of the animation are
+   **derived** from it, so picture and sound cannot drift; while cues exist, `motion_sound_events` refuses to change events
+   (`cues_own_sound`) but still changes music, kit and loudness. The page may embed the same list in
+   `<script id="lumiere-cues" type="application/json">`; `cues.json` is the one that sounds.
+5. **Check the picture against the sound.** `motion_cuecheck` renders the real page and measures, per cue, the frame where the
+   picture actually changes (mean absolute difference of 192 px greyscale frames, looked for within `window_s` = 0.3 s either side).
+   Statuses: `ok` (within one frame and 20 ms), `sound_late`, `sound_early`, `no_hit`, `unclear`. With `scan` (the default up to
+   1500 frames) it also lists **visual hits that have no cue**, and offers each cue that found nothing the nearest such hit
+   (`suggest_t`, within 2 s). `retime=true` (with `expected_revision`) moves only the cues that are off by a little.
+6. **Check that it can be read.** `motion_readcheck` samples the page and measures how long every text stays fully visible
+   (opacity at least 0.85, at least 98 % inside the frame) against `letters / 15 s + 1.5 s` (CJK: characters / 4.5 s). A page that
+   draws text in a canvas defines `window.TEXTS(t)` returning `[{id, text, x0, y0, x1, y1, opacity?}]`; otherwise the DOM is read.
+7. **Informative videos keep `FACTS.md`.** `motion_facts` (`get`, `set`, `check`) stores each claim with its source, and `check`
+   lists numbers shown on screen that are not in the file and facts never shown.
+
+Reviewing a film does not need a contact sheet each time: `html_motion_storyboard` `mode` is `sheet` (the moments you list, as
+before), `strip` (up to 48 frames over a `span`, small tiles in a grid) or `crop-at` (an enlarged detail around a point `x, y` or a
+CSS `selector`, scaled to at most 640 px) for typography, edges and small motion.
+
+In the interface, the **Animación HTML** section has *Crear desde un estilo* (search, the card with its four parts and licence,
+name/duration/first caption, create), a **Dirección** panel (treatment, editable cues, check sync, move cues, check reading, facts) and
+a review-type selector (sheet, strip, detail).
+
+| Tool | What it does |
+| --- | --- |
+| `motion_styles` | Search and read direction cards and their sections |
+| `motion_treatment` | Read, write, check or draft the treatment of a composition |
+| `motion_from_style` | Create a composition from a card and a treatment |
+| `motion_cues` | Read or set the cues; the sound events follow them |
+| `motion_cuecheck` | Measure each cue against the frame where the picture hits; list hits with no cue; retime |
+| `motion_readcheck` | Check that each text stays visible long enough to be read |
+| `motion_facts` | Keep FACTS.md and check the numbers shown against it |
+
+What the proof measured (real browser, private server): a film made from an imported card passed `motion_cuecheck` (2/2 cues, offsets
+0 and 16.7 ms at 30 fps) and `motion_readcheck`; a cue moved 1.5 s off its hit was reported as `no_hit` with the real hit listed
+as unmapped and offered as `suggest_t`. The cards are a starting vocabulary: the scaffold gives a plain page, the quality of the
+film still depends on the assistant that writes the HTML and on its treatment.

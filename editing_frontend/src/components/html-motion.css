@@ -26,3 +26,21 @@
 .html-motion-check { display: flex; align-items: center; gap: 6px; }
 .html-motion-mix audio { display: block; width: 100%; max-width: 520px; margin-top: 10px; }
 @media (max-width: 640px) { .html-motion-sound-table { display: block; overflow-x: auto; } }
+.html-motion-styles, .html-motion-direction { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 16px 0; min-width: 0; }
+.html-motion-styles legend, .html-motion-direction legend { padding: 0 6px; font-weight: 600; }
+.html-motion-direction h4, .html-motion-style-card h4 { margin: 14px 0 6px; }
+.html-motion-style-list { list-style: none; margin: 8px 0; padding: 0; max-height: 280px; overflow-y: auto; display: grid; gap: 4px; }
+.html-motion-style-list li { display: flex; gap: 10px; align-items: center; padding: 4px 6px; border-radius: 4px; }
+.html-motion-style-list li.chosen { outline: 1px solid var(--accent); }
+.html-motion-parts { display: grid; gap: 6px; margin: 10px 0; }
+.html-motion-parts .part { display: grid; gap: 2px; padding: 6px 8px; border-left: 3px solid var(--line); }
+.html-motion-parts .part span { color: var(--muted); }
+.html-motion-parts .part-safe { border-left-color: #4f9d69; }
+.html-motion-parts .part-character { border-left-color: #c8962e; }
+.html-motion-parts .part-essence { border-left-color: #c8553d; }
+.html-motion-shots { padding-left: 20px; display: grid; gap: 6px; }
+.html-motion-report { margin: 8px 0; }
+.html-motion-report .ok { color: #4f9d69; }
+.html-motion-report .warn { color: #c8553d; }
+.html-motion-direction .badge { border: 1px solid var(--line); border-radius: 10px; padding: 0 6px; font-size: .85em; }
+.html-motion-review-mode { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 8px 0; }

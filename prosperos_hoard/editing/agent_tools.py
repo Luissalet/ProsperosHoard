@@ -16,7 +16,7 @@ from . import subtitles as subtitles_mod
 from . import media as media_store
 from . import plan as plan_mod
 from . import projects as project_store
-from .errors import LumiereError
+from .errors import LumiereError, NotFound
 from .hoard_link import agentkit, fam_workspace
 from .hoard_link.agentkit import Tool, ann as _ann
 from .hoard_link.waiting import MAX_WAIT_S
@@ -249,6 +249,8 @@ class EditArgs(BaseModel):
                                   "A wrong op or field returns every operation with its fields.")
     label: str = Field("", max_length=120, description="Name of the undo step.")
     base_rev: Optional[int] = Field(None, description="Fail if the project changed since this revision.")
+    expected_revision: Optional[int] = Field(None, description="Same as base_rev (the revision you read with project_get / timeline_text); the name the other timeline tools use.")
+    dry_run: bool = Field(False, description="Run the operations on a copy and report what would change (changes, duration, issues, would_be_rev) without saving or using an undo step.")
     request_id: str = Field('', max_length=100, description='Optional unique edit key: retry identical ops/label/base_rev after an interrupted response without applying twice. A new edit needs a new key.')
 
 
@@ -256,6 +258,7 @@ class HistoryArgs(BaseModel):
     project: str = ProjectId
     action: Literal["list", "undo", "redo", "restore"] = "list"
     seq: Optional[int] = Field(None, description="restore: the history step to go back to.")
+    expected_revision: Optional[int] = Field(None, description="Undo/redo/restore only if the project is still at this revision.")
 
 
 class CommandArgs(BaseModel):
@@ -264,6 +267,51 @@ class CommandArgs(BaseModel):
                      "script_assemble", "zoom_cuts", "speaker_cut", "multicam_create", "multicam_resync", "multicam_auto", "music_add"]
     args: dict[str, Any] = Field(default_factory=dict, description="See the command list in plan docs / presets_list.")
     preview: bool = Field(False, description="Report what would change without saving.")
+
+
+class TextReplacement(BaseModel):
+    old: str = Field(..., min_length=1, max_length=20000, description="Text copied exactly from timeline_text; it must appear once (include the clip id of the line).")
+    new: str = Field(..., max_length=20000, description="What takes its place. A whole clip line replaced by nothing deletes the clip.")
+
+
+class TimelineTextArgs(BaseModel):
+    project: str = ProjectId
+    track: Optional[str] = Field(None, description="Only this track (id, name or kind).")
+    max_chars: int = Field(60000, ge=1000, le=300000)
+
+
+class TimelineApplyTextArgs(BaseModel):
+    project: str = ProjectId
+    replacements: list[TextReplacement] = Field(..., min_length=1, max_length=200, description="Applied in order to the text of timeline_text; each old must match exactly once. All or nothing.")
+    expected_revision: int = Field(..., description="The revision of the text you edited: a different one is refused.")
+    dry_run: bool = Field(False, description="Report the operations and what would change; save nothing.")
+    ripple: bool = Field(False, description="With true, deleting a clip or changing a length closes or opens the gap after it; default false: other clips stay where they are.")
+    label: str = Field("", max_length=120, description="Name of the undo step.")
+
+
+class TimelineCheckArgs(BaseModel):
+    project: str = ProjectId
+    replacements: Optional[list[TextReplacement]] = Field(None, max_length=200, description="A text edit to try (as timeline_apply_text).")
+    ops: Optional[list[dict[str, Any]]] = Field(None, max_length=500, description="Or timeline_edit operations to try.")
+    expected_revision: Optional[int] = Field(None, description="The revision you read: a different one is reported as a conflict.")
+    ripple: bool = False
+
+
+class CutProposalsArgs(BaseModel):
+    project: str = ProjectId
+    action: Literal["create", "get", "list", "accept", "reject"] = Field("get", description="create: find filler words and pauses; get: read the proposals; accept: cut them in one edit; reject: drop some; list: all documents.")
+    proposal: Optional[str] = Field(None, pattern=r"^cp_[0-9a-f]{8}$", description="Proposal document id; omitted = the latest.")
+    kinds: list[Literal["fillers", "pauses"]] = Field(["fillers", "pauses"], min_length=1, description="create: what to look for.")
+    media: Optional[str] = Field(None, description="create: only this media (default: those on the main track).")
+    min_pause_ms: int = Field(700, ge=200, le=10000, description="create: shortest silence between two words that counts as a pause.")
+    keep_pause_ms: int = Field(250, ge=0, le=2000, description="create: how much of a pause stays when it is cut.")
+    ids: Optional[list[str]] = Field(None, max_length=2000, description="accept/reject: proposal ids (f1, p3...). accept without ids takes every open one.")
+    min_confidence: Optional[float] = Field(None, ge=0, le=1, description="get/accept: only proposals at least this sure.")
+    max_confidence: Optional[float] = Field(None, ge=0, le=1, description="reject: drop the open proposals less sure than this.")
+    kind: Optional[Literal["filler", "pause"]] = Field(None, description="get/accept: only this kind.")
+    expected_revision: Optional[int] = Field(None, description="accept: the revision you read; a different one is refused.")
+    dry_run: bool = Field(False, description="accept: report what would be cut without saving.")
+    limit: int = Field(80, ge=1, le=500, description="get/create: proposals shown.")
 
 
 class TimelineTranscriptArgs(BaseModel):
@@ -668,10 +716,49 @@ def run_project_delete(svc: Services, a: ProjectDeleteArgs) -> dict:
 
 
 def run_edit(svc: Services, a: EditArgs) -> dict:
-    return project_store.edit(svc, a.project, a.ops, label=a.label, actor="agent", base_rev=a.base_rev, request_id=a.request_id)
+    if a.base_rev is not None and a.expected_revision is not None and a.base_rev != a.expected_revision:
+        raise LumiereError("base_rev and expected_revision are the same thing and differ: send one.", code="bad_args")
+    base = a.base_rev if a.base_rev is not None else a.expected_revision
+    if a.dry_run and a.request_id:
+        raise LumiereError("A dry run saves nothing, so request_id has no use with it.", code="bad_args")
+    return project_store.edit(svc, a.project, a.ops, label=a.label, actor="agent", base_rev=base, request_id=a.request_id, dry_run=a.dry_run)
+
+
+def run_timeline_text(svc: Services, a: TimelineTextArgs) -> dict:
+    return timeline_text.render(svc, a.project, track=a.track, max_chars=a.max_chars)
+
+
+def run_timeline_apply_text(svc: Services, a: TimelineApplyTextArgs) -> dict:
+    return timeline_text.apply(svc, a.project, replacements=[r.model_dump() for r in a.replacements], expected_revision=a.expected_revision,
+                               dry_run=a.dry_run, ripple=a.ripple, label=a.label)
+
+
+def run_timeline_check(svc: Services, a: TimelineCheckArgs) -> dict:
+    return timeline_text.check(svc, a.project, replacements=[r.model_dump() for r in a.replacements] if a.replacements else None,
+                               ops=a.ops, expected_revision=a.expected_revision, ripple=a.ripple)
+
+
+def run_cut_proposals(svc: Services, a: CutProposalsArgs) -> dict:
+    try:
+        if a.action == "create":
+            return cut_proposals.create(svc, a.project, kinds=tuple(a.kinds), media=a.media, min_pause_ms=a.min_pause_ms, keep_pause_ms=a.keep_pause_ms)
+        if a.action == "list":
+            return cut_proposals.listing(svc, a.project)
+        if a.action == "accept":
+            return cut_proposals.accept(svc, a.project, a.proposal, ids=a.ids, min_confidence=a.min_confidence, kind=a.kind,
+                                        expected_revision=a.expected_revision, dry_run=a.dry_run)
+        if a.action == "reject":
+            if a.ids is None and a.max_confidence is None:
+                raise LumiereError("reject needs ids or max_confidence.", code="bad_args")
+            return cut_proposals.reject(svc, a.project, a.proposal, ids=a.ids, min_confidence_below=a.max_confidence)
+        return cut_proposals.view(svc, cut_proposals.load(svc, a.project, a.proposal), limit=a.limit, min_confidence=a.min_confidence, kind=a.kind)
+    except commands.NeedsAnalysis as need:
+        return {"done": False, "needs": need.jobs, "message": str(need)}
 
 
 def run_history(svc: Services, a: HistoryArgs) -> dict:
+    if a.expected_revision is not None and a.action != "list":
+        timeline_text._revision(svc, a.project, a.expected_revision)
     if a.action == "undo":
         return project_store.undo(svc, a.project)
     if a.action == "redo":
@@ -1002,8 +1089,10 @@ def run_creative_film(svc: Services,a: CreativeFilmArgs):
 from .html_motion import HtmlMotion
 from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotionGetArgs,
                                HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, HtmlMotionRenderArgs,
-                               MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs)
-from . import audio_sync, motion_sound
+                               MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs,
+                               MotionStylesArgs, MotionTreatmentArgs, MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs,
+                               MotionFactsArgs, MotionFromStyleArgs)
+from . import audio_sync, cut_proposals, motion_direction, motion_scaffold, motion_sound, timeline_text
 
 
 def run_html_motion_list(svc: Services, a: Empty):
@@ -1071,6 +1160,9 @@ def run_motion_sound_events(svc: Services, a: MotionSoundEventsArgs):
     latest = store.get(a.composition)
     if a.revision not in (None, latest["revision"]):
         raise LumiereError(f"Revision {a.revision} is not the current one ({latest['revision']}): read the current revision to change its sound.", code="revision_conflict")
+    if a.action in ("set", "add", "remove", "clear") and motion_direction.cues_own_sound(store, a.composition):
+        raise LumiereError("This animation has cues, and the cues own its sound events: change them with motion_cues (set/clear) so the picture and the sound "
+                           "keep the same moments. Music, kit, loudness and audio can still be changed here.", code="cues_own_sound")
     if a.expected_revision is None:
         raise LumiereError("expected_revision is required to change the sound: pass the revision you read.", code="revision_conflict")
     new = dict(current)
@@ -1111,11 +1203,105 @@ def run_audio_sync_points(svc: Services, a: AudioSyncPointsArgs):
 
 def run_html_motion_storyboard(svc: Services, a: HtmlMotionStoryboardArgs):
     store = HtmlMotion(svc.config.data_dir)
-    result = store.storyboard(a.composition, a.times, a.revision)
+    result = store.storyboard(a.composition, a.times, a.revision, mode=a.mode, span=tuple(a.span) if a.span else None, x=a.x, y=a.y,
+                              selector=a.selector, size=tuple(a.size) if a.size else None, scale=a.scale)
     if a.show:
         data = store.storyboard_image(a.composition, result['revision'], result['id'])
         result['_image'] = {'mime':'image/png','data':base64.b64encode(data).decode('ascii')}
     return result
+
+
+def run_motion_styles(svc: Services, a: MotionStylesArgs):
+    from .. import style_cards
+    if a.action == "get":
+        card = style_cards.find(a.id or "")
+        if card is None:
+            raise NotFound(f"No style card {a.id!r}: search with motion_styles.")
+        if a.section:
+            if a.section not in card["sections"]:
+                raise LumiereError(f"The card has no section {a.section!r}: {', '.join(card['sections'])}.", code="bad_args")
+            return {**style_cards.brief(card), "section": {"key": a.section, **card["sections"][a.section]},
+                    "license": card["license"], "attribution": card["attribution"]}
+        return {**{k: v for k, v in card.items() if k not in ("extra",)}, "changes_rule": card.get("variants")}
+    found = style_cards.search(a.query or "", source=a.source, category=a.category)
+    return {"count": len(found), "items": [style_cards.brief(c) for c in found[:a.limit]],
+            "next": "motion_styles action=get id=<source/slug> for the whole card; motion_treatment action=draft card=<id>; motion_from_style to start from it."}
+
+
+def run_motion_treatment(svc: Services, a: MotionTreatmentArgs):
+    from .. import style_cards
+    store = HtmlMotion(svc.config.data_dir)
+    manifest = store.get(a.composition) if a.composition else None
+    duration = manifest["duration"] if manifest else a.duration
+    if a.action == "get":
+        if not manifest:
+            raise LumiereError("get needs a composition.", code="bad_args")
+        found = motion_direction.get_treatment(store, a.composition)
+        return {"composition": a.composition, "treatment": found,
+                "check": motion_direction.check_treatment(found, duration) if found else None}
+    if a.action == "draft":
+        card = style_cards.find(a.card or ((motion_direction.get_treatment(store, a.composition) or {}).get("card") if manifest else "") or "")
+        if card is None:
+            raise LumiereError("draft needs a style card (card=...): find one with motion_styles.", code="bad_args")
+        if duration is None:
+            duration = 8.0
+        draft = motion_direction.draft_treatment(card, duration, a.caption)
+        return {"treatment": draft, "check": motion_direction.check_treatment(draft, duration),
+                "note": "A draft built from the card. Replace the structures, the shots' why and the cue map with what this film needs, then set it."}
+    if a.treatment is None:
+        raise LumiereError(f"{a.action} needs a treatment.", code="bad_args")
+    if a.action == "check":
+        if duration is None:
+            raise LumiereError("check needs a composition or a duration.", code="bad_args")
+        return {"check": motion_direction.check_treatment(a.treatment, duration)}
+    if not manifest:
+        raise LumiereError("set needs a composition.", code="bad_args")
+    return motion_direction.set_treatment(store, a.composition, a.treatment)
+
+
+def run_motion_cues(svc: Services, a: MotionCuesArgs):
+    store = HtmlMotion(svc.config.data_dir)
+    manifest = store.get(a.composition, a.revision)
+    if a.action == "get":
+        found = motion_direction.get_cues(store, a.composition)
+        return {"composition": a.composition, "revision": manifest["revision"], "duration": manifest["duration"], "fps": manifest["fps"], **found,
+                "events": len((manifest.get("sound") or {}).get("events", []))}
+    if a.expected_revision is None:
+        raise LumiereError("expected_revision is required to change the cues: pass the revision you read.", code="revision_conflict")
+    if a.action == "clear":
+        return motion_direction.set_cues(store, a.composition, [], a.expected_revision)
+    if a.cues is None:
+        raise LumiereError("set needs cues.", code="bad_args")
+    return motion_direction.set_cues(store, a.composition, a.cues, a.expected_revision)
+
+
+def run_motion_cuecheck(svc: Services, a: MotionCuecheckArgs):
+    return motion_direction.cuecheck(HtmlMotion(svc.config.data_dir), a.composition, a.revision, window_s=a.window_s, scan=a.scan,
+                                     min_change=a.min_change, retime=a.retime, expected_revision=a.expected_revision)
+
+
+def run_motion_readcheck(svc: Services, a: MotionReadcheckArgs):
+    return motion_direction.readcheck(HtmlMotion(svc.config.data_dir), a.composition, a.revision, step=a.step, min_s=a.min_s)
+
+
+def run_motion_facts(svc: Services, a: MotionFactsArgs):
+    store = HtmlMotion(svc.config.data_dir)
+    if a.action == "get":
+        store.get(a.composition)
+        return {"composition": a.composition, "facts": motion_direction.get_facts(store, a.composition)}
+    if a.action == "set":
+        if a.content is None:
+            raise LumiereError("set needs content.", code="bad_args")
+        return motion_direction.set_facts(store, a.composition, a.content)
+    return motion_direction.facts_check(store, a.composition, a.revision)
+
+
+def run_motion_from_style(svc: Services, a: MotionFromStyleArgs):
+    if a.project_id:
+        project_store.doc(svc, a.project_id)
+    return motion_scaffold.create_from_style(HtmlMotion(svc.config.data_dir), card_ref=a.card, name=a.name, width=a.width, height=a.height,
+                                             fps=a.fps, duration=a.duration, treatment=a.treatment.model_dump(exclude_none=True) if a.treatment else None,
+                                             draft=a.draft_treatment, caption=a.caption, project_id=a.project_id)
 
 
 def run_html_motion_restore(svc: Services, a: HtmlMotionRestoreArgs):
@@ -1136,6 +1322,13 @@ TOOLS: list[Tool] = [
     Tool("motion_sound_events", "Read or change the sound events {t, role} and music of an HTML animation. Eventos de sonido.\nChanging saves a new revision (expected_revision). Events are picture moments in seconds; the effect is generated from code and placed by its sync point. Keywords: sound events, sfx, cues, sound design, music, audio for animation.", MotionSoundEventsArgs, _ann(False, False, False), run_motion_sound_events),
     Tool("motion_sound_preview", "Mix and master the declared sound of an animation into a WAV without rendering the picture. Oir el sonido.\nReturns the placements, the loudness reached, and the sync error measured on every effect; url plays it. Keywords: preview, listen, mix, loudness, LUFS, true peak.", MotionSoundPreviewArgs, _ann(False, False, True), run_motion_sound_preview),
     Tool("audio_sync_points", "Measure where a sound is first heard, loudest and over (onset, peak, end). Puntos de sincronía.\nOf a library media or a file. Place it with timeline_edit add_media {align: 'peak', at: ms} so that point lands on the picture event. Keywords: sync point, onset, peak, align audio, sound effect timing, hit.", AudioSyncPointsArgs, _ann(True), run_audio_sync_points),
+    Tool("motion_styles", "Search the style cards for a film look, or read one. Estilos de animacion.\nSeventy-four cards from two open libraries (MIT; films not included): essence, materials, colour, type, motion, camera, sound, native moves, pitfalls, and what is safe to change. Keywords: style, look, direction, card, estilo, ficha, visual identity, evidence film, motion graphics.", MotionStylesArgs, _ann(True), run_motion_styles),
+    Tool("motion_treatment", "Write, check or draft the treatment of an animation before its page. Tratamiento.\nThree different structures (and why one), the shots one by one with why each is there, and the cue map. motion_from_style refuses to start without one. Keywords: treatment, structure, shot list, storyboard plan, cue map, tratamiento.", MotionTreatmentArgs, _ann(False, False, False), run_motion_treatment),
+    Tool("motion_cues", "Read or set the cues: the moments picture and sound hang on. Hitos de imagen y sonido.\nOne list for both: the sound events are derived from it. Changing saves a new revision (expected_revision). Keywords: cues, hits, sync, sound events, cue map, hitos.", MotionCuesArgs, _ann(False, False, False), run_motion_cues),
+    Tool("motion_cuecheck", "Check that every cue has its visual hit in its frame, and every hit its cue. Comprobar sincronia.\nRenders the real page; reports each cue's measured offset in ms, unclear or missing hits, and visual hits with no cue. retime moves cues to the true frame. Keywords: sync check, cue check, audio visual sync, hit, offset.", MotionCuecheckArgs, _ann(False, False, False), run_motion_cuecheck),
+    Tool("motion_readcheck", "Check that every text stays fully visible long enough to be read. Comprobar lectura.\nLetters/15 s plus 1.5 s (CJK characters/4.5 s); partly outside the frame or never opaque counts as never readable. Uses window.TEXTS(t) or the DOM text. Keywords: reading time, subtitles, legibility, text duration, readcheck.", MotionReadcheckArgs, _ann(True), run_motion_readcheck),
+    Tool("motion_facts", "Keep FACTS.md of an informative animation and check the numbers shown against it. Hechos y fuentes.\nget/set the claims with their sources; check lists numbers on screen that no fact backs. Keywords: facts, sources, fact check, informative video, evidence, hechos.", MotionFactsArgs, _ann(False, False, False), run_motion_facts),
+    Tool("motion_from_style", "Start an animation from a style card and its treatment. Crear desde un estilo.\nRefuses without a treatment (three structures, shots with why, cue map). Writes a working page with captions and a sharp hit on every cue, the cues and the sound events; then review, cuecheck and readcheck. Keywords: style card, create animation, scaffold, treatment, start from style.", MotionFromStyleArgs, _ann(False, False, False), run_motion_from_style),
     Tool("html_motion_restore", "Restore a saved HTML composition revision as a new revision. Recuperar una animacion anterior.\nLater versions remain available. Keywords: undo, restore, revisions, HTML motion.", HtmlMotionRestoreArgs, _ann(False, False, False), run_html_motion_restore),
     Tool('creative_render_title_video','Render an editable Lumiere Motion title to verified H264 video. Renderizar cartela animada.\nReturns actual video path, metadata and media_receive_url. Keywords: animation, render title, mp4, motion graphics.',CreativeRenderArgs,_ann(False,False,True),run_creative_render),
     Tool('creative_tools','Discover Lumiere motion or editing operations. Herramientas nativas.\nKeywords: motion graphics, layers, compositing, editing, effects.',CreativeToolsArgs,_ann(True),run_creative_tools),
@@ -1215,6 +1408,10 @@ TOOLS: list[Tool] = [
          "Use request_id for interrupted-response retries: identical ops/label/base_rev recover original IDs without applying twice.\n"
          "Keywords: edit, cut, trim, split, title, text overlay, ops, speed ramp, slow motion, mask, retry, reintentar.",
          EditArgs, _ann(False, True, False), run_edit),
+    Tool("timeline_text", "The timeline as stable plain text with its revision, one line per clip. Montaje como texto.\nTimes in whole ms; edit it with timeline_apply_text (exact old/new replacements). Keywords: timeline text, serialize, read edit, clips as text, texto del montaje.", TimelineTextArgs, _ann(True), run_timeline_text),
+    Tool("timeline_apply_text", "Change the timeline with exact text replacements, all or nothing. Editar montaje por texto.\nEach old must match once; the result is proved before saving (the text you wrote must be what is there); revision conflict if it changed; dry_run reports. One undo step. Keywords: text edit, replace, start, src, volume, fade, label, delete clip, retime.", TimelineApplyTextArgs, _ann(False, True, False), run_timeline_apply_text),
+    Tool("timeline_check", "Try an edit without saving it: text replacements or operations. Simular edicion.\nReports whether it applies to the revision, the operations, what changes, the new duration and issues. Never saves. Keywords: dry run, simulate, validate edit, preview edit, check.", TimelineCheckArgs, _ann(True), run_timeline_check),
+    Tool("cut_proposals", "Propose filler-word and pause cuts with confidence and reason; accept in bulk. Propuestas de corte.\nNames words by transcript id, never times. The document expires if the transcript changes. Accepting is one edit, one undo step. Keywords: fillers, muletillas, pauses, silences, cut proposals, confidence, jump cuts.", CutProposalsArgs, _ann(False, True, False), run_cut_proposals),
     Tool("timeline_history", "Undo, redo, list or restore history steps of a project. Deshacer.\n"
          "Sinónimos: deshacer, rehacer, historial, volver atrás.\nKeywords: undo, redo, history.", HistoryArgs, _ann(False, False, False), run_history),
     Tool("edit_command", "Smart edits: remove_silences, remove_fillers, reframe, captions, beat_sync... Edición inteligente.\n"

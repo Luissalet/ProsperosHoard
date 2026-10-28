@@ -29,6 +29,15 @@ SOFT = {"este", "esto", "pues", "bueno", "vale", "tipo", "like", "so", "actually
         "a ver", "sort of", "kind of", "i mean", "you know", "so yeah"}
 
 
+# Hesitation sounds as a transcriber spells them when they are drawn out ("eeeh", "ehmm", "aaah", "mmmm", "ejm", "ejem"): they are
+# never real words, so they count as fillers without being listed one by one.
+_HESITATION = re.compile(r"(?:e+h+m*|e{2,}|e+m+h*|a+h+|u+h+|u+m+h*|h?m{2,}|ejem+|ejm+|ehm+)")
+
+
+def is_hesitation(text: str) -> bool:
+    return bool(_HESITATION.fullmatch(text))
+
+
 def norm(text: str) -> str:
     text = unicodedata.normalize("NFKD", text.lower())
     text = "".join(c for c in text if not unicodedata.combining(c))
@@ -179,7 +188,7 @@ def find_fillers(words: list[dict[str, Any]], language: str = "es", extra: Optio
                 matched = len(parts)
                 text = phrase
                 break
-        if not matched and norm(words[i]["text"]) in single:
+        if not matched and (norm(words[i]["text"]) in single or is_hesitation(norm(words[i]["text"]))):
             matched, text = 1, norm(words[i]["text"])
         if matched:
             run = words[i: i + matched]

@@ -20,8 +20,14 @@ def main():
             send({"ready": True})
             for line in sys.stdin:
                 command = json.loads(line)
-                data = store.capture(page, errors, command["at"])
-                send({"png": base64.b64encode(data).decode("ascii")})
+                op = command.get("op", "frame")
+                if op == "texts":
+                    send({"texts": store.texts(page, errors, command["times"])})
+                elif op == "box":
+                    send({"box": store.box(page, errors, command["at"], command["selector"])})
+                else:
+                    data = store.capture(page, errors, command["at"])
+                    send({"png": base64.b64encode(data).decode("ascii")})
     except LumiereError as exc:
         send({"error": str(exc), "code": exc.code})
     except Exception as exc:
