@@ -15,7 +15,7 @@ The workers must already exist in native/editing/bin; normal wheel building neve
 Install with pip in the selected product environment; ordinary installation resolves the pinned Python dependencies. The packaged console entrypoints are `prosperos-hoard` and `prosperos-hoard-mcp`. For existing data choose the root explicitly:
 
 ```powershell
-prosperos-hoard --data-dir "C:/Users/luism/Desktop/Proyectos independientes/Prospero's Hoard/data" --no-browser
+prosperos-hoard --data-dir "E:/Development/IA/Hoards/Prospero's Hoard/data" --no-browser
 ```
 
 Installed code/resources do not contain user data or secrets. Without `--data-dir`/PROSPERO_DATA_DIR, an installed Windows launcher uses `%LOCALAPPDATA%/ProsperosHoard/data`. With an explicit existing root it loads optional `.env` from that root's parent; real environment values still win. Development-tree defaults are unchanged. The installed default does not relocate an existing profile: migration934 must set the intended existing root and retain tokens/configuration explicitly. Do not move `.env` into the distribution.
