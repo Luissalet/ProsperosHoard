@@ -93,3 +93,55 @@ def test_routes_draft_edit_approve_and_storyboard(client, data_dir):
     assert r.json()["treatment"]["status"] == "approved"
     state = productions_mod.load_state(data_dir, "neon")
     assert state["done"]["treatment"]["shots"] == 2 and state["treatment"]["storyboard"]["asset_id"] == sheet["asset_id"]
+
+
+def test_a_redraft_after_approval_needs_approving_again():
+    state = _state()
+    state["treatment"] = tm.draft(None, state)
+    tm.approve(state)
+    tm.replace_draft(state, tm.draft(None, state))
+    assert productions_mod.stage_status(state, "treatment") == "pending"
+    assert "treatment_approved" not in state["review"]
+    run = SimpleNamespace(state=state, log=lambda *a, **k: None)
+    assert productions_mod.Run.stage_treatment(run) == "pause"
+
+
+def test_a_running_production_keeps_the_treatment_written_meanwhile(data_dir):
+    store = Store(data_dir)
+    project = store.create_project("Neon", brief="b")
+    productions_mod.create_production(data_dir, "neon", SPEC, project_id=project["id"])
+    run = productions_mod.Run(store, None, "neon", lambda *a, **k: None)   # a run holds the state it loaded
+    with productions_mod.lock_for("neon"):                                  # the Treatment tab drafts and approves
+        state = productions_mod.load_state(data_dir, "neon")
+        state["treatment"] = tm.draft(None, state)
+        tm.approve(state)
+        productions_mod.save_state(data_dir, state)
+    run.save()
+    saved = productions_mod.load_state(data_dir, "neon")
+    assert saved["treatment"]["status"] == "approved" and productions_mod.stage_status(saved, "treatment") == "done"
+    with productions_mod.lock_for("neon"):                                  # then redrafts it
+        state = productions_mod.load_state(data_dir, "neon")
+        tm.replace_draft(state, tm.draft(None, state))
+        productions_mod.save_state(data_dir, state)
+    run.save()
+    saved = productions_mod.load_state(data_dir, "neon")
+    assert saved["treatment"]["status"] == "draft" and productions_mod.stage_status(saved, "treatment") == "pending"
+
+
+def test_approving_the_treatment_does_not_approve_another_pending_review(client, data_dir):
+    c, app, _ = client
+    app.state.short_hooks = {"chat": lambda m, n, temp: json.dumps(REPLY)}
+    store = Store(data_dir)
+    project = store.create_project("Neon", brief="b")
+    productions_mod.create_production(data_dir, "neon", SPEC, project_id=project["id"])
+    with productions_mod.lock_for("neon"):
+        state = productions_mod.load_state(data_dir, "neon")
+        state.update(status="awaiting_review", stage="song")
+        productions_mod.save_state(data_dir, state)
+    assert c.post("/api/productions/neon/treatment", json={"action": "draft"}).status_code == 200
+    r = c.post("/api/productions/neon/treatment", json={"action": "approve", "run": True})
+    assert r.status_code == 200, r.text
+    assert "job" not in r.json()
+    state = productions_mod.load_state(data_dir, "neon")
+    assert state["treatment"]["status"] == "approved" and not state["review"].get("song_approved")
+    assert state["status"] == "awaiting_review" and state["stage"] == "song"

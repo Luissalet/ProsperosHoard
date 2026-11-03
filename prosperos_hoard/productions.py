@@ -1033,6 +1033,17 @@ class Run:
                 self.state["review"] = current.get("review", self.state.get("review", {}))
                 if current.get("settings"):
                     self.state["settings"] = current["settings"]  # changed from the page mid-run
+                if current.get("treatment"):
+                    # drafted, edited or approved from the Treatment tab while this run works: the API owns it,
+                    # and the treatment stage is done exactly while the saved treatment is approved
+                    self.state["treatment"] = current["treatment"]
+                    done = self.state.setdefault("done", {})
+                    if current["treatment"].get("status") == "approved":
+                        done["treatment"] = (current.get("done") or {}).get("treatment") or done.get("treatment") or {
+                            "approved_at": current["treatment"].get("approved_at"),
+                            "shots": len(current["treatment"].get("shot_list") or [])}
+                    else:
+                        done.pop("treatment", None)
             except (NotFound, ProductionError):
                 pass
             save_state(self.store.data_dir, self.state)
