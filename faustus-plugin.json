@@ -48,7 +48,14 @@
     "native multitrack editing",
     "native creative engines",
     "revisioned audiovisual projects",
-    "independent demand-start modules"
+    "independent demand-start modules",
+    "edit plans as fingerprinted ffmpeg commands (plan, run, verify)",
+    "platform delivery verification (Shorts, Reels, TikTok, YouTube; EBU R128 loudness)",
+    "video contact sheets",
+    "ComfyUI workflow preflight (missing nodes and model files)",
+    "treatment-first productions (logline, structures, shot list, beat sheet, approve and render)",
+    "storyboard sheets",
+    "anti-slideshow lint for HTML motion"
   ],
   "placeholders": [
     "PROSPERO_DIR",

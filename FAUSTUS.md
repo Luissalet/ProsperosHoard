@@ -103,3 +103,35 @@ HTML animations in Montaje can carry sound: `motion_sound_events` declares event
 Direction flow for HTML animations (Montaje): `motion_styles` searches 74 imported direction cards (each with licence and source, and split into safe / character / essence / free parts), `motion_treatment` stores the treatment before any HTML (three structures, the shots with why each is there, the cue map), `motion_from_style` makes a scaffold from a card, `motion_cues` owns the cues that drive picture and sound (`motion_sound_events` refuses to change events while cues exist), `motion_cuecheck` measures each cue against the frame where the picture hits and lists hits with no cue, `motion_readcheck` checks letters/15 s + 1.5 s, `motion_facts` keeps FACTS.md for informative videos, and `html_motion_storyboard` has `strip` and `crop-at` modes. The scaffold is a starting point, not a finished film. See `docs/HTML_MOTION.md`.
 
 Timeline as text: `timeline_text` returns the whole edit as stable text with its revision, `timeline_apply_text` changes it with exact `{old,new}` replacements (all or nothing, refused on another revision, proved on a copy), `timeline_check` and `dry_run` simulate, and `cut_proposals` proposes filler words, hesitations, repeats and pauses with confidence and reason as a separate document that names transcript word ids and expires when the transcript changes; accepting is one undo step. See `docs/TIMELINE_TEXT.md`.
+
+## Edit plans, delivery verification, workflow preflight, treatment-first productions (03-11-2026)
+
+Edit plans (Generación > Entrega / Edit & deliver; `prosperos_hoard/edit_plans.py`): a declarative edit (clips with
+in/out trims and transitions, including native xfade names, captions, image overlays, a music bed ducked by the
+clips' sound, a loudness target, platform `shorts|reels|tiktok|youtube`) is compiled into the exact ffmpeg steps
+(reusing `video.py`'s clip, join and mux builders) and saved as `data/edit_plans/<ep_...>/plan.json` with a
+fingerprint of every input (size, mtime, sha256 of the first MiB). `edit_run_plan` refuses with `inputs_changed`
+when any input changed, renders on the CPU lane, registers the video and verifies it. `edit_verify` checks a video
+against the platform spec (resolution and shape, fps, duration limit, codecs, stereo, sample rate, EBU R128
+integrated loudness and true peak through ffmpeg `ebur128`; pass/warn/fail per check). `edit_contact_sheet` tiles
+every Nth frame (`select` + `tile`) into an image asset. REST: `/api/edit-plans`, `/api/edit-plans/{id}/run`,
+`/api/edit-plans/verify`, `/api/assets/{id}/contact-sheet`.
+
+Workflow preflight (`workflow_preflight.py`, MCP `workflow_preflight`, `POST /api/workflows/preflight`): every node
+class of a ComfyUI workflow against `/object_info` and every model file (checkpoints, LoRAs, diffusion models, VAEs,
+text encoders, upscalers, audio encoders...) against the loader's list, with the node pack that usually provides a
+missing node and the `models/<folder>` for each missing file, plus a copyable list. Never starts ComfyUI: off, it
+uses the last saved node list (`source=cache`) or says nothing was checked. The production preflight shows the same
+checklist (a warning at most) and every production run records it in its lineage before starting.
+
+Treatment-first productions (`treatment.py`, tab Tratamiento, MCP `production_treatment_draft` with
+`draft|get|update|approve`): logline, three structures and the pick, benchmark learn/avoid, shot list (framing,
+camera, duration, why) and beat sheet, drafted by the family model or by rules from the planned shots when no model
+answers (`source: rules` with the reason). A production with a treatment pauses at its `treatment` stage;
+"Approve and render" (or `studio_production_continue`) approves and continues. `production_storyboard_sheet` tiles
+6-9 key shots: the production's own stills, ComfyUI stills queued with `generate=true` when ComfyUI is up, else
+placeholders drawn from the shot text.
+
+HTML motion (Montaje): `motion_lint` (button "Comprobar que no es un pase de diapositivas") counts targets whose
+only animation is opacity in the composition's GSAP tweens and CSS; 3 or more give `reject` with a re-prompt. The
+seek-stepped Playwright renderer with sound (`html_motion_render`, `motion_export`) already existed.

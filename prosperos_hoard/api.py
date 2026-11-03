@@ -58,6 +58,9 @@ from . import voices as voices_mod
 from . import style_profiles as style_profiles_mod
 from . import style_cards
 from . import shot_review as shot_review_mod
+from . import edit_plans as edit_plans_mod
+from . import treatment as treatment_mod
+from . import workflow_preflight as wf_preflight
 from .backend import Backend, ffmpeg_path
 from .design import DesignError
 from .hoard_link import family
@@ -801,6 +804,50 @@ class InterpolateBody(BaseModel):
     asset_id: str
     fps: float = 48
     wait_s: float = 0
+
+
+class EditPlanBody(BaseModel):
+    project: str
+    edit: dict[str, Any]                        # clips (asset_id, in_s/out_s or duration_s, transition), captions, overlays,
+    name: Optional[str] = None                  # music {asset_id, volume_db, duck}, loudness, platform, width/height/fps
+
+
+class EditRunBody(BaseModel):
+    plan_id: str
+    wait_s: float = 0
+
+
+class EditVerifyBody(BaseModel):
+    asset_id: Optional[str] = None              # a video asset, or
+    plan_id: Optional[str] = None               # the last render of an edit plan
+    platform: str = "shorts"                    # shorts | reels | tiktok | youtube
+    contact_sheet: bool = True
+
+
+class ContactSheetBody(BaseModel):
+    asset_id: str
+    every_n: Optional[int] = None               # every Nth frame; default spreads `count` frames over the clip
+    count: int = 12
+    columns: int = 4
+    width: int = 320
+
+
+class WorkflowPreflightBody(BaseModel):
+    production: Optional[str] = None            # the workflows a production's next run uses, or
+    template: Optional[str] = None              # one built-in template / imported workflow (wf_...), or
+    workflow: Optional[dict[str, Any]] = None   # a workflow JSON (API or UI format)
+
+
+class TreatmentBody(BaseModel):
+    action: Literal["draft", "get", "update", "approve"] = "draft"
+    treatment: Optional[dict[str, Any]] = None  # update: the edited treatment
+    language: str = "en"
+    notes: Optional[str] = None                 # draft: what the person wants the treatment to consider
+    run: bool = True                            # approve: also continue (render) the production
+
+
+class StoryboardSheetBody(BaseModel):
+    generate: bool = False                      # queue ComfyUI stills for shots without one (when ComfyUI is up)
 
 
 class RetakeBody(BaseModel):
@@ -3380,8 +3427,30 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     production_hooks: dict[str, Any] = {"qa_hook": None, "stage_hooks": {}}
     app.state.production_hooks = production_hooks
 
+    def _log_workflow_preflight(slug: str) -> None:
+        """Informational step of the run: what the workflows of this run miss in ComfyUI, kept in the production's
+        lineage (and REPORT.md) and in state["workflow_preflight"]. It never stops the run."""
+        try:
+            info, source = _preflight_object_info()
+            if not info:
+                return
+            with productions_mod.lock_for(slug):
+                state = productions_mod.load_state(store.data_dir, slug)
+                summary = wf_preflight.summary([wf_preflight.check_template(n, store.data_dir, info, source)
+                                                for n in production_workflows(state, info)], source)
+                state["workflow_preflight"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": summary["ok"], "source": source,
+                                               "missing_nodes": summary["missing_nodes"],
+                                               "missing_models": summary["missing_models"],
+                                               "copy_text": summary["copy_text"][:4000]}
+                productions_mod.log(state, "preflight", "workflow_preflight", ok=summary["ok"], source=source,
+                                    missing_nodes=summary["missing_nodes"], missing_models=summary["missing_models"])
+                productions_mod.save_state(store.data_dir, state)
+        except Exception:  # noqa: BLE001 - informational: a failing check never fails the run
+            logger.debug("workflow preflight before the run failed", exc_info=True)
+
     def _production_job(job: dict[str, Any], progress) -> dict[str, Any]:
         slug = job["params"]["slug"]
+        _log_workflow_preflight(slug)
         return productions_mod.run_production(store, studio, slug, progress, qa_hook=production_hooks["qa_hook"],
                                               stage_hooks=production_hooks["stage_hooks"])
 
@@ -3912,7 +3981,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 if not song or not 1 <= int(take) <= max(1, len(takes) or int(song.get("count") or 1)):
                     raise ValueError(f"take must be between 1 and {max(1, len(takes))}")
                 song["take"] = int(take)
-            if state.get("status") == "awaiting_review":
+            if state.get("status") == "awaiting_review" and state.get("stage") == "treatment":
+                if (state.get("treatment") or {}).get("status") != "approved":
+                    treatment_mod.approve(state)  # continuing past the treatment is "Approve and render"
+                productions_mod.log(state, "review", "approved", what="treatment_approved")
+                productions_mod.save_state(store.data_dir, state)
+            elif state.get("status") == "awaiting_review":
                 what = ("script_approved" if state.get("stage") == "script" else
                         "song_approved" if state.get("stage") == "song" else "animatic_approved")
                 state.setdefault("review", {})[what] = True
@@ -4719,11 +4793,286 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                               "holders": holders})
         except Exception:  # noqa: BLE001 - the memory view is a hint, never a blocker
             pass
-        return {"ok": not any(i["level"] == "error" for i in items), "items": items}
+        workflows = None
+        try:  # the workflow checklist: informational (a warning at most), never a new blocker
+            info, source = _preflight_object_info()
+            workflows = wf_preflight.summary([wf_preflight.check_template(n, store.data_dir, info, source)
+                                              for n in production_workflows(state, info)], source)
+            hard = sum(1 for r in workflows["workflows"] for m in r["models"] if m.get("ok") is False and not m.get("fallback"))
+            if workflows["missing_nodes"] or hard:
+                items.append({"level": "warn", "code": "workflow_missing",
+                              "message": f"the workflows this run uses miss {workflows['missing_nodes']} node(s) and {hard} "
+                                         "model file(s) in ComfyUI: see the workflow checklist"})
+        except Exception:  # noqa: BLE001
+            logger.debug("workflow preflight failed", exc_info=True)
+        return {"ok": not any(i["level"] == "error" for i in items), "items": items, "workflows": workflows}
 
     @app.get("/api/productions/{slug}/preflight")
     def production_preflight_route(slug: str):
         return production_preflight(slug)
+
+    # ------------------------------------------- workflow preflight (nodes and model files against /object_info)
+
+    def _preflight_object_info() -> tuple[dict[str, Any], str]:
+        """Live /object_info without starting ComfyUI, else the last saved copy, else nothing (every item unknown)."""
+        try:
+            return engine._object_info(backend, autostart=False) or {}, "live"
+        except Exception:  # noqa: BLE001 - ComfyUI off: fall back to the cache, then to "unknown"
+            path = engine.object_info_cache_path(backend.data_dir)
+            if path.is_file():
+                try:
+                    return json.loads(path.read_text(encoding="utf-8")), "cache"
+                except (OSError, ValueError):
+                    pass
+            return {}, "none"
+
+    def production_workflows(state: dict[str, Any], info: dict[str, Any]) -> list[str]:
+        """The ComfyUI templates the production's pending stages will use, resolved like the run resolves them."""
+        pending = [s for s in productions_mod.stages_for(state) if productions_mod.stage_status(state, s) != "done"]
+        spec = state.get("spec") or {}
+        names: list[Optional[str]] = []
+        if any(s in pending for s in ("character", "frames", "photocards", "visuals")):
+            tm = engine.ENGINE_TEMPLATES.get(engine.resolve_image_engine(info, spec.get("engine")), {})
+            names += [tm.get("txt2img"), tm.get("edit")]
+        song = spec.get("song") or {}
+        if "song" in pending and state.get("kind") != "short" and song and not song.get("asset_id"):
+            names.append("ace15_song")
+        if "clips" in pending:
+            tmpl = (spec.get("clip_settings") or {}).get("template") or "auto_clip"
+            names.append(engine.clip_template(info) if tmpl in ("auto_clip", "auto") else tmpl)
+            if any(sh.get("sing") for sh in spec.get("shots") or []):
+                names.append(engine.sing_template(info, 5.0))
+        return [n for n in dict.fromkeys(names) if n]
+
+    def op_workflow_preflight(body: WorkflowPreflightBody) -> dict[str, Any]:
+        info, source = _preflight_object_info()
+        if body.production:
+            state = productions_mod.load_fresh(store.data_dir, body.production)
+            reports = [wf_preflight.check_template(n, store.data_dir, info, source) for n in production_workflows(state, info)]
+        elif body.template:
+            reports = [wf_preflight.check_template(body.template, store.data_dir, info, source)]
+        elif body.workflow:
+            workflow = body.workflow
+            if comfy_driver._looks_like_ui_format(workflow):
+                if not info:
+                    raise engine.EngineError("comfy_down", "a UI-format workflow needs ComfyUI's node list: start ComfyUI once "
+                                                           "(or export the workflow in API format)")
+                workflow = engine.convert_mod.ui_to_api(workflow, info)
+            reports = [wf_preflight.check(workflow, info, source, label="workflow")]
+        else:
+            raise engine.EngineError("missing_argument", "give a production, a template or a workflow")
+        out = wf_preflight.summary(reports, source)
+        if body.production:
+            out["production"] = body.production
+        if source != "live":
+            out["note"] = ("ComfyUI is not running: checked against its last saved node list" if source == "cache" else
+                           "ComfyUI is not running and no node list was saved yet: nothing could be checked")
+        return out
+
+    @app.post("/api/workflows/preflight")
+    def workflow_preflight_route(body: WorkflowPreflightBody):
+        return op_workflow_preflight(body)
+
+    @app.post("/api/agent/workflow_preflight")
+    def agent_workflow_preflight(body: WorkflowPreflightBody):
+        return agent("workflow_preflight", body.production or body.template or "workflow", lambda: op_workflow_preflight(body))
+    # -- end workflow preflight
+
+    # ---------------------------------------------------- edit plans: plan -> run -> verify (edit_plans.py)
+
+    queue.register("edit_plan_run", lambda job, p: edit_plans_mod.run_job(store, job, p))
+
+    def op_edit_plan(body: EditPlanBody, full: bool = True) -> dict[str, Any]:
+        return edit_plans_mod.view(edit_plans_mod.create(store, body.project, body.edit, body.name), full=full)
+
+    def op_edit_run(body: EditRunBody) -> dict[str, Any]:
+        plan = edit_plans_mod.load(store.data_dir, body.plan_id)
+        changed = edit_plans_mod.check_inputs(store, plan)
+        if changed:
+            raise engine.EngineError("inputs_changed", "the plan's inputs changed since it was planned ("
+                                     + ", ".join(f"{c['name']}: {'/'.join(c['what'])}" for c in changed[:6])
+                                     + "); plan again to review the new commands")
+        job = wait(queue.enqueue("edit_plan_run", "cpu", {"plan_id": body.plan_id}, project_id=plan["project_id"]), body.wait_s)
+        return {"plan_id": body.plan_id, "job": job_result(job)}
+
+    def op_edit_verify(body: EditVerifyBody) -> dict[str, Any]:
+        asset_id = body.asset_id
+        if not asset_id and body.plan_id:
+            runs = edit_plans_mod.load(store.data_dir, body.plan_id).get("runs") or []
+            asset_id = runs[-1]["asset_id"] if runs else None
+        if not asset_id:
+            raise engine.EngineError("missing_argument", "give the video's asset_id, or a plan_id that has been run")
+        return edit_plans_mod.verify(store, asset_id, body.platform, sheet=body.contact_sheet)
+
+    def op_contact_sheet(body: ContactSheetBody) -> dict[str, Any]:
+        return edit_plans_mod.contact_sheet(store, body.asset_id, every_n=body.every_n, count=body.count,
+                                            columns=body.columns, width=body.width)
+
+    @app.post("/api/edit-plans")
+    def edit_plan_create(body: EditPlanBody):
+        return op_edit_plan(body)
+
+    @app.get("/api/edit-plans")
+    def edit_plan_list(project: Optional[str] = None, limit: int = 30):
+        return {"items": edit_plans_mod.list_plans(store.data_dir, project, max(1, min(100, limit)))}
+
+    @app.get("/api/edit-plans/{plan_id}")
+    def edit_plan_get(plan_id: str):
+        return edit_plans_mod.view(edit_plans_mod.load(store.data_dir, plan_id), full=True)
+
+    @app.post("/api/edit-plans/{plan_id}/run")
+    def edit_plan_run(plan_id: str, wait_s: float = 0):
+        return op_edit_run(EditRunBody(plan_id=plan_id, wait_s=wait_s))
+
+    @app.post("/api/edit-plans/verify")
+    def edit_plan_verify(body: EditVerifyBody):
+        return op_edit_verify(body)
+
+    @app.post("/api/assets/{asset_id}/contact-sheet")
+    def asset_contact_sheet(asset_id: str, body: ContactSheetBody):
+        return op_contact_sheet(body.model_copy(update={"asset_id": asset_id}))
+
+    @app.post("/api/agent/edit_plan")
+    def agent_edit_plan(body: EditPlanBody):
+        return agent("edit_plan", body.project, lambda: op_edit_plan(body, full=False))
+
+    @app.post("/api/agent/edit_run_plan")
+    def agent_edit_run_plan(body: EditRunBody):
+        return agent("edit_run_plan", body.plan_id, lambda: op_edit_run(body))
+
+    @app.post("/api/agent/edit_verify")
+    def agent_edit_verify(body: EditVerifyBody):
+        return agent("edit_verify", body.asset_id or body.plan_id or "", lambda: op_edit_verify(body))
+
+    @app.post("/api/agent/edit_contact_sheet")
+    def agent_edit_contact_sheet(body: ContactSheetBody):
+        return agent("edit_contact_sheet", body.asset_id, lambda: op_contact_sheet(body))
+    # -- end edit plans
+
+    # ---------------------------------------------------- treatment-first productions (treatment.py)
+
+    def _treatment_chat() -> Optional[Callable[..., str]]:
+        hook = (getattr(app.state, "short_hooks", None) or {}).get("chat")
+        if hook:
+            return hook
+        try:
+            return mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus)
+        except Exception:  # noqa: BLE001 - no model: the rule draft says why
+            return None
+
+    def op_treatment(slug: str, body: TreatmentBody) -> dict[str, Any]:
+        out: dict[str, Any] = {"production": slug}
+        if body.action == "draft":
+            drafted = treatment_mod.draft(_treatment_chat(), productions_mod.load_fresh(store.data_dir, slug),
+                                          body.language, body.notes)  # the model call happens outside the lock
+        with productions_mod.lock_for(slug):
+            state = productions_mod.load_state(store.data_dir, slug)
+            if body.action == "draft":
+                state["treatment"] = drafted
+                productions_mod.log(state, "treatment", "drafted", source=drafted["source"])
+            elif body.action == "update":
+                if not isinstance(body.treatment, dict):
+                    raise engine.EngineError("missing_argument", "update needs the edited treatment")
+                treatment_mod.set_treatment(state, body.treatment)
+                productions_mod.log(state, "treatment", "edited")
+            elif body.action == "approve":
+                treatment_mod.approve(state)
+                productions_mod.log(state, "treatment", "approved")
+            if body.action != "get":
+                productions_mod.save_state(store.data_dir, state)
+            out["treatment"] = state.get("treatment")
+            status = state.get("status")
+        if body.action == "approve" and body.run and status in ("awaiting_review", "queued", "failed", "cancelled"):
+            out["job"] = op_production_continue(slug)["job"]
+        out["status"] = productions_mod.load_fresh(store.data_dir, slug).get("status")
+        return out
+
+    @app.post("/api/productions/{slug}/treatment")
+    def production_treatment_route(slug: str, body: TreatmentBody):
+        return op_treatment(slug, body)
+
+    @app.get("/api/productions/{slug}/treatment")
+    def production_treatment_get(slug: str):
+        return op_treatment(slug, TreatmentBody(action="get"))
+
+    @app.post("/api/agent/production_treatment_draft")
+    def agent_production_treatment(production: str, body: TreatmentBody):
+        return agent("production_treatment_draft", f"{production}:{body.action}", lambda: op_treatment(production, body))
+
+    def _storyboard_still(state: dict[str, Any], key: str, jobs: dict[str, str]) -> Optional[str]:
+        """A shot's still: the production's own chosen frame, else the one a storyboard job made for it."""
+        best = ((((state.get("done") or {}).get("frames") or {}).get("items") or {}).get(key) or {}).get("best")
+        if best:
+            return best
+        if jobs.get(key):
+            try:
+                job = store.get_job(jobs[key])
+            except Exception:  # noqa: BLE001 - a forgotten job: draw the placeholder
+                return None
+            ids = (engine.job_view(job).get("asset_ids") or []) if job["state"] == "done" else []
+            return ids[0] if ids else None
+        return None
+
+    def op_storyboard_sheet(slug: str, body: StoryboardSheetBody) -> dict[str, Any]:
+        from PIL import Image as PILImage
+
+        state = productions_mod.load_fresh(store.data_dir, slug)
+        project = state.get("project_id")
+        if not project:
+            raise engine.EngineError("no_project", "the production has no project yet: create it with a project")
+        t = state.get("treatment")
+        note = None
+        if not t:
+            t, note = treatment_mod.rules_draft(state), "no treatment yet: the sheet follows the planned shots"
+        board = dict(t.get("storyboard") or {})
+        jobs = dict(board.get("jobs") or {})
+        spec = state.get("spec") or {}
+        prompts = {str(sh.get("key")): sh.get("prompt") for sh in spec.get("shots") or []}
+        shots = treatment_mod.key_shots(t)
+        queued: list[str] = []
+        if body.generate:
+            reachable = bool((backend.status().get("comfy") or {}).get("reachable"))
+            missing = [s for s in shots if not _storyboard_still(state, str(s["key"]), jobs)]
+            if missing and not reachable:
+                note = "ComfyUI is not running: the shots without a still are drawn from their text"
+            for s in missing if reachable else []:
+                look = (spec.get("world") or {}).get("look") or ""
+                prompt = prompts.get(str(s["key"])) or f"{s['framing']} shot, {s['camera']}, {s.get('why') or ''}"
+                res = op_generate(project, GenerateImageBody(prompt=f"{prompt}, {look}".strip(", "), width=768, height=432))
+                jobs[str(s["key"])] = res["job"]["id"]
+                queued.append(res["job"]["id"])
+        stills, used = {}, 0
+        for s in shots:
+            aid = _storyboard_still(state, str(s["key"]), jobs)
+            if aid:
+                try:
+                    with PILImage.open(store.data_dir / store.get_asset(aid)["file_path"]) as im:
+                        stills[str(s["key"])] = im.convert("RGB")
+                    used += 1
+                except Exception:  # noqa: BLE001 - an unreadable still becomes a placeholder
+                    pass
+        sheet = treatment_mod.sheet_image(t, stills, productions_mod.display_name(state))
+        recipe = {"operation": "storyboard_sheet", "production": slug, "shots": [s["key"] for s in shots],
+                  "stills": used, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        asset = engine._save_sheet(store, project, sheet, recipe, f"Storyboard - {productions_mod.display_name(state)}"[:100])
+        if state.get("treatment"):
+            with productions_mod.lock_for(slug):
+                fresh = productions_mod.load_state(store.data_dir, slug)
+                if fresh.get("treatment"):
+                    fresh["treatment"]["storyboard"] = {"asset_id": asset["id"], "jobs": jobs, "stills": used,
+                                                        "placeholders": len(shots) - used}
+                    productions_mod.save_state(store.data_dir, fresh)
+        return {"production": slug, "asset_id": asset["id"], "shots": len(shots), "stills": used,
+                "placeholders": len(shots) - used, "queued_jobs": queued, **({"note": note} if note else {})}
+
+    @app.post("/api/productions/{slug}/storyboard-sheet")
+    def production_storyboard_route(slug: str, body: StoryboardSheetBody):
+        return op_storyboard_sheet(slug, body)
+
+    @app.post("/api/agent/production_storyboard_sheet")
+    def agent_production_storyboard(production: str, body: StoryboardSheetBody):
+        return agent("production_storyboard_sheet", production, lambda: op_storyboard_sheet(production, body))
+    # -- end treatment
 
     @app.put("/api/productions/{slug}/song")
     def production_song(slug: str, body: ProductionSongBody):

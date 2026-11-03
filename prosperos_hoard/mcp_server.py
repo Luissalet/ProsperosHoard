@@ -2288,6 +2288,125 @@ def studio_video_engines() -> dict[str, Any]:
     return _call("GET", "/api/video-engines")
 
 
+# ------------------------------------------------- edit plans: plan -> run -> verify --
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def edit_plan(project: str, edit: dict[str, Any], name: Optional[str] = None) -> dict[str, Any]:
+    """Plan a declarative edit as saved ffmpeg commands, without rendering / planificar un montaje con ffmpeg.
+
+    `edit`: {"platform": "shorts"|"reels"|"tiktok"|"youtube" (sets 1080x1920 or 1920x1080 and -14 LUFS),
+    "width", "height", "fps", "framing": "fill"|"blur"|"fit", "quality": "final"|"preview",
+    "clips": [{"asset_id" (video or image), "in_s", "out_s" (video trims), "duration_s" (images),
+    "transition": {"type": "cut"|"crossfade"|"dip_black"|"flash_white"|"wipeleft"|"slideup"|"circleopen"|"dissolve"...,
+    "duration_s"}, "audio": true, "volume_db"}],
+    "captions": [{"text", "start_s", "end_s"}], "caption_style": "default"|"bold"|"pop"|"cinema"...,
+    "overlays": [{"asset_id" (image), "start_s", "end_s", "x", "y" (0-1), "scale" (0-1 of the width), "opacity"}],
+    "music": {"asset_id", "volume_db", "duck": true, "start_s", "fade_out_s"},
+    "loudness": {"target_lufs": -14, "true_peak": -1}}.
+    Saves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step
+    names, inputs and the duration; nothing renders until edit_run_plan. The commands are visible in the app.
+
+    Keywords: edit plan, ffmpeg plan, cut clips, trims, transitions, captions, overlay, music bed, loudness, plan de montaje, recortar, transiciones, subtitulos, musica de fondo
+    """
+    return _call("POST", "/api/agent/edit_plan", json={"project": project, "edit": edit, "name": name})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def edit_run_plan(plan_id: str, wait_s: float = 0) -> dict[str, Any]:
+    """Render a saved edit plan exactly as planned / ejecutar un plan de montaje.
+
+    Refuses with inputs_changed when any input file changed since it was planned (plan again with edit_plan to review
+    the new commands). Runs as a job on the CPU lane; when done the job has the new video asset id plus a contact
+    sheet, and the plan keeps an automatic verification against its platform (edit_verify to see it again).
+    wait_s (up to 150) waits on the server.
+
+    Keywords: run plan, render edit, execute ffmpeg plan, ejecutar plan, renderizar montaje
+    """
+    return _call("POST", "/api/agent/edit_run_plan", json={"plan_id": plan_id, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def edit_verify(asset_id: Optional[str] = None, plan_id: Optional[str] = None, platform: str = "shorts",
+                contact_sheet: bool = True) -> dict[str, Any]:
+    """Check a rendered video against a platform's delivery spec / verificar un vídeo para Shorts, Reels, TikTok o YouTube.
+
+    platform: shorts | reels | tiktok | youtube. Checks resolution and shape, frame rate, duration limit, video and audio
+    codecs, stereo layout, sample rate, integrated loudness (EBU R128 via ffmpeg ebur128, target -14 LUFS) and true
+    peak; each check is pass, warn or fail with expected and actual. asset_id, or plan_id for that plan's last render.
+    contact_sheet=true also saves a contact sheet image (look at it with studio_show).
+
+    Keywords: verify video, delivery check, platform spec, loudness, lufs, shorts, reels, tiktok, verificar video, sonoridad, especificaciones
+    """
+    return _call("POST", "/api/agent/edit_verify", json={"asset_id": asset_id, "plan_id": plan_id, "platform": platform,
+                                                         "contact_sheet": contact_sheet})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def edit_contact_sheet(asset_id: str, every_n: Optional[int] = None, count: int = 12, columns: int = 4,
+                       width: int = 320) -> dict[str, Any]:
+    """Contact sheet of a video: every Nth frame tiled into one PNG / hoja de contactos de un vídeo.
+
+    every_n picks every Nth frame; without it `count` frames are spread over the clip. columns and width (px per
+    frame) shape the grid. Saved as an image asset in the video's project; returns its asset_id (look with studio_show).
+
+    Keywords: contact sheet, thumbnails grid, frames overview, hoja de contactos, fotogramas, miniaturas
+    """
+    return _call("POST", "/api/agent/edit_contact_sheet", json={"asset_id": asset_id, "every_n": every_n, "count": count,
+                                                                "columns": columns, "width": width})
+
+
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def workflow_preflight(production: Optional[str] = None, template: Optional[str] = None,
+                       workflow: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """What a ComfyUI workflow misses before it runs / comprobar nodos y modelos de un workflow de ComfyUI.
+
+    Checks every node class against ComfyUI's /object_info and every model file the workflow names (checkpoints,
+    LoRAs, diffusion models, VAEs, text encoders, upscalers...) against the loader's file list. Give a production
+    (the workflows its next run will use), a template name (sdxl_txt2img, wan22_i2v_14b, wf_... imported) or a
+    workflow JSON. Returns per workflow the nodes and models with ok true/false (null when unknown), the node pack
+    that usually provides a missing node, the ComfyUI models/<folder> each missing file goes in, and copy_text with
+    the whole list. ComfyUI off: checks against its last saved node list (source=cache) or says nothing could be
+    checked (source=none). Never starts ComfyUI and never blocks a run.
+
+    Keywords: preflight, missing nodes, missing models, custom nodes, comfyui check, workflow check, nodos que faltan, modelos que faltan, comprobar workflow
+    """
+    return _call("POST", "/api/agent/workflow_preflight", json={"production": production, "template": template,
+                                                                "workflow": workflow})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def production_treatment_draft(production: str, action: Literal["draft", "get", "update", "approve"] = "draft",
+                               treatment: Optional[dict[str, Any]] = None, language: str = "en",
+                               notes: Optional[str] = None, run: bool = True) -> dict[str, Any]:
+    """Director's treatment of a production before it renders / tratamiento de dirección antes de renderizar.
+
+    action draft: the family's language model writes logline, three candidate structures and the pick with its reason,
+    a benchmark (learn / avoid), a shot list (key, framing, camera, duration_s, why) and a beat sheet / cue map
+    (t_s, section, cue); with no model it drafts from the planned shots (source "rules", note says why). A production
+    with a treatment pauses at its `treatment` stage until approved. get: read it. update: save the edited treatment
+    (same shape). approve: "Approve and render" (run=true continues the production). notes: what the person wants.
+
+    Keywords: treatment, director, logline, shot list, beat sheet, cue map, approve and render, tratamiento, guion tecnico, lista de planos, aprobar
+    """
+    return _call("POST", "/api/agent/production_treatment_draft", params={"production": production},
+                 json={"action": action, "treatment": treatment, "language": language, "notes": notes, "run": run})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def production_storyboard_sheet(production: str, generate: bool = False) -> dict[str, Any]:
+    """Storyboard contact sheet of 6-9 key shots of a production's treatment / hoja de storyboard.
+
+    Each frame is the shot's own still when the production has one, else a placeholder drawn from the shot text
+    (framing, camera, why). generate=true also queues a ComfyUI still for every shot without one when ComfyUI is
+    running (call again when those jobs finish to rebuild the sheet with them). Returns the sheet's asset_id (look at
+    it with studio_show), how many frames are stills or placeholders, and the queued jobs.
+
+    Keywords: storyboard, key frames, contact sheet, shot sheet, guion grafico, storyboard de planos
+    """
+    return _call("POST", "/api/agent/production_storyboard_sheet", params={"production": production},
+                 json={"generate": generate})
+
+
 def _install_studio_catalog() -> None:
     """Owned editing tools, exact cold catalogue; never import/start a native engine."""
     from mcp.types import Tool as MCPTool, TextContent, ImageContent

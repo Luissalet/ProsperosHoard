@@ -1277,6 +1277,35 @@ export interface CinemaGuide {
 }
 
 export const fileUrl = (id: string) => `/generation/api/assets/${id}/file`;
+export interface WorkflowCheck {
+  workflow: string | null; template?: string; source: string; ok: boolean | null; missing_nodes: number; missing_models: number;
+  nodes: { class_type: string; node_ids: string[]; ok: boolean | null; pack?: { name: string; url: string } | null }[];
+  models: { node_id: string; class_type: string; input: string; file: string; folder: string; ok: boolean | null; fallback?: string; note?: string }[];
+}
+export interface WorkflowPreflight {
+  ok: boolean | null; source: "live" | "cache" | "none"; workflows: WorkflowCheck[]; missing_nodes: number; missing_models: number;
+  copy_text: string; note?: string; production?: string;
+}
+export interface TreatmentShot { key: string; framing: string; camera: string; duration_s: number; why: string; text?: string }
+export interface Treatment {
+  logline: string; structures: { name: string; summary: string; beats: string[] }[]; pick: { index: number; why: string };
+  benchmark: { learn: string[]; avoid: string[] }; shot_list: TreatmentShot[]; beat_sheet: { t_s: number; section: string; cue: string }[];
+  status?: "draft" | "approved"; source?: "model" | "rules"; note?: string; drafted_at?: string; approved_at?: string;
+  storyboard?: { asset_id?: string; stills?: number; placeholders?: number; jobs?: Record<string, string> };
+}
+export interface VerifyCheck { id: string; label: string; status: "pass" | "warn" | "fail"; expected: unknown; actual: unknown }
+export interface VerifyReport {
+  asset_id: string; platform: string; label: string; ok: boolean; warnings: number; checks: VerifyCheck[];
+  media: Record<string, number | string | null>; contact_sheet_asset_id?: string; contact_sheet_error?: string; verified_at: string;
+}
+export interface EditPlan {
+  plan_id: string; name: string; project_id: string; status: string; platform: string | null; width: number; height: number;
+  fps: number; duration_s: number; clips: number; captions: number; overlays: number; music: boolean;
+  loudness: { target_lufs: number; true_peak: number }; steps: string[]; inputs: { asset_id: string; kind: string; name: string }[];
+  created_at: string; last_run?: { at: string; asset_id: string; elapsed_s?: number; verify_ok?: boolean };
+  last_verify?: VerifyReport; commands?: string[];
+}
+
 export const thumbUrl = (a: Pick<Asset, "id" | "thumb_path" | "kind">) =>
   a.thumb_path ? `/generation/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
 
@@ -1479,8 +1508,26 @@ export const api = {
     request<{ status: string; song_asset_id: string | null; lyrics_source: string; composes_on_run: boolean; timing_note?: string }>(
       "PUT", `/generation/api/productions/${slug}/song`, body),
   productionPreflight: (slug: string) =>
-    request<{ ok: boolean; items: { level: "error" | "warn" | "info"; code: string; message: string; startable?: boolean }[] }>(
+    request<{ ok: boolean; items: { level: "error" | "warn" | "info"; code: string; message: string; startable?: boolean }[];
+      workflows?: WorkflowPreflight | null }>(
       "GET", `/generation/api/productions/${slug}/preflight`),
+  workflowPreflight: (body: { production?: string; template?: string; workflow?: Record<string, unknown> }) =>
+    request<WorkflowPreflight>("POST", "/generation/api/workflows/preflight", body),
+  treatment: (slug: string, body: { action: "draft" | "get" | "update" | "approve"; treatment?: Treatment; language?: string;
+    notes?: string; run?: boolean }) =>
+    request<{ production: string; treatment: Treatment | null; status: string; job?: Job }>("POST", `/generation/api/productions/${slug}/treatment`, body),
+  storyboardSheet: (slug: string, generate = false) =>
+    request<{ asset_id: string; shots: number; stills: number; placeholders: number; queued_jobs: string[]; note?: string }>(
+      "POST", `/generation/api/productions/${slug}/storyboard-sheet`, { generate }),
+  editPlans: (project?: string) => request<{ items: EditPlan[] }>("GET", `/generation/api/edit-plans${q({ project })}`),
+  editPlan: (id: string) => request<EditPlan>("GET", `/generation/api/edit-plans/${id}`),
+  createEditPlan: (project: string, edit: Record<string, unknown>, name?: string) =>
+    request<EditPlan>("POST", "/generation/api/edit-plans", { project, edit, name }),
+  runEditPlan: (id: string) => request<{ plan_id: string; job: Job }>("POST", `/generation/api/edit-plans/${id}/run`),
+  verifyVideo: (body: { asset_id?: string; plan_id?: string; platform: string; contact_sheet?: boolean }) =>
+    request<VerifyReport>("POST", "/generation/api/edit-plans/verify", body),
+  contactSheet: (assetId: string, body: { every_n?: number; count?: number; columns?: number; width?: number } = {}) =>
+    request<{ asset_id: string; every_n: number; frames: number }>("POST", `/generation/api/assets/${assetId}/contact-sheet`, { asset_id: assetId, ...body }),
   makeCanvas: (slug: string, seconds = 8, start_s?: number) =>
     request<{ asset_id: string; start_s: number; start_from: string; seconds: number }>("POST", `/generation/api/productions/${slug}/canvas`, { seconds, start_s }),
   setProductionFinishing: (slug: string, finishing: Finishing, render = true) =>

@@ -16,6 +16,7 @@ import { VideoModal } from "./VideoModal";
 import { StoryboardCard, liveRun } from "./Storyboard";
 import { SongTrackCard } from "./SongTrack";
 import { ScriptDesk } from "./ScriptDesk";
+import { TreatmentCard, WorkflowChecklist } from "./Treatment";
 
 const STATUS_TONE: Record<string, string> = {
   queued: "info", running: "accent", awaiting_review: "gold", done: "ok", failed: "bad", cancelled: "", partial: "warn",
@@ -140,9 +141,9 @@ export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onS
   );
 }
 
-type Tab = "storyboard" | "script" | "preview" | "reviews" | "qa" | "history";
+type Tab = "treatment" | "storyboard" | "script" | "preview" | "reviews" | "qa" | "history";
 const STAGE_TAB: Record<string, Tab> = {
-  character: "storyboard", song: "storyboard", frames: "storyboard", lyrics: "storyboard", animatic: "preview", clips: "preview",
+  treatment: "treatment", character: "storyboard", song: "storyboard", frames: "storyboard", lyrics: "storyboard", animatic: "preview", clips: "preview",
   photocards: "preview", album: "preview", timeline: "preview", report: "history",
 };
 
@@ -197,10 +198,13 @@ function Preflight({ slug }: { slug: string }) {
   const { t, lang } = useT();
   const app = useApp();
   const [items, setItems] = useState<Awaited<ReturnType<typeof api.productionPreflight>>["items"] | null>(null);
+  const [workflows, setWorkflows] = useState<Awaited<ReturnType<typeof api.productionPreflight>>["workflows"]>(null);
   const [starting, setStarting] = useState(false);
-  const check = () => api.productionPreflight(slug).then((r) => setItems(r.items)).catch(() => setItems([]));
+  const check = () => api.productionPreflight(slug).then((r) => { setItems(r.items); setWorkflows(r.workflows || null); })
+    .catch(() => setItems([]));
   useEffect(() => { check(); }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!items || items.length === 0) return null;
+  const checklist = workflows && workflows.workflows.length > 0 ? <WorkflowChecklist report={workflows} /> : null;
+  if (!items || items.length === 0) return checklist ? <div className="preflight">{checklist}</div> : null;
   const start = async () => {
     setStarting(true);
     try { await api.startService("comfyui"); app.toast(t("pfComfyStarting"), "info"); setTimeout(check, 4000); }
@@ -216,6 +220,7 @@ function Preflight({ slug }: { slug: string }) {
           {i.code === "comfy_down" && i.startable && <button className="btn sm" disabled={starting} onClick={start}>{starting ? <Loader2 size={12} className="spin" /> : <Play size={12} />} {t("pfStartComfy")}</button>}
         </div>
       ))}
+      {checklist}
     </div>
   );
 }
@@ -274,6 +279,21 @@ function NextStep({ state, active, onChanged, setTab }: {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+  if (state.status === "awaiting_review" && state.stage === "treatment") {
+    return (
+      <div className="next-step gold">
+        <PauseIcon size={18} />
+        <div className="grow">
+          <strong>{lang === "es" ? "El tratamiento espera tu aprobación" : "The treatment is waiting for your approval"}</strong>
+          <div className="small muted">{lang === "es" ? "Léelo y edítalo en la pestaña Tratamiento; nada se renderiza hasta que lo apruebes."
+            : "Read and edit it in the Treatment tab; nothing renders until you approve it."}</div>
+          <Preflight slug={state.slug} />
+        </div>
+        <button className="btn sm" onClick={() => setTab("treatment")}><BookCopy size={13} /> {lang === "es" ? "Tratamiento" : "Treatment"}</button>
+        <button className="btn sm primary" disabled={busy} onClick={go}><Play size={13} /> {lang === "es" ? "Aprobar y renderizar" : "Approve and render"}</button>
       </div>
     );
   }
@@ -398,9 +418,11 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const outputs = Object.keys(renders).length + (animatic ? Object.keys(animatic).length : 0);
   // the tab follows the production until the person picks one
   const autoTab: Tab = data.status === "awaiting_review" && data.stage === "animatic" ? "preview"
+    : data.status === "awaiting_review" && data.stage === "treatment" ? "treatment"
     : data.status === "done" && outputs ? "preview" : "storyboard";
   const current = tab || autoTab;
   const tabs: [Tab, string][] = [
+    ["treatment", lang === "es" ? "Tratamiento" : "Treatment"],
     ["storyboard", t("tabStoryboard")], ["preview", `${t("tabPreview")}${outputs ? ` · ${outputs}` : ""}`],
     ["script", lang === "es" ? "Texto y tomas" : "Text and shots"],
     ["reviews", lang === "es" ? "Revisión y estilo" : "Review & style"],
@@ -443,6 +465,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
               {!legacy && !shotOpen && <SongTrackCard state={data} onChanged={changed} />}
             </>
           )}
+          {current === "treatment" && !legacy && <TreatmentCard state={data} onChanged={changed} />}
           {current === "script" && !legacy && <ScriptDesk state={data} onChanged={changed} onStoryboard={() => setTab("storyboard")} />}
           {current === "reviews" && !legacy && <ShotReviewsCard state={data} onChanged={changed} />}
           {current === "preview" && (
