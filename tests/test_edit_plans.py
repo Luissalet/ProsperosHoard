@@ -110,3 +110,41 @@ def test_check_media_against_platform_specs():
     assert status["resolution"] == "fail" and status["duration"] == "fail"
     assert status["audio_layout"] == "warn" and status["loudness"] == "fail"
     assert {c["id"]: c["status"] for c in edit_plans.check_media(wide, loud, "youtube")}["resolution"] == "pass"
+
+
+def test_ntsc_frame_rates_pass_the_platform_check():
+    good = {"has_video": True, "has_audio": False, "width": 1080, "height": 1920, "duration_s": 20, "video_codec": "h264"}
+    for platform in ("shorts", "tiktok", "youtube", "reels"):
+        status = {c["id"]: c["status"] for c in edit_plans.check_media(dict(good, fps=23.976), None, platform)}
+        assert status["fps"] == "pass", platform
+    assert {c["id"]: c["status"] for c in edit_plans.check_media(dict(good, fps=15), None, "shorts")}["fps"] == "fail"
+
+
+def test_fractional_fps_is_refused_not_truncated(store, project, media):
+    with pytest.raises(EngineError) as err:
+        edit_plans.create(store, project["id"], {"fps": 29.97, "clips": [{"asset_id": "a_clip"}]})
+    assert "whole number" in err.value.message
+    assert edit_plans.create(store, project["id"], {"fps": 25.0, "clips": [{"asset_id": "a_clip"}],
+                                                    "width": 160, "height": 120})["edit"]["fps"] == 25
+
+
+def test_a_transition_longer_than_its_clip_is_refused(store, project, media):
+    spec = {"width": 160, "height": 120, "clips": [{"asset_id": "a_clip"},
+                                                   {"asset_id": "a_still", "duration_s": 0.5,
+                                                    "transition": {"type": "crossfade", "duration_s": 2.0}}]}
+    with pytest.raises(EngineError) as err:
+        edit_plans.create(store, project["id"], spec)
+    assert "longer than the clip it enters" in err.value.message
+    spec["clips"][1]["transition"]["duration_s"] = 0.5
+    assert edit_plans.create(store, project["id"], spec)["edit"]["clips"][1]["transition"]["duration_s"] == 0.5
+
+
+def test_overlay_and_caption_ends_past_the_edit_run_to_its_end(store, project, media):
+    # the page adds an overlay lasting 0-5 s and a caption 0-2 s whatever the edit's length
+    plan = edit_plans.create(store, project["id"], {"width": 160, "height": 120, "clips": [{"asset_id": "a_still", "duration_s": 1.5}],
+                                                    "overlays": [{"asset_id": "a_still", "start_s": 0, "end_s": 5}],
+                                                    "captions": [{"text": "hola", "start_s": 0, "end_s": 2}]})
+    assert plan["edit"]["overlays"][0]["end_s"] == 1.5 and plan["edit"]["captions"][0]["end_s"] == 1.5
+    with pytest.raises(EngineError):
+        edit_plans.create(store, project["id"], {"clips": [{"asset_id": "a_still", "duration_s": 1.5}],
+                                                 "overlays": [{"asset_id": "a_still", "start_s": 3}]})

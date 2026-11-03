@@ -2303,7 +2303,8 @@ def edit_plan(project: str, edit: dict[str, Any], name: Optional[str] = None) ->
     "overlays": [{"asset_id" (image), "start_s", "end_s", "x", "y" (0-1), "scale" (0-1 of the width), "opacity"}],
     "music": {"asset_id", "volume_db", "duck": true, "start_s", "fade_out_s"},
     "loudness": {"target_lufs": -14, "true_peak": -1}}.
-    Saves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step
+    fps is a whole number; a transition may not be longer than the clip it enters; an end_s past the edit means
+    until the end. Saves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step
     names, inputs and the duration; nothing renders until edit_run_plan. The commands are visible in the app.
 
     Keywords: edit plan, ffmpeg plan, cut clips, trims, transitions, captions, overlay, music bed, loudness, plan de montaje, recortar, transiciones, subtitulos, musica de fondo
