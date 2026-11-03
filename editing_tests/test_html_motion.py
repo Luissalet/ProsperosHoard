@@ -363,3 +363,59 @@ def test_receive_imports_the_revision_visible_to_the_user(tmp_path):
         assert received.status_code == 200, received.text
         assert svc.db.one("SELECT id FROM media WHERE path = ?", (r1["render_path"],)) is not None
         assert svc.db.one("SELECT id FROM media WHERE path = ?", (r2["render_path"],)) is None
+
+
+def _with_outputs(store, composition):
+    """Stand-ins for what reviews and exports leave in a composition's folder."""
+    folder = store.folder(composition)
+    (folder / "1" / "render-job1.mp4").write_bytes(b"video")
+    (folder / "2" / "storyboards" / "sb1").mkdir(parents=True)
+    (folder / "2" / "storyboards" / "sb1" / "sheet.png").write_bytes(b"png")
+    (folder / "treatment.json").write_text("{}", encoding="utf-8")
+    return folder
+
+
+def test_delete_removes_every_revision_and_render_over_rest_and_tool(tmp_path):
+    from prosperos_hoard.editing.agent_tools import call_tool, tool_catalog
+    svc = Services(make_config(tmp_path), link=FakeLink(available=False), inline_jobs=True)
+    app = create_app(svc.config, services=svc)
+    store = HtmlMotion(svc.config.data_dir)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        first = save(store)
+        store.save(composition=first["id"], expected_revision=1, html=SOURCE + "<!-- 2 -->", name="Motion QA", width=320, height=180)
+        other = save(store)
+        folder = _with_outputs(store, first["id"])
+        response = client.delete(f"/api/html-motion/{first['id']}")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["deleted"] == first["id"] and body["revisions"] == [1, 2] and body["renders"] == 1 and body["files_removed"] >= 7
+        assert not folder.exists()
+        assert client.get(f"/api/html-motion/{first['id']}").status_code == 404
+        assert [c["id"] for c in client.get("/api/html-motion").json()["compositions"]] == [other["id"]]
+        assert client.delete(f"/api/html-motion/{first['id']}").status_code == 404
+        assert "html_motion_delete" in {t["name"] for t in tool_catalog()}
+        assert call_tool(svc, "html_motion_delete", {"composition": other["id"]}, caller="test", cap=False)["deleted"] == other["id"]
+        assert store.list()["compositions"] == []
+        assert client.delete("/api/html-motion/not-an-id").status_code in (400, 404, 422)
+
+
+def test_delete_refuses_while_exporting_or_while_the_library_reads_a_render(tmp_path):
+    svc = Services(make_config(tmp_path), link=FakeLink(available=False), inline_jobs=False)
+    store = HtmlMotion(svc.config.data_dir)
+    first = save(store)
+    folder = _with_outputs(store, first["id"])
+    queued = store.queue_render(svc, first["id"])
+    with pytest.raises(Conflict) as busy:
+        store.delete(svc, first["id"])
+    assert busy.value.code == "html_motion_busy" and folder.is_dir()
+    svc.jobs.cancel(queued["job"])
+    render = folder / "1" / "render-job1.mp4"
+    svc.db.execute("INSERT INTO media(id, path, name, kind, origin, fingerprint, bytes, duration_ms, width, height, fps, has_video, has_audio, "
+                   "probe, proxy, created_ts) VALUES ('med_x', ?, 'QA render', 'video', 'import', 'fp', 5, 1000, 320, 180, 10, 1, 0, '{}', 'done', 0)",
+                   (str(render),))
+    with pytest.raises(Conflict) as used:
+        store.delete(svc, first["id"])
+    assert used.value.code == "html_motion_in_use" and "QA render" in str(used.value) and render.is_file()
+    svc.db.execute("DELETE FROM media WHERE id = 'med_x'")
+    assert store.delete(svc, first["id"])["deleted"] == first["id"] and not folder.exists()
+    svc.stop()

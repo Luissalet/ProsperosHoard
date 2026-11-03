@@ -7,9 +7,14 @@ frame of the timeline, encodes them with ffmpeg and returns a verified H.264 MP4
 
 | Where | What |
 | --- | --- |
-| UI | Montaje, home page, **Animación HTML**: source editor, frame review, several moments at once, sound, export, add to the timeline |
-| REST | `/editing/api/html-motion/...` (composition, `revisions/{n}/frame`, `.../render`, `.../sound`, ...) |
-| MCP | `html_motion_starters`, `html_motion_starter_create`, `html_motion_save`, `html_motion_list`, `html_motion_get`, `html_motion_frame`, `html_motion_storyboard`, `html_motion_render`, `html_motion_restore`, and the sound tools below |
+| UI | Montaje, home page, **Animación HTML**: source editor, frame review, several moments at once, sound, export, add to the timeline, *Borrar composición* (with a confirm) |
+| REST | `/editing/api/html-motion/...` (composition, `revisions/{n}/frame`, `.../render`, `.../sound`, ...; `DELETE /editing/api/html-motion/{id}`) |
+| MCP | `html_motion_starters`, `html_motion_starter_create`, `html_motion_save`, `html_motion_list`, `html_motion_get`, `html_motion_frame`, `html_motion_storyboard`, `html_motion_render`, `html_motion_restore`, `html_motion_delete`, and the sound tools below |
+
+`html_motion_delete` removes the composition's folder (`data/editing/creative/html/<id>`): every revision, render,
+storyboard, sound preview, treatment, cues and facts. It refuses with `html_motion_busy` while an export of the
+composition is queued or running, and with `html_motion_in_use` while a library media still reads one of its renders
+(`media_receive` imports a render where it is, without a copy: remove that media first).
 
 ## Sound
 

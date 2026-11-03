@@ -8129,7 +8129,7 @@
     },
     {
       "name": "edit_plan",
-      "description": "Plan a declarative edit as saved ffmpeg commands, without rendering / planificar un montaje con ffmpeg.\n\n`edit`: {\"platform\": \"shorts\"|\"reels\"|\"tiktok\"|\"youtube\" (sets 1080x1920 or 1920x1080 and -14 LUFS),\n\"width\", \"height\", \"fps\", \"framing\": \"fill\"|\"blur\"|\"fit\", \"quality\": \"final\"|\"preview\",\n\"clips\": [{\"asset_id\" (video or image), \"in_s\", \"out_s\" (video trims), \"duration_s\" (images),\n\"transition\": {\"type\": \"cut\"|\"crossfade\"|\"dip_black\"|\"flash_white\"|\"wipeleft\"|\"slideup\"|\"circleopen\"|\"dissolve\"...,\n\"duration_s\"}, \"audio\": true, \"volume_db\"}],\n\"captions\": [{\"text\", \"start_s\", \"end_s\"}], \"caption_style\": \"default\"|\"bold\"|\"pop\"|\"cinema\"...,\n\"overlays\": [{\"asset_id\" (image), \"start_s\", \"end_s\", \"x\", \"y\" (0-1), \"scale\" (0-1 of the width), \"opacity\"}],\n\"music\": {\"asset_id\", \"volume_db\", \"duck\": true, \"start_s\", \"fade_out_s\"},\n\"loudness\": {\"target_lufs\": -14, \"true_peak\": -1}}.\nSaves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step\nnames, inputs and the duration; nothing renders until edit_run_plan. The commands are visible in the app.\n\nKeywords: edit plan, ffmpeg plan, cut clips, trims, transitions, captions, overlay, music bed, loudness, plan de montaje, recortar, transiciones, subtitulos, musica de fondo\n",
+      "description": "Plan a declarative edit as saved ffmpeg commands, without rendering / planificar un montaje con ffmpeg.\n\n`edit`: {\"platform\": \"shorts\"|\"reels\"|\"tiktok\"|\"youtube\" (sets 1080x1920 or 1920x1080 and -14 LUFS),\n\"width\", \"height\", \"fps\", \"framing\": \"fill\"|\"blur\"|\"fit\", \"quality\": \"final\"|\"preview\",\n\"clips\": [{\"asset_id\" (video or image), \"in_s\", \"out_s\" (video trims), \"duration_s\" (images),\n\"transition\": {\"type\": \"cut\"|\"crossfade\"|\"dip_black\"|\"flash_white\"|\"wipeleft\"|\"slideup\"|\"circleopen\"|\"dissolve\"...,\n\"duration_s\"}, \"audio\": true, \"volume_db\"}],\n\"captions\": [{\"text\", \"start_s\", \"end_s\"}], \"caption_style\": \"default\"|\"bold\"|\"pop\"|\"cinema\"...,\n\"overlays\": [{\"asset_id\" (image), \"start_s\", \"end_s\", \"x\", \"y\" (0-1), \"scale\" (0-1 of the width), \"opacity\"}],\n\"music\": {\"asset_id\", \"volume_db\", \"duck\": true, \"start_s\", \"fade_out_s\"},\n\"loudness\": {\"target_lufs\": -14, \"true_peak\": -1}}.\nfps is a whole number; a transition may not be longer than the clip it enters; an end_s past the edit means\nuntil the end. Saves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step\nnames, inputs and the duration; nothing renders until edit_run_plan. The commands are visible in the app.\n\nKeywords: edit plan, ffmpeg plan, cut clips, trims, transitions, captions, overlay, music bed, loudness, plan de montaje, recortar, transiciones, subtitulos, musica de fondo\n",
       "inputSchema": {
         "properties": {
           "project": {
@@ -8217,6 +8217,47 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "edit_plan_delete",
+      "description": "Delete a saved edit plan / borrar un plan de montaje.\n\nRemoves the plan's folder in Prospero's data (plan.json, the captions and concat list it planned, any leftover\nintermediate). outputs=true (default) also moves the videos its runs rendered and their contact sheets to the trash,\nwhere studio_trash(action='restore') brings them back; outputs=false keeps them in the project. The plan's input\nassets are never touched. Refuses with plan_running while a run of the plan is queued or rendering (cancel the job\nwith studio_cancel_job or wait). Returns files_removed, outputs_trashed and outputs_kept (a render a timeline uses).\n\nKeywords: delete plan, remove edit plan, clean up, borrar plan, eliminar plan de montaje, limpiar\n",
+      "inputSchema": {
+        "properties": {
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "outputs": {
+            "default": true,
+            "title": "Outputs",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "plan_id"
+        ],
+        "title": "edit_plan_deleteArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": false
       }
@@ -11437,6 +11478,38 @@
           "reason"
         ],
         "title": "HtmlMotionRestoreArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "html_motion_delete",
+      "description": "Delete an HTML composition with all its revisions and exported videos. Borrar una animacion HTML.\nRemoves its folder in Prospero's data: every revision, render, storyboard, sound preview, treatment, cues and facts. Refuses with html_motion_busy while an export of it is queued or running (cancel it with job_cancel), and with html_motion_in_use while a library media still reads one of its videos (media_delete it first). Keywords: delete, remove, borrar, eliminar, clean up, HTML motion, composition.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "description": "The composition to delete with all its revisions and renders.",
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "reason"
+        ],
+        "title": "HtmlMotionDeleteArgs",
         "type": "object"
       }
     },

@@ -249,6 +249,34 @@ class HtmlMotion:
     def source(self, manifest: dict) -> str:
         return (self.folder(manifest["id"]) / str(manifest["revision"]) / "composition.html").read_text(encoding="utf-8")
 
+    def delete(self, svc, composition: str) -> dict:
+        """Delete a composition with every revision, render, storyboard, sound preview, treatment, cues and facts it keeps
+        in its folder. Refuses while an export of it is queued or running, and while a library media still reads one of
+        its rendered videos (remove that media first: the library imports a render where it is, without a copy)."""
+        folder = self.folder(composition)
+        manifest = self.get(composition)
+        if folder.is_symlink() or not folder.is_relative_to(self.root):
+            raise LumiereError("Invalid HTML composition folder.", code="html_motion")
+        busy = [job for job in svc.jobs.list(state="active", limit=500)
+                if job.get("kind") == "html_motion" and (job.get("params") or {}).get("composition") == composition]
+        if busy:
+            raise Conflict(f"{manifest['name']} is being exported (job {busy[0]['id']}): cancel the export or wait for it before deleting it.",
+                           code="html_motion_busy")
+        prefix = str(folder)
+        used = [row for row in svc.db.query("SELECT id, name, path FROM media WHERE path LIKE ?", (prefix + "%",))
+                if Path(row["path"]).is_relative_to(folder)]
+        if used:
+            names = ", ".join(f"{row['name']} ({row['id']})" for row in used[:6])
+            raise Conflict(f"The library still uses a video of {manifest['name']}: {names}. Remove it from the library first (media_delete).",
+                           code="html_motion_in_use")
+        with _LOCK:
+            revisions = sorted(int(p.name) for p in folder.iterdir() if p.is_dir() and p.name.isdigit())
+            files = [p for p in folder.rglob("*") if p.is_file()]
+            renders = sum(1 for p in files if p.name.startswith("render-") and p.suffix == ".mp4")
+            shutil.rmtree(folder)
+        return {"deleted": composition, "name": manifest["name"], "revisions": revisions, "renders": renders,
+                "files_removed": len(files)}
+
     def restore(self, composition: str, revision: int, expected_revision: int) -> dict:
         old = self.get(composition, revision)
         return self.save(composition=composition, expected_revision=expected_revision, html=self.source(old),

@@ -69,6 +69,11 @@ def restore(request: Request, body: HtmlMotionRestoreArgs):
     return _store(request).restore(**body.model_dump())
 
 
+@router.delete("/{composition}")
+def delete(request: Request, composition: str):
+    return tool(request, "html_motion_delete", composition=composition)
+
+
 @router.get("/{composition}/revisions/{revision}/source")
 def source(request: Request, composition: str, revision: int):
     store = _store(request)

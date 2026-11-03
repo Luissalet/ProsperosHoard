@@ -118,6 +118,11 @@ every Nth frame (`select` + `tile`) into an image asset. REST: `/api/edit-plans`
 `/api/edit-plans/verify`, `/api/assets/{id}/contact-sheet`. An edit's `fps` is a whole number (29.97 is refused,
 not rounded down), a transition may not be longer than the clip it enters, and a caption or overlay end past the
 edit's end means "until the end". The frame-rate check accepts the NTSC rates (23.976, 29.97, 59.94).
+Deleting a plan (`edit_plan_delete`, `DELETE /api/edit-plans/{id}?outputs=true|false`, trash button in the Plans
+list with a confirm and a "move its videos to the trash" checkbox) removes its folder (plan.json, captions, concat
+list, leftover intermediates) and, with `outputs`, moves the videos its runs rendered (assets whose recipe names the
+plan) and their contact sheets to the trash, restorable; inputs are never touched and a render a timeline uses is
+kept (`outputs_kept`). Refuses with `plan_running` while an `edit_plan_run` job of the plan is queued or running.
 
 Workflow preflight (`workflow_preflight.py`, MCP `workflow_preflight`, `POST /api/workflows/preflight`): every node
 class of a ComfyUI workflow against `/object_info` and every model file (checkpoints, LoRAs, diffusion models, VAEs,
@@ -140,6 +145,11 @@ HTML motion (Montaje): `motion_lint` (button "Comprobar que no es un pase de dia
 only animation is opacity in the composition's GSAP tweens (including tweens whose vars nest objects such as
 `stagger: {each}` or `scrollTrigger`) and CSS; 3 or more give `reject` with a re-prompt. The
 seek-stepped Playwright renderer with sound (`html_motion_render`, `motion_export`) already existed.
+`html_motion_delete` (editing module, `DELETE /editing/api/html-motion/{id}`, button "Borrar composición" under the
+composition picker, with a confirm) removes the composition's folder `data/editing/creative/html/<id>`: every
+revision, render, storyboard, sound preview, treatment, cues and facts. Refuses with `html_motion_busy` while an
+export of it is queued or running and with `html_motion_in_use` while a library media still reads one of its
+renders (the library imports a render where it is). Like every editing tool it needs the editing module ON.
 
 ## Biblia de continuidad, reparación de tramos y revisión de uniones (03-11-2026)
 

@@ -8,8 +8,8 @@ import HtmlMotionDirection, { StylePicker } from "./HtmlMotionDirection.jsx";
 
 const initial = { name: "", html: "", width: 1280, height: 720, fps: 30, duration: 3 };
 const words = {
-  en: { title: "HTML motion", choose: "Saved composition", blank: "New composition", name: "Name", source: "Editable HTML source", load: "Open HTML file", example: "Load example", width: "Width", height: "Height", fps: "Frames per second", duration: "Duration (seconds)", save: "Save composition", saved: "Saved revision", preview: "Review frame", time: "Frame time (seconds)", render: "Export video", download: "Download HTML", video: "Download video", receive: "Add video to library", timeline: "Add video to timeline", received: "Video added", restore: "Restore revision", hint: "Define window.seek(t) with time in seconds. Calculate the complete frame from t; embed assets for portable results. Declare sound events {t, role} below and the export carries the sound; without them the video is silent.", runtime: "Browser renderer needs the motion package. Install lumiere-hoard[motion].", empty: "Save HTML to review a frame and export a video.", dirty: "Save your changes to review or export them.", cancel: "Cancel export" },
-  es: { title: "Animación HTML", choose: "Composición guardada", blank: "Nueva composición", name: "Nombre", source: "Fuente HTML editable", load: "Abrir archivo HTML", example: "Cargar ejemplo", width: "Anchura", height: "Altura", fps: "Fotogramas por segundo", duration: "Duración (segundos)", save: "Guardar composición", saved: "Revisión guardada", preview: "Revisar fotograma", time: "Tiempo del fotograma (segundos)", render: "Exportar vídeo", download: "Descargar HTML", video: "Descargar vídeo", receive: "Añadir vídeo a biblioteca", timeline: "Añadir vídeo a timeline", received: "Vídeo añadido", restore: "Restaurar revisión", hint: "Define window.seek(t) con el tiempo en segundos. Calcula el fotograma completo a partir de t; incrusta los recursos para conservar un resultado portable. Declara abajo eventos de sonido {t, role} y la exportación lleva el sonido; sin ellos el vídeo es mudo.", runtime: "El renderizador necesita el paquete motion. Instala lumiere-hoard[motion].", empty: "Guarda el HTML para revisar fotogramas y exportar un vídeo.", dirty: "Guarda tus cambios para revisarlos o exportarlos.", cancel: "Cancelar exportación" },
+  en: { title: "HTML motion", choose: "Saved composition", blank: "New composition", name: "Name", source: "Editable HTML source", load: "Open HTML file", example: "Load example", width: "Width", height: "Height", fps: "Frames per second", duration: "Duration (seconds)", save: "Save composition", saved: "Saved revision", preview: "Review frame", time: "Frame time (seconds)", render: "Export video", download: "Download HTML", video: "Download video", receive: "Add video to library", timeline: "Add video to timeline", received: "Video added", restore: "Restore revision", hint: "Define window.seek(t) with time in seconds. Calculate the complete frame from t; embed assets for portable results. Declare sound events {t, role} below and the export carries the sound; without them the video is silent.", runtime: "Browser renderer needs the motion package. Install lumiere-hoard[motion].", empty: "Save HTML to review a frame and export a video.", dirty: "Save your changes to review or export them.", cancel: "Cancel export", remove: "Delete composition", removeConfirm: (name, n) => `Delete "${name}" with its ${n} revision(s) and exported videos? This cannot be undone.`, removed: (name) => `Deleted "${name}"` },
+  es: { title: "Animación HTML", choose: "Composición guardada", blank: "Nueva composición", name: "Nombre", source: "Fuente HTML editable", load: "Abrir archivo HTML", example: "Cargar ejemplo", width: "Anchura", height: "Altura", fps: "Fotogramas por segundo", duration: "Duración (segundos)", save: "Guardar composición", saved: "Revisión guardada", preview: "Revisar fotograma", time: "Tiempo del fotograma (segundos)", render: "Exportar vídeo", download: "Descargar HTML", video: "Descargar vídeo", receive: "Añadir vídeo a biblioteca", timeline: "Añadir vídeo a timeline", received: "Vídeo añadido", restore: "Restaurar revisión", hint: "Define window.seek(t) con el tiempo en segundos. Calcula el fotograma completo a partir de t; incrusta los recursos para conservar un resultado portable. Declara abajo eventos de sonido {t, role} y la exportación lleva el sonido; sin ellos el vídeo es mudo.", runtime: "El renderizador necesita el paquete motion. Instala lumiere-hoard[motion].", empty: "Guarda el HTML para revisar fotogramas y exportar un vídeo.", dirty: "Guarda tus cambios para revisarlos o exportarlos.", cancel: "Cancelar exportación", remove: "Borrar composición", removeConfirm: (name, n) => `¿Borrar «${name}» con sus ${n} revisiones y los vídeos exportados? No se puede deshacer.`, removed: (name) => `Borrada «${name}»` },
 };
 
 const EXAMPLE = `<!doctype html><html lang="es"><meta charset="utf-8"><title>Proceso</title>
@@ -136,6 +136,15 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
     const data = await request(`/editing/api/html-motion/${result.id}`);
     setSaved(data); setDraft(Object.fromEntries(Object.keys(initial).map((key) => [key, data[key]]))); setPreview(null); refresh();
   });
+  const [removedName, setRemovedName] = useState("");
+  const remove = () => {
+    if (!saved || !window.confirm(t.removeConfirm(saved.name, saved.revisions?.length || 1))) return;
+    operate(async () => {
+      const result = await request(`/editing/api/html-motion/${saved.id}`, { method: "DELETE" });
+      setDraft(initial); setSaved(null); setPreview(null); setStoryboard(null); setJob(null);
+      setRemovedName(result.name || saved.name); refresh();
+    });
+  };
   const change = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
 
   const created = async (id) => { await refresh(); await load(id); };
@@ -152,6 +161,10 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
           <option value="">{t.blank}</option>{catalogue?.compositions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </label>
+      {saved && <div className="html-motion-actions">
+        <button type="button" className="btn btn-danger" data-testid="html-motion-delete" disabled={busy || active} onClick={remove}>{t.remove}</button>
+      </div>}
+      {!saved && removedName && <p role="status">{t.removed(removedName)}</p>}
       {catalogue && !catalogue.runtime.playwright && <p role="status">{t.runtime}</p>}
       <form onSubmit={save}>
         <label className="field-label"><span>{t.name}</span><input className="field" required value={draft.name} onChange={(e) => change("name", e.target.value)} /></label>

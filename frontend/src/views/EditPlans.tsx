@@ -93,6 +93,18 @@ export function EditPlansView() {
     const r = await api.runEditPlan(plan!.plan_id);
     setJobId(r.job.id); app.refreshJobs(); app.toast(L(lang, "Rendering the plan", "Renderizando el plan"), "info");
   });
+  const [trashOutputs, setTrashOutputs] = useState(true);
+  const removePlan = (p: EditPlan) => {
+    const what = trashOutputs ? L(lang, " Its rendered videos and contact sheets go to the trash.", " Sus vídeos renderizados y hojas de contactos irán a la papelera.") : "";
+    if (!window.confirm(L(lang, `Delete the plan "${p.name}"?`, `¿Borrar el plan «${p.name}»?`) + what)) return;
+    act(`delete:${p.plan_id}`, async () => {
+      const r = await api.deleteEditPlan(p.plan_id, trashOutputs);
+      if (plan?.plan_id === p.plan_id) setPlan(null);
+      reloadPlans(); app.bump();
+      const kept = r.outputs_kept?.length ? L(lang, ` · ${r.outputs_kept.length} kept (in use)`, ` · ${r.outputs_kept.length} conservado(s) (en uso)`) : "";
+      app.toast(L(lang, `Plan deleted · ${r.outputs_trashed.length} file(s) to the trash`, `Plan borrado · ${r.outputs_trashed.length} archivo(s) a la papelera`) + kept, "info");
+    });
+  };
   const verify = () => act("verify", async () => { setReport(await api.verifyVideo({ asset_id: verifyAsset, platform: verifyPlatform })); app.bump(); });
   const clip = (i: number, patch: Partial<ClipRow>) => setClips(clips.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const kindOf = (id: string) => assets.find((a: Asset) => a.id === id)?.kind;
@@ -197,10 +209,15 @@ export function EditPlansView() {
       {(plans?.items || []).length > 0 && (
         <div className="card">
           <h2><Film size={16} /> {L(lang, "Plans", "Planes")}</h2>
-          <ul className="ep-plans small">{plans!.items.map((p) => <li key={p.plan_id}>
+          <label className="row small" style={{ gap: 4 }}><input type="checkbox" checked={trashOutputs} onChange={(e) => setTrashOutputs(e.target.checked)} data-testid="ep-delete-outputs" />
+            {L(lang, "Deleting a plan also moves its rendered videos and contact sheets to the trash", "Al borrar un plan, sus vídeos renderizados y hojas de contactos van a la papelera")}</label>
+          <ul className="ep-plans small">{plans!.items.map((p) => <li key={p.plan_id} data-testid="ep-plan-item">
             <button className="link-btn" onClick={() => api.editPlan(p.plan_id).then(setPlan)}>{p.name}</button>
             <span className="muted"> · {p.status} · {p.duration_s.toFixed(1)} s{p.platform ? ` · ${p.platform}` : ""}
-              {p.last_run ? (p.last_run.verify_ok ? ` · ${L(lang, "spec ok", "cumple")}` : ` · ${L(lang, "spec failed", "no cumple")}`) : ""}</span></li>)}</ul>
+              {p.last_run ? (p.last_run.verify_ok ? ` · ${L(lang, "spec ok", "cumple")}` : ` · ${L(lang, "spec failed", "no cumple")}`) : ""}</span>
+            <button className="btn sm icon ghost danger" disabled={!!busy} onClick={() => removePlan(p)} data-testid="ep-plan-delete"
+              aria-label={L(lang, `Delete plan ${p.name}`, `Borrar plan ${p.name}`)} title={L(lang, "Delete plan", "Borrar plan")}>
+              {busy === `delete:${p.plan_id}` ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}</button></li>)}</ul>
         </div>
       )}
     </div>

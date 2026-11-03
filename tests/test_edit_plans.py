@@ -148,3 +148,70 @@ def test_overlay_and_caption_ends_past_the_edit_run_to_its_end(store, project, m
     with pytest.raises(EngineError):
         edit_plans.create(store, project["id"], {"clips": [{"asset_id": "a_still", "duration_s": 1.5}],
                                                  "overlays": [{"asset_id": "a_still", "start_s": 3}]})
+
+
+SMALL = {"width": 160, "height": 120, "quality": "preview", "clips": [{"asset_id": "a_clip"}]}
+
+
+def test_delete_removes_the_plan_folder_and_trashes_only_its_outputs(store, project, media):
+    plan = edit_plans.create(store, project["id"], dict(SMALL, captions=[{"text": "hola", "start_s": 0, "end_s": 1}]))
+    out = edit_plans.run_job(store, {"id": "job_x", "params": {"plan_id": plan["id"]}}, _progress)
+    extra = edit_plans.contact_sheet(store, out["asset_id"], count=4)["asset_id"]  # a sheet made later with edit_contact_sheet
+    folder = edit_plans.plan_dir(store.data_dir, plan["id"])
+    (folder / "clip_000.mp4").write_bytes(b"leftover")  # an intermediate a crash left behind
+    made = set(out["asset_ids"]) | {extra}
+    assert edit_plans.output_assets(store, edit_plans.load(store.data_dir, plan["id"])) and \
+        set(edit_plans.output_assets(store, edit_plans.load(store.data_dir, plan["id"]))) == made
+    result = edit_plans.delete(store, plan["id"])
+    assert result["deleted"] == plan["id"] and set(result["outputs_trashed"]) == made
+    assert {"plan.json", "captions.ass", "clip_000.mp4"} <= set(result["files_removed"])
+    assert not folder.exists()
+    for aid in made:
+        with pytest.raises(Exception):
+            store.get_asset(aid)
+    assert {t["id"] for t in store.list_trash(project["id"])} >= made  # restorable from the trash
+    for aid in ("a_clip", "a_still", "a_song"):  # inputs and other assets untouched
+        assert (store.data_dir / store.get_asset(aid)["file_path"]).is_file()
+    with pytest.raises(EngineError) as err:
+        edit_plans.load(store.data_dir, plan["id"])
+    assert err.value.code == "not_found"
+    assert plan["id"] not in {p["plan_id"] for p in edit_plans.list_plans(store.data_dir)}
+
+
+def test_delete_can_keep_the_outputs(store, project, media):
+    plan = edit_plans.create(store, project["id"], SMALL)
+    out = edit_plans.run_job(store, {"id": "job_y", "params": {"plan_id": plan["id"]}}, _progress)
+    result = edit_plans.delete(store, plan["id"], outputs=False)
+    assert result["outputs_trashed"] == [] and store.get_asset(out["asset_id"])["kind"] == "video"
+
+
+def test_delete_refuses_while_a_run_is_queued_or_running(store, project, media):
+    plan = edit_plans.create(store, project["id"], SMALL)
+    job = store.create_job("edit_plan_run", "cpu", {"plan_id": plan["id"]}, project_id=project["id"], state="running")
+    with pytest.raises(EngineError) as err:
+        edit_plans.delete(store, plan["id"])
+    assert err.value.code == "plan_running" and job["id"] in err.value.message
+    assert edit_plans.plan_dir(store.data_dir, plan["id"]).is_dir()
+    store.update_job(job["id"], state="done")
+    assert edit_plans.delete(store, plan["id"])["deleted"] == plan["id"]
+
+
+def test_delete_rejects_ids_outside_the_plans_folder(store):
+    for bad in ("..", "ep_../x", "a_clip", "ep_x/../../y"):
+        with pytest.raises(EngineError):
+            edit_plans.delete(store, bad)
+
+
+def test_delete_over_rest_and_the_agent_route(client):
+    c, app, _ = client
+    store = app.state.store
+    project = store.create_project("Plans")
+    _make(store, project, "a_clip", ["-f", "lavfi", "-i", "testsrc=size=160x120:rate=25:duration=1", "-pix_fmt", "yuv420p"], "video")
+    first = c.post("/api/edit-plans", json={"project": project["id"], "edit": SMALL}).json()["plan_id"]
+    second = c.post("/api/edit-plans", json={"project": project["id"], "edit": SMALL}).json()["plan_id"]
+    r = c.delete(f"/api/edit-plans/{first}")
+    assert r.status_code == 200 and r.json()["deleted"] == first
+    assert c.get(f"/api/edit-plans/{first}").status_code in (400, 404)
+    r = c.post("/api/agent/edit_plan_delete", json={"plan_id": second, "outputs": False})
+    assert r.status_code == 200 and r.json()["deleted"] == second
+    assert c.get("/api/edit-plans", params={"project": project["id"]}).json()["items"] == []

@@ -29,7 +29,7 @@ from .backend import ffmpeg_path
 from .engine import EngineError, _rel, _video_thumbnail, make_thumbnail
 from .hoard_link.media.ffmpeg import FFmpeg, FFmpegError
 from .ids import new_id
-from .store import Store
+from .store import AssetInUse, NotFound, Store
 from .util import now_iso, write_text_atomic
 
 FORMAT = "prospero.edit_plan/1"
@@ -402,6 +402,79 @@ def list_plans(data_dir: Path, project_id: Optional[str] = None, limit: int = 30
         out.append(view(plan))
         if len(out) >= limit:
             break
+    return out
+
+
+ACTIVE_STATES = ("queued", "waiting_gpu", "running")
+
+
+def active_run(store: Store, plan_id: str) -> Optional[str]:
+    """The id of a queued or running `edit_plan_run` job of this plan, if any."""
+    rows = store.conn.execute("SELECT id, params_json FROM jobs WHERE type='edit_plan_run' AND state IN (?, ?, ?)",
+                              ACTIVE_STATES).fetchall()
+    for row in rows:
+        try:
+            params = json.loads(row["params_json"] or "{}")
+        except ValueError:
+            continue
+        if params.get("plan_id") == plan_id:
+            return row["id"]
+    return None
+
+
+def output_assets(store: Store, plan: dict[str, Any]) -> list[str]:
+    """The assets the plan's runs made: every rendered video whose recipe names the plan, and the contact sheets made of
+    those videos. Never one of the plan's inputs."""
+    inputs = {i["asset_id"] for i in plan.get("inputs") or []}
+    renders: list[str] = []
+    for row in store.conn.execute("SELECT id, recipe_json FROM assets WHERE source='rendered' AND recipe_json LIKE ?",
+                                  (f"%{plan['id']}%",)).fetchall():
+        recipe = json.loads(row["recipe_json"] or "{}")
+        if recipe.get("operation") == "edit_plan" and recipe.get("plan_id") == plan["id"]:
+            renders.append(row["id"])
+    renders = [a for a in dict.fromkeys(renders) if a not in inputs]
+    sheets: list[str] = []
+    for aid in renders:
+        for row in store.conn.execute("SELECT id, recipe_json FROM assets WHERE source='rendered' AND recipe_json LIKE ?",
+                                      (f"%{aid}%",)).fetchall():
+            recipe = json.loads(row["recipe_json"] or "{}")
+            if recipe.get("operation") == "contact_sheet" and aid in (recipe.get("input_asset_ids") or []):
+                sheets.append(row["id"])
+    return [a for a in dict.fromkeys(renders + sheets) if a not in inputs]
+
+
+def delete(store: Store, plan_id: str, outputs: bool = True) -> dict[str, Any]:
+    """Delete a plan: its folder under data/edit_plans (plan.json, captions, concat list and any leftover intermediate)
+    and, with `outputs`, move the videos and contact sheets its runs made to the trash (restorable). The plan's input
+    assets are never touched. Refuses while a run of the plan is queued or rendering."""
+    plan = load(store.data_dir, plan_id)
+    job = active_run(store, plan_id)
+    if job:
+        raise EngineError("plan_running", f"edit plan {plan_id} is rendering (job {job}): cancel the job or wait for it to "
+                                          "finish before deleting the plan")
+    root = plans_dir(store.data_dir).resolve()
+    folder = plan_dir(store.data_dir, plan_id)
+    if folder.is_symlink() or not folder.resolve().is_relative_to(root):
+        raise EngineError("bad_plan", f"edit plan {plan_id} is not a folder of the plans directory")
+    trashed: list[str] = []
+    kept: list[dict[str, Any]] = []
+    if outputs:
+        for aid in output_assets(store, plan):
+            try:
+                store.trash_asset(aid)
+                trashed.append(aid)
+            except AssetInUse as exc:
+                kept.append({"asset_id": aid, "error": "asset_in_use", "message": str(exc)})
+            except NotFound:
+                continue  # already deleted
+    files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+    shutil.rmtree(folder)
+    out: dict[str, Any] = {"deleted": plan_id, "name": plan.get("name"), "project_id": plan.get("project_id"),
+                           "files_removed": files, "outputs_trashed": trashed}
+    if kept:
+        out["outputs_kept"] = kept
+    if trashed:
+        out["note"] = "the rendered videos and contact sheets are in the trash: restore them with studio_trash(action='restore')"
     return out
 
 
