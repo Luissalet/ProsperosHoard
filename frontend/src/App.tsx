@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
-  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search,
+  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search, ShieldCheck,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource/cinzel";
@@ -32,6 +32,7 @@ import { SettingsView } from "./views/Settings";
 import { VoiceView } from "./views/Voice";
 import { ProductionsView } from "./views/Productions";
 import { CinemaView } from "./views/Cinema";
+import { EditPlansView } from "./views/EditPlans";
 import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
 
@@ -62,6 +63,7 @@ const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = 
   { id: "audio", key: "navAudio", icon: AudioLines },
   { id: "timeline", key: "navTimeline", icon: Clapperboard },
   { id: "boards", key: "navBoards", icon: LayoutGrid },
+  { id: "delivery", key: "navDelivery", icon: ShieldCheck },
 ];
 const GLOBAL_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
   { id: "projects", key: "navProjects", icon: FolderKanban },
@@ -221,6 +223,7 @@ export default function App() {
   else if (section === "audio") view = <AudioView key={projectId} />;
   else if (section === "timeline") view = <TimelineView key={projectId} />;
   else if (section === "boards") view = <BoardsView key={projectId} />;
+  else if (section === "delivery") view = <EditPlansView key={projectId} />;
   else if (section === "voice") view = <VoiceView />;
   else if (section === "cinema") view = <CinemaView />;
   else if (section === "productions") view = <ProductionsView key={route.arg || ""} />;
@@ -303,7 +306,7 @@ export default function App() {
               </select>
               <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
                 <button className={section === "spaces" || section === "create" ? "on" : ""} onClick={() => go("create")}>{lang === "es" ? "Lienzo de vídeo" : "Video canvas"}</button>
-                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")]].map(([id, label]) =>
+                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")], ["delivery", lang === "es" ? "Entrega" : "Deliver"]].map(([id, label]) =>
                   <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
               </nav>
               <div className="spacer" />

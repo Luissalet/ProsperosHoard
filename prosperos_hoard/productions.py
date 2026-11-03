@@ -773,7 +773,10 @@ def stage_status(state: dict[str, Any], stage: str) -> str:
 
 
 def stages_for(state: dict[str, Any]) -> list[str]:
-    return list(state.get("stages") or STAGES)
+    stages = list(state.get("stages") or STAGES)
+    if state.get("treatment") and "treatment" not in stages:
+        stages.insert(0, "treatment")  # treatment-first: pauses until the treatment is approved
+    return stages
 
 
 def display_name(state: dict[str, Any]) -> str:
@@ -841,6 +844,14 @@ def _cover(state: dict[str, Any]) -> Optional[dict[str, str]]:
 def compact_view(state: dict[str, Any]) -> dict[str, Any]:
     """What an agent sees: status, each stage's state, the ids that matter,
     the animatic, the last QA summary and what to do next."""
+    view = _compact_view(state)
+    if state.get("status") == "awaiting_review" and state.get("stage") == "treatment":
+        view["next"] = ("read the treatment (production_treatment_draft with action 'get'), edit it if needed, then "
+                        "studio_production_continue(production) approves it and renders")
+    return view
+
+
+def _compact_view(state: dict[str, Any]) -> dict[str, Any]:
     view = summary_view(state)
     if view.get("legacy"):
         view["note"] = "made by the production script; export it as a recipe with studio_recipe_export"
@@ -848,6 +859,12 @@ def compact_view(state: dict[str, Any]) -> dict[str, Any]:
     spec = state.get("spec") or {}
     done = state.get("done", {})
     view["stages"] = {s: stage_status(state, s) for s in stages_for(state)}
+    treatment = state.get("treatment")
+    if treatment:
+        view["treatment"] = {"status": treatment.get("status"), "source": treatment.get("source"),
+                             "shots": len(treatment.get("shot_list") or []), "logline": treatment.get("logline"),
+                             **({"storyboard_asset_id": treatment["storyboard"].get("asset_id")}
+                                if (treatment.get("storyboard") or {}).get("asset_id") else {})}
     if state.get("kind") == "short":
         from .shorts import compact_extras
 
@@ -1137,6 +1154,16 @@ class Run:
             self.log("failed", message=str(exc)[:400])
             self.save()
             raise
+
+    def stage_treatment(self) -> Optional[str]:
+        """Treatment-first: nothing renders until the treatment is approved ("Approve and render")."""
+        t = self.state.get("treatment") or {}
+        if t.get("status") == "approved":
+            self.state.setdefault("done", {})["treatment"] = {"approved_at": t.get("approved_at"),
+                                                              "shots": len(t.get("shot_list") or [])}
+            return None
+        self.log("treatment_awaiting_approval")
+        return "pause"
 
     def _ensure_project(self) -> None:
         if self.state.get("project_id"):

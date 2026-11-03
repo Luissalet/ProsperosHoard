@@ -64,6 +64,191 @@
       }
     },
     {
+      "name": "edit_contact_sheet",
+      "description": "Contact sheet of a video: every Nth frame tiled into one PNG / hoja de contactos de un vídeo.\n\nevery_n picks every Nth frame; without it `count` frames are spread over the clip. columns and width (px per\nframe) shape the grid. Saved as an image asset in the video's project; returns its asset_id (look with studio_show).\n\nKeywords: contact sheet, thumbnails grid, frames overview, hoja de contactos, fotogramas, miniaturas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Every N"
+          },
+          "count": {
+            "default": 12,
+            "title": "Count",
+            "type": "integer"
+          },
+          "columns": {
+            "default": 4,
+            "title": "Columns",
+            "type": "integer"
+          },
+          "width": {
+            "default": 320,
+            "title": "Width",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "edit_plan",
+      "description": "Plan a declarative edit as saved ffmpeg commands, without rendering / planificar un montaje con ffmpeg.\n\n`edit`: {\"platform\": \"shorts\"|\"reels\"|\"tiktok\"|\"youtube\" (sets 1080x1920 or 1920x1080 and -14 LUFS),\n\"width\", \"height\", \"fps\", \"framing\": \"fill\"|\"blur\"|\"fit\", \"quality\": \"final\"|\"preview\",\n\"clips\": [{\"asset_id\" (video or image), \"in_s\", \"out_s\" (video trims), \"duration_s\" (images),\n\"transition\": {\"type\": \"cut\"|\"crossfade\"|\"dip_black\"|\"flash_white\"|\"wipeleft\"|\"slideup\"|\"circleopen\"|\"dissolve\"...,\n\"duration_s\"}, \"audio\": true, \"volume_db\"}],\n\"captions\": [{\"text\", \"start_s\", \"end_s\"}], \"caption_style\": \"default\"|\"bold\"|\"pop\"|\"cinema\"...,\n\"overlays\": [{\"asset_id\" (image), \"start_s\", \"end_s\", \"x\", \"y\" (0-1), \"scale\" (0-1 of the width), \"opacity\"}],\n\"music\": {\"asset_id\", \"volume_db\", \"duck\": true, \"start_s\", \"fade_out_s\"},\n\"loudness\": {\"target_lufs\": -14, \"true_peak\": -1}}.\nSaves the plan with a fingerprint of every input (size, time, hash of the first MiB). Returns plan_id, the step\nnames, inputs and the duration; nothing renders until edit_run_plan. The commands are visible in the app.\n\nKeywords: edit plan, ffmpeg plan, cut clips, trims, transitions, captions, overlay, music bed, loudness, plan de montaje, recortar, transiciones, subtitulos, musica de fondo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "edit": {
+            "title": "Edit",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "edit",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "edit_run_plan",
+      "description": "Render a saved edit plan exactly as planned / ejecutar un plan de montaje.\n\nRefuses with inputs_changed when any input file changed since it was planned (plan again with edit_plan to review\nthe new commands). Runs as a job on the CPU lane; when done the job has the new video asset id plus a contact\nsheet, and the plan keeps an automatic verification against its platform (edit_verify to see it again).\nwait_s (up to 150) waits on the server.\n\nKeywords: run plan, render edit, execute ffmpeg plan, ejecutar plan, renderizar montaje",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "wait_s": {
+            "default": 0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "plan_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "edit_verify",
+      "description": "Check a rendered video against a platform's delivery spec / verificar un vídeo para Shorts, Reels, TikTok o YouTube.\n\nplatform: shorts | reels | tiktok | youtube. Checks resolution and shape, frame rate, duration limit, video and audio\ncodecs, stereo layout, sample rate, integrated loudness (EBU R128 via ffmpeg ebur128, target -14 LUFS) and true\npeak; each check is pass, warn or fail with expected and actual. asset_id, or plan_id for that plan's last render.\ncontact_sheet=true also saves a contact sheet image (look at it with studio_show).\n\nKeywords: verify video, delivery check, platform spec, loudness, lufs, shorts, reels, tiktok, verificar video, sonoridad, especificaciones",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Asset Id"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Id"
+          },
+          "platform": {
+            "default": "shorts",
+            "title": "Platform",
+            "type": "string"
+          },
+          "contact_sheet": {
+            "default": true,
+            "title": "Contact Sheet",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
       "name": "production_export_lumiere",
       "description": "Send a production's cut to Lumiere's Hoard (video editor) as a project / enviar el montaje a Lumiere.\n\nWrites the cut as FCP7 XML + EDL (lyrics as markers) in the data folder and asks Lumiere, through the family\nhub, to open it as a project: ok, project_id, url. aspect picks the cut when a production has several\n(16:9, 9:16...); timeline_id exports a timeline instead. When Lumiere is not running or may not read this\nfolder, ok is false with the reason and the two files are still there (files.xml, files.edl).\n\nKeywords: lumiere, video editor, export cut, send to editor, family, hub, enviar a lumiere, editar en lumiere, montaje",
       "inputSchema": {
@@ -256,6 +441,106 @@
       "annotations": {
         "readOnlyHint": false,
         "draftSafeHint": true
+      }
+    },
+    {
+      "name": "production_storyboard_sheet",
+      "description": "Storyboard contact sheet of 6-9 key shots of a production's treatment / hoja de storyboard.\n\nEach frame is the shot's own still when the production has one, else a placeholder drawn from the shot text\n(framing, camera, why). generate=true also queues a ComfyUI still for every shot without one when ComfyUI is\nrunning (call again when those jobs finish to rebuild the sheet with them). Returns the sheet's asset_id (look at\nit with studio_show), how many frames are stills or placeholders, and the queued jobs.\n\nKeywords: storyboard, key frames, contact sheet, shot sheet, guion grafico, storyboard de planos",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "generate": {
+            "default": false,
+            "title": "Generate",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "production_treatment_draft",
+      "description": "Director's treatment of a production before it renders / tratamiento de dirección antes de renderizar.\n\naction draft: the family's language model writes logline, three candidate structures and the pick with its reason,\na benchmark (learn / avoid), a shot list (key, framing, camera, duration_s, why) and a beat sheet / cue map\n(t_s, section, cue); with no model it drafts from the planned shots (source \"rules\", note says why). A production\nwith a treatment pauses at its `treatment` stage until approved. get: read it. update: save the edited treatment\n(same shape). approve: \"Approve and render\" (run=true continues the production). notes: what the person wants.\n\nKeywords: treatment, director, logline, shot list, beat sheet, cue map, approve and render, tratamiento, guion tecnico, lista de planos, aprobar",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "action": {
+            "default": "draft",
+            "enum": [
+              "draft",
+              "get",
+              "update",
+              "approve"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "treatment": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Treatment"
+          },
+          "language": {
+            "default": "en",
+            "title": "Language",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes"
+          },
+          "run": {
+            "default": true,
+            "title": "Run",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
       }
     },
     {
@@ -7860,6 +8145,54 @@
         "readOnlyHint": false,
         "draftSafeHint": true
       }
+    },
+    {
+      "name": "workflow_preflight",
+      "description": "What a ComfyUI workflow misses before it runs / comprobar nodos y modelos de un workflow de ComfyUI.\n\nChecks every node class against ComfyUI's /object_info and every model file the workflow names (checkpoints,\nLoRAs, diffusion models, VAEs, text encoders, upscalers...) against the loader's file list. Give a production\n(the workflows its next run will use), a template name (sdxl_txt2img, wan22_i2v_14b, wf_... imported) or a\nworkflow JSON. Returns per workflow the nodes and models with ok true/false (null when unknown), the node pack\nthat usually provides a missing node, the ComfyUI models/<folder> each missing file goes in, and copy_text with\nthe whole list. ComfyUI off: checks against its last saved node list (source=cache) or says nothing could be\nchecked (source=none). Never starts ComfyUI and never blocks a run.\n\nKeywords: preflight, missing nodes, missing models, custom nodes, comfyui check, workflow check, nodos que faltan, modelos que faltan, comprobar workflow",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Production"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Template"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workflow"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
     }
   ],
   "editing": [
@@ -9621,6 +9954,52 @@
           "composition"
         ],
         "title": "MotionReadcheckArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "motion_lint",
+      "description": "Anti-slideshow lint of an HTML motion composition. Comprobar que no sea un pase de diapositivas.\nCounts the targets whose only animation is opacity (GSAP to/from/fromTo/set, CSS @keyframes and opacity transitions); 3 or more gives verdict reject with a reprompt: rewrite the scene with real movement and save again. Static, no browser. Keywords: slideshow, fades only, opacity, motion quality, lint, diapositivas, solo fundidos.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "threshold": {
+            "default": 3,
+            "description": "How many opacity-only sections make it a slideshow (default 3).",
+            "maximum": 12,
+            "minimum": 2,
+            "title": "Threshold",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "composition"
+        ],
+        "title": "MotionLintArgs",
         "type": "object"
       }
     },

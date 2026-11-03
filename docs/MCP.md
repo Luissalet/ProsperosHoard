@@ -596,3 +596,16 @@ studio_production_continue("why_the_sea_glows_at_night")         # voice it, pic
 studio_production(...)  -> status "done", renders {"9:16": {"preview": a_...}}, publish "Why the sea glows\n\n...#ocean\n\nFootage:\n- Video by ... on Pexels"
 studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by hand for anything else
 ```
+
+### Edit plans, delivery checks, workflow preflight and treatments
+
+| Tool | What it does |
+| --- | --- |
+| `edit_plan(project, edit, name?)` | Compiles a declarative edit (clips with `in_s`/`out_s` or `duration_s` and `transition`, `captions`, `overlays`, `music` with `duck`, `loudness`, `platform`) into ffmpeg steps and saves them as a plan with input fingerprints. Returns `plan_id`, step names, inputs, duration. Renders nothing. |
+| `edit_run_plan(plan_id, wait_s?)` | Renders the plan exactly as planned (CPU lane). `inputs_changed` when any input file changed since planning. The job returns the video and a contact sheet; the plan keeps the verification. |
+| `edit_verify(asset_id? \| plan_id?, platform, contact_sheet?)` | Checks a video against `shorts`, `reels`, `tiktok` or `youtube`: resolution and shape, fps, duration limit, codecs, stereo, sample rate, EBU R128 loudness and true peak. Each check is `pass`, `warn` or `fail`. |
+| `edit_contact_sheet(asset_id, every_n?, count?, columns?, width?)` | Every Nth frame tiled into one image asset. |
+| `workflow_preflight(production? \| template? \| workflow?)` | Read-only. Nodes and model files a ComfyUI workflow needs against `/object_info`: `ok` true/false/null per item, the node pack for a missing node, `models/<folder>` for a missing file, `copy_text`. ComfyUI off: `source=cache` or `none`; never starts it. |
+| `production_treatment_draft(production, action, treatment?, language?, notes?, run?)` | `draft` (model, or rules with `note`), `get`, `update`, `approve` (with `run=true` continues the production). A production with a treatment pauses at its `treatment` stage until approved. |
+| `production_storyboard_sheet(production, generate?)` | 6-9 key shots of the treatment in one image: the production's stills, else placeholders from the shot text; `generate=true` queues ComfyUI stills for the rest when ComfyUI is running. |
+| `motion_lint(composition, revision?, threshold?)` (Montaje) | Read-only. Opacity-only sections of an HTML animation; 3 or more: `verdict: reject` with `reprompt`. |

@@ -20,3 +20,13 @@ Direction style cards (prosperos_hoard/style_library/)
     License: MIT for the code, prompts and docs (LICENSE.mg-styles-15). Its films and third-party files keep
     their own licences and are NOT included here.
   A variant made from a card keeps the licence, the attribution and the link of the card it comes from.
+
+Methods followed (no code copied):
+  Edit plans (plan with input fingerprints, run, verify against platform specs, contact sheet): the workflow of
+    kajisho5/ffmpeg-skill, MIT. https://github.com/kajisho5/ffmpeg-skill
+  Workflow preflight (node classes against /object_info, model files against the loader lists): the pattern of
+    D3voz/openjutsu, MIT. https://github.com/D3voz/openjutsu
+  Treatment-first productions (logline, three structures and the pick, benchmark, shot list with reasons, cue map):
+    the DIRECTOR.md method of lemomo-ai/lemo-opuscar, MIT. https://github.com/lemomo-ai/lemo-opuscar
+  Anti-slideshow lint for HTML motion (three or more opacity-only sections are rejected): the rule of
+    bangtutorial/bang-motion, MIT. https://github.com/bangtutorial/bang-motion

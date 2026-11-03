@@ -35,6 +35,9 @@ QUALITY_PRESETS = {
 }
 
 TRANSITION_MAP = {"crossfade": "fade", "dip_black": "fadeblack", "flash_white": "fadewhite"}
+XFADE_NATIVE = frozenset({"fade", "fadeblack", "fadewhite", "dissolve", "wipeleft", "wiperight", "wipeup", "wipedown",
+                          "slideleft", "slideright", "slideup", "slidedown", "circleopen", "circleclose", "radial",
+                          "pixelize", "zoomin", "smoothleft", "smoothright", "distance", "hblur"})
 
 # Finishing: an optional grade/texture pass applied once over the whole cut
 # (not per clip), plus a lyric caption style. All keys are optional; an
@@ -406,7 +409,9 @@ def build_xfade_cmd(ffmpeg: str, clip_paths: list[Path], durations: list[float],
     for i in range(1, len(clip_paths)):
         start += durations[i - 1]
         t = transitions[i] or {}
-        xfade_type = TRANSITION_MAP.get(t.get("type", "cut"), "fade")
+        kind = t.get("type", "cut")
+        # a native xfade name (wipeleft, slideup, circleopen... from an edit plan) passes through as it is
+        xfade_type = TRANSITION_MAP.get(kind) or (kind if kind in XFADE_NATIVE else "fade")
         dur = transition_duration(t, fps)
         out_label = f"v{i}"
         filters.append(f"[{label}][s{i}]xfade=transition={xfade_type}:duration={dur:.3f}:offset={start:.3f}[{out_label}]")
