@@ -37,3 +37,14 @@ def test_css_keyframes_and_transitions_count_too():
     r = slideshow_lint(css)
     assert r["verdict"] == "reject" and set(r["opacity_only"]) == {".a", ".b", ".c"} and r["moving_count"] == 1
     assert slideshow_lint(css, threshold=4)["verdict"] == "pass"
+
+
+def test_tweens_with_nested_objects_are_read():
+    # stagger objects, scrollTrigger and callbacks nest braces in the vars; those tweens used to be skipped entirely
+    nested = """<script>const tl = gsap.timeline();
+tl.from('.s1', {opacity: 0, duration: 1, stagger: {each: 0.1, from: "start"}})
+  .from(".s2", {autoAlpha: 0, onComplete: () => { done = {x: 1}; }})
+  .fromTo('.s3', {opacity: 0}, {opacity: 1, scrollTrigger: {trigger: '.s3', start: "top: 80%"}})
+  .from('.s4', {opacity: 0, stagger: {each: 0.2}, y: 30});</script>"""
+    r = slideshow_lint(nested)
+    assert r["verdict"] == "reject" and r["opacity_only"] == [".s1", ".s2", ".s3"] and r["moving_count"] == 1

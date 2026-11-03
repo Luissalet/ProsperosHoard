@@ -19,9 +19,62 @@ MOTION_KEYS = {"x", "y", "z", "xpercent", "ypercent", "scale", "scalex", "scaley
                "attr", "fontsize", "letterspacing", "borderradius"}
 IGNORED_KEYS = {"duration", "delay", "ease", "stagger", "repeat", "yoyo", "repeatdelay", "onstart", "oncomplete",
                 "onupdate", "immediaterender", "overwrite", "paused", "id", "transformorigin", "display", "visibility",
-                "zindex", "pointerevents", "color", "backgroundcolor", "background"}
-_TWEEN = re.compile(r"\.(to|from|fromTo|set)\(\s*([\"'`])(.+?)\2\s*,\s*(\{[^{}]*\})(?:\s*,\s*(\{[^{}]*\}))?", re.S)
+                "zindex", "pointerevents", "color", "backgroundcolor", "background",
+                # tween settings that nest objects or functions; they move nothing themselves
+                "scrolltrigger", "onrepeat", "onreversecomplete", "oninterrupt", "callbackscope", "lazy", "data", "inherit"}
+_TWEEN_HEAD = re.compile(r"\.(to|from|fromTo|set)\(\s*([\"'`])(.+?)\2\s*,\s*", re.S)
 _KEY = re.compile(r"([A-Za-z_$][\w$]*)\s*:")
+
+
+def _object_at(src: str, i: int) -> tuple[str, int]:
+    """The balanced `{...}` starting at src[i] with its nested objects and functions blanked out (only its own keys
+    are left), and the index after it; ("", i) when there is no object there."""
+    if i >= len(src) or src[i] != "{":
+        return "", i
+    depth, quote, out, j = 0, "", [], i
+    while j < len(src):
+        ch = src[j]
+        if quote:
+            if ch == "\\":
+                j += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'`":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return "".join(out) + "}", j + 1
+        in_string = bool(quote) or ch in "\"'`"
+        if depth == 1 and not in_string:  # the object's own text; nested objects and strings are left out
+            out.append(ch)
+        j += 1
+    return "", i
+
+
+def _tweens(html: str) -> list[tuple[str, str, str]]:
+    """(selector, vars, second vars) of every GSAP to/from/fromTo/set on a selector string; vars may nest objects
+    (stagger: {each: 0.1}, scrollTrigger, callbacks)."""
+    found = []
+    for m in _TWEEN_HEAD.finditer(html or ""):
+        first, end = _object_at(html, m.end())
+        if not first:
+            continue
+        second = ""
+        k = end
+        while k < len(html) and html[k] in " \t\r\n":
+            k += 1
+        if k < len(html) and html[k] == ",":
+            k += 1
+            while k < len(html) and html[k] in " \t\r\n":
+                k += 1
+            second, _ = _object_at(html, k)
+        found.append((m.group(3), first, second))
+    return found
+
+
 _KEYFRAMES = re.compile(r"@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}", re.S)
 _RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
 
@@ -43,7 +96,7 @@ def _mark(targets: dict[str, dict[str, Any]], selector: str, keys: set[str]) -> 
 def slideshow_lint(html: str, threshold: int = THRESHOLD) -> dict[str, Any]:
     """Targets animated only through opacity; `reject` with a re-prompt at `threshold` or more."""
     targets: dict[str, dict[str, Any]] = {}
-    for _method, _q, selector, first, second in _TWEEN.findall(html or ""):
+    for selector, first, second in _tweens(html or ""):
         _mark(targets, selector.strip(), _keys(first) | _keys(second))
     frames: dict[str, set[str]] = {}
     css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", html or "", re.S | re.I))  # CSS only: script braces are not rules
