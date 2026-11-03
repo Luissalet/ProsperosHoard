@@ -115,7 +115,9 @@ when any input changed, renders on the CPU lane, registers the video and verifie
 against the platform spec (resolution and shape, fps, duration limit, codecs, stereo, sample rate, EBU R128
 integrated loudness and true peak through ffmpeg `ebur128`; pass/warn/fail per check). `edit_contact_sheet` tiles
 every Nth frame (`select` + `tile`) into an image asset. REST: `/api/edit-plans`, `/api/edit-plans/{id}/run`,
-`/api/edit-plans/verify`, `/api/assets/{id}/contact-sheet`.
+`/api/edit-plans/verify`, `/api/assets/{id}/contact-sheet`. An edit's `fps` is a whole number (29.97 is refused,
+not rounded down), a transition may not be longer than the clip it enters, and a caption or overlay end past the
+edit's end means "until the end". The frame-rate check accepts the NTSC rates (23.976, 29.97, 59.94).
 
 Workflow preflight (`workflow_preflight.py`, MCP `workflow_preflight`, `POST /api/workflows/preflight`): every node
 class of a ComfyUI workflow against `/object_info` and every model file (checkpoints, LoRAs, diffusion models, VAEs,
@@ -130,10 +132,13 @@ camera, duration, why) and beat sheet, drafted by the family model or by rules f
 answers (`source: rules` with the reason). A production with a treatment pauses at its `treatment` stage;
 "Approve and render" (or `studio_production_continue`) approves and continues. `production_storyboard_sheet` tiles
 6-9 key shots: the production's own stills, ComfyUI stills queued with `generate=true` when ComfyUI is up, else
-placeholders drawn from the shot text.
+placeholders drawn from the shot text. A redraft or an edit of an approved treatment needs approving again; a
+treatment drafted, edited or approved while the production is running is kept (the run merges it when it saves);
+approving it while the production waits at another review (song, script, animatic) does not approve that review.
 
 HTML motion (Montaje): `motion_lint` (button "Comprobar que no es un pase de diapositivas") counts targets whose
-only animation is opacity in the composition's GSAP tweens and CSS; 3 or more give `reject` with a re-prompt. The
+only animation is opacity in the composition's GSAP tweens (including tweens whose vars nest objects such as
+`stagger: {each}` or `scrollTrigger`) and CSS; 3 or more give `reject` with a re-prompt. The
 seek-stepped Playwright renderer with sound (`html_motion_render`, `motion_export`) already existed.
 
 ## Biblia de continuidad, reparación de tramos y revisión de uniones (03-11-2026)
