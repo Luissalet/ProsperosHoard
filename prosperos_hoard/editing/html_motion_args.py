@@ -128,6 +128,10 @@ class MotionReadcheckArgs(HtmlMotionRefArgs):
     min_s: float = Field(0.0, ge=0, le=30, allow_inf_nan=False, description="Shortest time any text must stay, on top of the reading rule.")
 
 
+class MotionLintArgs(HtmlMotionRefArgs):
+    threshold: int = Field(3, ge=2, le=12, description="How many opacity-only sections make it a slideshow (default 3).")
+
+
 class MotionFactsArgs(HtmlMotionRefArgs):
     action: Literal["get", "set", "check"] = Field("get", description="get: FACTS.md; set: write it; check: every number the video shows must be in it.")
     content: Optional[str] = Field(None, max_length=60000, description="set: the claims, one per line, each with where it comes from. Empty removes the file.")

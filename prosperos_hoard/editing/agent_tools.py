@@ -1090,7 +1090,7 @@ from .html_motion import HtmlMotion
 from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotionGetArgs,
                                HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, HtmlMotionRenderArgs,
                                MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs,
-                               MotionStylesArgs, MotionTreatmentArgs, MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs,
+                               MotionStylesArgs, MotionTreatmentArgs, MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionLintArgs,
                                MotionFactsArgs, MotionFromStyleArgs)
 from . import audio_sync, cut_proposals, motion_direction, motion_scaffold, motion_sound, timeline_text
 
@@ -1284,6 +1284,14 @@ def run_motion_readcheck(svc: Services, a: MotionReadcheckArgs):
     return motion_direction.readcheck(HtmlMotion(svc.config.data_dir), a.composition, a.revision, step=a.step, min_s=a.min_s)
 
 
+def run_motion_lint(svc: Services, a: MotionLintArgs):
+    from .motion_lint import slideshow_lint
+    store = HtmlMotion(svc.config.data_dir)
+    manifest = store.get(a.composition, a.revision)
+    return {"composition": a.composition, "revision": manifest.get("revision"),
+            **slideshow_lint(store.source(manifest), threshold=a.threshold)}
+
+
 def run_motion_facts(svc: Services, a: MotionFactsArgs):
     store = HtmlMotion(svc.config.data_dir)
     if a.action == "get":
@@ -1327,6 +1335,7 @@ TOOLS: list[Tool] = [
     Tool("motion_cues", "Read or set the cues: the moments picture and sound hang on. Hitos de imagen y sonido.\nOne list for both: the sound events are derived from it. Changing saves a new revision (expected_revision). Keywords: cues, hits, sync, sound events, cue map, hitos.", MotionCuesArgs, _ann(False, False, False), run_motion_cues),
     Tool("motion_cuecheck", "Check that every cue has its visual hit in its frame, and every hit its cue. Comprobar sincronia.\nRenders the real page; reports each cue's measured offset in ms, unclear or missing hits, and visual hits with no cue. retime moves cues to the true frame. Keywords: sync check, cue check, audio visual sync, hit, offset.", MotionCuecheckArgs, _ann(False, False, False), run_motion_cuecheck),
     Tool("motion_readcheck", "Check that every text stays fully visible long enough to be read. Comprobar lectura.\nLetters/15 s plus 1.5 s (CJK characters/4.5 s); partly outside the frame or never opaque counts as never readable. Uses window.TEXTS(t) or the DOM text. Keywords: reading time, subtitles, legibility, text duration, readcheck.", MotionReadcheckArgs, _ann(True), run_motion_readcheck),
+    Tool("motion_lint", "Anti-slideshow lint of an HTML motion composition. Comprobar que no sea un pase de diapositivas.\nCounts the targets whose only animation is opacity (GSAP to/from/fromTo/set, CSS @keyframes and opacity transitions); 3 or more gives verdict reject with a reprompt: rewrite the scene with real movement and save again. Static, no browser. Keywords: slideshow, fades only, opacity, motion quality, lint, diapositivas, solo fundidos.", MotionLintArgs, _ann(True), run_motion_lint),
     Tool("motion_facts", "Keep FACTS.md of an informative animation and check the numbers shown against it. Hechos y fuentes.\nget/set the claims with their sources; check lists numbers on screen that no fact backs. Keywords: facts, sources, fact check, informative video, evidence, hechos.", MotionFactsArgs, _ann(False, False, False), run_motion_facts),
     Tool("motion_from_style", "Start an animation from a style card and its treatment. Crear desde un estilo.\nRefuses without a treatment (three structures, shots with why, cue map). Writes a working page with captions and a sharp hit on every cue, the cues and the sound events; then review, cuecheck and readcheck. Keywords: style card, create animation, scaffold, treatment, start from style.", MotionFromStyleArgs, _ann(False, False, False), run_motion_from_style),
     Tool("html_motion_restore", "Restore a saved HTML composition revision as a new revision. Recuperar una animacion anterior.\nLater versions remain available. Keywords: undo, restore, revisions, HTML motion.", HtmlMotionRestoreArgs, _ann(False, False, False), run_html_motion_restore),

@@ -8,7 +8,7 @@ from ..errors import NotFound
 from ..html_motion import HtmlMotion
 from ..html_starters import HtmlStarterArgs, catalogue as starters_catalogue, save_args as starter_source
 from ..html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, MotionSoundEventsArgs, MotionTreatmentArgs,
-                                MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionFactsArgs, MotionFromStyleArgs)
+                                MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionFactsArgs, MotionFromStyleArgs, MotionLintArgs)
 from .deps import services, tool
 
 router = APIRouter(prefix="/api/html-motion", tags=["HTML motion"])
@@ -157,6 +157,13 @@ def readcheck(request: Request, composition: str, body: MotionReadcheckArgs):
     if body.composition != composition:
         raise NotFound("Readcheck composition does not match the request.")
     return tool(request, "motion_readcheck", **body.model_dump(exclude_none=True))
+
+
+@router.post("/{composition}/lint")
+def lint(request: Request, composition: str, body: MotionLintArgs):
+    if body.composition != composition:
+        raise NotFound("Lint composition does not match the request.")
+    return tool(request, "motion_lint", **body.model_dump(exclude_none=True))
 
 
 @router.get("/{composition}/facts")
