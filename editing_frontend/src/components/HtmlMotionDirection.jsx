@@ -17,6 +17,8 @@ const words = {
     facts: "Hechos y fuentes (FACTS.md)", factsHint: "Para vídeos informativos: cada afirmación con su fuente. Comprobar compara los números que se ven con los de este texto.", saveFacts: "Guardar hechos", checkFacts: "Comprobar números", unsourced: "Números en pantalla sin fuente", factsOk: "Todos los números que se ven están en los hechos.", factsSaved: "Hechos guardados",
     reviewMode: "Tipo de revisión", sheet: "Hoja de momentos", strip: "Tira de fotogramas", crop: "Detalle ampliado", span: "Tramo (s)", from: "Desde", to: "Hasta", point: "Punto x, y", selector: "o selector CSS", cropHint: "Recorta alrededor del punto (o del elemento) en cada momento y lo amplía.",
     soundOwned: "Los eventos de sonido salen de los hitos de esta animación: se cambian en la sección Dirección.",
+    lint: "Comprobar que no es un pase de diapositivas", lintReject: "Pase de diapositivas: reescribe las secciones con movimiento", lintWarn: "Solo hay fundidos, sin movimiento",
+    lintPass: "Hay movimiento: no es un pase de diapositivas", lintOnly: "Solo cambian de opacidad", lintPrompt: "Instrucción para reescribirla",
   },
   en: {
     stylesTitle: "Start from a style", stylesHint: "Direction style cards: essence, materials, colour, type, motion, sound and what may change. Pick one and an animation is made with its palette, a caption per shot and a visual hit on every cue.",
@@ -34,6 +36,8 @@ const words = {
     facts: "Facts and sources (FACTS.md)", factsHint: "For informative videos: each claim with its source. Check compares the numbers on screen with this text.", saveFacts: "Save facts", checkFacts: "Check numbers", unsourced: "Numbers on screen with no source", factsOk: "Every number shown is in the facts.", factsSaved: "Facts saved",
     reviewMode: "Review type", sheet: "Moments sheet", strip: "Frame strip", crop: "Enlarged detail", span: "Span (s)", from: "From", to: "To", point: "Point x, y", selector: "or CSS selector", cropHint: "Crops around the point (or the element) at each moment and enlarges it.",
     soundOwned: "The sound events come from this animation's cues: change them in the Direction section.",
+    lint: "Check it is not a slideshow", lintReject: "Slideshow: rewrite the sections with movement", lintWarn: "Only fades, no movement",
+    lintPass: "There is movement: not a slideshow", lintOnly: "Only their opacity changes", lintPrompt: "Instruction to rewrite it",
   },
 };
 const tr = (lang) => words[String(lang).startsWith("es") ? "es" : "en"];
@@ -122,13 +126,14 @@ export default function HtmlMotionDirection({ saved, dirty, busy, lang, operate,
   const [notice, setNotice] = useState("");
   const [cut, setCut] = useState(null);
   const [read, setRead] = useState(null);
+  const [lint, setLint] = useState(null);
   const [facts, setFacts] = useState("");
   const [factsReport, setFactsReport] = useState(null);
 
   useEffect(() => { request(`${BASE}/sound/roles`).then((d) => setRoles(d.roles.filter((r) => r.sounded !== false))).catch(() => {}); }, []);
   useEffect(() => {
     let live = true;
-    setCut(null); setRead(null); setNotice(""); setFactsReport(null);
+    setCut(null); setRead(null); setLint(null); setNotice(""); setFactsReport(null);
     request(`${BASE}/${saved.id}/treatment`).then((d) => live && setTreatment(d.treatment)).catch(() => {});
     request(`${BASE}/${saved.id}/cues`).then((d) => { if (!live) return; setCues(d.cues.map((c) => ({ ...c, sound: c.sound || "" }))); onCueCount?.(d.cues.length); }).catch(() => {});
     request(`${BASE}/${saved.id}/facts`).then((d) => live && setFacts(d.facts || "")).catch(() => {});
@@ -151,6 +156,9 @@ export default function HtmlMotionDirection({ saved, dirty, busy, lang, operate,
   });
   const runRead = () => operate(async () => {
     setRead(await request(`${BASE}/${saved.id}/readcheck`, { method: "POST", body: JSON.stringify({ composition: saved.id, revision: saved.revision }) }));
+  });
+  const runLint = () => operate(async () => {
+    setLint(await request(`${BASE}/${saved.id}/lint`, { method: "POST", body: JSON.stringify({ composition: saved.id, revision: saved.revision }) }));
   });
   const saveFacts = () => operate(async () => {
     await request(`${BASE}/${saved.id}/facts`, { method: "POST", body: JSON.stringify({ composition: saved.id, action: "set", content: facts }) });
@@ -194,8 +202,15 @@ export default function HtmlMotionDirection({ saved, dirty, busy, lang, operate,
         <button type="button" className="btn" disabled={busy || !cues.length} onClick={() => runCut(false)}>{t.cuecheck}</button>
         {fixable && <button type="button" className="btn" disabled={busy} onClick={() => runCut(true)}>{t.retime}</button>}
         <button type="button" className="btn" disabled={busy} onClick={runRead}>{t.readcheck}</button>
+        <button type="button" className="btn" disabled={busy} onClick={runLint} data-testid="motion-lint">{t.lint}</button>
         {notice && <span role="status">{notice}</span>}
       </div>
+      {lint && <div className="html-motion-report" role="status" data-testid="motion-lint-report">
+        <p className={lint.verdict === "pass" ? "ok" : "warn"}><strong>{lint.verdict === "reject" ? t.lintReject : lint.verdict === "warn" ? t.lintWarn : t.lintPass}</strong>
+          {" "}<span className="muted">{lint.opacity_only_count} / {lint.threshold}</span></p>
+        {lint.opacity_only.length > 0 && <p className="muted">{t.lintOnly}: {lint.opacity_only.join(", ")}</p>}
+        {lint.reprompt && <><p>{t.lintPrompt}</p><textarea className="field html-motion-source" rows={3} readOnly value={lint.reprompt} /></>}
+      </div>}
       {cut && <div className="html-motion-report" role="status">
         <p className={cut.ok ? "ok" : "warn"}><strong>{cut.summary}</strong> <span className="muted">±{cut.tolerance_ms} ms</span></p>
         <table className="html-motion-sound-table"><thead><tr><th>{t.cue}</th><th>{t.time}</th><th>{t.visual}</th><th>{t.offset}</th><th>{t.suggest}</th><th /></tr></thead>
