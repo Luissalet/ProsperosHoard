@@ -609,3 +609,14 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
 | `production_treatment_draft(production, action, treatment?, language?, notes?, run?)` | `draft` (model, or rules with `note`), `get`, `update`, `approve` (with `run=true` continues the production). A production with a treatment pauses at its `treatment` stage until approved. |
 | `production_storyboard_sheet(production, generate?)` | 6-9 key shots of the treatment in one image: the production's stills, else placeholders from the shot text; `generate=true` queues ComfyUI stills for the rest when ComfyUI is running. |
 | `motion_lint(composition, revision?, threshold?)` (Montaje) | Read-only. Opacity-only sections of an HTML animation; 3 or more: `verdict: reject` with `reprompt`. |
+
+### Continuity bible, segment repair and join review
+
+| Tool | What it does |
+| --- | --- |
+| `continuity_bible(action, project?, bible_id?, name?, production?, identity?, timing?)` | `create`, `get` (entries with revisions, shots, corrections, provenance and `must_regenerate`), `list`, `update` (identity: `palette`, `style`, `reference_asset_ids`; timing: fps, size, sample rate, channels). |
+| `continuity_entry(bible_id, entry_id, action, fields?, note?)` | `upsert` an object, character, voice or style entry (`descriptor`, `reference_asset_ids`, `palette`, `voice_id`, `settings`); a real change makes a new revision and returns `newly_stale`, `must_regenerate` and `kept_accepted`. `remove`, `history`. |
+| `continuity_shot(bible_id, action, shot_id?, fields?, asset_id?, ...)` | `upsert` a shot (`start_s`, `end_s`, `description`, `camera`, `prompt`, `references`, `uses`, `regions`), `accept_clip` (records entry revisions and references used), `correct` (a correction for a segment or region), `remove`. |
+| `continuity_repair_segment(asset_id, replacement_asset_id, start_s?, end_s?, shot_id?, bible_id?, transition, crossfade_s, ...)` | Replaces a time range of a video with another clip: frame-snapped range, conformed replacement, `cut` or `crossfade`, same duration; untouched GOPs are stream-copied and compared by frame hash (`untouched`). CPU job (`wait_s`). Returns the new asset and a `join_review`. |
+| `continuity_review_join(asset_id, seams_s, expected_duration_s?, expected_frames?, thresholds?, strips?)` | Per seam: black frames, frozen frames, colour jump, audio level jump, audio click (pass/warn/fail with actual and threshold), duration and frame count, and a six-frame thumbnail strip image per seam. |
+| `continuity_check_consistency(bible_id, shot_ids?, delta_e_warn?, hist_warn?)` | Colour-signature and wording warnings for recurring objects and characters. Warnings only; never claims the same character. |

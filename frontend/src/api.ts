@@ -1298,6 +1298,21 @@ export interface VerifyReport {
   asset_id: string; platform: string; label: string; ok: boolean; warnings: number; checks: VerifyCheck[];
   media: Record<string, number | string | null>; contact_sheet_asset_id?: string; contact_sheet_error?: string; verified_at: string;
 }
+export interface ContinuityEntry { kind: string; revision: number; name?: string; descriptor?: string; reference_asset_ids?: string[]; palette?: string[]; voice_id?: string; style?: string }
+export interface StaleReason { entry_id: string | null; name?: string; why: string; used_revision: number | null; current_revision: number | null }
+export interface ContinuityShot { id: string; start_s?: number; end_s?: number; description?: string; camera?: string; prompt?: string; uses: string[]; references: string[];
+  clip: { asset_id: string; operation: string; entries: Record<string, number> } | null; stale: boolean; stale_reasons: StaleReason[]; revision: number }
+export interface ContinuityBible { bible_id: string; name: string; project_id: string; production?: string | null; revision: number; entries: Record<string, ContinuityEntry>;
+  shots: Record<string, ContinuityShot>; stale_shots: string[]; accepted_shots: string[]; must_regenerate: { shot_id: string; reasons: StaleReason[] }[];
+  corrections: { id: string; text: string; status: string; shot_id?: string | null; start_s?: number | null; end_s?: number | null }[];
+  provenance: { at: string; asset_id: string; operation: string; shot_id?: string; entries?: Record<string, number>; references?: string[] }[] }
+export interface ContinuityBibleBrief { bible_id: string; name: string; revision: number; entries: number; shots: number; stale_shots: string[]; open_corrections: number }
+export interface JoinCheck { id: string; label: string; status: "pass" | "warn" | "fail"; expected: unknown; actual: unknown }
+export interface JoinReview { asset_id: string; ok: boolean; status: string; warnings: number; failures: number; note: string;
+  seams: { t_s: number; frame: number; status: string; checks: JoinCheck[]; strip_asset_id?: string | null }[]; overall: JoinCheck[] }
+export interface RepairResult { asset_id: string; range_s: number[]; exact_outside: boolean; notes: string[]; join_review?: JoinReview;
+  untouched?: { identical: boolean; frames_compared: number; frames_identical: number; reencoded_range_s: number[] } | null }
+export interface ConsistencyReport { warnings: { shot_id: string; entry_id: string; check: string; message: string }[]; note: string }
 export interface EditPlan {
   plan_id: string; name: string; project_id: string; status: string; platform: string | null; width: number; height: number;
   fps: number; duration_s: number; clips: number; captions: number; overlays: number; music: boolean;
@@ -1519,6 +1534,20 @@ export const api = {
   storyboardSheet: (slug: string, generate = false) =>
     request<{ asset_id: string; shots: number; stills: number; placeholders: number; queued_jobs: string[]; note?: string }>(
       "POST", `/generation/api/productions/${slug}/storyboard-sheet`, { generate }),
+  continuityList: (project?: string) => request<{ items: ContinuityBibleBrief[] }>("GET", `/generation/api/continuity${q({ project })}`),
+  continuity: (id: string) => request<ContinuityBible>("GET", `/generation/api/continuity/${id}`),
+  createContinuity: (project: string, name: string, production?: string) =>
+    request<ContinuityBibleBrief>("POST", "/generation/api/continuity", { project, name, production }),
+  continuityEntry: (id: string, entryId: string, fields: Record<string, unknown>, note = "") =>
+    request<{ revision: number; changed: string[]; newly_stale: string[] }>("PUT", `/generation/api/continuity/${id}/entries/${entryId}`, { bible_id: id, entry_id: entryId, fields, note }),
+  continuityShot: (id: string, shotId: string, fields: Record<string, unknown>) =>
+    request<{ newly_stale: string[] }>("PUT", `/generation/api/continuity/${id}/shots/${shotId}`, { bible_id: id, fields }),
+  continuityAcceptClip: (id: string, shotId: string, assetId: string) =>
+    request<unknown>("POST", `/generation/api/continuity/${id}/shots/${shotId}/clip`, { bible_id: id, asset_id: assetId }),
+  continuityRepair: (body: Record<string, unknown>) => request<{ asset_id: string; job: Job }>("POST", "/generation/api/continuity/repair", body),
+  continuityReview: (assetId: string, seams: number[]) =>
+    request<JoinReview>("POST", "/generation/api/continuity/review-join", { asset_id: assetId, seams_s: seams }),
+  continuityConsistency: (id: string) => request<ConsistencyReport>("POST", "/generation/api/continuity/consistency", { bible_id: id }),
   editPlans: (project?: string) => request<{ items: EditPlan[] }>("GET", `/generation/api/edit-plans${q({ project })}`),
   editPlan: (id: string) => request<EditPlan>("GET", `/generation/api/edit-plans/${id}`),
   createEditPlan: (project: string, edit: Record<string, unknown>, name?: string) =>

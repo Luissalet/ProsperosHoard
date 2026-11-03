@@ -2355,6 +2355,133 @@ def edit_contact_sheet(asset_id: str, every_n: Optional[int] = None, count: int 
                                                                 "columns": columns, "width": width})
 
 
+# ------------------------------------------------- continuity bible, segment repair, join review --
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def continuity_bible(action: Literal["create", "get", "list", "update"] = "get", project: Optional[str] = None,
+                     bible_id: Optional[str] = None, name: Optional[str] = None, production: Optional[str] = None,
+                     identity: Optional[dict[str, Any]] = None, timing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Continuity bible of a production: decisions that survive versions / biblia de continuidad de una producción.
+
+    create (project, name, production?): a bible with the visual identity (identity: palette as #rrggbb list, style,
+    reference_asset_ids for style references) and timing (fps, width, height, sample_rate, channels). get: the whole
+    bible: entries with revisions, shots, corrections, the provenance log and `must_regenerate` (the shots whose
+    accepted clip was made with an older revision of an entry). list: the bibles of a project. update: change identity
+    or timing (a real change makes a new revision; every shot is marked stale by a new identity revision, none by timing).
+
+    Keywords: continuity, bible, identity, palette, style references, revision, stale shots, decisions, continuidad, biblia, decisiones, revisiones
+    """
+    return _call("POST", "/api/agent/continuity_bible", json={"action": action, "project": project, "bible_id": bible_id,
+                                                              "name": name, "production": production, "identity": identity,
+                                                              "timing": timing})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def continuity_entry(bible_id: str, entry_id: str, action: Literal["upsert", "remove", "history"] = "upsert",
+                     fields: Optional[dict[str, Any]] = None, note: str = "") -> dict[str, Any]:
+    """Recurring object, character or voice of a bible; changing it makes a revision / objeto, personaje o voz recurrente.
+
+    upsert: fields = {"kind": "object"|"character"|"voice"|"style", "name", "descriptor", "reference_asset_ids": [...],
+    "palette": ["#cc2222"], "voice_id", "settings": {...}}. Only a real change creates a new revision; the reply lists
+    `newly_stale` (only the shots whose accepted clip used this entry), `must_regenerate` with the reasons, and
+    `kept_accepted` (untouched shots keep their clips). remove: drop the entry (its dependants become stale). history:
+    the revisions with what changed and a snapshot.
+
+    Keywords: continuity entry, character, object, voice, descriptor, reference images, revision, stale, personaje, objeto, voz, referencias
+    """
+    return _call("POST", "/api/agent/continuity_entry", json={"bible_id": bible_id, "entry_id": entry_id, "action": action,
+                                                              "fields": fields or {}, "note": note})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def continuity_shot(bible_id: str, action: Literal["upsert", "remove", "accept_clip", "correct"] = "upsert",
+                    shot_id: Optional[str] = None, fields: Optional[dict[str, Any]] = None, asset_id: Optional[str] = None,
+                    operation: str = "generate", references: Optional[list[str]] = None, entries: Optional[list[str]] = None,
+                    note: str = "", text: Optional[str] = None, start_s: Optional[float] = None, end_s: Optional[float] = None,
+                    region: Optional[list[float]] = None) -> dict[str, Any]:
+    """Shots of a bible, accepted clips with provenance and corrections / planos, clips aceptados y correcciones.
+
+    upsert: fields = {"start_s", "end_s", "description", "camera", "prompt", "references": [asset ids], "uses": [entry ids],
+    "regions": {entry_id: [x, y, w, h] as fractions of the frame}}; every shot uses the identity. Changing what a shot is
+    makes only that shot stale. accept_clip (asset_id, operation "generate"|"edit"|"regenerate", references, entries):
+    records the clip with the revision of every entry and the reference assets it used (decision provenance) and clears
+    the stale flag. correct (text, shot_id?, start_s/end_s?, region?): a correction tied to a segment or region; a repair
+    with correction_id marks it applied. remove: drop the shot.
+
+    Keywords: shot, clip provenance, accept clip, correction, region, segment, camera, plano, correccion, procedencia, aceptar clip
+    """
+    return _call("POST", "/api/agent/continuity_shot", json={
+        "bible_id": bible_id, "action": action, "shot_id": shot_id, "fields": fields or {}, "asset_id": asset_id,
+        "operation": operation, "references": references, "entries": entries, "note": note, "text": text,
+        "start_s": start_s, "end_s": end_s, "region": region})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def continuity_repair_segment(asset_id: str, replacement_asset_id: str, start_s: Optional[float] = None,
+                              end_s: Optional[float] = None, shot_id: Optional[str] = None, bible_id: Optional[str] = None,
+                              transition: Literal["cut", "crossfade"] = "cut", crossfade_s: float = 0.3,
+                              declick_ms: float = 5.0, replacement_in_s: float = 0.0, framing: Literal["fit", "fill"] = "fit",
+                              pad: bool = False, entries: Optional[list[str]] = None, references: Optional[list[str]] = None,
+                              correction_id: Optional[str] = None, verify_untouched: bool = True, review: bool = True,
+                              thresholds: Optional[dict[str, float]] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Replace a time range of a video without redoing the rest / reparar un tramo de un vídeo.
+
+    The range (start_s-end_s, or the shot's range) snaps to frames; the replacement (any video asset: make it with the
+    usual generators first) is conformed to the video's resolution, fps, pixel format and audio format. Frames outside the
+    GOPs that touch the range are stream-copied, so they stay identical (`untouched` compares frame hashes;
+    `reencoded_range_s` says what was re-encoded; `exact_outside=false` means everything was re-encoded). transition
+    cut (declick_ms on the audio) or crossfade (crossfade_s, inside the range). Duration and frame count do not change.
+    Creates a new video asset; the source stays. With bible_id the repair is recorded as provenance (entries and
+    references used) and correction_id is marked applied. The result includes `join_review` (see
+    continuity_review_join). Runs as a CPU job; wait_s (up to 150) waits on the server. Mock or real generators are not
+    run here: give the replacement asset.
+
+    Keywords: repair segment, replace range, fix 5 seconds, patch video, crossfade, hard cut, segment repair, reparar tramo, sustituir segmento, parchear video
+    """
+    return _call("POST", "/api/agent/continuity_repair_segment", json={
+        "asset_id": asset_id, "replacement_asset_id": replacement_asset_id, "start_s": start_s, "end_s": end_s,
+        "shot_id": shot_id, "bible_id": bible_id, "transition": transition, "crossfade_s": crossfade_s,
+        "declick_ms": declick_ms, "replacement_in_s": replacement_in_s, "framing": framing, "pad": pad, "entries": entries,
+        "references": references, "correction_id": correction_id, "verify_untouched": verify_untouched, "review": review,
+        "thresholds": thresholds, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def continuity_review_join(asset_id: str, seams_s: list[float], expected_duration_s: Optional[float] = None,
+                           expected_frames: Optional[int] = None, thresholds: Optional[dict[str, float]] = None,
+                           strips: bool = True) -> dict[str, Any]:
+    """Check the seams of an edit and save a thumbnail strip for each / revisar las uniones de un montaje.
+
+    For each seam time: black frames, frozen frames, colour jump across the cut (mean colour and histogram difference),
+    audio level jump (RMS over 150 ms each side) and audio click; overall, that the duration and frame count are the
+    expected ones. Each check is pass, warn or fail with the actual value and the threshold; `thresholds` overrides any of
+    them (black_luma, frozen_frames, colour_warn, hist_warn, level_warn_db, click_ratio, duration_tol_s, ...). strips=true
+    saves six consecutive frames around each cut as an image asset (look at it with studio_show). These are heuristics: a
+    pass does not approve the edit.
+
+    Keywords: join review, seam, black frame, frozen frame, audio click, level jump, colour jump, duration check, revisar union, corte, fotograma negro, clic de audio
+    """
+    return _call("POST", "/api/agent/continuity_review_join", json={
+        "asset_id": asset_id, "seams_s": seams_s, "expected_duration_s": expected_duration_s,
+        "expected_frames": expected_frames, "thresholds": thresholds, "strips": strips})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def continuity_check_consistency(bible_id: str, shot_ids: Optional[list[str]] = None, delta_e_warn: float = 18.0,
+                                 hist_warn: float = 0.45) -> dict[str, Any]:
+    """Warnings about recurring objects and characters across shots / avisos de consistencia entre planos.
+
+    Compares a colour signature of each shot's clip (inside the region the shot declares for the entry, else the whole
+    frame) with the entry's reference images or palette, and checks that the shot's prompt names the entry and repeats the
+    colour words of its descriptor. Everything is reported as a warning to look at; it never claims that a character or an
+    object is the same one, and no warning proves it is.
+
+    Keywords: consistency, drift, colour signature, character consistency, recurring object, warnings, consistencia, deriva de color, personaje recurrente
+    """
+    return _call("POST", "/api/agent/continuity_check_consistency", json={
+        "bible_id": bible_id, "shot_ids": shot_ids, "delta_e_warn": delta_e_warn, "hist_warn": hist_warn})
+
+
 @tool(_ro(readOnlyHint=True, idempotentHint=True))
 def workflow_preflight(production: Optional[str] = None, template: Optional[str] = None,
                        workflow: Optional[dict[str, Any]] = None) -> dict[str, Any]:

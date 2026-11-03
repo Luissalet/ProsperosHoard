@@ -59,6 +59,8 @@ from . import style_profiles as style_profiles_mod
 from . import style_cards
 from . import shot_review as shot_review_mod
 from . import edit_plans as edit_plans_mod
+from . import continuity as continuity_mod
+from . import segment_repair as segment_repair_mod
 from . import treatment as treatment_mod
 from . import workflow_preflight as wf_preflight
 from .backend import Backend, ffmpeg_path
@@ -830,6 +832,78 @@ class ContactSheetBody(BaseModel):
     count: int = 12
     columns: int = 4
     width: int = 320
+
+
+class ContinuityBibleBody(BaseModel):
+    action: Literal["create", "get", "list", "update"] = "get"
+    project: Optional[str] = None
+    bible_id: Optional[str] = None
+    name: Optional[str] = None
+    production: Optional[str] = None
+    identity: Optional[dict[str, Any]] = None   # palette (#rrggbb list), style, reference_asset_ids (style references)
+    timing: Optional[dict[str, Any]] = None     # fps, width, height, sample_rate, channels
+
+
+class ContinuityEntryBody(BaseModel):
+    bible_id: str
+    action: Literal["upsert", "remove", "history"] = "upsert"
+    entry_id: str
+    fields: dict[str, Any] = {}                 # kind, name, descriptor, reference_asset_ids, palette, voice_id, settings, ...
+    note: str = ""
+
+
+class ContinuityShotBody(BaseModel):
+    bible_id: str
+    action: Literal["upsert", "remove", "accept_clip", "correct"] = "upsert"
+    shot_id: Optional[str] = None
+    fields: dict[str, Any] = {}                 # start_s, end_s, description, camera, prompt, references, uses, regions
+    asset_id: Optional[str] = None              # accept_clip: the clip
+    operation: str = "generate"
+    references: Optional[list[str]] = None
+    entries: Optional[list[str]] = None
+    note: str = ""
+    text: Optional[str] = None                  # correct: what is wrong
+    start_s: Optional[float] = None
+    end_s: Optional[float] = None
+    region: Optional[list[float]] = None
+
+
+class RepairSegmentBody(BaseModel):
+    asset_id: str
+    replacement_asset_id: str
+    start_s: Optional[float] = None
+    end_s: Optional[float] = None
+    shot_id: Optional[str] = None
+    bible_id: Optional[str] = None
+    transition: Literal["cut", "crossfade"] = "cut"
+    crossfade_s: float = 0.3
+    declick_ms: float = 5.0
+    replacement_in_s: float = 0.0
+    framing: Literal["fit", "fill"] = "fit"
+    pad: bool = False
+    entries: Optional[list[str]] = None
+    references: Optional[list[str]] = None
+    correction_id: Optional[str] = None
+    verify_untouched: bool = True
+    review: bool = True
+    thresholds: Optional[dict[str, float]] = None
+    wait_s: float = 0
+
+
+class ReviewJoinBody(BaseModel):
+    asset_id: str
+    seams_s: list[float]
+    thresholds: Optional[dict[str, float]] = None
+    expected_duration_s: Optional[float] = None
+    expected_frames: Optional[int] = None
+    strips: bool = True
+
+
+class ConsistencyBody(BaseModel):
+    bible_id: str
+    shot_ids: Optional[list[str]] = None
+    delta_e_warn: float = 18.0
+    hist_warn: float = 0.45
 
 
 class WorkflowPreflightBody(BaseModel):
@@ -4948,6 +5022,147 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_edit_contact_sheet(body: ContactSheetBody):
         return agent("edit_contact_sheet", body.asset_id, lambda: op_contact_sheet(body))
     # -- end edit plans
+
+    # ---------------------------------------------------- continuity bible, segment repair, join review (continuity.py, segment_repair.py)
+
+    queue.register("segment_repair", lambda job, p: segment_repair_mod.run_job(store, job, p))
+
+    def op_continuity_bible(body: ContinuityBibleBody) -> dict[str, Any]:
+        if body.action == "list":
+            return {"items": continuity_mod.list_bibles(store.data_dir, body.project)}
+        if body.action == "create":
+            if not body.project:
+                raise engine.EngineError("missing_argument", "create needs a project")
+            return continuity_mod.view(continuity_mod.create(store, body.project, body.name or "Continuity bible",
+                                                             body.production, body.identity, body.timing))
+        if not body.bible_id:
+            raise engine.EngineError("missing_argument", f"{body.action} needs a bible_id")
+        if body.action == "update":
+            out = {}
+            for key, fields in (("identity", body.identity), ("timing", body.timing)):
+                if fields:
+                    out[key] = continuity_mod.upsert_entry(store, body.bible_id, key, fields)
+            if out:
+                return {**continuity_mod.view(continuity_mod.load(store.data_dir, body.bible_id)), "changes": out}
+        return continuity_mod.view(continuity_mod.load(store.data_dir, body.bible_id))
+
+    def op_continuity_entry(body: ContinuityEntryBody) -> dict[str, Any]:
+        if body.action == "remove":
+            return continuity_mod.remove_entry(store, body.bible_id, body.entry_id)
+        if body.action == "history":
+            return {"entry_id": body.entry_id, "history": continuity_mod.entry_history(
+                continuity_mod.load(store.data_dir, body.bible_id), body.entry_id)}
+        return continuity_mod.upsert_entry(store, body.bible_id, body.entry_id, body.fields, body.note)
+
+    def op_continuity_shot(body: ContinuityShotBody) -> dict[str, Any]:
+        if body.action == "correct":
+            if not body.text:
+                raise engine.EngineError("missing_argument", "correct needs text")
+            return continuity_mod.add_correction(store, body.bible_id, body.text, body.shot_id, body.start_s, body.end_s, body.region)
+        if not body.shot_id:
+            raise engine.EngineError("missing_argument", f"{body.action} needs a shot_id")
+        if body.action == "remove":
+            return continuity_mod.remove_shot(store, body.bible_id, body.shot_id)
+        if body.action == "accept_clip":
+            if not body.asset_id:
+                raise engine.EngineError("missing_argument", "accept_clip needs the clip's asset_id")
+            return continuity_mod.accept_clip(store, body.bible_id, body.shot_id, body.asset_id, body.operation,
+                                              body.references, body.entries, body.note)
+        return continuity_mod.upsert_shot(store, body.bible_id, body.shot_id, body.fields)
+
+    def op_repair_segment(body: RepairSegmentBody) -> dict[str, Any]:
+        params = body.model_dump(exclude={"wait_s"})
+        project_id = store.get_asset(body.asset_id)["project_id"]
+        job = wait(queue.enqueue("segment_repair", "cpu", params, project_id=project_id), body.wait_s)
+        return {"asset_id": body.asset_id, "job": job_result(job)}
+
+    def op_review_join(body: ReviewJoinBody) -> dict[str, Any]:
+        return segment_repair_mod.review_join(store, body.asset_id, body.seams_s, body.thresholds, body.expected_duration_s,
+                                              body.expected_frames, body.strips)
+
+    def op_consistency(body: ConsistencyBody) -> dict[str, Any]:
+        return continuity_mod.check_consistency(store, body.bible_id, body.shot_ids, body.delta_e_warn, body.hist_warn)
+
+    @app.post("/api/continuity/repair")
+    def continuity_repair(body: RepairSegmentBody):
+        return op_repair_segment(body)
+
+    @app.post("/api/continuity/review-join")
+    def continuity_review_join(body: ReviewJoinBody):
+        return op_review_join(body)
+
+    @app.post("/api/continuity/consistency")
+    def continuity_consistency(body: ConsistencyBody):
+        return op_consistency(body)
+
+    @app.post("/api/continuity")
+    def continuity_create(body: ContinuityBibleBody):
+        return op_continuity_bible(body.model_copy(update={"action": "create"}))
+
+    @app.get("/api/continuity")
+    def continuity_list(project: Optional[str] = None):
+        return op_continuity_bible(ContinuityBibleBody(action="list", project=project))
+
+    @app.get("/api/continuity/{bible_id}")
+    def continuity_get(bible_id: str):
+        return op_continuity_bible(ContinuityBibleBody(action="get", bible_id=bible_id))
+
+    @app.put("/api/continuity/{bible_id}")
+    def continuity_update(bible_id: str, body: ContinuityBibleBody):
+        return op_continuity_bible(body.model_copy(update={"action": "update", "bible_id": bible_id}))
+
+    @app.put("/api/continuity/{bible_id}/entries/{entry_id}")
+    def continuity_entry_put(bible_id: str, entry_id: str, body: ContinuityEntryBody):
+        return op_continuity_entry(body.model_copy(update={"bible_id": bible_id, "entry_id": entry_id, "action": "upsert"}))
+
+    @app.delete("/api/continuity/{bible_id}/entries/{entry_id}")
+    def continuity_entry_delete(bible_id: str, entry_id: str):
+        return op_continuity_entry(ContinuityEntryBody(bible_id=bible_id, entry_id=entry_id, action="remove"))
+
+    @app.get("/api/continuity/{bible_id}/entries/{entry_id}/history")
+    def continuity_entry_history(bible_id: str, entry_id: str):
+        return op_continuity_entry(ContinuityEntryBody(bible_id=bible_id, entry_id=entry_id, action="history"))
+
+    @app.put("/api/continuity/{bible_id}/shots/{shot_id}")
+    def continuity_shot_put(bible_id: str, shot_id: str, body: ContinuityShotBody):
+        return op_continuity_shot(body.model_copy(update={"bible_id": bible_id, "shot_id": shot_id, "action": "upsert"}))
+
+    @app.delete("/api/continuity/{bible_id}/shots/{shot_id}")
+    def continuity_shot_delete(bible_id: str, shot_id: str):
+        return op_continuity_shot(ContinuityShotBody(bible_id=bible_id, shot_id=shot_id, action="remove"))
+
+    @app.post("/api/continuity/{bible_id}/shots/{shot_id}/clip")
+    def continuity_shot_clip(bible_id: str, shot_id: str, body: ContinuityShotBody):
+        return op_continuity_shot(body.model_copy(update={"bible_id": bible_id, "shot_id": shot_id, "action": "accept_clip"}))
+
+    @app.post("/api/continuity/{bible_id}/corrections")
+    def continuity_correction(bible_id: str, body: ContinuityShotBody):
+        return op_continuity_shot(body.model_copy(update={"bible_id": bible_id, "action": "correct"}))
+
+    @app.post("/api/agent/continuity_bible")
+    def agent_continuity_bible(body: ContinuityBibleBody):
+        return agent("continuity_bible", body.bible_id or body.project or "", lambda: op_continuity_bible(body))
+
+    @app.post("/api/agent/continuity_entry")
+    def agent_continuity_entry(body: ContinuityEntryBody):
+        return agent("continuity_entry", f"{body.bible_id}/{body.entry_id}", lambda: op_continuity_entry(body))
+
+    @app.post("/api/agent/continuity_shot")
+    def agent_continuity_shot(body: ContinuityShotBody):
+        return agent("continuity_shot", f"{body.bible_id}/{body.shot_id or ''}", lambda: op_continuity_shot(body))
+
+    @app.post("/api/agent/continuity_repair_segment")
+    def agent_continuity_repair(body: RepairSegmentBody):
+        return agent("continuity_repair_segment", body.asset_id, lambda: op_repair_segment(body))
+
+    @app.post("/api/agent/continuity_review_join")
+    def agent_continuity_review(body: ReviewJoinBody):
+        return agent("continuity_review_join", body.asset_id, lambda: op_review_join(body))
+
+    @app.post("/api/agent/continuity_check_consistency")
+    def agent_continuity_consistency(body: ConsistencyBody):
+        return agent("continuity_check_consistency", body.bible_id, lambda: op_consistency(body))
+    # -- end continuity
 
     # ---------------------------------------------------- treatment-first productions (treatment.py)
 

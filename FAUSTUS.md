@@ -135,3 +135,64 @@ placeholders drawn from the shot text.
 HTML motion (Montaje): `motion_lint` (button "Comprobar que no es un pase de diapositivas") counts targets whose
 only animation is opacity in the composition's GSAP tweens and CSS; 3 or more give `reject` with a re-prompt. The
 seek-stepped Playwright renderer with sound (`html_motion_render`, `motion_export`) already existed.
+
+## Biblia de continuidad, reparación de tramos y revisión de uniones (03-11-2026)
+
+Qué es: una **biblia de continuidad** por producción (`prosperos_hoard/continuity.py`, guardada en
+`data/continuity/<cb_...>/bible.json`), la **reparación de un tramo** de un vídeo y la **revisión de las uniones**
+(`prosperos_hoard/segment_repair.py`). Interfaz: sección Continuidad / Continuity. REST bajo `/api/continuity`
+(biblias, `entries/{id}`, `shots/{id}`, `shots/{id}/clip`, `corrections`, `repair`, `review-join`, `consistency`).
+MCP: `continuity_bible`, `continuity_entry`, `continuity_shot`, `continuity_repair_segment`,
+`continuity_review_join`, `continuity_check_consistency`.
+
+Qué guarda la biblia:
+- **Entradas** con revisión e historial: `identity` (paleta `#rrggbb`, estilo, imágenes de referencia de estilo) y
+  `timing` (fps, tamaño, frecuencia y canales de audio) existen siempre; además objetos, personajes, voces
+  (`voice_id`, `settings`) y estilos, con `descriptor` e imágenes de referencia. Un cambio real crea una revisión
+  nueva; guardar lo mismo no crea nada.
+- **Planos** con rango, descripción, cámara, prompt, referencias, entradas que usan (todos usan `identity`) y
+  `regions` (dónde aparece una entrada, en fracciones del fotograma) para la comprobación de color.
+- **Clip aceptado** (`accept_clip`): guarda el id del clip, la operación y la revisión de **cada** entrada y las
+  imágenes de referencia con las que se hizo (procedencia). Un plano está obsoleto cuando alguna entrada que usó
+  tiene hoy otra revisión (o la entrada se quitó, o se añadió después) o cuando cambió el propio plano (descripción,
+  cámara, prompt, rango, referencias). Solo esos planos salen en `must_regenerate`; el resto sigue en
+  `kept_accepted` con su clip. Cambiar `identity` marca todos los planos (todos la usan); cambiar `timing` no marca
+  ninguno, porque la reparación conforma los clips.
+- **Correcciones** ligadas a un tramo o región de un plano; al reparar con `correction_id` pasan a `applied`.
+- **Procedencia** (hasta 500 registros): clip, plano, operación, entradas con revisión y referencias. Una reparación
+  la graba también en la receta del asset nuevo (`recipe.continuity`).
+
+Reparar un tramo (`continuity_repair_segment`, trabajo en el carril de CPU, `wait_s` para esperar):
+1. El rango (o el del plano) se ajusta a fotogramas; el sustituto (cualquier asset de vídeo; no se genera aquí) se
+   conforma a resolución, fps, formato de píxel y audio (frecuencia y canales) del vídeo, con `framing` fit o fill.
+2. Se buscan los fotogramas clave alrededor del rango. Los GOP antes y después se copian sin recodificar; solo el
+   GOP que toca el rango se recodifica con x264 (`reencoded_range_s` lo dice). Si el origen no es H.264 en MP4 o las
+   partes copiadas no decodifican a los mismos fotogramas, se recodifica todo y sale `exact_outside=false` con la
+   razón en `notes`.
+3. Corte seco (con `declick_ms` de fundido de audio en cada unión, 0 para quitarlo) o fundido encadenado de
+   `crossfade_s` dentro del rango reparado: la duración y el número de fotogramas no cambian. El audio se reconstruye
+   desde muestras decodificadas y se codifica una vez (AAC 192k); un sustituto sin audio deja silencio y lo avisa.
+4. `untouched` compara los hashes de fotograma del original y del resultado fuera del rango recodificado
+   (`frames_identical` = `frames_compared`). El origen nunca se modifica.
+
+Revisión de uniones (`continuity_review_join`, también automática tras reparar): por cada unión, fotogramas negros
+(luma media < 12 con el contexto por encima de 30), fotogramas congelados (4 o más idénticos tocando el corte, salvo
+que el contenido sea estático), salto de color (cambio máximo del color medio por canal y distancia de histograma
+entre 3 fotogramas antes y 3 después), salto de nivel de audio (RMS de 150 ms a cada lado: aviso 6 dB, fallo 12 dB)
+y chasquido (mayor escalón entre muestras en ±4 ms frente al percentil 99,9 del resto y al menos 0,08 de fondo de
+escala); en conjunto, duración y fotogramas conservados. Los umbrales están en `segment_repair.THRESHOLDS` y se
+cambian con `thresholds`. Guarda una tira de 6 fotogramas consecutivos por unión (el corte cae entre las miniaturas
+3 y 4). Son heurísticas: un corte legítimo entre escenas distintas puede dar aviso de color y un pase no aprueba el
+montaje; hay que mirar la tira.
+
+Consistencia (`continuity_check_consistency`): firma de color (CIELAB medio e histograma RGB de 64 casillas) de 5
+fotogramas del clip del plano, dentro de la región declarada para la entrada o del fotograma entero (entonces el
+fondo cuenta), frente a las referencias o la paleta de la entrada: aviso `colour_drift` con delta E >= 18 o
+histograma >= 0,45; además `entry_not_named`, `descriptor_colour_missing` y `no_reference`. Todo son avisos; **no
+detecta ni garantiza que un personaje u objeto sea el mismo**.
+
+Límites: no genera el tramo sustituto ni engancha los generadores existentes (`accept_clip` se llama a mano o desde
+el asistente); los clips generados por otras vías solo quedan en la procedencia si se registran con `accept_clip`; sin ffmpeg las funciones de
+vídeo dan `no_ffmpeg` y los tests se saltan; con GOP largos (por defecto 250 fotogramas en x264) la zona recodificada
+puede ser mucho mayor que el rango pedido, y se informa. Tests: `tests/test_continuity.py` (medios sintéticos con
+lavfi `testsrc`/`sine`).
