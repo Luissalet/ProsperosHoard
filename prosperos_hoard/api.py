@@ -819,6 +819,11 @@ class EditRunBody(BaseModel):
     wait_s: float = 0
 
 
+class EditPlanDeleteBody(BaseModel):
+    plan_id: str
+    outputs: bool = True                        # also move the videos and contact sheets its runs made to the trash
+
+
 class EditVerifyBody(BaseModel):
     asset_id: Optional[str] = None              # a video asset, or
     plan_id: Optional[str] = None               # the last render of an edit plan
@@ -4998,6 +5003,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def edit_plan_run(plan_id: str, wait_s: float = 0):
         return op_edit_run(EditRunBody(plan_id=plan_id, wait_s=wait_s))
 
+    def op_edit_plan_delete(body: EditPlanDeleteBody) -> dict[str, Any]:
+        return edit_plans_mod.delete(store, body.plan_id, outputs=body.outputs)
+
+    @app.delete("/api/edit-plans/{plan_id}")
+    def edit_plan_delete(plan_id: str, outputs: bool = True):
+        return op_edit_plan_delete(EditPlanDeleteBody(plan_id=plan_id, outputs=outputs))
+
     @app.post("/api/edit-plans/verify")
     def edit_plan_verify(body: EditVerifyBody):
         return op_edit_verify(body)
@@ -5013,6 +5025,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/edit_run_plan")
     def agent_edit_run_plan(body: EditRunBody):
         return agent("edit_run_plan", body.plan_id, lambda: op_edit_run(body))
+
+    @app.post("/api/agent/edit_plan_delete")
+    def agent_edit_plan_delete(body: EditPlanDeleteBody):
+        return agent("edit_plan_delete", body.plan_id, lambda: op_edit_plan_delete(body))
 
     @app.post("/api/agent/edit_verify")
     def agent_edit_verify(body: EditVerifyBody):

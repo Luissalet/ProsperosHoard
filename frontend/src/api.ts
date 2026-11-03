@@ -1553,6 +1553,9 @@ export const api = {
   createEditPlan: (project: string, edit: Record<string, unknown>, name?: string) =>
     request<EditPlan>("POST", "/generation/api/edit-plans", { project, edit, name }),
   runEditPlan: (id: string) => request<{ plan_id: string; job: Job }>("POST", `/generation/api/edit-plans/${id}/run`),
+  deleteEditPlan: (id: string, outputs = true) =>
+    request<{ deleted: string; name: string; files_removed: string[]; outputs_trashed: string[]; outputs_kept?: { asset_id: string; message: string }[] }>(
+      "DELETE", `/generation/api/edit-plans/${id}${q({ outputs })}`),
   verifyVideo: (body: { asset_id?: string; plan_id?: string; platform: string; contact_sheet?: boolean }) =>
     request<VerifyReport>("POST", "/generation/api/edit-plans/verify", body),
   contactSheet: (assetId: string, body: { every_n?: number; count?: number; columns?: number; width?: number } = {}) =>

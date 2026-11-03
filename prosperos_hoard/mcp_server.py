@@ -2326,6 +2326,21 @@ def edit_run_plan(plan_id: str, wait_s: float = 0) -> dict[str, Any]:
     return _call("POST", "/api/agent/edit_run_plan", json={"plan_id": plan_id, "wait_s": wait_s})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def edit_plan_delete(plan_id: str, outputs: bool = True) -> dict[str, Any]:
+    """Delete a saved edit plan / borrar un plan de montaje.
+
+    Removes the plan's folder in Prospero's data (plan.json, the captions and concat list it planned, any leftover
+    intermediate). outputs=true (default) also moves the videos its runs rendered and their contact sheets to the trash,
+    where studio_trash(action='restore') brings them back; outputs=false keeps them in the project. The plan's input
+    assets are never touched. Refuses with plan_running while a run of the plan is queued or rendering (cancel the job
+    with studio_cancel_job or wait). Returns files_removed, outputs_trashed and outputs_kept (a render a timeline uses).
+
+    Keywords: delete plan, remove edit plan, clean up, borrar plan, eliminar plan de montaje, limpiar
+    """
+    return _call("POST", "/api/agent/edit_plan_delete", json={"plan_id": plan_id, "outputs": outputs})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def edit_verify(asset_id: Optional[str] = None, plan_id: Optional[str] = None, platform: str = "shorts",
                 contact_sheet: bool = True) -> dict[str, Any]:

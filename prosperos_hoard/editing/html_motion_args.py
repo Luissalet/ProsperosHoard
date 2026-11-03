@@ -55,6 +55,10 @@ class HtmlMotionRestoreArgs(BaseModel):
     expected_revision: int = Field(..., ge=1)
 
 
+class HtmlMotionDeleteArgs(BaseModel):
+    composition: str = Field(..., pattern=r"^[0-9a-f]{32}$", description="The composition to delete with all its revisions and renders.")
+
+
 class HtmlMotionRenderArgs(HtmlMotionRefArgs):
     audio: bool = Field(True, description="With the sound the composition declares (events, music); false exports the picture only.")
 

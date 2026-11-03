@@ -1087,7 +1087,7 @@ def run_creative_film(svc: Services,a: CreativeFilmArgs):
 
 
 from .html_motion import HtmlMotion
-from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotionGetArgs,
+from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotionGetArgs, HtmlMotionDeleteArgs,
                                HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, HtmlMotionRenderArgs,
                                MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs,
                                MotionStylesArgs, MotionTreatmentArgs, MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionLintArgs,
@@ -1316,6 +1316,10 @@ def run_html_motion_restore(svc: Services, a: HtmlMotionRestoreArgs):
     return HtmlMotion(svc.config.data_dir).restore(**a.model_dump())
 
 
+def run_html_motion_delete(svc: Services, a: HtmlMotionDeleteArgs):
+    return HtmlMotion(svc.config.data_dir).delete(svc, a.composition)
+
+
 TOOLS: list[Tool] = [
     Tool("html_motion_starters", "List own editable motion starters. Escenas de partida.\nFour distinct sources: kinetic title, layered landscape, artistic oscillators and elastic lettering. Use html_motion_starter_create, then edit the ordinary HTML source and review moments. Keywords: motion, plantilla, parallax, letras, spring.", Empty, _ann(True), run_html_motion_starters),
     Tool("html_motion_starter_create", "Create a new composition from an own motion starter. Crear escena editable.\nLiteral text, duration and dimensions; every frame is a pure function of time. Creates a separate composition, leaving earlier sources intact. Use existing frame/storyboard/render/get/save tools and the ordinary workshop. No external assets or runtime. Keywords: escena, title, parallax, oscillators, elastic lettering.", HtmlStarterArgs, _ann(False, False, False), run_html_motion_starter_create),
@@ -1339,6 +1343,7 @@ TOOLS: list[Tool] = [
     Tool("motion_facts", "Keep FACTS.md of an informative animation and check the numbers shown against it. Hechos y fuentes.\nget/set the claims with their sources; check lists numbers on screen that no fact backs. Keywords: facts, sources, fact check, informative video, evidence, hechos.", MotionFactsArgs, _ann(False, False, False), run_motion_facts),
     Tool("motion_from_style", "Start an animation from a style card and its treatment. Crear desde un estilo.\nRefuses without a treatment (three structures, shots with why, cue map). Writes a working page with captions and a sharp hit on every cue, the cues and the sound events; then review, cuecheck and readcheck. Keywords: style card, create animation, scaffold, treatment, start from style.", MotionFromStyleArgs, _ann(False, False, False), run_motion_from_style),
     Tool("html_motion_restore", "Restore a saved HTML composition revision as a new revision. Recuperar una animacion anterior.\nLater versions remain available. Keywords: undo, restore, revisions, HTML motion.", HtmlMotionRestoreArgs, _ann(False, False, False), run_html_motion_restore),
+    Tool("html_motion_delete", "Delete an HTML composition with all its revisions and exported videos. Borrar una animacion HTML.\nRemoves its folder in Prospero's data: every revision, render, storyboard, sound preview, treatment, cues and facts. Refuses with html_motion_busy while an export of it is queued or running (cancel it with job_cancel), and with html_motion_in_use while a library media still reads one of its videos (media_delete it first). Keywords: delete, remove, borrar, eliminar, clean up, HTML motion, composition.", HtmlMotionDeleteArgs, _ann(False, True, False), run_html_motion_delete),
     Tool('creative_render_title_video','Render an editable Lumiere Motion title to verified H264 video. Renderizar cartela animada.\nReturns actual video path, metadata and media_receive_url. Keywords: animation, render title, mp4, motion graphics.',CreativeRenderArgs,_ann(False,False,True),run_creative_render),
     Tool('creative_tools','Discover Lumiere motion or editing operations. Herramientas nativas.\nKeywords: motion graphics, layers, compositing, editing, effects.',CreativeToolsArgs,_ann(True),run_creative_tools),
     Tool('creative_list','List saved editable creative projects. Listar composiciones guardadas.\nFilter by own engine or linked timeline. Keywords: composition, saved, project library, motion, edit.',CreativeListArgs,_ann(True),run_creative_list),
