@@ -5183,7 +5183,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         with productions_mod.lock_for(slug):
             state = productions_mod.load_state(store.data_dir, slug)
             if body.action == "draft":
-                state["treatment"] = drafted
+                treatment_mod.replace_draft(state, drafted)
                 productions_mod.log(state, "treatment", "drafted", source=drafted["source"])
             elif body.action == "update":
                 if not isinstance(body.treatment, dict):
@@ -5196,8 +5196,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if body.action != "get":
                 productions_mod.save_state(store.data_dir, state)
             out["treatment"] = state.get("treatment")
-            status = state.get("status")
-        if body.action == "approve" and body.run and status in ("awaiting_review", "queued", "failed", "cancelled"):
+            status, stage = state.get("status"), state.get("stage")
+        # continuing a production paused at another review (song, script, animatic) would approve that review too
+        if (body.action == "approve" and body.run and status in ("awaiting_review", "queued", "failed", "cancelled")
+                and (status != "awaiting_review" or stage == "treatment")):
             out["job"] = op_production_continue(slug)["job"]
         out["status"] = productions_mod.load_fresh(store.data_dir, slug).get("status")
         return out

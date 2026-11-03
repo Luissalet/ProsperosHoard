@@ -221,6 +221,17 @@ def draft(chat: Optional[Chat], state: dict[str, Any], language: str = "en", not
             "note": f"Drafted by rules: {_clip(reason, 200)}"}
 
 
+def replace_draft(state: dict[str, Any], drafted: dict[str, Any]) -> dict[str, Any]:
+    """A new draft replaces the treatment; when the old one was approved the stage is pending again (a redraft is not
+    what was approved, so it must not render unapproved)."""
+    old = state.get("treatment") or {}
+    if old.get("status") == "approved":
+        (state.get("done") or {}).pop("treatment", None)
+        (state.get("review") or {}).pop("treatment_approved", None)
+    state["treatment"] = drafted
+    return drafted
+
+
 def set_treatment(state: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     """Save the person's edits. An edit after approval makes it a draft again (and the stage pending)."""
     old = state.get("treatment") or {}
