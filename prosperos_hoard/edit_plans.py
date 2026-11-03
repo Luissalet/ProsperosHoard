@@ -84,6 +84,14 @@ def _num(value: Any, where: str, lo: float, hi: float, default: Optional[float] 
     return out
 
 
+def _until_end(value: Any, total: float) -> Any:
+    """An end time past the edit's end means 'until the end' (the page's default overlay lasts 5 s on any edit)."""
+    try:
+        return total if math.isfinite(float(value)) and float(value) > total else value
+    except (TypeError, ValueError):
+        return value
+
+
 def _even(value: float) -> int:
     return max(2, int(round(value / 2)) * 2)
 
@@ -122,7 +130,10 @@ def normalise(store: Store, spec: Any) -> tuple[dict[str, Any], dict[str, dict[s
     target = PLATFORMS.get(platform or "", {})
     width = _even(_num(spec.get("width"), "width", 64, 4096, target.get("width", 1080)))
     height = _even(_num(spec.get("height"), "height", 64, 4096, target.get("height", 1920)))
-    fps = int(_num(spec.get("fps"), "fps", 1, 120, 30))
+    fps_in = _num(spec.get("fps"), "fps", 1, 120, 30)
+    if abs(fps_in - round(fps_in)) > 1e-6:  # int() would quietly render 29.97 as 29 fps
+        raise EngineError("bad_edit", f"fps must be a whole number (24, 25, 30, 50, 60), not {fps_in:g}")
+    fps = int(round(fps_in))
     framing = spec.get("framing") or "fill"
     if framing not in video_mod.FRAMINGS:
         raise EngineError("bad_edit", f"framing must be one of {', '.join(video_mod.FRAMINGS)}")
@@ -164,6 +175,10 @@ def normalise(store: Store, spec: Any) -> tuple[dict[str, Any], dict[str, dict[s
                                                                0.05, 3, 0.4) if kind != "cut" else 0.0}
         if i == 0:
             clip["transition"] = {"type": "cut", "duration_s": 0.0}
+        elif clip["transition"]["duration_s"] > clip["duration_s"]:
+            # the incoming clip has to last through its transition: a longer one swallows the clip and the next xfade
+            raise EngineError("bad_edit", f"{where}.transition.duration_s ({clip['transition']['duration_s']:g} s) is longer "
+                                          f"than the clip it enters ({clip['duration_s']:g} s)")
         clips.append(clip)
     total = round(sum(c["duration_s"] for c in clips), 3)
 
@@ -174,7 +189,7 @@ def normalise(store: Store, spec: Any) -> tuple[dict[str, Any], dict[str, dict[s
         if not text:
             continue
         start = _num(raw.get("start_s"), f"{where}.start_s", 0, total, 0)
-        end = _num(raw.get("end_s"), f"{where}.end_s", start + 0.1, total + 0.001, min(total, start + 2.5))
+        end = _num(_until_end(raw.get("end_s"), total), f"{where}.end_s", start + 0.1, total + 0.001, min(total, start + 2.5))
         captions.append({"text": text, "start_s": round(start, 3), "end_s": round(end, 3)})
     caption_style = spec.get("caption_style") or "default"
     if caption_style not in video_mod.LYRIC_STYLES:
@@ -185,7 +200,8 @@ def normalise(store: Store, spec: Any) -> tuple[dict[str, Any], dict[str, dict[s
         src = use((raw or {}).get("asset_id"), ("image",), where)
         start = _num(raw.get("start_s"), f"{where}.start_s", 0, total, 0)
         overlays.append({"asset_id": src["asset"]["id"], "start_s": round(start, 3),
-                         "end_s": round(_num(raw.get("end_s"), f"{where}.end_s", start + 0.04, total + 0.001, total), 3),
+                         "end_s": round(_num(_until_end(raw.get("end_s"), total), f"{where}.end_s", start + 0.04, total + 0.001,
+                                             total), 3),
                          "x": _num(raw.get("x"), f"{where}.x", 0, 1, 0.95), "y": _num(raw.get("y"), f"{where}.y", 0, 1, 0.05),
                          "scale": _num(raw.get("scale"), f"{where}.scale", 0.02, 1, 0.2),
                          "opacity": _num(raw.get("opacity"), f"{where}.opacity", 0, 1, 1)})
@@ -527,7 +543,9 @@ def check_media(info: dict[str, Any], loud: Optional[dict[str, Any]], platform: 
         status = "pass" if (w, h) == (tw, th) else ("warn" if same_shape and min(w, h) >= 720 else "fail")
         _check(checks, "resolution", "Resolution", status, f"{tw}x{th}", f"{w}x{h}")
         fps, (lo, hi) = float(info.get("fps") or 0), spec["fps"]
-        _check(checks, "fps", "Frame rate", "pass" if lo - 0.01 <= fps <= hi + 0.01 else "fail", f"{lo}-{hi}", round(fps, 3))
+        # the NTSC rates (23.976, 29.97, 59.94) are the whole rates x 1000/1001 and every platform takes them
+        _check(checks, "fps", "Frame rate", "pass" if lo * 1000 / 1001 - 0.01 <= fps <= hi + 0.01 else "fail", f"{lo}-{hi}",
+               round(fps, 3))
         codec = info.get("video_codec")
         _check(checks, "video_codec", "Video codec", "pass" if codec in ("h264", "hevc") else "warn", "h264", codec)
     dur = float(info.get("duration_s") or 0)
