@@ -422,9 +422,10 @@ class OpenAIWhisperEngine(STTEngine):
 # ------------------------------------------------------------- registries --
 
 def default_tts_engines(voices_dir: Optional[Path] = None, object_info: Optional[dict[str, Any]] = None) -> list[TTSEngine]:
+    from .kitten_engine import KittenTTSEngine
     from .yovoice_engine import YovoiceEngine
     return [PiperEngine(voices_dir), XTTSEngine(), F5TTSEngine(), KokoroEngine(), ChatterboxEngine(),
-            ComfyTTSEngine(object_info), YovoiceEngine()]
+            ComfyTTSEngine(object_info), YovoiceEngine(), KittenTTSEngine(voices_dir)]
 
 
 def default_stt_engines() -> list[STTEngine]:
