@@ -39,7 +39,7 @@ def test_status_and_registry(tmp_path):
     _fake_env(ke.env_dir(tmp_path))
     assert engine.is_installed() is True
     ids = [e.id for e in ve.default_tts_engines(voices_dir=tmp_path)]
-    assert ids[-1] == "kittentts" and "piper" in ids
+    assert "kittentts" in ids and "piper" in ids
 
 
 def test_synthesize_runs_the_worker_out_of_process(tmp_path, monkeypatch):

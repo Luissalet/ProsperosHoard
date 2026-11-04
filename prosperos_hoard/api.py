@@ -6069,12 +6069,13 @@ def _install_voice_engine_job(job: dict[str, Any], progress) -> dict[str, Any]:
     (`POST /api/voice/engines/{id}/install`): runs `pip install` for its
     packages into this app's own venv. Never triggered on its own."""
     params = job["params"]
-    if params.get("sidecar") and params.get("engine_id") == "kittentts":
-        from . import kitten_engine
+    if params.get("sidecar") and params.get("engine_id") in ("kittentts", "voxcpm"):
+        from . import kitten_engine, voxcpm_engine
         from .voice_engines import EngineNotInstalled
 
+        installer = (voxcpm_engine if params["engine_id"] == "voxcpm" else kitten_engine).install
         try:
-            return {**kitten_engine.install(Path(params["voices_dir"]), progress), "kind": params["kind"]}
+            return {**installer(Path(params["voices_dir"]), progress), "kind": params["kind"]}
         except EngineNotInstalled as exc:
             raise engine.EngineError("install_failed", exc.install_hint[-1500:]) from exc
     packages = params["pip_packages"]

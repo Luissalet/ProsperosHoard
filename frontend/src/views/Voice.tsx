@@ -95,6 +95,12 @@ function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
           {engineVoices.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
       )}
+      {!spec.voice_id && spec.engine_id === "voxcpm" && selected?.installed && (
+        <input data-testid="voice-design" style={{ width: 260 }} value={spec.voice_ref || ""}
+          aria-label={lang.startsWith("es") ? "Diseño de voz" : "Voice design"}
+          placeholder={lang.startsWith("es") ? "(una mujer joven, voz suave) o ruta a un WAV" : "(a young woman, gentle voice) or a WAV path"}
+          onChange={(e) => setSpec({ ...spec, voice_ref: e.target.value || null })} />
+      )}
       <label className="field" style={{ width: 110 }}>{t("speedLabel")}
         <input type="number" step={0.1} min={0.5} max={2} placeholder="1.0" value={spec.speed ?? ""}
           onChange={(e) => setSpec({ ...spec, speed: e.target.value ? Number(e.target.value) : null })} />

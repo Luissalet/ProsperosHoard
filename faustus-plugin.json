@@ -46,6 +46,8 @@
     "audio.cpp-local-tts",
     "yovoice-adapter",
     "kittentts-cpu-voice",
+    "voxcpm2-gpu-voice",
+    "camera-orbit-variations",
     "native multitrack editing",
     "native creative engines",
     "revisioned audiovisual projects",
