@@ -840,7 +840,7 @@ class ContactSheetBody(BaseModel):
 
 
 class ContinuityBibleBody(BaseModel):
-    action: Literal["create", "get", "list", "update"] = "get"
+    action: Literal["create", "get", "list", "update", "delete"] = "get"
     project: Optional[str] = None
     bible_id: Optional[str] = None
     name: Optional[str] = None
@@ -5055,6 +5055,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                              body.production, body.identity, body.timing))
         if not body.bible_id:
             raise engine.EngineError("missing_argument", f"{body.action} needs a bible_id")
+        if body.action == "delete":
+            return continuity_mod.delete_bible(store.data_dir, body.bible_id)
         if body.action == "update":
             out = {}
             for key, fields in (("identity", body.identity), ("timing", body.timing)):
@@ -5128,6 +5130,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.put("/api/continuity/{bible_id}")
     def continuity_update(bible_id: str, body: ContinuityBibleBody):
         return op_continuity_bible(body.model_copy(update={"action": "update", "bible_id": bible_id}))
+
+    @app.delete("/api/continuity/{bible_id}")
+    def continuity_delete(bible_id: str):
+        return op_continuity_bible(ContinuityBibleBody(action="delete", bible_id=bible_id))
 
     @app.put("/api/continuity/{bible_id}/entries/{entry_id}")
     def continuity_entry_put(bible_id: str, entry_id: str, body: ContinuityEntryBody):

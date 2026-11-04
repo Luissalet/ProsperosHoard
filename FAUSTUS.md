@@ -211,3 +211,8 @@ el asistente); los clips generados por otras vías solo quedan en la procedencia
 vídeo dan `no_ffmpeg` y los tests se saltan; con GOP largos (por defecto 250 fotogramas en x264) la zona recodificada
 puede ser mucho mayor que el rango pedido, y se informa. Tests: `tests/test_continuity.py` (medios sintéticos con
 lavfi `testsrc`/`sine`).
+
+## 04-11-2026 · Borrar una biblia de continuidad (Hangar E39)
+
+La biblia de continuidad, la reparación de tramos y la revisión de uniones (4aebd37) se verificaron en vivo para el programa Hangar: vídeo de 20 s con 5 s (8–13 s) sustituidos por otro clip en 3,3 s, duración conservada (20,000 s), las dos uniones con salto de color detectado (fuentes distintas a propósito) y la reparación anotada en el plano con las revisiones de las entradas usadas. Faltaba poder quitar una biblia: ahora `continuity_bible(action="delete")`, `DELETE /api/continuity/{id}` y el botón «Borrar biblia» (con confirmación) eliminan la biblia y sus decisiones, planos, correcciones y procedencia; los clips y las imágenes de referencia siguen en el proyecto. Prueba en `tests/test_continuity.py`.
+
