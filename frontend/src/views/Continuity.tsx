@@ -1,7 +1,7 @@
 // Continuity bible: decisions that survive versions (entries with revisions, shots with accepted clips and the revision they
 // used), repair of one time range of a video, the join review of its seams and colour/wording consistency warnings.
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Plus, ShieldCheck, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Plus, ShieldCheck, Trash2, Wrench, XCircle } from "lucide-react";
 import { api, fileUrl, type Asset, type ConsistencyReport, type ContinuityBible, type JoinReview, type RepairResult } from "../api";
 import { useT } from "../i18n";
 import { useApp, useAsync } from "../components/ui";
@@ -94,6 +94,12 @@ export function ContinuityView() {
     setJobId(r.job.id); app.refreshJobs(); app.toast(L(lang, "Repairing the segment", "Reparando el tramo"), "info");
   });
   const check = () => act("check", async () => setConsistency(await api.continuityConsistency(bibleId)));
+  const removeBible = () => {
+    const b = (list?.items || []).find((x) => x.bible_id === bibleId);
+    if (!b || !window.confirm(L(lang, `Delete the bible "${b.name}"? Its entries, shots, corrections and provenance go; the clips and reference images stay in the project.`,
+      `¿Borrar la biblia «${b.name}»? Se van sus entradas, planos, correcciones y procedencia; los clips y las imágenes de referencia se quedan en el proyecto.`))) return;
+    act("delete", async () => { await api.deleteContinuity(bibleId); setBible(null); setBibleId(""); reloadList(); });
+  };
   const stale = new Set(bible?.stale_shots || []);
 
   return (
@@ -107,6 +113,7 @@ export function ContinuityView() {
             {(list?.items || []).map((b) => <option key={b.bible_id} value={b.bible_id}>{b.name} · r{b.revision}{b.stale_shots.length ? ` · ${b.stale_shots.length} ${L(lang, "stale", "obsoletos")}` : ""}</option>)}</select>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={L(lang, "New bible name", "Nombre de la biblia nueva")} />
           <button className="btn" disabled={!!busy} onClick={create} data-testid="cb-create">{busy === "create" ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} {L(lang, "Create", "Crear")}</button>
+          <button className="btn" disabled={!bibleId || !!busy} onClick={removeBible} data-testid="cb-delete"><Trash2 size={14} /> {L(lang, "Delete bible", "Borrar biblia")}</button>
         </div>
       </div>
       {bible && (<>

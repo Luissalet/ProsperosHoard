@@ -112,6 +112,20 @@ def list_bibles(data_dir: Path, project_id: Optional[str] = None, limit: int = 3
     return out
 
 
+def delete_bible(data_dir: Path, bible_id: str) -> dict[str, Any]:
+    """Remove a continuity bible (its folder under ``data/continuity``). The clips and reference assets it points at are
+    assets of the project and stay; only the decisions, shots, corrections and provenance recorded here go."""
+    import shutil
+    with _LOCK:
+        bible = load(data_dir, bible_id)
+        folder = bible_dir(data_dir, bible_id)
+        shutil.rmtree(folder)
+    return {"deleted": bible_id, "name": bible.get("name"), "project_id": bible.get("project_id"),
+            "removed": {"entries": len(bible.get("entries") or {}), "shots": len(bible.get("shots") or {}),
+                        "corrections": len(bible.get("corrections") or []), "provenance": len(bible.get("provenance") or [])},
+            "kept": {"assets": "the clips and reference images stay in the project"}}
+
+
 def _clean_fields(store: Store, fields: dict[str, Any]) -> dict[str, Any]:
     unknown = sorted(set(fields) - set(ENTRY_FIELDS) - {"kind"})
     if unknown:

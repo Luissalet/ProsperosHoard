@@ -1538,6 +1538,7 @@ export const api = {
       "POST", `/generation/api/productions/${slug}/storyboard-sheet`, { generate }),
   continuityList: (project?: string) => request<{ items: ContinuityBibleBrief[] }>("GET", `/generation/api/continuity${q({ project })}`),
   continuity: (id: string) => request<ContinuityBible>("GET", `/generation/api/continuity/${id}`),
+  deleteContinuity: (id: string) => request<{ deleted: string }>("DELETE", `/generation/api/continuity/${id}`),
   createContinuity: (project: string, name: string, production?: string) =>
     request<ContinuityBibleBrief>("POST", "/generation/api/continuity", { project, name, production }),
   continuityEntry: (id: string, entryId: string, fields: Record<string, unknown>, note = "") =>

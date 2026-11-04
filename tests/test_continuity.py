@@ -238,3 +238,20 @@ def test_routes_bible_repair_job_and_agent_endpoints(client, data_dir):
     assert c.get(f"/api/continuity/{bid}/entries/lamp/history").json()["history"][-1]["revision"] == 2
     missing = c.get("/api/continuity/cb_nope")
     assert missing.status_code >= 400 and "not_found" in missing.text
+
+def test_a_bible_can_be_deleted_and_its_clips_stay(client, data_dir):
+    from prosperos_hoard.store import Store
+    c, app, _ = client
+    store = Store(data_dir)
+    project = store.create_project("Reel", brief="b")
+    _video(store, project, "main", "testsrc", 3)
+    bid = c.post("/api/continuity", json={"project": project["id"], "name": "Para borrar"}).json()["bible_id"]
+    c.put(f"/api/continuity/{bid}/shots/one", json={"bible_id": bid, "fields": {"start_s": 0, "end_s": 3}})
+    c.post(f"/api/continuity/{bid}/shots/one/clip", json={"bible_id": bid, "asset_id": "main"})
+    out = c.delete(f"/api/continuity/{bid}").json()
+    assert out["deleted"] == bid and out["removed"]["shots"] == 1 and "stay" in out["kept"]["assets"]
+    assert c.get("/api/continuity", params={"project": project["id"]}).json()["items"] == []
+    assert store.get_asset("main")["id"] == "main"
+    assert c.get(f"/api/continuity/{bid}").status_code >= 400
+    again = c.post("/api/agent/continuity_bible", json={"action": "delete", "bible_id": bid})
+    assert again.status_code >= 400 and "not_found" in again.text

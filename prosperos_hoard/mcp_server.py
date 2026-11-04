@@ -2375,7 +2375,7 @@ def edit_contact_sheet(asset_id: str, every_n: Optional[int] = None, count: int 
 # ------------------------------------------------- continuity bible, segment repair, join review --
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def continuity_bible(action: Literal["create", "get", "list", "update"] = "get", project: Optional[str] = None,
+def continuity_bible(action: Literal["create", "get", "list", "update", "delete"] = "get", project: Optional[str] = None,
                      bible_id: Optional[str] = None, name: Optional[str] = None, production: Optional[str] = None,
                      identity: Optional[dict[str, Any]] = None, timing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Continuity bible of a production: decisions that survive versions / biblia de continuidad de una producción.
@@ -2385,6 +2385,8 @@ def continuity_bible(action: Literal["create", "get", "list", "update"] = "get",
     bible: entries with revisions, shots, corrections, the provenance log and `must_regenerate` (the shots whose
     accepted clip was made with an older revision of an entry). list: the bibles of a project. update: change identity
     or timing (a real change makes a new revision; every shot is marked stale by a new identity revision, none by timing).
+    delete (bible_id): removes the bible and its decisions, shots, corrections and provenance; the clips and reference
+    images are project assets and stay.
 
     Keywords: continuity, bible, identity, palette, style references, revision, stale shots, decisions, continuidad, biblia, decisiones, revisiones
     """
