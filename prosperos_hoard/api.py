@@ -17,7 +17,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional, Union
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -60,6 +60,7 @@ from . import style_cards
 from . import shot_review as shot_review_mod
 from . import edit_plans as edit_plans_mod
 from . import continuity as continuity_mod
+from . import continuity_regen as regen_mod
 from . import segment_repair as segment_repair_mod
 from . import treatment as treatment_mod
 from . import workflow_preflight as wf_preflight
@@ -892,6 +893,22 @@ class RepairSegmentBody(BaseModel):
     verify_untouched: bool = True
     review: bool = True
     thresholds: Optional[dict[str, float]] = None
+    region: Optional[Union[list[float], Literal["correction"]]] = None   # [x, y, w, h] fractions, or the correction's region
+    feather_px: int = 0
+    voice: Optional[dict[str, Any]] = None      # {entry_id, text, at_s?, max_speed?}: a line in a bible voice
+    wait_s: float = 0
+
+
+class RegenerateBody(BaseModel):
+    bible_id: str
+    action: Literal["plan", "run", "use_clip"] = "plan"
+    shot_ids: Optional[list[str]] = None        # plan/run: these stale shots (default: every stale shot)
+    shot_id: Optional[str] = None               # use_clip: the shot
+    clip_asset_id: Optional[str] = None         # use_clip: the new take, made anywhere
+    clip_in_s: float = 0.0                      # use_clip: where the first stale range starts inside the take
+    ranges: Optional[list[list[float]]] = None  # use_clip: other ranges than the stale ones
+    transition: Literal["cut", "crossfade"] = "cut"
+    crossfade_s: float = 0.3
     wait_s: float = 0
 
 
@@ -5043,7 +5060,85 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     # ---------------------------------------------------- continuity bible, segment repair, join review (continuity.py, segment_repair.py)
 
-    queue.register("segment_repair", lambda job, p: segment_repair_mod.run_job(store, job, p))
+    def _bible_speak(spec: dict[str, Any], text: str) -> tuple[bytes, str]:
+        """A bible voice entry's voice_id is a library voice when there is one with that id, else the engine's own voice
+        reference (its settings may name the engine)."""
+        spec = dict(spec or {})
+        vid = spec.get("voice_id")
+        if vid:
+            try:
+                store.get_studio_voice(vid)
+            except Exception:  # noqa: BLE001 - not a library voice
+                spec.pop("voice_id", None)
+                spec.setdefault("voice_ref", vid)
+        try:
+            return voice_lab.synthesize_with_spec(store, _tts_engines(), spec, text)
+        except voice_lab.VoiceLabError as exc:
+            raise engine.EngineError("voice_unavailable", f"the bible's voice could not speak the line: {exc}") from None
+
+    def _take_job(job: dict[str, Any]) -> dict[str, Any]:
+        while True:
+            job = queue.wait_for(job["id"], 600)
+            if job["state"] == "done":
+                return job
+            if job["state"] in ("failed", "error", "cancelled"):
+                raise engine.EngineError("take_failed", f"{job.get('type')} {job['id']}: {job.get('message') or job['state']}")
+
+    def _first_asset(job: dict[str, Any], kind: str) -> str:
+        for aid in job.get("asset_ids") or []:
+            try:
+                if store.get_asset(aid)["kind"] == kind:
+                    return aid
+            except NotFound:
+                continue
+        raise engine.EngineError("take_failed", f"job {job['id']} made no {kind}")
+
+    def _regen_generate(item: dict[str, Any], progress: Callable[..., None]) -> dict[str, Any]:
+        """A new take of a stale shot through the normal render queue: a start frame from the prompt and the references
+        (unless the shot has a reference image to start from), then a clip of the stale span from that frame."""
+        project, jobs = item["project_id"], []
+        start = item.get("start_image")
+        if not start:
+            progress(0.05, "making a start frame")
+            job = _take_job(op_generate(project, GenerateImageBody(prompt=item["prompt"], count=1))["job"])
+            jobs.append(job["id"])
+            start = _first_asset(job, "image")
+        progress(0.2, "making the clip")
+        job = _take_job(op_generate(project, GenerateImageBody(
+            prompt=item["prompt"], template="auto_clip", reference_asset_id=start, count=1,
+            template_params={"seconds": max(1.0, float(item["seconds"]))}))["job"])
+        jobs.append(job["id"])
+        return {"asset_id": _first_asset(job, "video"), "kind": "studio", "start_image": start, "jobs": jobs}
+
+    queue.register("segment_repair", lambda job, p: segment_repair_mod.run_job(store, job, p, speak=_bible_speak))
+    queue.register("continuity_regenerate", lambda job, p: regen_mod.run_job(store, job, p, _regen_generate))
+    queue.register("continuity_apply_clip", lambda job, p: regen_mod.run_apply_job(store, job, p))
+
+    def op_regenerate(body: RegenerateBody) -> dict[str, Any]:
+        if body.action == "plan":
+            return regen_mod.plan(store, body.bible_id, body.shot_ids)
+        bible = continuity_mod.load(store.data_dir, body.bible_id)
+        if body.action == "use_clip":
+            if not (body.shot_id and body.clip_asset_id):
+                raise engine.EngineError("missing_argument", "use_clip needs shot_id and clip_asset_id (the new take)")
+            store.get_asset(body.clip_asset_id)
+            params = body.model_dump(include={"bible_id", "shot_id", "clip_asset_id", "clip_in_s", "ranges", "transition", "crossfade_s"})
+            job = wait(queue.enqueue("continuity_apply_clip", "cpu", params, project_id=bible["project_id"]), body.wait_s)
+            return {"bible_id": body.bible_id, "job": job_result(job)}
+        planned = regen_mod.plan(store, body.bible_id, body.shot_ids)
+        if not planned["items"]:
+            raise engine.EngineError("not_stale", "no stale shot to regenerate")
+        params = {"bible_id": body.bible_id, "shot_ids": body.shot_ids, "transition": body.transition}
+        job = wait(queue.enqueue("continuity_regenerate", "cpu", params, project_id=bible["project_id"]), body.wait_s)
+        return {"bible_id": body.bible_id, "plan": planned, "job": job_result(job)}
+
+    @app.post("/api/continuity/{bible_id}/regenerate")
+    def continuity_regenerate(bible_id: str, body: RegenerateBody):
+        return op_regenerate(body.model_copy(update={"bible_id": bible_id}))
+
+    @app.post("/api/agent/continuity_regenerate")
+    def agent_continuity_regenerate(body: RegenerateBody):
+        return agent("continuity_regenerate", f"{body.bible_id}:{body.action}", lambda: op_regenerate(body))
 
     def op_continuity_bible(body: ContinuityBibleBody) -> dict[str, Any]:
         if body.action == "list":

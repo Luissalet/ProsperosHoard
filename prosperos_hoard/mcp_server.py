@@ -2442,7 +2442,9 @@ def continuity_repair_segment(asset_id: str, replacement_asset_id: str, start_s:
                               declick_ms: float = 5.0, replacement_in_s: float = 0.0, framing: Literal["fit", "fill"] = "fit",
                               pad: bool = False, entries: Optional[list[str]] = None, references: Optional[list[str]] = None,
                               correction_id: Optional[str] = None, verify_untouched: bool = True, review: bool = True,
-                              thresholds: Optional[dict[str, float]] = None, wait_s: float = 0) -> dict[str, Any]:
+                              thresholds: Optional[dict[str, float]] = None, region: Optional[Any] = None,
+                              feather_px: int = 0, voice: Optional[dict[str, Any]] = None,
+                              wait_s: float = 0) -> dict[str, Any]:
     """Replace a time range of a video without redoing the rest / reparar un tramo de un vídeo.
 
     The range (start_s-end_s, or the shot's range) snaps to frames; the replacement (any video asset: make it with the
@@ -2456,16 +2458,46 @@ def continuity_repair_segment(asset_id: str, replacement_asset_id: str, start_s:
     to date, `provenance.still_stale` the shots whose other ranges (stale_ranges_s) still come from an old revision;
     repair those too, or accept the repaired video for the whole shot (continuity_shot accept_clip). The result includes `join_review` (see
     continuity_review_join). Runs as a CPU job; wait_s (up to 150) waits on the server. Mock or real generators are not
-    run here: give the replacement asset.
+    run here: give the replacement asset (continuity_regenerate makes new takes of stale shots).
+    region [x, y, w, h] (fractions of the frame) or "correction" (the region of correction_id) replaces only that
+    rectangle inside the range: the rest of each frame and the sound stay the original; `region_review` checks that the
+    outside is unchanged and that the rectangle's edge is not much stronger than in the original, with a preview image
+    (feather_px softens the edge). voice {entry_id, text, at_s?, max_speed?} speaks the text in the voice of a bible voice
+    entry (its voice_id and settings, through the voice studio), places it in the range (sped up to max_speed, default
+    1.5, when too long, then cut) as the range's sound and stamps that entry's revision on the repair (`voice` in the result).
 
-    Keywords: repair segment, replace range, fix 5 seconds, patch video, crossfade, hard cut, segment repair, reparar tramo, sustituir segmento, parchear video
+    Keywords: repair segment, replace range, fix 5 seconds, patch video, crossfade, hard cut, segment repair, reparar tramo, sustituir segmento, parchear video, region repair, mask, voice line, reparar region, voz de la biblia
     """
     return _call("POST", "/api/agent/continuity_repair_segment", json={
         "asset_id": asset_id, "replacement_asset_id": replacement_asset_id, "start_s": start_s, "end_s": end_s,
         "shot_id": shot_id, "bible_id": bible_id, "transition": transition, "crossfade_s": crossfade_s,
         "declick_ms": declick_ms, "replacement_in_s": replacement_in_s, "framing": framing, "pad": pad, "entries": entries,
         "references": references, "correction_id": correction_id, "verify_untouched": verify_untouched, "review": review,
-        "thresholds": thresholds, "wait_s": wait_s})
+        "thresholds": thresholds, "region": region, "feather_px": feather_px, "voice": voice, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def continuity_regenerate(bible_id: str, action: Literal["plan", "run", "use_clip"] = "plan",
+                          shot_ids: Optional[list[str]] = None, shot_id: Optional[str] = None,
+                          clip_asset_id: Optional[str] = None, clip_in_s: float = 0.0,
+                          ranges: Optional[list[list[float]]] = None, transition: Literal["cut", "crossfade"] = "cut",
+                          crossfade_s: float = 0.3, wait_s: float = 0) -> dict[str, Any]:
+    """Regenerate the stale shots of a continuity bible without redoing good material / regenerar planos obsoletos.
+
+    plan: for every stale shot (or shot_ids) the prompt built from the shot and the current revision of every entry it
+    uses, the reference images, the start image, the stale ranges (after a partial repair, only those) and the ranges
+    that will be kept. run: an orchestrator job makes a new take per shot through the normal render queue (a start frame,
+    then a clip of the stale span; needs ComfyUI and a video model) and splices only the stale ranges of it into the
+    shot's clip; each splice is stamped with the current revisions, so the shot stops being stale, and the regeneration
+    (take, prompt, references, revisions, jobs) is recorded in the bible's provenance. use_clip (shot_id, clip_asset_id,
+    clip_in_s): the same splice with a take made anywhere else. A shot whose take fails stays stale and says why. Poll
+    the job with studio_job; wait_s (up to 150) waits on the server.
+
+    Keywords: regenerate stale shots, must_regenerate, new take, redo shot, continuity, regenerar planos, plano obsoleto, nueva toma
+    """
+    return _call("POST", "/api/agent/continuity_regenerate", json={
+        "bible_id": bible_id, "action": action, "shot_ids": shot_ids, "shot_id": shot_id, "clip_asset_id": clip_asset_id,
+        "clip_in_s": clip_in_s, "ranges": ranges, "transition": transition, "crossfade_s": crossfade_s, "wait_s": wait_s})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

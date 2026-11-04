@@ -309,3 +309,173 @@ def test_a_shot_without_repairs_keeps_its_old_stale_reasons(store, project):
     continuity.upsert_entry(store, bid, "hero", {"descriptor": "blue"})
     item = continuity.must_regenerate(continuity.load(store.data_dir, bid))[0]
     assert "ranges_s" not in item["reasons"][0] and "stale_ranges_s" not in item
+
+
+# ---------------------------------------------------------------- prospero#2299: region, voice, regenerate
+
+def _pcm(path, rate=16000):
+    import numpy as np
+    done = procutil.run([ffmpeg_path(), "-v", "error", "-i", str(path), "-map", "0:a:0", "-ac", "1", "-ar", str(rate), "-f", "f32le", "-"])
+    return np.frombuffer(done.stdout, dtype="float32")
+
+
+def _rms(x, rate, a, b):
+    import numpy as np
+    seg = x[int(a * rate):int(b * rate)]
+    return float(np.sqrt(np.mean(seg ** 2))) if seg.size else 0.0
+
+
+def _audio_md5(path):
+    done = procutil.run([ffmpeg_path(), "-v", "error", "-i", str(path), "-map", "0:a:0", "-c", "copy", "-f", "md5", "-"], text=True)
+    return done.stdout.strip()
+
+
+def test_a_region_repair_changes_only_the_rectangle_and_keeps_the_sound(store, project):
+    import numpy as np
+    src = _video(store, project, "scene", "testsrc", 4)
+    _video(store, project, "patched", "testsrc", 4, vf="drawbox=x=40:y=30:w=80:h=60:color=red:t=fill", sine=880)
+    # the patched take is the same moving picture with a box on it: taken from the same second, only the box differs
+    res = segment_repair.repair_segment(store, "scene", "patched", 1.0, 3.0, region=[0.2, 0.2, 0.6, 0.6], replacement_in_s=1.0)
+    assert res["region"]["px"] == [32, 24, 96, 72] and res["exact_outside"] and res["untouched"]["identical"]
+    checks = {c["id"]: c for c in res["region_review"]["checks"]}
+    assert checks["outside_preserved"]["status"] == "pass" and checks["region_changed"]["status"] == "pass"
+    assert checks["region_edge"]["status"] == "pass", checks["region_edge"]
+    assert store.get_asset(res["region_review"]["preview_asset_id"])["kind"] == "image"
+    out = store.data_dir / store.get_asset(res["asset_id"])["file_path"]
+    a = segment_repair._frame_rgb(ffmpeg_path(), store.data_dir / src["file_path"], 2.02, 160, 120)
+    b = segment_repair._frame_rgb(ffmpeg_path(), out, 2.02, 160, 120)
+    assert b[45, 60, 0] > 180 and b[45, 60, 1] < 90                          # red inside the rectangle
+    mask = np.ones((120, 160), bool); mask[24:96, 32:128] = False
+    assert np.abs(a - b).mean(axis=2)[mask].mean() < 4                      # the rest of the frame is the original
+    assert _audio_md5(out) == _audio_md5(store.data_dir / src["file_path"])  # the sound is untouched
+    assert any("only the region" in n for n in res["notes"])
+    # the region a correction was written about
+    bid = continuity.create(store, project["id"], "Scene")["id"]
+    corr = continuity.add_correction(store, bid, "logo wrong", start_s=1, end_s=3, region=[0.2, 0.2, 0.6, 0.6])
+    again = segment_repair.repair_segment(store, "scene", "patched", 1.0, 3.0, bible_id=bid, correction_id=corr["id"],
+                                          region="correction", review=False, verify_untouched=False)
+    assert again["region"]["px"] == [32, 24, 96, 72]
+    assert continuity.load(store.data_dir, bid)["corrections"][0]["status"] == "applied"
+    for bad in ([0.5, 0.5, 0, 0.2], [1.2, 0, 0.1, 0.1], "correction"):
+        with pytest.raises(EngineError):
+            segment_repair.repair_segment(store, "scene", "patched", 1.0, 3.0, region=bad, review=False)
+
+
+def _speaker(seconds, calls):
+    import io
+    import wave
+    import numpy as np
+
+    def speak(spec, text):
+        calls.append((dict(spec), text))
+        n = int(16000 * seconds)
+        tone = (np.sin(2 * np.pi * 300 * np.arange(n) / 16000) * 0.5 * 32767).astype("<i2")
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(tone.tobytes())
+        return buf.getvalue(), "fake-tts"
+    return speak
+
+
+def test_a_line_in_the_bible_voice_is_spoken_in_the_repaired_range(store, project):
+    _video(store, project, "talk", "testsrc", 4)
+    _video(store, project, "take", "smptebars", 4, af="volume=0")
+    bid = continuity.create(store, project["id"], "Talk")["id"]
+    continuity.upsert_entry(store, bid, "narrador", {"kind": "voice", "name": "Narrador", "voice_id": "v1",
+                                                     "settings": {"engine_id": "fake-tts", "speed": 0.9}})
+    continuity.upsert_entry(store, bid, "lamp", {"kind": "object", "name": "Lamp"})
+    continuity.upsert_shot(store, bid, "a", {"start_s": 0, "end_s": 4, "uses": ["lamp", "narrador"]})
+    continuity.accept_clip(store, bid, "a", "talk")
+    calls = []
+    res = segment_repair.repair_segment(store, "talk", "take", 1.0, 3.0, shot_id="a", bible_id=bid, review=False,
+                                        voice={"entry_id": "narrador", "text": "hola", "at_s": 0.5}, speak=_speaker(1.0, calls))
+    assert calls == [({"engine_id": "fake-tts", "speed": 0.9, "voice_id": "v1"}, "hola")]
+    v = res["voice"]
+    assert v["entry_id"] == "narrador" and v["revision"] == 1 and v["engine_id"] == "fake-tts"
+    assert abs(v["spoken_s"] - 1.0) < 0.05 and v["speed"] == 1.0 and v["at_s"] == 0.5 and v["cut"] is False
+    pcm = _pcm(store.data_dir / store.get_asset(res["asset_id"])["file_path"])
+    assert _rms(pcm, 16000, 1.05, 1.45) < 0.01          # before the line: the range's sound is the line alone
+    assert _rms(pcm, 16000, 1.6, 2.4) > 0.1             # the line, placed 0.5 s into the range
+    assert _rms(pcm, 16000, 0.2, 0.8) > 0.05            # outside the range the original sound stays
+    last = continuity.load(store.data_dir, bid)["shots"]["a"]["repairs"][-1]
+    assert last["entries"]["narrador"] == 1
+    assert store.get_asset(res["asset_id"])["recipe"]["voice"]["text"] == "hola"
+    long = segment_repair.repair_segment(store, "talk", "take", 1.0, 3.0, bible_id=bid, review=False, verify_untouched=False,
+                                         voice={"entry_id": "narrador", "text": "una frase larga"}, speak=_speaker(4.0, []))
+    assert long["voice"]["speed"] == 1.5 and long["voice"]["cut"] is True
+    for voice, speak in (({"entry_id": "lamp", "text": "x"}, _speaker(1.0, [])), ({"entry_id": "narrador", "text": ""}, _speaker(1.0, [])),
+                         ({"entry_id": "narrador", "text": "x"}, None)):
+        with pytest.raises(EngineError):
+            segment_repair.repair_segment(store, "talk", "take", 1.0, 3.0, bible_id=bid, voice=voice, speak=speak, review=False)
+
+
+def test_regenerating_a_stale_shot_splices_only_its_stale_ranges(store, project):
+    from prosperos_hoard import continuity_regen
+    _make(store, project, "ref_lamp", ["-f", "lavfi", "-i", "color=c=0xcc8833:size=64x64", "-frames:v", "1"], "image")
+    _video(store, project, "film", "testsrc", 12)
+    _video(store, project, "fix", "smptebars", 5)
+    bid = continuity.create(store, project["id"], "Film", identity={"style": "warm film"})["id"]
+    continuity.upsert_entry(store, bid, "lamp", {"kind": "object", "name": "Lamp", "descriptor": "brass", "reference_asset_ids": ["ref_lamp"]})
+    continuity.upsert_shot(store, bid, "uno", {"start_s": 0, "end_s": 6, "description": "street"})
+    continuity.upsert_shot(store, bid, "dos", {"start_s": 6, "end_s": 12, "prompt": "the lamp on the desk", "camera": "slow push-in", "uses": ["lamp"]})
+    for sid in ("uno", "dos"):
+        continuity.accept_clip(store, bid, sid, "film")
+    continuity.upsert_entry(store, bid, "lamp", {"descriptor": "aged brass"})
+    first = segment_repair.repair_segment(store, "film", "fix", 4.0, 8.0, shot_id="dos", bible_id=bid, review=False)
+    item = continuity_regen.plan(store, bid)["items"][0]
+    assert item["shot_id"] == "dos" and item["ranges_s"] == [[8.0, 12.0]] and item["kept_ranges_s"] == [[6.0, 8.0]]
+    assert "Lamp: aged brass" in item["prompt"] and "camera: slow push-in" in item["prompt"] and "warm film" in item["prompt"]
+    assert item["references"] == ["ref_lamp"] and item["start_image"] == "ref_lamp" and item["seconds"] == 4.0
+    assert item["entries"]["lamp"] == 2
+    made = []
+
+    def generate(it, progress):
+        made.append(it["shot_id"])
+        take = _video(store, project, f"take_{len(made)}", "testsrc2", it["seconds"] + 0.5)
+        return {"asset_id": take["id"], "kind": "test", "jobs": ["job-1"]}
+    out = continuity_regen.run_job(store, {"params": {"bible_id": bid}}, lambda *a, **k: None, generate)
+    r = out["regenerate"]["results"][0]
+    assert out["regenerate"]["done"] == 1 and r["ok"] and r["up_to_date"] and r["kept_ranges_s"] == [[6.0, 8.0]]
+    bible = continuity.load(store.data_dir, bid)
+    assert continuity.view(bible)["stale_shots"] == [] and bible["shots"]["dos"]["clip"]["asset_id"] == r["result_asset_id"]
+    reg = bible["shots"]["dos"]["regenerations"][-1]
+    assert reg["take_asset_id"] == "take_1" and reg["generator"]["jobs"] == ["job-1"] and reg["entries"]["lamp"] == 2
+    assert bible["provenance"][-1]["operation"] == "regenerate"
+    before = segment_repair.analyze_video(store.data_dir / store.get_asset(first["asset_id"])["file_path"])["hashes"]
+    after = segment_repair.analyze_video(store.data_dir / store.get_asset(r["result_asset_id"])["file_path"])["hashes"]
+    assert after[:200] == before[:200] and after[200:300] != before[200:300], r["repairs"]   # 0-8 s kept as it was, 8-12 s new
+    # nothing stale: plan is empty; a failing take leaves the shot stale and says why
+    assert continuity_regen.plan(store, bid)["items"] == []
+    continuity.upsert_entry(store, bid, "lamp", {"descriptor": "copper"})
+
+    def broken(it, progress):
+        raise EngineError("take_failed", "no video model")
+    bad = continuity_regen.run_job(store, {"params": {"bible_id": bid}}, lambda *a, **k: None, broken)
+    assert bad["regenerate"]["failed"] == 1 and "no video model" in bad["regenerate"]["results"][0]["error"]
+    assert continuity.view(continuity.load(store.data_dir, bid))["stale_shots"] == ["dos"]
+
+
+def test_routes_plan_and_use_a_take_for_a_stale_shot(client, data_dir):
+    from prosperos_hoard.store import Store
+    c, app, _ = client
+    store = Store(data_dir)
+    project = store.create_project("Reel", brief="b")
+    _video(store, project, "main", "testsrc", 6)
+    _video(store, project, "newtake", "smptebars", 3)
+    bid = c.post("/api/continuity", json={"project": project["id"], "name": "Reel"}).json()["bible_id"]
+    c.put(f"/api/continuity/{bid}/entries/lamp", json={"bible_id": bid, "entry_id": "lamp", "fields": {"kind": "object", "name": "Lamp"}})
+    c.put(f"/api/continuity/{bid}/shots/two", json={"bible_id": bid, "fields": {"start_s": 3, "end_s": 6, "uses": ["lamp"]}})
+    c.post(f"/api/continuity/{bid}/shots/two/clip", json={"bible_id": bid, "asset_id": "main"})
+    assert c.post(f"/api/continuity/{bid}/regenerate", json={"bible_id": bid}).json()["items"] == []
+    c.put(f"/api/continuity/{bid}/entries/lamp", json={"bible_id": bid, "entry_id": "lamp", "fields": {"descriptor": "brass"}})
+    planned = c.post("/api/agent/continuity_regenerate", json={"bible_id": bid, "action": "plan"}).json()
+    assert planned["items"][0]["ranges_s"] == [[3.0, 6.0]] and "Lamp: brass" in planned["items"][0]["prompt"]
+    r = c.post(f"/api/continuity/{bid}/regenerate", json={"bible_id": bid, "action": "use_clip", "shot_id": "two",
+                                                         "clip_asset_id": "newtake", "wait_s": 120})
+    assert r.status_code == 200, r.text
+    job = r.json()["job"]
+    assert job["state"] == "done", job
+    got = c.get(f"/api/continuity/{bid}").json()
+    assert got["stale_shots"] == [] and got["shots"]["two"]["regenerations"][-1]["take_asset_id"] == "newtake"
+    bad = c.post(f"/api/continuity/{bid}/regenerate", json={"bible_id": bid, "action": "run"})
+    assert bad.status_code >= 400 and "not_stale" in bad.text

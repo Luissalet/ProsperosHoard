@@ -8745,7 +8745,7 @@
     },
     {
       "name": "continuity_repair_segment",
-      "description": "Replace a time range of a video without redoing the rest / reparar un tramo de un vídeo.\n\nThe range (start_s-end_s, or the shot's range) snaps to frames; the replacement (any video asset: make it with the\nusual generators first) is conformed to the video's resolution, fps, pixel format and audio format. Frames outside the\nGOPs that touch the range are stream-copied, so they stay identical (`untouched` compares frame hashes;\n`reencoded_range_s` says what was re-encoded; `exact_outside=false` means everything was re-encoded). transition\ncut (declick_ms on the audio) or crossfade (crossfade_s, inside the range). Duration and frame count do not change.\nCreates a new video asset; the source stays. With bible_id the repair is recorded as provenance (entries and\nreferences used) and correction_id is marked applied. When the shot's accepted clip is the repaired video, the\nrepaired range counts as made with the current revisions: `provenance.up_to_date` lists shots the repair brought up\nto date, `provenance.still_stale` the shots whose other ranges (stale_ranges_s) still come from an old revision;\nrepair those too, or accept the repaired video for the whole shot (continuity_shot accept_clip). The result includes `join_review` (see\ncontinuity_review_join). Runs as a CPU job; wait_s (up to 150) waits on the server. Mock or real generators are not\nrun here: give the replacement asset.\n\nKeywords: repair segment, replace range, fix 5 seconds, patch video, crossfade, hard cut, segment repair, reparar tramo, sustituir segmento, parchear video\n",
+      "description": "Replace a time range of a video without redoing the rest / reparar un tramo de un vídeo.\n\nThe range (start_s-end_s, or the shot's range) snaps to frames; the replacement (any video asset: make it with the\nusual generators first) is conformed to the video's resolution, fps, pixel format and audio format. Frames outside the\nGOPs that touch the range are stream-copied, so they stay identical (`untouched` compares frame hashes;\n`reencoded_range_s` says what was re-encoded; `exact_outside=false` means everything was re-encoded). transition\ncut (declick_ms on the audio) or crossfade (crossfade_s, inside the range). Duration and frame count do not change.\nCreates a new video asset; the source stays. With bible_id the repair is recorded as provenance (entries and\nreferences used) and correction_id is marked applied. When the shot's accepted clip is the repaired video, the\nrepaired range counts as made with the current revisions: `provenance.up_to_date` lists shots the repair brought up\nto date, `provenance.still_stale` the shots whose other ranges (stale_ranges_s) still come from an old revision;\nrepair those too, or accept the repaired video for the whole shot (continuity_shot accept_clip). The result includes `join_review` (see\ncontinuity_review_join). Runs as a CPU job; wait_s (up to 150) waits on the server. Mock or real generators are not\nrun here: give the replacement asset (continuity_regenerate makes new takes of stale shots).\nregion [x, y, w, h] (fractions of the frame) or \"correction\" (the region of correction_id) replaces only that\nrectangle inside the range: the rest of each frame and the sound stay the original; `region_review` checks that the\noutside is unchanged and that the rectangle's edge is not much stronger than in the original, with a preview image\n(feather_px softens the edge). voice {entry_id, text, at_s?, max_speed?} speaks the text in the voice of a bible voice\nentry (its voice_id and settings, through the voice studio), places it in the range (sped up to max_speed, default\n1.5, when too long, then cut) as the range's sound and stamps that entry's revision on the repair (`voice` in the result).\n\nKeywords: repair segment, replace range, fix 5 seconds, patch video, crossfade, hard cut, segment repair, reparar tramo, sustituir segmento, parchear video, region repair, mask, voice line, reparar region, voz de la biblia\n",
       "inputSchema": {
         "properties": {
           "asset_id": {
@@ -8909,6 +8909,33 @@
             "default": null,
             "title": "Thresholds"
           },
+          "region": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region"
+          },
+          "feather_px": {
+            "default": 0,
+            "title": "Feather Px",
+            "type": "integer"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Voice"
+          },
           "wait_s": {
             "default": 0,
             "title": "Wait S",
@@ -8933,6 +8960,133 @@
           "replacement_asset_id"
         ],
         "title": "continuity_repair_segmentArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "continuity_regenerate",
+      "description": "Regenerate the stale shots of a continuity bible without redoing good material / regenerar planos obsoletos.\n\nplan: for every stale shot (or shot_ids) the prompt built from the shot and the current revision of every entry it\nuses, the reference images, the start image, the stale ranges (after a partial repair, only those) and the ranges\nthat will be kept. run: an orchestrator job makes a new take per shot through the normal render queue (a start frame,\nthen a clip of the stale span; needs ComfyUI and a video model) and splices only the stale ranges of it into the\nshot's clip; each splice is stamped with the current revisions, so the shot stops being stale, and the regeneration\n(take, prompt, references, revisions, jobs) is recorded in the bible's provenance. use_clip (shot_id, clip_asset_id,\nclip_in_s): the same splice with a take made anywhere else. A shot whose take fails stays stale and says why. Poll\nthe job with studio_job; wait_s (up to 150) waits on the server.\n\nKeywords: regenerate stale shots, must_regenerate, new take, redo shot, continuity, regenerar planos, plano obsoleto, nueva toma\n",
+      "inputSchema": {
+        "properties": {
+          "bible_id": {
+            "title": "Bible Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "plan",
+            "enum": [
+              "plan",
+              "run",
+              "use_clip"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "shot_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shot Ids"
+          },
+          "shot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shot Id"
+          },
+          "clip_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Clip Asset Id"
+          },
+          "clip_in_s": {
+            "default": 0.0,
+            "title": "Clip In S",
+            "type": "number"
+          },
+          "ranges": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ranges"
+          },
+          "transition": {
+            "default": "cut",
+            "enum": [
+              "cut",
+              "crossfade"
+            ],
+            "title": "Transition",
+            "type": "string"
+          },
+          "crossfade_s": {
+            "default": 0.3,
+            "title": "Crossfade S",
+            "type": "number"
+          },
+          "wait_s": {
+            "default": 0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "bible_id"
+        ],
+        "title": "continuity_regenerateArguments",
         "type": "object"
       },
       "annotations": {
