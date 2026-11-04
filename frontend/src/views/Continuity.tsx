@@ -8,6 +8,8 @@ import { useApp, useAsync } from "../components/ui";
 
 const L = (lang: string, en: string, es: string) => (lang === "es" ? es : en);
 const KINDS = ["object", "character", "voice", "style"];
+const fmtS = (v: number) => (Math.round(v * 100) / 100).toString();
+const spans = (ranges: [number, number][]) => ranges.map(([a, b]) => `${fmtS(a)}–${fmtS(b)} s`).join(", ");
 const CHECK_ES: Record<string, string> = {
   black_frames: "Fotogramas negros", frozen_frames: "Fotogramas congelados", colour_jump: "Salto de color", audio_level_jump: "Salto de nivel de audio",
   audio_click: "Chasquido de audio", duration_preserved: "Duración conservada", frames_preserved: "Fotogramas conservados",
@@ -134,11 +136,20 @@ export function ContinuityView() {
         <div className="card">
           <h3>{L(lang, "Shots", "Planos")}</h3>
           {bible.must_regenerate.length > 0 && <p className="small" data-testid="cb-stale"><AlertTriangle size={13} className="wf-warn" /> {L(lang, "To regenerate", "Por regenerar")}: {bible.must_regenerate.map((m) =>
-            `${m.shot_id} (${m.reasons.map((r) => r.entry_id ? `${r.entry_id} r${r.used_revision ?? "–"}→r${r.current_revision ?? "–"}` : r.why).join(", ")})`).join("; ")}</p>}
+            `${m.shot_id} (${m.reasons.map((r) => r.entry_id ? `${r.entry_id} r${r.used_revision ?? "–"}→r${r.current_revision ?? "–"}` : r.why).join(", ")}` +
+            (m.stale_ranges_s ? `; ${L(lang, "still old in", "aún antiguo en")} ${spans(m.stale_ranges_s)}` +
+              (m.repaired_ranges_s?.length ? `; ${L(lang, "repaired", "reparado")} ${spans(m.repaired_ranges_s)}` : "") : "") + ")").join("; ")}</p>}
+          {bible.must_regenerate.some((m) => m.stale_ranges_s) && <p className="small muted" data-testid="cb-stale-repair-note">{L(lang,
+            "A repair counts as made with the bible's current revisions only inside the range it replaced; the rest of the shot keeps the revisions of the original clip. Repair the ranges still listed, or, if they do not show the changed entry, accept the repaired video as the shot's clip.",
+            "Una reparación cuenta como hecha con las revisiones vigentes solo dentro del tramo que sustituyó; el resto del plano conserva las del clip original. Repara los tramos que siguen en la lista o, si en ellos no aparece la entrada cambiada, acepta el vídeo reparado como clip del plano.")}</p>}
           <table className="verify-table small"><thead><tr><th>id</th><th>s</th><th>{L(lang, "Description", "Descripción")}</th><th>{L(lang, "Uses", "Usa")}</th><th>{L(lang, "Clip", "Clip")}</th><th /></tr></thead>
             <tbody>{Object.values(bible.shots).map((s) => <tr key={s.id} className={stale.has(s.id) ? "warn" : ""}>
               <td className="mono">{s.id}</td><td>{s.start_s ?? "–"}–{s.end_s ?? "–"}</td><td>{s.description}</td><td>{s.uses.join(", ")}</td>
-              <td>{s.clip ? <>{s.clip.asset_id} {stale.has(s.id) ? <span className="pill warn">{L(lang, "stale", "obsoleto")}</span> : <span className="pill ok">{L(lang, "accepted", "aceptado")}</span>}</> : "–"}</td>
+              <td>{s.clip ? <>{s.clip.asset_id} {stale.has(s.id) ? <span className="pill warn">{L(lang, "stale", "obsoleto")}</span> : <span className="pill ok">{L(lang, "accepted", "aceptado")}</span>}
+                {(s.clip.segments || []).length > 0 && <div className="muted" data-testid={`cb-segments-${s.id}`}>{L(lang, "Repaired", "Reparado")}: {(s.clip.segments || []).map((g) =>
+                  `${fmtS(g.start_s)}–${fmtS(g.end_s)} s (${Object.entries(g.entries).filter(([e]) => e !== "identity").map(([e, r]) => `${e} r${r}`).join(", ") || "identity"})`).join("; ")}</div>}
+                {stale.has(s.id) && (s.clip.segments || []).length > 0 && <button className="btn sm" disabled={!!busy} onClick={() => accept(s.id, s.clip!.asset_id)} data-testid={`cb-accept-repaired-${s.id}`}
+                  title={L(lang, "Accept the repaired video as the whole shot with the current revisions", "Aceptar el vídeo reparado como el plano entero con las revisiones vigentes")}>{L(lang, "Accept repaired video", "Aceptar vídeo reparado")}</button>}</> : "–"}</td>
               <td><select value="" onChange={(e) => e.target.value && accept(s.id, e.target.value)} aria-label={L(lang, "Accept clip", "Aceptar clip")}><option value="">{L(lang, "Accept clip…", "Aceptar clip…")}</option>
                 {videos.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select></td></tr>)}</tbody></table>
           <div className="ep-row" style={{ marginTop: 8 }}>

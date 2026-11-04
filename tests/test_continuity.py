@@ -255,3 +255,57 @@ def test_a_bible_can_be_deleted_and_its_clips_stay(client, data_dir):
     assert c.get(f"/api/continuity/{bid}").status_code >= 400
     again = c.post("/api/agent/continuity_bible", json={"action": "delete", "bible_id": bid})
     assert again.status_code >= 400 and "not_found" in again.text
+
+
+def test_a_repair_with_the_current_revisions_clears_the_range_it_replaced(store, project):
+    """prospero#2287: a shot repaired after an entry change stayed stale. Now the repaired range is a segment of the
+    clip made with the current revisions; only what is still made with the old revision keeps the shot stale."""
+    _video(store, project, "film", "testsrc", 12)
+    _video(store, project, "fixa", "smptebars", 5)
+    _video(store, project, "fixb", "testsrc2", 5)
+    bid = continuity.create(store, project["id"], "Film")["id"]
+    continuity.upsert_entry(store, bid, "lamp", {"kind": "object", "name": "Lamp", "descriptor": "brass"})
+    continuity.upsert_shot(store, bid, "uno", {"start_s": 0, "end_s": 6, "description": "street"})
+    continuity.upsert_shot(store, bid, "dos", {"start_s": 6, "end_s": 12, "description": "the lamp", "uses": ["lamp"]})
+    continuity.accept_clip(store, bid, "uno", "film")
+    continuity.accept_clip(store, bid, "dos", "film")
+    assert continuity.upsert_entry(store, bid, "lamp", {"descriptor": "aged brass"})["newly_stale"] == ["dos"]
+
+    # repair 4-8 s for the shot 6-12 s: 6-8 s now has lamp r2, 8-12 s is still the r1 material
+    first = segment_repair.repair_segment(store, "film", "fixa", 4.0, 8.0, shot_id="dos", bible_id=bid, review=False)
+    prov = first["provenance"]
+    assert prov["up_to_date"] == [] and prov["still_stale"] == [{"shot_id": "dos", "stale_ranges_s": [[8.0, 12.0]],
+                                                                 "repaired_ranges_s": [[6.0, 8.0]]}]
+    view = continuity.view(continuity.load(store.data_dir, bid))
+    reason = view["shots"]["dos"]["stale_reasons"][0]
+    assert reason["entry_id"] == "lamp" and reason["used_revision"] == 1 and reason["current_revision"] == 2
+    assert reason["ranges_s"] == [[8.0, 12.0]] and reason["repaired_ranges_s"] == [[6.0, 8.0]]
+    assert view["shots"]["dos"]["clip"]["segments"][0]["entries"]["lamp"] == 2
+    assert view["stale_shots"] == ["dos"] and "uno" in view["accepted_shots"]
+
+    # repairing the rest of the shot on the repaired video brings it up to date without re-accepting anything
+    second = segment_repair.repair_segment(store, first["asset_id"], "fixb", 8.0, 12.0, shot_id="dos", bible_id=bid, review=False)
+    assert second["provenance"]["up_to_date"] == ["dos"] and second["provenance"]["still_stale"] == []
+    bible = continuity.load(store.data_dir, bid)
+    assert continuity.view(bible)["stale_shots"] == [] and bible["shots"]["dos"]["clip"]["asset_id"] == second["asset_id"]
+    assert [p["repaired"] for p in continuity.clip_pieces(bible["shots"]["dos"])] == [True, True]
+
+    # a later change of the entry makes the whole shot stale again: both repairs used r2
+    continuity.upsert_entry(store, bid, "lamp", {"descriptor": "copper"})
+    item = continuity.must_regenerate(continuity.load(store.data_dir, bid))[0]
+    assert item["shot_id"] == "dos" and item["stale_ranges_s"] == [[6.0, 12.0]] and item["repaired_ranges_s"] == []
+    # accepting a clip for the whole shot starts again from one piece with the current revisions
+    continuity.accept_clip(store, bid, "dos", second["asset_id"], operation="edit")
+    bible = continuity.load(store.data_dir, bid)
+    assert "segments" not in bible["shots"]["dos"]["clip"] and continuity.view(bible)["stale_shots"] == []
+
+
+def test_a_shot_without_repairs_keeps_its_old_stale_reasons(store, project):
+    _video(store, project, "plain", "testsrc", 2)
+    bid = continuity.create(store, project["id"], "Plain")["id"]
+    continuity.upsert_entry(store, bid, "hero", {"kind": "character", "name": "Hero", "descriptor": "red"})
+    continuity.upsert_shot(store, bid, "a", {"start_s": 0, "end_s": 2, "uses": ["hero"]})
+    continuity.accept_clip(store, bid, "a", "plain")
+    continuity.upsert_entry(store, bid, "hero", {"descriptor": "blue"})
+    item = continuity.must_regenerate(continuity.load(store.data_dir, bid))[0]
+    assert "ranges_s" not in item["reasons"][0] and "stale_ranges_s" not in item

@@ -63,6 +63,7 @@
     "continuity bible with revisions and stale shots",
     "continuity bible deletion (clips kept)",
     "segment repair with frame-identical untouched GOPs",
+    "staleness per repaired range (a repair with the current revisions clears only the range it replaced)",
     "join review (black, frozen, colour jump, audio click and level jump) with seam strips",
     "colour-signature consistency warnings"
   ],
