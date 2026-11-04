@@ -119,3 +119,27 @@ What the proof measured (real browser, private server): a film made from an impo
 0 and 16.7 ms at 30 fps) and `motion_readcheck`; a cue moved 1.5 s off its hit was reported as `no_hit` with the real hit listed
 as unmapped and offered as `suggest_t`. The cards are a starting vocabulary: the scaffold gives a plain page, the quality of the
 film still depends on the assistant that writes the HTML and on its treatment.
+
+## Comparison with the HyperFrames design (Ágora #783)
+
+Read on 2026-10-20 from the upstream's documentation (Apache-2.0, revision 0693839b52306cbe35ee508f7b4c4b6f914a4fae); the upstream
+was not run and nothing here claims its speed or quality. What Prospero already has and what it does not:
+
+| Capability | Here | Gap |
+| --- | --- | --- |
+| Deterministic HTML frame by time | `window.seek(t)` contract, headless capture of every frame, verified H.264 MP4, frame review and `html_motion_storyboard` | none |
+| Editable source with history | every save is a revision, `html_motion_restore` | none |
+| Quality gates before export | anti-slideshow lint, GSAP tween reading, starters | none |
+| Sound | declared events `{t, role}` from 252 procedural effects with measured sync offsets, optional music bed with ducking, loudness target | no per-track automation curves or groups: a bed has one gain, events have none |
+| Montage hand-off | `html_motion_render` result goes to the timeline / Lumiere | none |
+
+The one real difference is mixing: upstream documents audio mixing, automation and groups. Here the mix is fixed (events
+placed by sync point over one bed). Add automation only when a composition needs a volume curve; the declaration format
+(`lumiere-sound`) leaves room for a `gain_db` curve on `music` without a second mixer.
+
+## Voice and camera trials of the same study (#783)
+
+- VoxCPM2 is a TTS engine of the registry (`voxcpm`, see [VOICE.md](VOICE.md)); the comparison with XTTS, F5 and Kokoro is the
+  `last_run` figures of `voice_engines` on the same text.
+- Camera: the Spaces *Variations* node has a `orbit` mode (`orbit_step`, `orbit_elevation`, `orbit_distance`). It is a
+  generative edit of one picture, not a 3D camera: the sides it was not shown are invented.

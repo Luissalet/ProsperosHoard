@@ -41,6 +41,12 @@ when asked.
 | Chatterbox | `chatterbox` | yes, English-focused, an "exaggeration" style control | en | `pip install chatterbox-tts` (GPU recommended) |
 | ComfyUI TTS node pack | `comfy-tts` | status-only: reports a TTS node pack ComfyUI already has (VibeVoice, F5-TTS, Kokoro, IndexTTS custom nodes); no built-in workflow template yet, so it cannot synthesize | - | install a TTS custom node pack in ComfyUI and restart it |
 | KittenTTS 0.8 | `kittentts` | no (eight named voices: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo); ONNX on the CPU only, nano 15 M / micro 40 M / mini 80 M | en | the **Install** button: builds its own environment in `data/voices/engines/kittentts` with a Python 3.10-3.12 from the PC (`PROSPERO_KITTEN_PYTHON` wins), installs the kittentts 0.8.1 wheel and downloads the default model |
+| VoxCPM2 | `voxcpm` | yes (a reference WAV, or the voice library's sample; optional transcript for a closer clone) and voice design (`voice_ref` = `(a calm older man)`) | 30 languages incl. es/en, 48 kHz, streaming | the **Install** button: its own environment in `data/voices/engines/voxcpm` (Python 3.10-3.12, CUDA 12.8 torch, `voxcpm`, ~8 GB `openbmb/VoxCPM2`, Apache-2.0); runs on the GPU in `PROSPERO_VOXCPM_GPU` (default 2) |
+
+VoxCPM2 is out of process like KittenTTS (`voxcpm_worker.py`). After each line `voice_engines` reports `last_run`
+(model load, total seconds, first audio when streaming, audio seconds) so engines can be compared on the same text.
+
+Measured here (Ágora #783, 04-11-2026, GPU 2, one Spanish sentence of 24 words with proper names; the audio was not auditioned or scored by a listener, so naturalness and name pronunciation are not rated): VoxCPM2 took 29.8-32.9 s per call as an out-of-process call, of which 18.9 s is loading the model each time and 9.6 s generating 7.7 s of 48 kHz audio (0.3 s to the first chunk when streaming). Piper (`es_ES-davefx-medium`, CPU, 22 kHz) took 0.25 s for 8 s of audio once warm. XTTS-v2, F5-TTS and Kokoro are not installed on this PC, so they were not measured. Keeping the model resident in a long-lived worker is the next step if VoxCPM2 is wanted for many short lines.
 
 KittenTTS needs Python < 3.13 (its phonemiser) and this app runs on 3.13, so it never goes into the app's venv: each
 line is synthesised out of process by `kitten_worker.py` in that environment. `voice_ref` is a voice name or
