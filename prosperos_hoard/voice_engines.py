@@ -43,6 +43,7 @@ class EngineCapabilities:
     streaming: bool = False
     needs_gpu: bool = False
     multi_speaker: bool = False
+    reference_optional: bool = False  # cloning engine that also has a voice of its own (empty voice_ref)
 
     def to_dict(self) -> dict[str, Any]:
         return {"languages": self.languages, "cloning": self.cloning, "streaming": self.streaming,

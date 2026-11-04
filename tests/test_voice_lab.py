@@ -215,3 +215,11 @@ def test_synthesize_with_spec_not_installed(tmp_path):
     store = Store(tmp_path / "data")
     with pytest.raises(voice_lab.VoiceSpecError):
         voice_lab.synthesize_with_spec(store, [NotInstalled()], {"engine_id": "off"}, "hi")
+
+def test_voxcpm_speaks_with_its_own_voice_when_no_reference_is_given(tmp_path):
+    # voxcpm documents voice_ref "empty = the model's own voice"; the cloning gate must not turn that into an error
+    from prosperos_hoard import voxcpm_engine as vx
+    store = Store(tmp_path / "data")
+    engine = vx.VoxCPMEngine(tmp_path)
+    resolved = voice_lab.resolve_voice_spec(store, [engine], {"engine_id": "voxcpm"})
+    assert resolved["engine"].id == "voxcpm" and not resolved["voice_ref"] and resolved["sample_path"] is None
