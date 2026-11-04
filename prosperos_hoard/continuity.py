@@ -232,13 +232,44 @@ def _entry_names(bible: dict[str, Any], ids: list[str]) -> list[str]:
     return [bible["entries"][i]["fields"].get("name") or i for i in ids if i in bible["entries"]]
 
 
-def stale_reasons(bible: dict[str, Any], shot: dict[str, Any]) -> list[dict[str, Any]]:
-    """Why a shot's accepted clip no longer matches the bible (empty when it still does or has no clip)."""
+def clip_pieces(shot: dict[str, Any]) -> list[dict[str, Any]]:
+    """The shot's time range split by what made each part of its accepted clip.
+
+    A segment repair replaces only a range of the clip: that range was made with the revisions stamped by the repair,
+    the rest of the shot keeps the revisions of the original clip. Later repairs cover earlier ones. Without a time
+    range or without repairs the whole shot is one piece made with the clip's own revisions."""
     clip = shot.get("clip")
     if not clip:
         return []
+    base = {"start_s": shot.get("start_s"), "end_s": shot.get("end_s"), "asset_id": clip.get("asset_id"),
+            "operation": clip.get("operation"), "entries": clip.get("entries") or {}, "shot_revision": clip.get("shot_revision"),
+            "repaired": False}
+    s0, s1 = shot.get("start_s"), shot.get("end_s")
+    if s0 is None or s1 is None or not clip.get("segments"):
+        return [base]
+    pieces = [base]
+    for seg in clip["segments"]:
+        a, b = max(s0, seg["start_s"]), min(s1, seg["end_s"])
+        if b - a <= 1e-6:
+            continue
+        cut = []
+        for p in pieces:
+            if p["end_s"] <= a or p["start_s"] >= b:
+                cut.append(p)
+                continue
+            if p["start_s"] < a:
+                cut.append({**p, "end_s": a})
+            if p["end_s"] > b:
+                cut.append({**p, "start_s": b})
+        cut.append({"start_s": a, "end_s": b, "asset_id": seg.get("asset_id"), "operation": seg.get("operation") or "segment_repair",
+                    "entries": seg.get("entries") or {}, "shot_revision": seg.get("shot_revision"), "repaired": True})
+        pieces = sorted(cut, key=lambda p: p["start_s"])
+    return pieces
+
+
+def _piece_reasons(bible: dict[str, Any], shot: dict[str, Any], piece: dict[str, Any]) -> list[dict[str, Any]]:
     reasons = []
-    for entry_id, used in sorted((clip.get("entries") or {}).items()):
+    for entry_id, used in sorted(piece["entries"].items()):
         entry = bible["entries"].get(entry_id)
         if entry is None:
             reasons.append({"entry_id": entry_id, "used_revision": used, "current_revision": None, "why": "entry removed"})
@@ -246,13 +277,49 @@ def stale_reasons(bible: dict[str, Any], shot: dict[str, Any]) -> list[dict[str,
             reasons.append({"entry_id": entry_id, "name": entry["fields"].get("name") or entry_id, "used_revision": used,
                             "current_revision": entry["revision"], "why": "entry changed"})
     for entry_id in shot.get("uses") or []:  # an entry added to the shot after the clip was made
-        if entry_id in bible["entries"] and entry_id not in (clip.get("entries") or {}):
+        if entry_id in bible["entries"] and entry_id not in piece["entries"]:
             reasons.append({"entry_id": entry_id, "used_revision": None, "current_revision": bible["entries"][entry_id]["revision"],
                             "why": "entry added to the shot after the clip"})
-    if clip.get("shot_revision") != shot["revision"]:
+    if piece.get("shot_revision") != shot["revision"]:
         reasons.append({"entry_id": None, "why": "shot description, camera, prompt, range or references changed",
-                        "used_revision": clip.get("shot_revision"), "current_revision": shot["revision"]})
+                        "used_revision": piece.get("shot_revision"), "current_revision": shot["revision"]})
     return reasons
+
+
+def stale_reasons(bible: dict[str, Any], shot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Why a shot's accepted clip no longer matches the bible (empty when it still does or has no clip).
+
+    Checked per piece of the clip (see ``clip_pieces``): a repair stamped with the current revisions clears the range
+    it replaced. When the clip has repairs every reason carries ``ranges_s``, the parts of the shot still made with the
+    old revision, and ``repaired_ranges_s``, the parts a repair already brought up to date."""
+    pieces = clip_pieces(shot)
+    if not pieces:
+        return []
+    repaired = any(p["repaired"] for p in pieces)
+    merged: dict[tuple, dict[str, Any]] = {}
+    fresh = [p for p in pieces if p["repaired"] and not _piece_reasons(bible, shot, p)]
+    for piece in pieces:
+        for reason in _piece_reasons(bible, shot, piece):
+            key = (reason["entry_id"], reason["why"], reason["used_revision"])
+            got = merged.setdefault(key, {**reason, "ranges_s": []} if repaired else reason)
+            if repaired:
+                got["ranges_s"].append([piece["start_s"], piece["end_s"]])
+    out = list(merged.values())
+    if repaired:
+        for reason in out:
+            reason["ranges_s"] = _join_ranges(reason["ranges_s"])
+            reason["repaired_ranges_s"] = _join_ranges([[p["start_s"], p["end_s"]] for p in fresh])
+    return out
+
+
+def _join_ranges(ranges: list[list[float]]) -> list[list[float]]:
+    out: list[list[float]] = []
+    for a, b in sorted(ranges):
+        if out and a <= out[-1][1] + 1e-6:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([round(a, 4), round(b, 4)])
+    return [[round(a, 4), round(b, 4)] for a, b in out]
 
 
 def must_regenerate(bible: dict[str, Any], only: Optional[list[str]] = None) -> list[dict[str, Any]]:
@@ -262,9 +329,13 @@ def must_regenerate(bible: dict[str, Any], only: Optional[list[str]] = None) -> 
             continue
         reasons = stale_reasons(bible, shot)
         if reasons:
-            out.append({"shot_id": sid, "start_s": shot.get("start_s"), "end_s": shot.get("end_s"),
-                        "clip_asset_id": shot["clip"]["asset_id"], "reasons": reasons,
-                        "uses": shot["uses"], "references": shot.get("references") or []})
+            item = {"shot_id": sid, "start_s": shot.get("start_s"), "end_s": shot.get("end_s"),
+                    "clip_asset_id": shot["clip"]["asset_id"], "reasons": reasons,
+                    "uses": shot["uses"], "references": shot.get("references") or []}
+            if any("ranges_s" in r for r in reasons):  # a repaired clip: only these parts still need redoing
+                item["stale_ranges_s"] = _join_ranges([rg for r in reasons for rg in r.get("ranges_s", [])])
+                item["repaired_ranges_s"] = reasons[0].get("repaired_ranges_s", [])
+            out.append(item)
     return out
 
 
@@ -385,10 +456,16 @@ def accept_clip(store: Store, bible_id: str, shot_id: str, asset_id: str, operat
 def record_repair(store: Store, bible_id: str, new_asset_id: str, source_asset_id: str, start_s: float, end_s: float,
                   shot_id: Optional[str], references: list[str], entries: Optional[list[str]],
                   correction_id: Optional[str], operation: str = "segment_repair") -> dict[str, Any]:
-    """Provenance of a repair: the shots whose range overlaps the repaired range now point at the repaired video."""
+    """Provenance of a repair: the shots whose range overlaps the repaired range now point at the repaired video.
+
+    When the shot's accepted clip is the repaired source, the repaired range is recorded as a segment of the clip
+    stamped with the current revisions: that range stops being stale, while the rest of the shot keeps the revisions
+    of the original clip (and stays stale if one of them changed). Repairing every stale range, or accepting the
+    repaired video as the whole shot (accept_clip), brings the shot up to date."""
     with _LOCK:
         bible = load(store.data_dir, bible_id)
         touched = []
+        resealed: list[str] = []
         for sid, shot in bible["shots"].items():
             if shot.get("start_s") is None or shot.get("end_s") is None:
                 continue
@@ -405,7 +482,15 @@ def record_repair(store: Store, bible_id: str, new_asset_id: str, source_asset_i
                                                    "start_s": start_s, "end_s": end_s, "at": now_iso(),
                                                    "entries": _stamp(bible, shot, entries), "references": references})
             if shot.get("clip") and shot["clip"]["asset_id"] == source_asset_id:  # the repaired video is the clip now
-                shot["clip"] = {**shot["clip"], "asset_id": new_asset_id, "operation": "segment_repair", "at": now_iso()}
+                was_stale = bool(stale_reasons(bible, shot))
+                segments = [*(shot["clip"].get("segments") or []),
+                            {"start_s": round(float(start_s), 4), "end_s": round(float(end_s), 4), "asset_id": new_asset_id,
+                             "source_asset_id": source_asset_id, "operation": operation, "at": now_iso(),
+                             "entries": _stamp(bible, shot, entries), "shot_revision": shot["revision"]}]
+                shot["clip"] = {**shot["clip"], "asset_id": new_asset_id, "operation": "segment_repair", "at": now_iso(),
+                                "segments": segments}
+                if was_stale and not stale_reasons(bible, shot):
+                    resealed.append(sid)
         if correction_id:
             for corr in bible["corrections"]:
                 if corr["id"] == correction_id:
@@ -414,7 +499,10 @@ def record_repair(store: Store, bible_id: str, new_asset_id: str, source_asset_i
                         "operation": operation, "range_s": [start_s, end_s], "entries": stamps, "references": references,
                         "correction_id": correction_id})
         _save(store.data_dir, bible)
-    return {"bible_id": bible_id, "revision": bible["revision"], "shots": touched, "entries": stamps}
+    still = must_regenerate(bible, only=touched)
+    return {"bible_id": bible_id, "revision": bible["revision"], "shots": touched, "entries": stamps,
+            "up_to_date": resealed, "still_stale": [{"shot_id": m["shot_id"], "stale_ranges_s": m.get("stale_ranges_s"),
+                                                     "repaired_ranges_s": m.get("repaired_ranges_s")} for m in still]}
 
 
 def add_correction(store: Store, bible_id: str, text: str, shot_id: Optional[str] = None, start_s: Optional[float] = None,

@@ -2451,7 +2451,10 @@ def continuity_repair_segment(asset_id: str, replacement_asset_id: str, start_s:
     `reencoded_range_s` says what was re-encoded; `exact_outside=false` means everything was re-encoded). transition
     cut (declick_ms on the audio) or crossfade (crossfade_s, inside the range). Duration and frame count do not change.
     Creates a new video asset; the source stays. With bible_id the repair is recorded as provenance (entries and
-    references used) and correction_id is marked applied. The result includes `join_review` (see
+    references used) and correction_id is marked applied. When the shot's accepted clip is the repaired video, the
+    repaired range counts as made with the current revisions: `provenance.up_to_date` lists shots the repair brought up
+    to date, `provenance.still_stale` the shots whose other ranges (stale_ranges_s) still come from an old revision;
+    repair those too, or accept the repaired video for the whole shot (continuity_shot accept_clip). The result includes `join_review` (see
     continuity_review_join). Runs as a CPU job; wait_s (up to 150) waits on the server. Mock or real generators are not
     run here: give the replacement asset.
 

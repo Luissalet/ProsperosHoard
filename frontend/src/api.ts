@@ -1301,11 +1301,13 @@ export interface VerifyReport {
   media: Record<string, number | string | null>; contact_sheet_asset_id?: string; contact_sheet_error?: string; verified_at: string;
 }
 export interface ContinuityEntry { kind: string; revision: number; name?: string; descriptor?: string; reference_asset_ids?: string[]; palette?: string[]; voice_id?: string; style?: string }
-export interface StaleReason { entry_id: string | null; name?: string; why: string; used_revision: number | null; current_revision: number | null }
+export interface StaleReason { entry_id: string | null; name?: string; why: string; used_revision: number | null; current_revision: number | null;
+  ranges_s?: [number, number][]; repaired_ranges_s?: [number, number][] }
+export interface ClipSegment { start_s: number; end_s: number; asset_id: string; entries: Record<string, number>; shot_revision?: number }
 export interface ContinuityShot { id: string; start_s?: number; end_s?: number; description?: string; camera?: string; prompt?: string; uses: string[]; references: string[];
-  clip: { asset_id: string; operation: string; entries: Record<string, number> } | null; stale: boolean; stale_reasons: StaleReason[]; revision: number }
+  clip: { asset_id: string; operation: string; entries: Record<string, number>; segments?: ClipSegment[] } | null; stale: boolean; stale_reasons: StaleReason[]; revision: number }
 export interface ContinuityBible { bible_id: string; name: string; project_id: string; production?: string | null; revision: number; entries: Record<string, ContinuityEntry>;
-  shots: Record<string, ContinuityShot>; stale_shots: string[]; accepted_shots: string[]; must_regenerate: { shot_id: string; reasons: StaleReason[] }[];
+  shots: Record<string, ContinuityShot>; stale_shots: string[]; accepted_shots: string[]; must_regenerate: { shot_id: string; reasons: StaleReason[]; stale_ranges_s?: [number, number][]; repaired_ranges_s?: [number, number][] }[];
   corrections: { id: string; text: string; status: string; shot_id?: string | null; start_s?: number | null; end_s?: number | null }[];
   provenance: { at: string; asset_id: string; operation: string; shot_id?: string; entries?: Record<string, number>; references?: string[] }[] }
 export interface ContinuityBibleBrief { bible_id: string; name: string; revision: number; entries: number; shots: number; stale_shots: string[]; open_corrections: number }
