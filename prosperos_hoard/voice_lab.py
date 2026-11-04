@@ -218,7 +218,7 @@ def resolve_voice_spec(store: Store, tts_engines: list[Any], spec: dict[str, Any
 
     voice_ref = spec.get("voice_ref") or (library_voice.get("voice_ref") if library_voice else None)
     sample = sample_path(store, library_voice) if library_voice else None
-    if engine.capabilities.cloning and not sample and not voice_ref:
+    if engine.capabilities.cloning and not engine.capabilities.reference_optional and not sample and not voice_ref:
         raise VoiceSpecError("cloning_needs_sample", f"engine '{engine.id}' needs a cloning sample (voice_id with a "
                                                       "processed sample, or voice_ref for a pre-made speaker)")
     return {"engine": engine, "voice_ref": voice_ref, "sample_path": sample, "speed": merged.get("speed"),

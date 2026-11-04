@@ -114,7 +114,8 @@ class VoxCPMEngine(TTSEngine):
     id = "voxcpm"
     label = "VoxCPM2 (GPU, 30 languages, cloning)"
     pip_packages = ["voxcpm"]  # installed into its own environment, see install()
-    capabilities = EngineCapabilities(languages=LANGUAGES, cloning=True, streaming=True, needs_gpu=True, multi_speaker=False)
+    capabilities = EngineCapabilities(languages=LANGUAGES, cloning=True, streaming=True, needs_gpu=True, multi_speaker=False,
+                                      reference_optional=True)
     sidecar = True
 
     def __init__(self, voices_dir: Optional[Path] = None):
