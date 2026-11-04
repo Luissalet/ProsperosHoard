@@ -505,6 +505,27 @@ def record_repair(store: Store, bible_id: str, new_asset_id: str, source_asset_i
                                                      "repaired_ranges_s": m.get("repaired_ranges_s")} for m in still]}
 
 
+def record_regeneration(store: Store, bible_id: str, shot_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    """Provenance of a regenerated shot: the new take, the prompt, references and revisions it was made with, the
+    generator and its jobs, and the repairs that spliced its stale ranges in (those repairs already stamped the clip)."""
+    with _LOCK:
+        bible = load(store.data_dir, bible_id)
+        shot = bible["shots"].get(shot_id)
+        if shot is None:
+            raise EngineError("not_found", f"shot {shot_id} not found")
+        entry = {"at": now_iso(), **{k: v for k, v in record.items() if k != "prompt"}, "prompt": str(record.get("prompt") or "")[:2000]}
+        shot.setdefault("regenerations", []).append(entry)
+        del shot["regenerations"][:-20]
+        _record(bible, {"asset_id": record.get("result_asset_id"), "shot_id": shot_id, "operation": "regenerate",
+                        "take_asset_id": record.get("take_asset_id"), "ranges_s": record.get("ranges_s"),
+                        "entries": record.get("entries"), "references": record.get("references"),
+                        "generator": record.get("generator")})
+        _save(store.data_dir, bible)
+    still = must_regenerate(bible, only=[shot_id])
+    return {"shot_id": shot_id, "up_to_date": not still,
+            "still_stale": [{"shot_id": m["shot_id"], "stale_ranges_s": m.get("stale_ranges_s")} for m in still]}
+
+
 def add_correction(store: Store, bible_id: str, text: str, shot_id: Optional[str] = None, start_s: Optional[float] = None,
                    end_s: Optional[float] = None, region: Optional[list[float]] = None) -> dict[str, Any]:
     with _LOCK:
