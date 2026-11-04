@@ -1806,8 +1806,9 @@ def studio_spaces(
     included clip at that time locally, without a model. Choose a time inside every clip; its image
     output can feed a reference, an edit or a video's start. combine
     {audio_start_s} joins the clips wired into "clips" in wire order, with input audio (a song under them);
-    variations {mode "angles"|"expressions"|"ages"|"lighting"|"storyboard"|"custom" (data.custom: one change per
-    line), count 1-9} edits each wired image (input image) once per change, keeping everything else;
+    variations {mode "angles"|"orbit"|"expressions"|"ages"|"lighting"|"storyboard"|"custom" (data.custom: one change per
+    line; "orbit" turns the camera around the subject: data.orbit_step 15-180 degrees, data.orbit_elevation -60..60
+    (positive looks down), data.orbit_distance "close"|"medium"|"wide"; a generative edit, not a 3D camera), count 1-9} edits each wired image (input image) once per change, keeping everything else;
     composite {layers: [{blend "normal"|"screen"|"multiply"|"overlay"|"add"|"lighten"|"darken"|"softlight"|
     "difference", opacity 0-1, scale (of the background's width), x, y (0-1 centre), key "black"|"white"}] one per
     layer in wire order} lays the pictures or clips wired into "layers" over each one wired into "background"

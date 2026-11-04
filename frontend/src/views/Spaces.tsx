@@ -708,7 +708,7 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
       </>
     );
   } else if (kind === "variations") {
-    const modes = ["angles", "expressions", "ages", "lighting", "storyboard", "custom"];
+    const modes = ["angles", "orbit", "expressions", "ages", "lighting", "storyboard", "custom"];
     body = (
       <>
         <div className="sp-opts nodrag">
@@ -719,6 +719,19 @@ const SpaceNodeView = memo(function SpaceNodeView({ id, data: nd, selected }: No
             {[2, 3, 4, 6, 9].map((n) => <option key={n} value={n}>×{n}</option>)}
           </select>
         </div>
+        {data.mode === "orbit" && (
+          <div className="sp-opts nodrag">
+            <select value={data.orbit_step || 45} onChange={(e) => set({ orbit_step: Number(e.target.value) })} title={t("spOrbitStep")}>
+              {[30, 45, 60, 90, 120, 180].map((n) => <option key={n} value={n}>{n}°</option>)}
+            </select>
+            <select value={data.orbit_elevation || 0} onChange={(e) => set({ orbit_elevation: Number(e.target.value) })} title={t("spOrbitElevation")}>
+              {[-45, -30, 0, 30, 45].map((n) => <option key={n} value={n}>{n > 0 ? `↓ ${n}°` : n < 0 ? `↑ ${-n}°` : "0°"}</option>)}
+            </select>
+            <select value={data.orbit_distance || "medium"} onChange={(e) => set({ orbit_distance: e.target.value })} title={t("spOrbitDistance")}>
+              {["close", "medium", "wide"].map((d) => <option key={d} value={d}>{t(`spOrbit_${d}` as MessageKey)}</option>)}
+            </select>
+          </div>
+        )}
         {data.mode === "custom" && <textarea className="nodrag nowheel" rows={4} value={data.custom || ""} placeholder={t("spVarCustomPh")}
           onChange={(e) => set({ custom: e.target.value })} />}
         <div className="small muted sp-mode">{t("spVarHint")}</div>

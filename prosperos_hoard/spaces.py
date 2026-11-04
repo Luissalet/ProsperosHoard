@@ -85,6 +85,35 @@ VARIATIONS: dict[str, list[str]] = {
     "storyboard": ["the opening moment", "a moment later", "the action builds", "the turning point", "the reaction",
                    "the climax", "the aftermath", "a quiet beat", "the final image"],
 }
+ORBIT_DISTANCES = {"close": "move the camera closer", "medium": "", "wide": "move the camera back for a wide shot"}
+
+
+def orbit_views(step: Any = 45, elevation: Any = 0, distance: Any = "medium") -> list[str]:
+    """Camera positions around the subject, as edit instructions: the camera turns ``step`` degrees at a time (right,
+    then on round to 360), tilted ``elevation`` degrees (-60 looking up .. 60 looking down), at a close, medium or wide
+    distance. A generative edit of one picture, not a 3D reconstruction: the sides it was not shown are invented."""
+    try:
+        step_deg = max(15, min(180, int(float(step))))
+    except (TypeError, ValueError):
+        step_deg = 45
+    try:
+        tilt = max(-60, min(60, int(float(elevation))))
+    except (TypeError, ValueError):
+        tilt = 0
+    extra = [ORBIT_DISTANCES.get(str(distance or "medium").lower(), "")]
+    if tilt >= 15:
+        extra.append(f"raise the camera to look down on it at {tilt} degrees")
+    elif tilt <= -15:
+        extra.append(f"lower the camera to look up at it at {-tilt} degrees")
+    tail = "".join(f", {x}" for x in extra if x)
+    views = []
+    for angle in range(step_deg, 360, step_deg):
+        views.append(f"rotate the camera {angle} degrees to the right around the subject" if angle <= 180
+                     else f"rotate the camera {360 - angle} degrees to the left around the subject")
+        views[-1] += tail
+    return views or [f"rotate the camera 90 degrees to the right around the subject{tail}"]
+
+
 MAX_FANOUT = 24
 MAX_NODES, MAX_EDGES = 300, 900
 SHEET_SUFFIX = ("character turnaround reference sheet: full body front view, full body side view and a face close-up, "
@@ -603,6 +632,8 @@ def plan_node(store: Store, graph: dict[str, Any], state: dict[str, Any], node_i
             wanted = [x.strip() for x in str(data.get("custom") or "").splitlines() if x.strip()]
             if not wanted:
                 raise SpaceError("needs_prompt", "write one change per line")
+        elif mode == "orbit":
+            wanted = orbit_views(data.get("orbit_step", 45), data.get("orbit_elevation", 0), data.get("orbit_distance"))
         else:
             wanted = VARIATIONS.get(mode) or VARIATIONS["angles"]
         count = max(1, min(int(data.get("count") or 4), len(wanted), 9))
@@ -1181,7 +1212,7 @@ def plan_to_ops(store: Store, project_id: str, plan: dict[str, Any], existing: s
     types = {ids[str(n.get("id") or n["type"])]: n["type"] for n in raw}
     data_keys = {"text": ("text",), "image": ("prompt", "aspect", "count"), "video": ("prompt", "quality", "seconds"),
                  "music": ("tags", "lyrics", "duration", "bpm"), "assistant": ("prompt", "as_list", "items"),
-                 "variations": ("mode", "count"), "note": ("text",), "combine": ("audio_start_s",),
+                 "variations": ("mode", "count", "orbit_step", "orbit_elevation", "orbit_distance"), "note": ("text",), "combine": ("audio_start_s",),
                  "clip_edit": ("prompt", "mode", "quality"), "frame": ("at_s",)}
     kept = []
     for n in raw:
