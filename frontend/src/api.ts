@@ -724,6 +724,8 @@ export interface EngineStatus {
   capabilities: EngineCapabilities;
   install_hint: string | null;
   reason: string;
+  voices?: string[];
+  default_voice?: string;
 }
 
 export interface VoiceSpec {

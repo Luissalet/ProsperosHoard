@@ -2553,8 +2553,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         eng = _engine_for_install(body.kind, engine_id)
         if not eng.pip_packages:
             raise engine.EngineError("no_installer", f"'{engine_id}' has no known installer; see docs/VOICE.md")
-        return queue.enqueue("install_voice_engine", "cpu", {"kind": body.kind, "engine_id": engine_id,
-                                                              "pip_packages": eng.pip_packages})
+        params = {"kind": body.kind, "engine_id": engine_id, "pip_packages": eng.pip_packages}
+        if getattr(eng, "sidecar", False):  # installs into its own environment, not this app's venv
+            params.update(sidecar=True, voices_dir=str(store.data_dir / "voices"))
+        return queue.enqueue("install_voice_engine", "cpu", params)
 
     # -------------------------------------------------------------- library
     @app.get("/api/voice/voices")
@@ -6067,6 +6069,14 @@ def _install_voice_engine_job(job: dict[str, Any], progress) -> dict[str, Any]:
     (`POST /api/voice/engines/{id}/install`): runs `pip install` for its
     packages into this app's own venv. Never triggered on its own."""
     params = job["params"]
+    if params.get("sidecar") and params.get("engine_id") == "kittentts":
+        from . import kitten_engine
+        from .voice_engines import EngineNotInstalled
+
+        try:
+            return {**kitten_engine.install(Path(params["voices_dir"]), progress), "kind": params["kind"]}
+        except EngineNotInstalled as exc:
+            raise engine.EngineError("install_failed", exc.install_hint[-1500:]) from exc
     packages = params["pip_packages"]
     progress(0.05, f"installing {', '.join(packages)}")
     exe = sys.executable

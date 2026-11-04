@@ -74,6 +74,8 @@ function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
   spec: VoiceSpec; setSpec: (s: VoiceSpec) => void; engines: EngineStatus[]; voices: StudioVoice[];
 }) {
   const { t, lang } = useT();
+  const selected = engines.find((e) => e.id === spec.engine_id);
+  const engineVoices = selected?.installed ? selected.voices || [] : [];
   return (
     <div className="row wrap">
       <select value={spec.voice_id || ""} onChange={(e) => setSpec({ ...spec, voice_id: e.target.value || null, engine_id: e.target.value ? undefined : spec.engine_id })}>
@@ -81,9 +83,16 @@ function VoiceSpecPicker({ spec, setSpec, engines, voices }: {
         {voices.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.engine_id})</option>)}
       </select>
       {!spec.voice_id && (
-        <select value={spec.engine_id || ""} onChange={(e) => setSpec({ ...spec, engine_id: e.target.value || null })}>
+        <select value={spec.engine_id || ""} onChange={(e) => setSpec({ ...spec, engine_id: e.target.value || null, voice_ref: null })}>
           <option value="">{t("chooseVoice")}</option>
           {engines.filter((e) => e.installed).map((e) => <option key={e.id} value={e.id}>{voiceEngineLabel(e.label, lang)}</option>)}
+        </select>
+      )}
+      {!spec.voice_id && engineVoices.length > 0 && (
+        <select data-testid="engine-voice" aria-label={lang.startsWith("es") ? "Voz del motor" : "Engine voice"} value={spec.voice_ref || ""}
+          onChange={(e) => setSpec({ ...spec, voice_ref: e.target.value || null })}>
+          <option value="">{(lang.startsWith("es") ? "Voz por defecto" : "Default voice") + (selected?.default_voice ? ` (${selected.default_voice})` : "")}</option>
+          {engineVoices.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
       )}
       <label className="field" style={{ width: 110 }}>{t("speedLabel")}

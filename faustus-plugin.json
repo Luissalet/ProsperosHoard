@@ -45,6 +45,7 @@
     "expanded-canvas-mask",
     "audio.cpp-local-tts",
     "yovoice-adapter",
+    "kittentts-cpu-voice",
     "native multitrack editing",
     "native creative engines",
     "revisioned audiovisual projects",

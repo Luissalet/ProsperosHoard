@@ -40,6 +40,14 @@ when asked.
 | Kokoro | `kokoro` | no (named voice packs), streaming | en, es, fr, it, pt, ja, zh, hi | `pip install kokoro>=0.9.4 soundfile` |
 | Chatterbox | `chatterbox` | yes, English-focused, an "exaggeration" style control | en | `pip install chatterbox-tts` (GPU recommended) |
 | ComfyUI TTS node pack | `comfy-tts` | status-only: reports a TTS node pack ComfyUI already has (VibeVoice, F5-TTS, Kokoro, IndexTTS custom nodes); no built-in workflow template yet, so it cannot synthesize | - | install a TTS custom node pack in ComfyUI and restart it |
+| KittenTTS 0.8 | `kittentts` | no (eight named voices: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo); ONNX on the CPU only, nano 15 M / micro 40 M / mini 80 M | en | the **Install** button: builds its own environment in `data/voices/engines/kittentts` with a Python 3.10-3.12 from the PC (`PROSPERO_KITTEN_PYTHON` wins), installs the kittentts 0.8.1 wheel and downloads the default model |
+
+KittenTTS needs Python < 3.13 (its phonemiser) and this app runs on 3.13, so it never goes into the app's venv: each
+line is synthesised out of process by `kitten_worker.py` in that environment. `voice_ref` is a voice name or
+`<size>/<voice>` (`nano/Luna`); the default model is mini (`PROSPERO_KITTEN_MODEL=nano|micro|mini` or a Hugging Face
+id). The engine's status lists its voices, and the Voice screen shows them in a second selector next to the engine.
+The 1.7 B «KittenTTS 2» family (Spanish voice) was measured at 16-20x real time on this CPU (Ágora #250) and is not
+used.
 
 ### Speech-to-text
 
