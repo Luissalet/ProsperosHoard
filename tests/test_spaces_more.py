@@ -212,3 +212,25 @@ def test_an_unknown_at_name_becomes_plain_words(client):
     assert c.post(f"/api/spaces/{sp['id']}/build", json={"request": "Vera on stage"}).status_code == 200
     g = c.get(f"/api/spaces/{sp['id']}").json()["graph"]
     assert {n["id"]: n["data"]["prompt"] for n in g["nodes"]}["i"] == "VERA on stage"
+
+
+def test_orbit_views_turn_the_camera_around_the_subject():
+    assert spaces.orbit_views(90) == ["rotate the camera 90 degrees to the right around the subject",
+                                      "rotate the camera 180 degrees to the right around the subject",
+                                      "rotate the camera 90 degrees to the left around the subject"]
+    views = spaces.orbit_views(45, 30, "close")
+    assert len(views) == 7 and views[0].endswith("move the camera closer, raise the camera to look down on it at 30 degrees")
+    assert "lower the camera to look up at it at 45 degrees" in spaces.orbit_views(60, -45)[0]
+    assert spaces.orbit_views("junk", "junk", "nope")[0].startswith("rotate the camera 45 degrees")
+
+
+def test_variations_orbit_mode_plans_one_edit_per_view(client):
+    g = {"nodes": [{"id": "p", "type": "image", "data": {"prompt": "x"}},
+                   {"id": "v", "type": "variations", "data": {"mode": "orbit", "count": 3, "orbit_step": 90, "orbit_distance": "wide"}}],
+         "edges": [{"source": "p", "target": "v", "target_handle": "image"}]}
+    store, sid = _space_with(client, g)
+    store.patch_space_state(sid, "p", {"outputs": ["a_pic"]})
+    sp = store.get_space(sid)
+    ops = spaces.plan_node(store, sp["graph"], sp["state"], "v")
+    assert len(ops) == 3 and "rotate the camera 90 degrees to the right" in ops[0]["body"]["prompt"]
+    assert all("move the camera back for a wide shot" in o["body"]["prompt"] for o in ops)
