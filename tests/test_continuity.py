@@ -479,3 +479,28 @@ def test_routes_plan_and_use_a_take_for_a_stale_shot(client, data_dir):
     assert got["stale_shots"] == [] and got["shots"]["two"]["regenerations"][-1]["take_asset_id"] == "newtake"
     bad = c.post(f"/api/continuity/{bid}/regenerate", json={"bible_id": bid, "action": "run"})
     assert bad.status_code >= 400 and "not_stale" in bad.text
+
+
+def test_a_region_repair_can_crossfade_and_keeps_length_picture_and_sound(store, project):
+    # the overlay branch used another time base than the other branches, so xfade refused the region + crossfade pair
+    src = _video(store, project, "scene", "testsrc", 6)
+    _video(store, project, "patched", "testsrc", 6, vf="drawbox=x=40:y=30:w=80:h=60:color=red:t=fill", sine=880)
+    for a, b in ((1.0, 3.0), (1.2, 3.6), (0.0, 2.0), (1.0, 6.0)):
+        res = segment_repair.repair_segment(store, "scene", "patched", a, b, region=[0.25, 0.25, 0.5, 0.5],
+                                            transition="crossfade", crossfade_s=0.3, replacement_in_s=a, review=False)
+        assert res["untouched"]["identical"] and res["untouched"]["frames_result"] == 150, (a, b, res["untouched"])
+        assert _audio_md5(store.data_dir / store.get_asset(res["asset_id"])["file_path"]) == _audio_md5(store.data_dir / src["file_path"])
+
+
+def test_a_repair_inside_an_earlier_repair_still_succeeds_and_keeps_length(store, project, monkeypatch):
+    # some ffmpeg builds never finish reading a video made by an earlier repair together with a replacement; the repair
+    # must not hang: it is stopped and redone on a clean re-encoded copy (honestly reported), or done exactly
+    monkeypatch.setattr(segment_repair, "_encode_timeout", lambda src, frames, fps: 8)
+    _video(store, project, "film", "testsrc", 8, gop=25)
+    _video(store, project, "fix", "smptebars", 8)
+    first = segment_repair.repair_segment(store, "film", "fix", 2.0, 4.0, review=False)
+    assert first["untouched"]["reencoded_range_s"] == [2.0, 4.0]
+    again = segment_repair.repair_segment(store, first["asset_id"], "fix", 3.0, 3.2, review=False)
+    u = again["untouched"]
+    assert u["frames_result"] == 200, u
+    assert u["identical"] or any("re-encoded" in n for n in again.get("notes", [])), again
