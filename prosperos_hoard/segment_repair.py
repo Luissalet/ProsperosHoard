@@ -92,11 +92,21 @@ def _exe() -> str:
 
 
 def _run(argv: list[str], what: str, timeout: int = 3600) -> procutil.subprocess.CompletedProcess:
-    done = procutil.run(argv, text=True, timeout=timeout)
+    try:
+        done = procutil.run(argv, text=True, timeout=timeout)
+    except procutil.subprocess.TimeoutExpired:
+        raise EngineError("repair_timeout", f"{what}: ffmpeg did not finish in {timeout} s") from None
     if done.returncode != 0:
         tail = " ".join((done.stderr or "").strip().splitlines()[-3:])[:500]
         raise EngineError("repair_step_failed", f"{what}: {tail or f'ffmpeg exit {done.returncode}'}")
     return done
+
+
+def _encode_timeout(src: dict[str, Any], frames: int, fps: float) -> int:
+    """Generous time for encoding ``frames`` frames of the source's size: an ffmpeg that never finishes (it does with some
+    earlier repairs used as the source, see ``repair_segment``) is stopped and reported instead of holding the job for an hour."""
+    scale = max(1.0, int(src["width"]) * int(src["height"]) / (1280 * 720))
+    return int(20 + 5 * scale * frames / max(fps, 1.0))
 
 
 def _probe(path: Path) -> dict[str, Any]:
@@ -173,14 +183,15 @@ def _mid_filter(src: dict[str, Any], fps: float, ka: int, kb: int, sf: int, ef: 
            f"trim=start_frame={rep_start}:end_frame={rep_start + lf},setpts=PTS-STARTPTS")
     if rect:
         rx, ry, rw, rh = rect
-        g.append(f"[s2]trim=start_frame={sf}:end_frame={ef},setpts=PTS-STARTPTS[O]")
+        g.append(f"[s2]trim=start_frame={sf}:end_frame={ef},setpts=PTS-STARTPTS,fps={f}[O]")
         soft = ""
         if feather > 0:
             fe = max(1, int(feather))
             soft = (f",format=yuva444p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':"
                     f"a='255*clip(min(min(X,W-1-X),min(Y,H-1-Y))/{fe},0,1)'")
         g.append(f"{new},crop={rw}:{rh}:{rx}:{ry}{soft}[Nc]")
-        g.append(f"[O][Nc]overlay={rx}:{ry}:eof_action=pass,format={pix}[N]")
+        # fps: the overlay keeps the time base of the source branch, and xfade needs both inputs on the same one
+        g.append(f"[O][Nc]overlay={rx}:{ry}:eof_action=pass,fps={f},format={pix}[N]")
     else:
         g.append(f"{new}[N]")
     names.append("N")
@@ -288,7 +299,7 @@ def _stitch(exe: str, work: Path, src_path: Path, rep_path: Path, src: dict[str,
         graph = ";".join([new.replace("[1:v]", "[0:v]", 1), next(x for x in graph.split(";") if x.startswith("[N]"))])
         inputs = ["-i", str(rep_path)]
     _run([*base, *inputs, "-filter_complex", graph, "-map", "[mid]", "-an", *enc,
-          "-frames:v", str(kb - ka), str(mid)], "encode repaired part")
+          "-frames:v", str(kb - ka), str(mid)], "encode repaired part", timeout=_encode_timeout(src, kb - ka, fps))
     parts.append(mid)
     out = work / "video.mp4"
     if kb >= n and len(parts) == 1:
@@ -409,6 +420,9 @@ def repair_segment(store: Store, asset_id: str, replacement_asset_id: str, start
         copyable = (src.get("video_codec") == "h264" and "mp4" in str(src.get("container")) and bool(ana["keyframes"])
                     and len(ana["pts_time"]) == n)
         kfs = ana["keyframes"] or [0]
+        if len(kfs) > 2:  # keep the source's keyframe spacing in the re-encoded part: a later repair of this result then
+            gaps = sorted(b - a for a, b in zip(kfs, kfs[1:]))  # re-encodes only the GOPs it touches, not the whole part
+            enc += ["-g", str(max(1, gaps[len(gaps) // 2])), "-sc_threshold", "0"]
         ka = max([k for k in kfs if k <= sf] or [0]) if copyable else 0
         kb = min([k for k in kfs if k >= ef] or [n]) if copyable else n
         kf_times = {i: t for i, t in zip(range(n), ana["pts_time"])} if copyable else {}
@@ -425,13 +439,33 @@ def repair_segment(store: Store, asset_id: str, replacement_asset_id: str, start
             notes.append(f"the range was snapped to frames {sf}-{ef} ({sf / fps:.4f}-{ef / fps:.4f} s)")
         exact, fallback = copyable, None
         video = None
+        normalised = False
         for attempt in (0, 1):
             ka_, kb_ = (ka, kb) if attempt == 0 else (0, n)
             progress(0.15 + 0.4 * attempt, "re-encoding the repaired part" if ka_ or kb_ < n else "re-encoding the video")
             tmp = work / f"try{attempt}"
             tmp.mkdir()
-            video = _stitch(exe, tmp, src_path, rep_for_video, src, fps, ka_, kb_, kf_times, n, sf, ef, d_in, d_out,
-                            rep_start, framing, enc, rect, int(feather_px or 0))
+            try:
+                video = _stitch(exe, tmp, src_path, rep_for_video, src, fps, ka_, kb_, kf_times, n, sf, ef, d_in, d_out,
+                                rep_start, framing, enc, rect, int(feather_px or 0))
+            except EngineError as exc:
+                if exc.code != "repair_timeout" or normalised:
+                    raise
+                # ffmpeg stops forever on some videos made by an earlier repair (several inputs joined in one graph); the same
+                # picture re-encoded once is read without trouble, so the repair is done on that copy and says so
+                progress(0.3, "normalising the source video")
+                clean = work / "normalised.mp4"
+                _run([exe, "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(src_path), "-map", "0:v:0", "-an",
+                      "-c:v", "libx264", "-preset", "fast", "-crf", "12", "-pix_fmt", src.get("pix_fmt") or "yuv420p",
+                      "-fps_mode", "passthrough", str(clean)], "normalise the source video",
+                     timeout=_encode_timeout(src, n, fps))
+                normalised = True
+                ka_, kb_ = 0, n
+                shutil.rmtree(tmp, ignore_errors=True)
+                tmp.mkdir()
+                video = _stitch(exe, tmp, clean, rep_for_video, src, fps, 0, n, {}, n, sf, ef, d_in, d_out,
+                                rep_start, framing, enc, rect, int(feather_px or 0))
+                attempt = 1
             if attempt == 0 and not (ka_ == 0 and kb_ == n):
                 check = analyze_video(video)
                 same = (check["frames"] == n and check["hashes"][:ka_] == ana["hashes"][:ka_]
@@ -446,7 +480,11 @@ def repair_segment(store: Store, asset_id: str, replacement_asset_id: str, start
             break
         else:  # pragma: no cover - the loop always breaks on attempt 1
             raise EngineError("repair_step_failed", "could not stitch the repaired video")
-        if fallback:
+        if normalised:
+            exact = False
+            notes.append("all frames were re-encoded: ffmpeg could not read this video (made by an earlier repair) together "
+                         "with the replacement, so the repair was done on a re-encoded copy of it")
+        elif fallback:
             ka, kb = 0, n
             notes.append(f"all frames were re-encoded: {fallback}")
         elif not copyable:
