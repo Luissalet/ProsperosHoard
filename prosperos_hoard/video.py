@@ -13,6 +13,7 @@ production's animatic, see `animatic.py`).
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import shutil
@@ -255,17 +256,23 @@ def _scaled_resolution(width: int, height: int, short_side: Optional[int]) -> tu
     return w, h
 
 
-def _zoompan_expr(zoom_start: float, zoom_end: float, pan: str, n_frames: int) -> tuple[str, str, str]:
+def _zoompan_expr(zoom_start: float, zoom_end: float, pan: str, n_frames: int,
+                  progress_range: tuple[float, float] = (0.0, 1.0)) -> tuple[str, str, str]:
     """zoompan expressions for one still. The zoom is a closed form of the
     output frame number `on` (0 on the first frame): exactly `zoom_start` on
     the first frame and `zoom_end` on the last, in either direction. (An
     incremental `zoom+inc` capped with `min()` ignored `zoom_start` on a
     zoom-in and snapped a zoom-out to 1.0 after one frame.) The pan drifts
     the crop window by up to `drift` source pixels over the clip, clamped to
-    the room the zoom leaves (none at zoom 1.0)."""
+    the room the zoom leaves (none at zoom 1.0). `progress_range` renders
+    only that part of the move (a clip cut short by a range render)."""
     n_frames = max(1, n_frames)
     span = max(1, n_frames - 1)
-    progress = f"(on/{span})"
+    p0, p1 = progress_range
+    if (p0, p1) == (0.0, 1.0):
+        progress = f"(on/{span})"
+    else:
+        progress = f"({p0:.6f}+{p1 - p0:.6f}*on/{span})"
     z = f"{zoom_start:.6f}+({zoom_end - zoom_start:.6f})*{progress}"
     drift = 48
     x = "iw/2-(iw/zoom/2)"
@@ -302,14 +309,55 @@ def framing_vf(width: int, height: int, framing: str = "fill", focus_x: float = 
             f"crop={width}:{height}:(iw-{width})*{fx:.3f}:(ih-{height})*{fy:.3f}")
 
 
+# dips and flashes are fades inside the clips on either side of the cut, so
+# a timeline of cuts, dips and flashes is joined with the concat demuxer
+FADE_COLORS = {"dip_black": "black", "flash_white": "white"}
+
+
+def clip_fade_vf(n_frames: int, fade_in: Optional[tuple[str, int]] = None,
+                 fade_out: Optional[tuple[str, int]] = None, out_end_frame: Optional[int] = None) -> str:
+    """`fade` filters for one clip (no leading/trailing comma): `fade_in` =
+    (colour, frames) from that colour at the start; `fade_out` = (colour,
+    frames) into it, ending at `out_end_frame` (default: the last frame; a
+    clip rendered longer for a crossfade stays full colour after it)."""
+    parts = []
+    if fade_in and fade_in[1] > 0:
+        parts.append(f"fade=t=in:s=0:n={fade_in[1]}:color={fade_in[0]}")
+    if fade_out and fade_out[1] > 0:
+        end = n_frames if out_end_frame is None else out_end_frame
+        parts.append(f"fade=t=out:s={max(0, end - fade_out[1])}:n={fade_out[1]}:color={fade_out[0]}")
+    return ",".join(parts)
+
+
+def upright_still(src: Path, work_dir: Path, name: str) -> Path:
+    """`src`, or an upright PNG copy of it in `work_dir` when it carries an
+    EXIF orientation: ffmpeg's image input ignores that tag, so a phone
+    photo stored sideways rendered sideways. (New imports are baked
+    upright; this covers older assets.)"""
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(src) as im:
+            if im.getexif().get(0x0112, 1) in (None, 0, 1):
+                return src
+            out = work_dir / f"{name}.png"
+            ImageOps.exif_transpose(im).save(out)
+            return out
+    except (OSError, ValueError, SyntaxError):  # not something Pillow reads: let ffmpeg try
+        return src
+
+
 def build_image_clip_cmd(
     ffmpeg: str, src: Path, out_path: Path, width: int, height: int, fps: int, duration_s: float,
     ken_burns: Optional[dict[str, Any]] = None, extra_vf: str = "", framing: str = "fill",
-    focus: tuple[float, float] = (0.5, 0.5),
+    focus: tuple[float, float] = (0.5, 0.5), progress_range: tuple[float, float] = (0.0, 1.0),
 ) -> list[str]:
+    """`extra_vf` (e.g. `clip_fade_vf`) runs on the finished frames;
+    `progress_range` renders only that part of the Ken Burns move."""
     ken_burns = ken_burns or {"zoom_start": 1.0, "zoom_end": 1.0, "pan": "none"}
     n_frames = max(1, round(duration_s * fps))
-    z, x, y = _zoompan_expr(ken_burns.get("zoom_start", 1.0), ken_burns.get("zoom_end", 1.0), ken_burns.get("pan", "none"), n_frames)
+    z, x, y = _zoompan_expr(ken_burns.get("zoom_start", 1.0), ken_burns.get("zoom_end", 1.0), ken_burns.get("pan", "none"),
+                            n_frames, progress_range)
     vf = (
         f"{framing_vf(width * 2, height * 2, framing, *focus)},"
         f"zoompan=z='{z}':d={n_frames}:s={width}x{height}:fps={fps}:x='{x}':y='{y}',"
@@ -495,7 +543,8 @@ def ffmpeg_has_filter(ffmpeg: str, name: str) -> bool:
 
 def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass_name: Optional[str],
                    out_path: Path, preset: str, crf: int, audio_bitrate: str, finishing_vf: str = "",
-                   overlay_path: Optional[Path] = None, max_duration_s: Optional[float] = None) -> list[str]:
+                   overlay_path: Optional[Path] = None, max_duration_s: Optional[float] = None,
+                   duration_s: Optional[float] = None, audio_start_s: float = 0.0) -> list[str]:
     """`ass_name` is a bare file name inside the ffmpeg working directory
     (`render_timeline` runs this with `cwd=work_dir`): the `ass=` filter
     argument is parsed by ffmpeg's filter-graph syntax, where the drive
@@ -506,11 +555,19 @@ def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass
     `overlay_path` is the transparent video of the graphics track (see
     `motion_graphics.render_overlay_track`): it goes over the finished picture and under
     the captions, so the grade does not tint it and a caption still reads on top of it;
-    `max_duration_s` then stops the output at the cut's end."""
+    `max_duration_s` then stops the output at the cut's end.
+
+    With `duration_s` the output is exactly that long: the song is padded
+    with silence (`apad`) and cut there, so an edit longer than the song
+    keeps its last shots (`-shortest` stopped at the song's end while the
+    render reported the edit's length). `audio_start_s` seeks into the song
+    (a range render)."""
     cmd = [ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-i", str(video_path)]
     if overlay_path:
         cmd += ["-i", str(overlay_path)]
     if audio_path:
+        if audio_start_s > 0:
+            cmd += ["-ss", f"{audio_start_s:.3f}"]
         cmd += ["-i", str(audio_path)]
     audio_index = 2 if overlay_path else 1
     ass_filter = ""
@@ -532,8 +589,11 @@ def build_mux_cmd(ffmpeg: str, video_path: Path, audio_path: Optional[Path], ass
             cmd += ["-vf", ",".join(vf_parts)]
         cmd += ["-map", "0:v"]
     if audio_path:
-        cmd += ["-map", f"{audio_index}:a", "-shortest"]
-    if overlay_path and max_duration_s:
+        cmd += ["-map", f"{audio_index}:a"]
+        cmd += ["-af", "apad"] if duration_s else ["-shortest"]
+    if duration_s:
+        cmd += ["-t", f"{duration_s:.3f}"]
+    elif overlay_path and max_duration_s:
         cmd += ["-t", f"{max_duration_s:.3f}"]
     cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
     if audio_path:
@@ -830,15 +890,21 @@ def run_ffmpeg_with_progress(cmd: list[str], total_duration_s: float, on_progres
     with tempfile.TemporaryFile(mode="w+b") as err:
         proc = procutil.popen(cmd, stdout=procutil.subprocess.PIPE, stderr=err, text=True, cwd=str(cwd) if cwd else None)
         assert proc.stdout is not None
-        for line in proc.stdout:
-            if should_cancel and should_cancel():
-                hlproc.kill_tree(proc, grace_s=1.0)
-                proc.wait()
-                raise RenderCancelled("render cancelled")
-            m = re.match(r"out_time_(?:ms|us)=(\d+)", line.strip())
-            if m and on_progress and total_duration_s > 0:
-                out_s = int(m.group(1)) / 1_000_000.0
-                on_progress(min(1.0, out_s / total_duration_s))
+        try:
+            for line in proc.stdout:
+                if should_cancel and should_cancel():
+                    raise RenderCancelled("render cancelled")
+                m = re.match(r"out_time_(?:ms|us)=(\d+)", line.strip())
+                if m and on_progress and total_duration_s > 0:
+                    out_s = int(m.group(1)) / 1_000_000.0
+                    on_progress(min(1.0, out_s / total_duration_s))
+        except BaseException:
+            # a cancel, or on_progress raising (a job cancelled through its
+            # progress callback, a database error): stop ffmpeg before it
+            # writes any more of the output
+            hlproc.kill_tree(proc, grace_s=1.0)
+            proc.wait()
+            raise
         code = proc.wait()
         if code != 0:
             err.seek(0)
@@ -913,6 +979,43 @@ def _render_overlay_track(clips: list[dict[str, Any]], out: Path, width: int, he
     return out
 
 
+MIN_RANGE_S = 0.2
+
+
+def range_window(time_range: Any, total_s: float) -> Optional[tuple[float, float]]:
+    """A validated (start_s, end_s) inside the edit (the end clamped to its
+    length), or None for the whole edit."""
+    if time_range is None:
+        return None
+    if not isinstance(time_range, (list, tuple)) or len(time_range) != 2:
+        raise RenderError("range must be [start_s, end_s]")
+    try:
+        start, end = float(time_range[0]), float(time_range[1])
+    except (TypeError, ValueError):
+        raise RenderError("range must be [start_s, end_s]") from None
+    if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end <= start:
+        raise RenderError("range must be [start_s, end_s] with 0 <= start_s < end_s")
+    end = min(end, total_s)
+    if end - start < MIN_RANGE_S:
+        raise RenderError(f"range must cover at least {MIN_RANGE_S} s of the edit (the edit is {total_s:.2f} s long)")
+    if start <= 1e-6 and end >= total_s - 1e-6:
+        return None
+    return start, end
+
+
+def _dip_frames(transition: dict[str, Any], fps: int) -> int:
+    """Whole frames a dip/flash takes (split between the two clips)."""
+    return max(2, int(round(transition_duration(transition, fps) * fps)))
+
+
+def _fade_clip_file(ffmpeg: str, path: Path, fade_vf: str) -> None:
+    """Applies `clip_fade_vf` filters to a clip that was drawn elsewhere (a graphic shot)."""
+    faded = path.with_name(f"{path.stem}_faded.mp4")
+    _run([ffmpeg, "-y", "-nostdin", "-loglevel", "error", "-i", str(path), "-vf", f"{fade_vf},format=yuv420p", "-an",
+          "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(faded)])
+    faded.replace(path)
+
+
 def render_timeline(
     timeline: dict[str, Any],
     asset_path_for: Callable[[str], Path],
@@ -923,8 +1026,13 @@ def render_timeline(
     should_cancel: Optional[Callable[[], bool]] = None,
     beat_audio_path: Optional[Path] = None,
     stem_paths: Optional[dict[str, Path]] = None,
+    time_range: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """`beat_audio_path`: the song's drums stem, when it was split - the
+    """Renders the timeline (or only `time_range` = [start_s, end_s] of it:
+    the clips that overlap it, the first and last trimmed, the lyrics
+    shifted and the song seeked) to `out_path`. On any failure, cancel
+    included, a partial `out_path` is removed.
+    `beat_audio_path`: the song's drums stem, when it was split - the
     "kick" beat effects read the bass drum there instead of in the mix.
     `stem_paths`: every stem of the song, for effects driven by one stem
     ("vocals", "bass"...); without it they fall back to the mix's kick."""
@@ -937,15 +1045,19 @@ def render_timeline(
     preset_cfg = QUALITY_PRESETS[quality]
     width, height = _scaled_resolution(timeline["width"], timeline["height"], preset_cfg["short_side"])
     fps = int(timeline["fps"])
-    work_dir.mkdir(parents=True, exist_ok=True)
-    work_dir = work_dir.resolve()
     finishing = validate_finishing(timeline.get("finishing"))
 
     visual = next((t for t in timeline["tracks"] if t["type"] == "visual"), None)
     if not visual or not visual["clips"]:
         raise RenderError("timeline has no visual clips to render")
     clips = visual["clips"]
-    total_duration = sum(float(c["duration_s"]) for c in clips)
+    durations = [float(c["duration_s"]) for c in clips]
+    starts = [sum(durations[:i]) for i in range(len(clips))]
+    total_duration = sum(durations)
+    window = range_window(time_range, total_duration)
+    seg_start, seg_end = window if window else (0.0, total_duration)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = work_dir.resolve()
 
     def report(frac: float, msg: Optional[str] = None) -> None:
         if progress:
@@ -955,26 +1067,59 @@ def render_timeline(
         if should_cancel and should_cancel():
             raise RenderCancelled("render cancelled")
 
-    transitions = [c.get("transition_in") or {"type": "cut"} for c in clips]
-    all_cuts = all(t.get("type", "cut") == "cut" for t in transitions)
+    # the transition entering clip 0 is never rendered (nothing precedes it)
+    transitions = [{"type": "cut"}] + [c.get("transition_in") or {"type": "cut"} for c in clips[1:]]
+
+    # the clips to render: (timeline index, start in the output, length,
+    # seconds cut off its head, seconds cut off its tail); a range render
+    # trims the first and last, a full render takes every clip whole
+    half_frame = 0.5 / fps
+    picked: list[tuple[int, float, float, float, float]] = []
+    for i, (s, d) in enumerate(zip(starts, durations)):
+        a, b = max(s, seg_start), min(s + d, seg_end)
+        if b - a >= half_frame:
+            picked.append((i, a - seg_start, b - a, max(0.0, a - s), max(0.0, s + d - b)))
+    if not picked:
+        raise RenderError("the range holds no clip")
+    n = len(picked)
 
     # Everything on the frame grid: each clip starts on the frame nearest its
-    # beat and lasts a whole number of frames, and (with transitions) is
-    # rendered one overlap + one spare frame longer. Float seconds drift as
-    # they accumulate, and an xfade whose outgoing clip ends a fraction of a
-    # frame before the overlap does silently ends the whole chain.
-    start_frames, acc = [], 0.0
-    for c in clips:
-        start_frames.append(int(round(acc * fps)))
-        acc += float(c["duration_s"])
-    start_frames.append(int(round(acc * fps)))
-    clip_frames = [max(1, start_frames[i + 1] - start_frames[i]) for i in range(len(clips))]
-    overlap_frames = [max(1, int(round(transition_duration(t, fps) * fps))) for t in transitions]
-    grid_durations = [n / fps for n in clip_frames]
-    grid_transitions = [dict(t, duration_s=overlap_frames[i] / fps) if t.get("type", "cut") != "cut" else t
-                        for i, t in enumerate(transitions)]
+    # beat and lasts a whole number of frames, and (joined with crossfades)
+    # is rendered one overlap + one spare frame longer. Float seconds drift
+    # as they accumulate, and an xfade whose outgoing clip ends a fraction of
+    # a frame before the overlap does silently ends the whole chain.
+    start_frames = [int(round(rel * fps)) for _, rel, _, _, _ in picked]
+    start_frames.append(int(round((seg_end - seg_start) * fps)))
+    clip_frames = [max(1, start_frames[k + 1] - start_frames[k]) for k in range(n)]
+    out_frames = start_frames[0] + sum(clip_frames)
+    out_duration = out_frames / fps
 
-    hits: list[tuple[float, float]] = []
+    # Only crossfades need a blending join (xfade, or the overlay fallback on
+    # an ffmpeg without it). Dips and flashes are colour fades inside the two
+    # clips around the cut, so a timeline of cuts, dips and flashes is joined
+    # with the concat demuxer (-c copy: fast and on the beat to the frame).
+    local = [transitions[picked[k][0]] if k > 0 else {"type": "cut"} for k in range(n)]
+    needs_join = any(t.get("type", "cut") == "crossfade" for t in local[1:])
+    overlap_frames = [max(1, int(round(transition_duration(t, fps) * fps))) if t.get("type") == "crossfade" else 1
+                      for t in local]
+    grid_durations = [f / fps for f in clip_frames]
+    grid_transitions = [dict(t, duration_s=overlap_frames[k] / fps) if t.get("type") == "crossfade" else {"type": "cut"}
+                        for k, t in enumerate(local)]
+
+    def fades(k: int) -> tuple[Optional[tuple[str, int]], Optional[tuple[str, int]]]:
+        i, _, _, head, tail = picked[k]
+        half = max(1, clip_frames[k] // 2)
+        fade_in = fade_out = None
+        t_in = transitions[i]
+        if t_in.get("type") in FADE_COLORS and head < half_frame:
+            total = _dip_frames(t_in, fps)
+            fade_in = (FADE_COLORS[t_in["type"]], min(half, total - total // 2))
+        t_out = transitions[i + 1] if i + 1 < len(clips) else {}
+        if t_out.get("type") in FADE_COLORS and tail < half_frame:
+            fade_out = (FADE_COLORS[t_out["type"]], min(half, _dip_frames(t_out, fps) // 2))
+        return fade_in, fade_out
+
+    hits: list[tuple[float, float]] = []  # in song time
     fx = finishing.get("beat_fx")
     if fx and timeline.get("audio_asset_id"):
         from . import audio as audio_mod  # numpy-only; only a render with beat effects pays for it
@@ -992,106 +1137,145 @@ def render_timeline(
         except Exception:  # noqa: BLE001 - an unreadable song renders without the effect, not at all
             hits = []
 
-    clip_paths: list[Path] = []
-    source_adjustments: list[dict[str, Any]] = []
-    for i, clip in enumerate(clips):
-        check_cancel()
-        out_clip = work_dir / f"clip_{i:03d}.mp4"
-        src = asset_path_for(clip["asset_id"]) if clip["kind"] != "graphic" else None
-        frames = clip_frames[i]
-        if not all_cuts and i + 1 < len(clips):
-            frames += overlap_frames[i + 1] + 1
-        duration = frames / fps
-        extra = build_beat_fx_vf(fx, clip_hits(hits, start_frames[i] / fps, duration), width, height, fps) if hits else ""
-        framing = finishing.get("framing") or "fill"
-        focus = (float(clip.get("focus_x", 0.5)), float(clip.get("focus_y", 0.5)))
-        if clip["kind"] == "graphic":
-            _render_graphic_clip(clip, out_clip, width, height, fps, frames, should_cancel,
-                                 lambda f, i=i: report(0.05 + 0.55 * (i + f) / len(clips), f"drawing graphic {i + 1}/{len(clips)}"))
+    try:
+        clip_paths: list[Path] = []
+        upright: dict[Path, Path] = {}
+        source_adjustments: list[dict[str, Any]] = []
+        for k, (i, _rel, _dur, head, tail) in enumerate(picked):
+            check_cancel()
+            clip = clips[i]
+            out_clip = work_dir / f"clip_{k:03d}.mp4"
+            frames = clip_frames[k]
+            if needs_join and k + 1 < n:
+                frames += overlap_frames[k + 1] + 1
+            duration = frames / fps
+            fade_in, fade_out = fades(k)
+            fade_vf = clip_fade_vf(frames, fade_in, fade_out, out_end_frame=clip_frames[k])
+            hit_vf = (build_beat_fx_vf(fx, clip_hits(hits, start_frames[k] / fps + seg_start, duration), width, height, fps)
+                      if hits else "")
+            extra = ",".join(v for v in (hit_vf, fade_vf) if v)
+            framing = finishing.get("framing") or "fill"
+            focus = (float(clip.get("focus_x", 0.5)), float(clip.get("focus_y", 0.5)))
+            if clip["kind"] == "graphic":
+                graphic_clip = dict(clip, graphic_offset_s=float(clip.get("graphic_offset_s") or 0.0) + head) if head else clip
+                _render_graphic_clip(graphic_clip, out_clip, width, height, fps, frames, should_cancel,
+                                     lambda f, k=k: report(0.05 + 0.55 * (k + f) / n, f"drawing graphic {k + 1}/{n}"))
+                if fade_vf:
+                    _fade_clip_file(ffmpeg, out_clip, fade_vf)
+                clip_paths.append(out_clip)
+                report(0.05 + 0.55 * (k + 1) / n, f"rendered clip {k + 1}/{n}")
+                continue
+            src = asset_path_for(clip["asset_id"])
+            if clip["kind"] == "video":
+                from .audio import probe_duration_s
+                source_s = probe_duration_s(src)
+                fit = clip.get("source_fit") or ("error" if clip.get("synced") else "stretch")
+                trim = float(clip.get("trim_start_s", 0.0)) + head
+                available = (source_s or duration) - trim
+                if available + 1 / fps < duration:
+                    source_adjustments.append({"asset_id": clip["asset_id"], "source_fit": fit,
+                                               "available_s": round(available, 3), "target_s": round(duration, 3)})
+                cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, trim,
+                                           extra_vf=extra, framing=framing, focus=focus, source_duration_s=source_s,
+                                           source_fit=fit)
+            else:
+                if src not in upright:
+                    upright[src] = upright_still(src, work_dir, f"still_{len(upright):03d}")
+                d = durations[i]
+                span = (head / d, 1.0 - tail / d) if d > 0 else (0.0, 1.0)
+                cmd = build_image_clip_cmd(ffmpeg, upright[src], out_clip, width, height, fps, duration, clip.get("ken_burns"),
+                                           extra_vf=extra, framing=framing, focus=focus,
+                                           progress_range=span if (head or tail) else (0.0, 1.0))
+            _run(cmd)
             clip_paths.append(out_clip)
-            report(0.05 + 0.55 * (i + 1) / len(clips), f"rendered clip {i + 1}/{len(clips)}")
-            continue
-        if clip["kind"] == "video":
-            from .audio import probe_duration_s
-            source_s = probe_duration_s(src)
-            fit = clip.get("source_fit") or ("error" if clip.get("synced") else "stretch")
-            available = (source_s or duration) - float(clip.get("trim_start_s", 0.0))
-            if available + 1 / fps < duration:
-                source_adjustments.append({"asset_id": clip["asset_id"], "source_fit": fit,
-                                           "available_s": round(available, 3), "target_s": round(duration, 3)})
-            cmd = build_video_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, float(clip.get("trim_start_s", 0.0)),
-                                       extra_vf=extra, framing=framing, focus=focus, source_duration_s=source_s,
-                                       source_fit=fit)
-        else:
-            cmd = build_image_clip_cmd(ffmpeg, src, out_clip, width, height, fps, duration, clip.get("ken_burns"), extra_vf=extra,
-                                       framing=framing, focus=focus)
-        _run(cmd)
-        clip_paths.append(out_clip)
-        report(0.05 + 0.55 * (i + 1) / len(clips), f"rendered clip {i + 1}/{len(clips)}")
+            report(0.05 + 0.55 * (k + 1) / n, f"rendered clip {k + 1}/{n}")
 
-    check_cancel()
-    concatenated = work_dir / "concatenated.mp4"
-    if all_cuts:
-        list_file = work_dir / "concat_list.txt"
-        list_file.write_text(concat_list_text(clip_paths), encoding="utf-8")
-        _run(build_concat_cmd(ffmpeg, list_file, concatenated))
-    else:
-        join = build_xfade_cmd if ffmpeg_has_filter(ffmpeg, "xfade") else build_overlay_fade_cmd
-        _run(join(ffmpeg, clip_paths, grid_durations, grid_transitions, concatenated, fps=fps))
-    report(0.65, "joined clips")
-
-    lyrics_track = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), None)
-    ass_name = None
-    lyric_clips = list(lyrics_track["clips"]) if lyrics_track else []
-    covered = graphic_caption_windows(timeline)
-    if covered:
-        lyric_clips = drop_covered_captions(lyric_clips, covered)
-    if lyric_clips:
-        ass_name = "lyrics.ass"
-        lyric_style = finishing.get("lyric_style", "default")
-        beats: list[float] = []
-        if lyric_style == "pulse" and timeline.get("audio_asset_id"):
-            try:
-                from . import audio as audio_mod
-                beats = [t for t, _ in audio_mod.beat_hits(audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"])), "beats")]
-            except Exception:  # noqa: BLE001 - an unreadable song: the line just doesn't pulse
-                beats = []
-        (work_dir / ass_name).write_text(build_ass(width, height, lyric_clips, style=lyric_style, beats=beats),
-                                         encoding="utf-8")
-        fonts_out = work_dir / "fonts"
-        fonts_out.mkdir(exist_ok=True)
-        for ttf in FONTS_DIR.glob("*/*.ttf"):
-            shutil.copyfile(ttf, fonts_out / ttf.name)
-
-    overlay_path = None
-    graphics_track = next((t for t in timeline["tracks"] if t.get("type") == "graphics"), None)
-    if graphics_track and graphics_track["clips"]:
         check_cancel()
-        overlay_path = _render_overlay_track(graphics_track["clips"], work_dir / "graphics.mov", width, height, fps, total_duration,
-                                             should_cancel, lambda f: report(0.6 + 0.05 * f, "drawing overlays"))
+        concatenated = work_dir / "concatenated.mp4"
+        if not needs_join:
+            list_file = work_dir / "concat_list.txt"
+            list_file.write_text(concat_list_text(clip_paths), encoding="utf-8")
+            _run(build_concat_cmd(ffmpeg, list_file, concatenated))
+        else:
+            join = build_xfade_cmd if ffmpeg_has_filter(ffmpeg, "xfade") else build_overlay_fade_cmd
+            _run(join(ffmpeg, clip_paths, grid_durations, grid_transitions, concatenated, fps=fps))
+        report(0.65, "joined clips")
 
-    audio_path = asset_path_for(timeline["audio_asset_id"]) if timeline.get("audio_asset_id") else None
+        def shifted(a: float, b: float) -> Optional[tuple[float, float]]:
+            """[a, b] of the edit in the output's time, or None outside it."""
+            a, b = max(0.0, a - seg_start), min(out_duration, b - seg_start)
+            return (a, b) if b - a >= 0.05 else None
 
-    # `start_s` is derived (not required on the caller's clip dicts - see
-    # the module docstring), so it is recomputed here from durations rather
-    # than trusted from the clip, exactly like `total_duration` above.
-    glitch_points: list[tuple[float, float]] = []
-    running = 0.0
-    for i, c in enumerate(clips):
-        if transitions[i].get("type") == "flash_white":
-            glitch_points.append((running, float(c["duration_s"])))
-        running += float(c["duration_s"])
-    finishing_vf = build_finishing_vf(finishing, width, height, glitch_points)
+        lyrics_track = next((t for t in timeline["tracks"] if t["type"] == "lyrics"), None)
+        lyric_clips = list(lyrics_track["clips"]) if lyrics_track else []
+        windows = graphic_caption_windows(timeline)
+        if window:
+            moved = []
+            for lc in lyric_clips:
+                span = shifted(float(lc["start_s"]), float(lc["end_s"]))
+                if span:
+                    words = [dict(w, start_s=max(0.0, float(w["start_s"]) - seg_start), end_s=max(0.0, float(w["end_s"]) - seg_start))
+                             for w in (lc.get("words") or [])]
+                    moved.append(dict(lc, start_s=round(span[0], 3), end_s=round(span[1], 3), **({"words": words} if words else {})))
+            lyric_clips = moved
+            windows = [w for w in (shifted(a, b) for a, b in windows) if w]
+        if windows:
+            lyric_clips = drop_covered_captions(lyric_clips, windows)
+        ass_name = None
+        if lyric_clips:
+            ass_name = "lyrics.ass"
+            lyric_style = finishing.get("lyric_style", "default")
+            beats: list[float] = []
+            if lyric_style == "pulse" and timeline.get("audio_asset_id"):
+                try:
+                    from . import audio as audio_mod
+                    beats = [t for t, _ in audio_mod.beat_hits(audio_mod.decode_to_mono(asset_path_for(timeline["audio_asset_id"])), "beats")]
+                except Exception:  # noqa: BLE001 - an unreadable song: the line just doesn't pulse
+                    beats = []
+                if window:
+                    beats = [t - seg_start for t in beats if seg_start <= t < seg_end]
+            (work_dir / ass_name).write_text(build_ass(width, height, lyric_clips, style=lyric_style, beats=beats),
+                                             encoding="utf-8")
+            fonts_out = work_dir / "fonts"
+            fonts_out.mkdir(exist_ok=True)
+            for ttf in FONTS_DIR.glob("*/*.ttf"):
+                shutil.copyfile(ttf, fonts_out / ttf.name)
 
-    def ffmpeg_progress(frac: float) -> None:
-        report(0.65 + 0.35 * frac, "encoding with audio and lyrics")
+        overlay_path = None
+        graphics_track = next((t for t in timeline["tracks"] if t.get("type") == "graphics"), None)
+        overlay_clips = list(graphics_track["clips"]) if graphics_track else []
+        if window:
+            overlay_clips = [dict(c, start_s=span[0], end_s=span[1]) for c in overlay_clips
+                             if (span := shifted(float(c["start_s"]), float(c["end_s"])))]
+        if overlay_clips:
+            check_cancel()
+            overlay_path = _render_overlay_track(overlay_clips, work_dir / "graphics.mov", width, height, fps, out_duration,
+                                                 should_cancel, lambda f: report(0.6 + 0.05 * f, "drawing overlays"))
 
-    run_ffmpeg_with_progress(
-        build_mux_cmd(ffmpeg, concatenated, audio_path.resolve() if audio_path else None, ass_name, out_path.resolve(),
-                      preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"], finishing_vf=finishing_vf,
-                      overlay_path=overlay_path, max_duration_s=total_duration),
-        total_duration, ffmpeg_progress, cwd=work_dir, should_cancel=should_cancel,
-    )
+        audio_path = asset_path_for(timeline["audio_asset_id"]) if timeline.get("audio_asset_id") else None
+
+        # a glitch on each flash, from the clip's start on the output's grid
+        glitch_points: list[tuple[float, float]] = []
+        for k, (i, _rel, dur, head, _tail) in enumerate(picked):
+            if transitions[i].get("type") == "flash_white" and head < half_frame:
+                glitch_points.append((start_frames[k] / fps, dur))
+        finishing_vf = build_finishing_vf(finishing, width, height, glitch_points)
+
+        def ffmpeg_progress(frac: float) -> None:
+            report(0.65 + 0.35 * frac, "encoding with audio and lyrics")
+
+        run_ffmpeg_with_progress(
+            build_mux_cmd(ffmpeg, concatenated, audio_path.resolve() if audio_path else None, ass_name, out_path.resolve(),
+                          preset_cfg["preset"], preset_cfg["crf"], preset_cfg["audio_bitrate"], finishing_vf=finishing_vf,
+                          overlay_path=overlay_path, duration_s=out_duration, audio_start_s=seg_start),
+            out_duration, ffmpeg_progress, cwd=work_dir, should_cancel=should_cancel,
+        )
+    except BaseException:
+        out_path.unlink(missing_ok=True)
+        raise
     report(1.0, "done")
-    return {"path": str(out_path), "width": width, "height": height, "fps": fps, "duration_s": round(total_duration, 3),
-            "source_adjustments": source_adjustments}
+    result = {"path": str(out_path), "width": width, "height": height, "fps": fps, "duration_s": round(out_duration, 3),
+              "source_adjustments": source_adjustments}
+    if window:
+        result["range"] = [round(seg_start, 3), round(seg_end, 3)]
+    return result
