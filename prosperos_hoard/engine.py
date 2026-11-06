@@ -2566,6 +2566,35 @@ def _validate_content(path: Path, kind: str) -> dict[str, Any]:
 
 
 _MIME = {"image": None, "audio": None, "video": None, "lyrics": "text/plain; charset=utf-8", "font": None}
+_EXIF_ORIENTATION = 0x0112
+
+
+def _bake_exif_orientation(path: Path) -> None:
+    """A phone photo stored sideways with an EXIF "rotate me" flag is
+    rewritten upright (same format), so every consumer - designs, ffmpeg
+    clips, ComfyUI uploads - sees it the way the user does, not only the
+    thumbnails."""
+    with Image.open(path) as img:
+        orientation = img.getexif().get(_EXIF_ORIENTATION, 1)
+        if orientation in (None, 1):
+            return
+        fmt = (img.format or "PNG").upper()
+        upright = ImageOps.exif_transpose(img)
+        upright.load()
+    if fmt == "MPO":
+        fmt = "JPEG"
+    save_kwargs: dict[str, Any] = {}
+    if fmt == "JPEG":
+        save_kwargs = {"quality": 95, "subsampling": 0}
+        if upright.mode not in ("RGB", "L", "CMYK"):
+            upright = upright.convert("RGB")
+    exif = upright.getexif()
+    if exif:
+        exif[_EXIF_ORIENTATION] = 1
+        save_kwargs["exif"] = exif.tobytes()
+    tmp = path.with_name(path.name + ".tmp")
+    upright.save(tmp, format=fmt, **save_kwargs)
+    tmp.replace(path)
 
 
 def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Optional[str] = None,
@@ -2585,29 +2614,37 @@ def import_asset(store: Store, project_id: str, source_path: Path, kind_hint: Op
     stored_ext = ".lrc" if kind == "lyrics" else ext
     dest = store.path_for_asset_file(asset_id, stored_ext)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if kind == "lyrics":
-        dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
-    else:
-        shutil.copyfile(source_path, dest)
+    thumb = store.path_for_thumb(asset_id)
+    try:
+        if kind == "lyrics":
+            dest.write_text(info["text"].replace("\r\n", "\n"), encoding="utf-8")
+        else:
+            shutil.copyfile(source_path, dest)
 
-    thumb_path = None
-    mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
-    if kind == "image":
-        thumb = store.path_for_thumb(asset_id)
-        make_thumbnail(dest, thumb)
-        thumb_path = _rel(store, thumb)
-        mime = Image.MIME.get((info.get("format") or "").upper(), mime)
-    elif kind == "video":
-        thumb_path = _video_thumbnail(dest, store.path_for_thumb(asset_id))
-        info["width"], info["height"] = _probe_video_size(dest)
-    elif kind == "audio":
-        mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
+        thumb_path = None
+        mime = _MIME.get(kind) or mimetypes.guess_type(f"x{ext}")[0] or "application/octet-stream"
+        if kind == "image":
+            _bake_exif_orientation(dest)
+            make_thumbnail(dest, thumb)
+            thumb_path = _rel(store, thumb)
+            mime = Image.MIME.get((info.get("format") or "").upper(), mime)
+        elif kind == "video":
+            thumb_path = _video_thumbnail(dest, thumb)
+            info["width"], info["height"] = _probe_video_size(dest)
+        elif kind == "audio":
+            mime = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}.get(ext, mime)
 
-    asset = store.create_asset(
-        project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
-        width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
-        source=source, asset_id=asset_id, name=name, recipe=recipe, tags=tags,
-    )
+        asset = store.create_asset(
+            project_id=project_id, kind=kind, file_path=_rel(store, dest), mime=mime,
+            width=info.get("width"), height=info.get("height"), duration_s=info.get("duration_s"), thumb_path=thumb_path,
+            source=source, asset_id=asset_id, name=name, recipe=recipe, tags=tags,
+        )
+    except BaseException:
+        # no orphaned assets/<id>.* (or its thumbnail) for an import that failed
+        dest.unlink(missing_ok=True)
+        thumb.unlink(missing_ok=True)
+        thumb.with_suffix(".jpg").unlink(missing_ok=True)
+        raise
     if kind == "audio":
         try:
             samples = audio_mod.decode_to_mono(dest)
@@ -2949,16 +2986,25 @@ def analyze_audio(store: Store, asset_id: str, force: bool = False) -> dict[str,
         return asset["analysis"]
     path = store.data_dir / asset["file_path"]
     try:
-        samples = audio_mod.decode_to_mono(path)
+        samples = audio_mod.decode_to_mono(path, max_duration_s=ANALYSIS_MAX_S)
     except audio_mod.DecodeError as exc:
         raise EngineError("decode_failed", f"could not decode {asset.get('name') or asset_id}: {exc}") from None
     result = audio_mod.analyze_samples(samples)
     result["version"] = ANALYSIS_VERSION
-    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=result["duration_s"])
+    duration_s = result["duration_s"]
+    if duration_s >= ANALYSIS_MAX_S - 0.1:
+        # the decode stopped at the analysis cap: the analysis covers the
+        # first ANALYSIS_MAX_S seconds, but the asset keeps its real length
+        probed = asset.get("duration_s") or audio_mod.probe_duration_s(path)
+        if probed and probed > duration_s:
+            duration_s = probed
+            result["analyzed_s"] = result["duration_s"]
+    store.set_asset_media(asset_id, waveform=audio_mod.waveform_peaks(samples), analysis=result, duration_s=duration_s)
     return result
 
 
 ANALYSIS_VERSION = 2
+ANALYSIS_MAX_S = 1200.0  # decode cap for beat/section analysis (memory bound)
 
 
 def analysis_view(asset_id: str, analysis: dict[str, Any], max_beats: int = 32) -> dict[str, Any]:
@@ -3105,6 +3151,9 @@ def auto_cut(store: Store, project_id: str, song_asset_id: str, asset_ids: Optio
     if song["kind"] != "audio":
         raise EngineError("not_audio", f"song_asset_id {song_asset_id} is {song['kind']}, not audio")
     analysis = analyze_audio(store, song_asset_id)
+    if float(analysis.get("duration_s") or 0.0) < timeline_mod.MIN_CLIP_S:
+        raise EngineError("song_too_short", f"song {song_asset_id} is {float(analysis.get('duration_s') or 0.0):.2f} s long; "
+                                            f"an auto-cut needs at least {timeline_mod.MIN_CLIP_S} s of audio")
     pool = _pool(store, project_id, asset_ids, board_id)
     lyrics_lines = None
     sections = analysis["sections"]
