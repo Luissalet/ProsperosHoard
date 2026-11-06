@@ -768,9 +768,10 @@ class ShortRun(prod.Run):
                                     aspect, lambda frac, msg=None: self.tick(self.stage_fraction(frac), msg or "animatic"),
                                     getattr(self.progress, "cancelled", None))
         plan = {"clips_planned": len(targets), "gpu_minutes": round(len(targets) * 9.5, 1), "clip_keys": targets}
-        self.state["done"]["animatic"] = {"renders": {aspect: asset["id"]}, "plan": plan}
+        # made_at names this animatic: the approval (productions.approve_animatic) is of this one
+        self.state["done"]["animatic"] = {"renders": {aspect: asset["id"]}, "plan": plan, "made_at": animatic_mod._made_at()}
         self.log("animatic", renders={aspect: asset["id"]}, clips_planned=len(targets))
-        if settings.get("animatic_autocontinue") or (self.state.get("review") or {}).get("animatic_approved"):
+        if settings.get("animatic_autocontinue") or prod.animatic_approved(self.state):
             return None
         return "pause"
 
