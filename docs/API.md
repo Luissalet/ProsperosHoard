@@ -60,7 +60,7 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_design?project=` | `{template, fields, image_asset_id?, variant?, options}` |
 | POST | `/api/agent/studio_photocard_set?project=` | group `{group_id, template_front, template_back, image_asset_ids?}` or solo `{character_id, cards:[{image_asset_id, role?, message?, accent?}], set_name?}` |
 | POST | `/api/agent/studio_timeline?project=` | `{action, song_asset_id?, asset_ids?, board_id?, aspect, lyrics_asset_id?, options, timeline_id?, patch}` |
-| POST | `/api/agent/studio_render` | `{timeline_id, quality, wait_s}` |
+| POST | `/api/agent/studio_render` | `{timeline_id, quality, range?: [start_s, end_s], wait_s}` |
 | GET | `/api/agent/studio_jobs` | `?state&limit&offset` |
 | GET | `/api/agent/studio_job` | `?job_id&wait_s` |
 | POST | `/api/agent/studio_cancel_job?job_id=` | - |
