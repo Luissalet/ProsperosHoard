@@ -565,7 +565,7 @@ agente hace lo mismo con `studio_services`, `studio_service_start` y
 `studio_service_stop`.
 
 ComfyUI se busca en `COMFYUI_DIR`, en la carpeta guardada en Backends o en
-los sitios de siempre (`D:\LocalAI\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, la
+los sitios de siempre (`E:\Development\Tools\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, la
 versión portable...), con el Python de su `venv`, `.venv` o
 `python_embeded`. Se arranca en loopback con `--cuda-device` para la GPU
 elegida; un servidor en cualquier puerto distinto del 8188 tiene sus propias
@@ -941,9 +941,9 @@ Kit -> Entrenamiento -> Configurar (o `training` en `data/backend.json`):
 
 ```json
 "training": {
-  "lora_dir": "D:/LocalAI/ComfyUI/models/loras",
+  "lora_dir": "E:/Development/Tools/ComfyUI/models/loras",
   "gpu": "auto",
-  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "D:/LocalAI/ai-toolkit"}],
+  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "E:/Development/Tools/ai-toolkit"}],
   "base_models": {"qwen_image": "Qwen/Qwen-Image", "flux1": "black-forest-labs/FLUX.1-dev"}
 }
 ```
