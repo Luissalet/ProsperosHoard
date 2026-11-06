@@ -1095,6 +1095,7 @@ class AnimaticBody(BaseModel):
 class RecipeExportBody(BaseModel):
     production: str
     name: Optional[str] = None
+    overwrite: bool = False
 
 
 class RecipeRunBody(BaseModel):
@@ -4216,8 +4217,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_review_clip(body: ClipReviewBody):
         return agent("studio_review_clip", body.asset_id, lambda: op_review_clip(body))
 
+    def job_or_none(job_id: str) -> Optional[dict[str, Any]]:
+        try:
+            return store.get_job(job_id)
+        except NotFound:
+            return None
+
+    def production_state(slug: str) -> dict[str, Any]:
+        """The state, with the status of a production whose job was
+        cancelled or failed before its run could record it."""
+        return productions_mod.reconcile(productions_mod.load_fresh(store.data_dir, slug), job_or_none)
+
     def production_view(slug: str) -> dict[str, Any]:
-        return productions_mod.compact_view(productions_mod.load_fresh(store.data_dir, slug))
+        return productions_mod.compact_view(production_state(slug))
 
     def op_production_create(body: ProductionCreateBody) -> dict[str, Any]:
         if body.project:
@@ -4314,10 +4326,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 productions_mod.log(state, "review", "approved", what="treatment_approved")
                 productions_mod.save_state(store.data_dir, state)
             elif state.get("status") == "awaiting_review":
-                what = ("script_approved" if state.get("stage") == "script" else
-                        "song_approved" if state.get("stage") == "song" else "animatic_approved")
-                state.setdefault("review", {})[what] = True
-                productions_mod.log(state, "review", "approved", what=what)
+                if state.get("stage") in ("script", "song"):
+                    what = "script_approved" if state.get("stage") == "script" else "song_approved"
+                    state.setdefault("review", {})[what] = True
+                    productions_mod.log(state, "review", "approved", what=what)
+                else:
+                    # the approval names the animatic reviewed: one made again
+                    # later (shots changed, QA retries) is reviewed again
+                    approved = productions_mod.approve_animatic(state)
+                    productions_mod.log(state, "review", "approved", animatic=approved)
                 productions_mod.save_state(store.data_dir, state)
         job = queue_production(slug)
         return {"production": production_view(slug), "job": engine.job_view(job)}
@@ -4357,12 +4374,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                                                  "quality": (a.get("recipe") or {}).get("quality") or "final"})
                                 productions_mod.save_state(store.data_dir, state)
                                 break
-        result = productions_mod.update_shots(store.data_dir, slug, body.changes)
+        result = productions_mod.update_shots(store.data_dir, slug, body.changes, requeue=body.run)
         if body.run and result["changed"]:
             result["job"] = engine.job_view(queue_production(slug))
         return {**result, "production": production_view(slug)}
 
     def op_recipe_run(name: str, body: RecipeRunBody) -> dict[str, Any]:
+        if (body.options or {}).get("dry_run"):
+            return recipes_mod.preview_run(store, name, body.cast, body.options)
         cast = dict(body.cast)
         lead = cast.get("lead")
         lib_id = lead if isinstance(lead, str) and lead.startswith("lib_") else \
@@ -4388,13 +4407,25 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     queue.register("production_qa", _qa_job)
 
+    def _qa_check_job(job: dict[str, Any], progress) -> dict[str, Any]:
+        # a dry run reads a snapshot and regenerates nothing: an ordinary
+        # cpu-lane job, so it never waits behind a running production
+        params = job["params"]
+        fn, name = vision_for_qa()
+        out = qa_mod.check_production(store, params["slug"], params.get("stage") or "all", params.get("keys"), fn, name,
+                                      progress)
+        return {"scorecard": qa_mod.compact_scorecard(out["scorecard"]), "requeued": False}
+
+    queue.register("production_qa_check", _qa_check_job)
+
     def op_qa_run(slug: str, body: QaRunBody) -> dict[str, Any]:
         state = productions_mod.load_state(store.data_dir, slug)
         if body.stage != "all" and body.stage not in qa_mod.CHECKED_STAGES:
             raise engine.EngineError("bad_stage", f"stage must be 'all' or one of {', '.join(qa_mod.CHECKED_STAGES)}")
         project_id = state.get("project_id") or (state.get("done", {}).get("1") or {}).get("project_id")
-        job = queue.enqueue("production_qa", "cpu", {"slug": slug, "stage": body.stage, "dry_run": body.dry_run,
-                                                     "keys": body.keys}, project_id=project_id)
+        job = queue.enqueue("production_qa_check" if body.dry_run else "production_qa", "cpu",
+                            {"slug": slug, "stage": body.stage, "dry_run": body.dry_run, "keys": body.keys},
+                            project_id=project_id)
         job = wait(job, body.wait_s)
         out: dict[str, Any] = {"job": engine.job_view(job)}
         if job["state"] == "done":
@@ -4448,7 +4479,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         out: dict[str, Any] = {"job": engine.job_view(job)}
         if job["state"] == "done":
             outputs = job.get("outputs") or {}
-            out["animatic"] = {k: outputs.get(k) for k in ("renders", "plan")}
+            out["animatic"] = {k: outputs.get(k) for k in ("renders", "plan", "contact_sheet_id") if outputs.get(k) is not None}
+            if outputs.get("preview"):
+                out["animatic"]["preview"] = True
+                out["animatic"]["note"] = ("not every shot has its still yet (or the production is running): kept as a "
+                                           "preview; the production makes and pauses at its own animatic")
         return out
 
     @app.post("/api/agent/studio_animatic")
@@ -4467,7 +4502,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/productions")
     def productions_list():
-        return {"items": productions_mod.list_productions(store.data_dir)}
+        return {"items": productions_mod.list_productions(store.data_dir, job_or_none)}
 
     @app.post("/api/productions")
     def production_create(body: ProductionCreateBody):
@@ -4502,7 +4537,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/productions/{slug}")
     def production_get(slug: str):
-        state = productions_mod.load_fresh(store.data_dir, slug)
+        state = production_state(slug)
         timing = None if productions_mod.is_legacy(state) else productions_mod.shot_timing(store.data_dir, store, state)
         return {**state, "view": productions_mod.compact_view(state), "timing": timing}
 
@@ -5731,7 +5766,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.post("/api/productions/{slug}/recipe")
     def production_to_recipe(slug: str, body: RecipeExportBody):
-        return recipes_mod.recipe_summary(recipes_mod.export_recipe(store, slug, body.name))
+        return recipes_mod.recipe_summary(recipes_mod.export_recipe(store, slug, body.name, overwrite=body.overwrite))
 
     @app.get("/api/recipes")
     def recipes_list():
@@ -5747,7 +5782,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     @app.get("/api/agent/studio_productions")
     def agent_productions():
-        return agent("studio_productions", "", lambda: {"items": productions_mod.list_productions(store.data_dir)[:30]})
+        return agent("studio_productions", "", lambda: {"items": productions_mod.list_productions(store.data_dir, job_or_none)[:30]})
 
     @app.get("/api/agent/studio_production")
     def agent_production(production: str):
@@ -6169,7 +6204,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_recipe_export")
     def agent_recipe_export(body: RecipeExportBody):
         def run():
-            recipe = recipes_mod.export_recipe(store, body.production, body.name)
+            recipe = recipes_mod.export_recipe(store, body.production, body.name, overwrite=body.overwrite)
             return {**recipes_mod.recipe_summary(recipe), "cast": recipe["cast"], "warnings": recipe["warnings"][:12],
                     "notes": recipe["notes"]}
         return agent("studio_recipe_export", body.production, run)
