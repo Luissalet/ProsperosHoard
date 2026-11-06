@@ -577,6 +577,8 @@ export interface BackendStatus {
     vram_free_mb?: number | null;
     devices?: { name: string; vram_total_mb: number; vram_free_mb: number }[];
     version?: string;
+    /** built-in template -> "ready" or what this ComfyUI lacks to run it */
+    templates?: Record<string, "ready" | { missing?: string[]; invalid?: string[] }>;
   };
   ffmpeg: { found: boolean; path: string | null; version: string | null };
   piper: { installed: boolean };
@@ -966,6 +968,8 @@ export interface ProductionAnimaticView {
   renders: Record<string, string>;
   gpu_minutes_estimate?: number | null;
   clips_planned?: number | null;
+  contact_sheet_id?: string | null;
+  approved?: boolean;
 }
 
 export interface ProductionView extends Omit<ProductionSummary, "animatic"> {
@@ -1475,6 +1479,7 @@ export const api = {
   jobs: (params: { state?: string; project?: string; limit?: number; offset?: number } = {}) => request<Paged<Job>>("GET", `/generation/api/jobs${q(params)}`),
   job: (id: string) => request<Job>("GET", `/generation/api/jobs/${id}`),
   cancelJob: (id: string) => request<Job>("POST", `/generation/api/jobs/${id}/cancel`),
+  retryJob: (id: string, newSeed = false) => request<Job>("POST", `/generation/api/jobs/${id}/retry${newSeed ? "?new_seed=true" : ""}`),
 
   assets: (pid: string, params: Record<string, string | number | boolean | undefined> = {}) =>
     request<Paged<Asset>>("GET", `/generation/api/projects/${pid}/assets${q(params)}`),
