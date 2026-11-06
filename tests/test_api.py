@@ -40,8 +40,8 @@ def test_health_answers_while_the_database_is_busy(client, monkeypatch):
     c, _, _ = client
     first = c.get("/api/health").json()
     release = threading.Event()
-    real = Store.list_projects
-    monkeypatch.setattr(Store, "list_projects", lambda self, *a, **k: (release.wait(10), real(self, *a, **k))[1])
+    real = Store.count_projects
+    monkeypatch.setattr(Store, "count_projects", lambda self, *a, **k: (release.wait(10), real(self, *a, **k))[1])
     started = _time.perf_counter()
     body = c.get("/api/health").json()
     took = _time.perf_counter() - started
@@ -440,3 +440,71 @@ def test_prompt_preview_and_song_compose_have_their_own_bodies(client):
     assert "platinum bob" in r.json()["positive_prompt"]
     song = c.post(f"/api/projects/{pid}/compose", json={"tags": "dark trap", "lyrics": "[Verse]\nuna", "duration": 5})
     assert song.status_code == 200, song.text
+
+
+def test_oversized_request_bodies_are_refused_before_reading(client):
+    c, _, _ = client
+    r = c.post("/api/agent/studio_create_project", content=b"{}",
+               headers={"Content-Type": "application/json", "Content-Length": str(200 * 1024 * 1024)})
+    assert r.status_code == 413 and r.json()["error"] == "too_large"
+
+
+def test_counts_are_not_capped_at_one_page(store):
+    for n in range(55):
+        store.create_project(f"P{n}", "")
+    assert store.count_projects() == 55
+    assert store.count_jobs(("queued", "running")) == {"queued": 0, "running": 0}
+    project_id = store.list_projects()["items"][0]["id"]
+    for _ in range(52):
+        store.create_job("generate_image", "gpu", {"positive_prompt": "x"}, project_id=project_id)
+    assert store.count_jobs(("queued", "waiting_gpu", "running"))["queued"] == 52
+
+
+def test_search_wildcards_are_literal(store):
+    store.create_project("100% real", "")
+    store.create_project("1000 real", "")
+    assert [p["name"] for p in store.list_projects(query="100%")["items"]] == ["100% real"]
+    assert [p["name"] for p in store.list_projects(query="_000")["items"]] == []
+
+
+def test_housekeeping_sweeps_old_scratch_files(tmp_path):
+    import os
+    import time
+
+    from prosperos_hoard.api import _housekeeping
+    from prosperos_hoard.store import Store
+
+    store = Store(tmp_path)
+    old_dir = tmp_path / "tmp" / "render_old"
+    old_dir.mkdir(parents=True)
+    fresh = tmp_path / "tmp" / "render_live"
+    fresh.mkdir()
+    upload = tmp_path / "tmp" / "uploads" / "up_1.png"
+    upload.parent.mkdir()
+    upload.write_bytes(b"x")
+    past = time.time() - 3 * 24 * 3600
+    for p in (old_dir, upload):
+        os.utime(p, (past, past))
+    _housekeeping(store)
+    assert not old_dir.exists() and not upload.exists()
+    assert fresh.exists() and (tmp_path / "tmp" / "uploads").is_dir()
+
+
+def test_a_second_instance_on_the_same_data_folder_is_refused(tmp_path):
+    from prosperos_hoard.__main__ import _acquire_instance_lock, _port_free
+
+    first = _acquire_instance_lock(tmp_path)
+    assert first is not None
+    try:
+        assert _acquire_instance_lock(tmp_path) is None
+    finally:
+        first.close()
+    again = _acquire_instance_lock(tmp_path)
+    assert again is not None
+    again.close()
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        assert not _port_free(s.getsockname()[1])

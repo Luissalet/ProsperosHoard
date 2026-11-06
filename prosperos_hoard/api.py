@@ -14,6 +14,8 @@ import mimetypes
 import os
 import re
 import shutil
+import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from . import mv_planner
@@ -80,6 +83,40 @@ logger = logging.getLogger("prosperos_hoard.api")
 
 MAX_UPLOAD_MEDIA = engine.MAX_MEDIA_BYTES
 MAX_UPLOAD_IMAGE = engine.MAX_IMAGE_BYTES
+# request bodies: file uploads get the media cap, everything else (JSON) far less
+MAX_JSON_BODY = 64 * 1024 * 1024
+_UPLOAD_PATH_RE = re.compile(r"^/api/(projects/[^/]+/import-upload|workflows/import-file|voice/voices/upload|"
+                             r"voice/transcribe/upload|voice/dictate)$")
+
+
+class BodyLimitMiddleware:
+    """Refuses a write whose Content-Length is over the cap before its body is
+    read: a multipart body is spooled to the system temp folder before a route
+    could check its size. Pure ASGI, so it never buffers the body itself."""
+
+    def __init__(self, app, url_prefix: str = ""):
+        self.app = app
+        self.prefix = url_prefix.rstrip("/")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] not in ("GET", "HEAD", "OPTIONS"):
+            path = scope.get("path", "")
+            if self.prefix and path.startswith(self.prefix):
+                path = path[len(self.prefix):]
+            cap = MAX_UPLOAD_MEDIA + 16 * 1024 * 1024 if _UPLOAD_PATH_RE.match(path) else MAX_JSON_BODY
+            length = dict(scope.get("headers") or []).get(b"content-length")
+            if length is not None:
+                try:
+                    too_big = int(length) > cap
+                except ValueError:
+                    await JSONResponse({"error": "bad_request", "message": "invalid Content-Length"},
+                                       status_code=400)(scope, receive, send)
+                    return
+                if too_big:
+                    await JSONResponse({"error": "too_large", "message": f"request body exceeds {cap // (1024 * 1024)} MB"},
+                                       status_code=413)(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
 
 
 # ------------------------------------------------------------------ guard
@@ -116,6 +153,11 @@ def error_payload(exc: Exception) -> tuple[int, dict[str, str]]:
         return 400, {"error": "bad_design", "message": str(exc)}
     if isinstance(exc, voices_mod.VoiceError):
         return 400, {"error": exc.code, "message": str(exc)}
+    if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc):
+        return 503, {"error": "database_busy", "message": "the database is busy; retry in a moment"}
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return 504, {"error": "subprocess_timeout",
+                     "message": f"{Path(str(exc.cmd[0] if isinstance(exc.cmd, (list, tuple)) else exc.cmd)).name} timed out"}
     if isinstance(exc, (VoiceLabError, vp.AudiobookError, dubbing_mod.DubbingError, ve.EngineNotInstalled)):
         code = exc.code if hasattr(exc, "code") else "engine_not_installed"
         return 400, {"error": code, "message": str(exc)}
@@ -1294,6 +1336,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     app = FastAPI(title="Prospero's Hoard", version=__version__, lifespan=lifespan)
     # strict_ports keeps the old rule: a Host that names a port must be this app's; PROSPERO_ALLOWED_HOSTS adds LAN / tailnet names.
     install_guard(app, port_getter=lambda: port, allowed_env="PROSPERO_ALLOWED_HOSTS", strict_ports=True)
+    app.add_middleware(BodyLimitMiddleware, url_prefix=url_prefix)
     app.state.store = store
     app.state.backend = backend
     app.state.queue = queue
@@ -1310,7 +1353,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # its server-error middleware and re-raises): every failure a handler can
     # hit becomes {"error", "message"} JSON.
     for exc_type in (HoardLinkError, ValueError, LookupError, RuntimeError, OSError, TypeError, AttributeError,
-                     ArithmeticError, AssertionError):
+                     ArithmeticError, AssertionError, sqlite3.Error, subprocess.SubprocessError):
         app.add_exception_handler(exc_type, _any_error)
 
     @app.exception_handler(RequestValidationError)
@@ -1729,8 +1772,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     health_counts: dict[str, int] = {"projects": 0, "active_jobs": 0}
 
     def _health_counts() -> dict[str, int]:
-        return {"projects": len(store.list_projects(limit=50)["items"]),
-                "active_jobs": len(store.list_jobs(state="active", limit=50)["items"])}
+        return {"projects": store.count_projects(),
+                "active_jobs": sum(store.count_jobs(("queued", "waiting_gpu", "running")).values())}
 
     @app.get("/api/health")
     async def health():
@@ -2483,8 +2526,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/workflows/import-file")
     async def import_workflow_file(file: UploadFile, name: Optional[str] = None):
         raw = await file.read(comfy_driver.MAX_WORKFLOW_BYTES + 1)
-        return comfy_driver.import_custom_workflow(store.data_dir, name or Path(file.filename or "workflow").stem, raw,
-                                                   object_info=lambda: engine.object_info_live_or_cached(backend))
+        return await run_in_threadpool(comfy_driver.import_custom_workflow, store.data_dir,
+                                       name or Path(file.filename or "workflow").stem, raw,
+                                       object_info=lambda: engine.object_info_live_or_cached(backend))
 
     @app.patch("/api/workflows/{wf_id}")
     def update_workflow(wf_id: str, body: WorkflowUpdateBody):
@@ -3017,7 +3061,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     if total > cap:
                         raise engine.EngineError("too_large", f"file exceeds {cap // (1024 * 1024)} MB")
                     fh.write(chunk)
-            return engine.import_asset(store, project_id, tmp_path, kind, original_name=original)
+            # ffprobe, thumbnails and audio decoding off the event loop
+            return await run_in_threadpool(engine.import_asset, store, project_id, tmp_path, kind, original_name=original)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -6024,7 +6069,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def run():
             status = backend.status()
             link = status["hoard_link"]
-            counts = {s: len(store.list_jobs(state=s, limit=50)["items"]) for s in ("queued", "waiting_gpu", "running")}
+            counts = store.count_jobs(("queued", "waiting_gpu", "running"))
             return {
                 "demo_backend": status["demo"],
                 "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
@@ -6093,11 +6138,36 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             )
 
     if start_workers:
+        _housekeeping(store)
         queue.start(resume_pending=resume_pending)
     return app
 
 
 # ---------------------------------------------------------------- helpers
+
+def _housekeeping(store: Store, tmp_max_age_s: float = 24 * 3600) -> None:
+    """On start-up: trim the assistant-activity log and remove scratch files
+    a crash left in data/tmp (render work folders, partial uploads). Only
+    entries older than a day go, so nothing a live job is using is touched."""
+    try:
+        store.prune_agent_calls()
+    except sqlite3.Error:
+        logger.warning("could not prune the agent call log", exc_info=True)
+    tmp = store.data_dir / "tmp"
+    if not tmp.is_dir():
+        return
+    cutoff = time.time() - tmp_max_age_s
+    for entry in list(tmp.iterdir()) + (list((tmp / "uploads").iterdir()) if (tmp / "uploads").is_dir() else []):
+        try:
+            if entry.name == "uploads" or entry.stat().st_mtime > cutoff:
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            continue
+
 
 def _is_within(path: Path, root: Path) -> bool:
     try:
