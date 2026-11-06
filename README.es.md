@@ -306,6 +306,8 @@ TTS están ya en marcha en vez de cargar nada propio.
 | `studio_timeline` / `studio_render` | Montaje automático, lectura y edición / renderizado | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Cola, un trabajo (con espera), cancelar | sí / sí / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Buscar recursos, verlos y su receta | sí |
+| `studio_asset_update` / `studio_board` / `studio_project_update` | Puntuar, etiquetar y marcar favoritos / tableros de ideas y storyboards / ajustes y portada del proyecto | no |
+| `studio_retry_job` | Volver a encolar un trabajo fallido o cancelado | no |
 | `studio_productions` / `studio_production` | Listar producciones / etapas, renders y siguiente paso de una producción | sí |
 | `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Lanzar una producción entera desde una especificación / reanudarla o aprobarla / cambiar planos antes del render (incluye `continue_from` y aprobar planos con `locked`) | no |
 | `studio_production_takes` | Todas las tomas que ha tenido un plano (fotogramas y clips, con la que está en uso marcada); devuelve una con `studio_production_shots` `{"key", "take"}` | sí |

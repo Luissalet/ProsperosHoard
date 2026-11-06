@@ -75,7 +75,7 @@ from .hoard_link.waiting import MAX_WAIT_S
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .family_settings import FamilySettings
 from .ids import new_id
-from .jobs import JobQueue
+from .jobs import ORCHESTRATOR_TYPES, JobQueue
 from .store import AssetInUse, NotFound, ProjectBusy, Store
 from .voice_lab import VoiceLabError
 
@@ -1130,6 +1130,15 @@ class BoardUpdateBody(BaseModel):
 
 class BoardItemsBody(BaseModel):
     items: list[dict[str, Any]]
+
+
+class AgentBoardBody(BaseModel):
+    action: str = "list"  # list | get | create | add | set
+    board_id: Optional[str] = None
+    name: Optional[str] = None
+    kind: Optional[str] = None  # moodboard | storyboard | shotlist
+    asset_ids: Optional[list[str]] = None
+    notes: Optional[dict[str, str]] = None  # asset_id -> note
 
 
 class WorkflowImportBody(BaseModel):
@@ -3309,6 +3318,29 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def cancel_job(job_id: str):
         return queue.cancel(job_id)
 
+    def op_retry_job(job_id: str, new_seed: bool) -> dict[str, Any]:
+        """Queue a copy of a failed or cancelled job (same type, parameters
+        and inputs; optionally a new seed), linked by `params.retry_of`."""
+        old = store.get_job(job_id)
+        if old["state"] not in ("failed", "cancelled"):
+            raise engine.EngineError("not_retryable", f"job is {old['state']}; only failed or cancelled jobs can be retried")
+        if old["type"] in ORCHESTRATOR_TYPES:
+            raise engine.EngineError("use_production_continue",
+                                     "a production resumes with studio_production_continue, which keeps what is done")
+        params = dict(old["params"] or {})
+        if new_seed and "seed" in params:
+            params["seed"] = engine.random_seed()
+        params["retry_of"] = job_id
+        return queue.enqueue(old["type"], old["lane"], params, old.get("inputs"), old.get("project_id"))
+
+    @app.post("/api/agent/studio_retry_job")
+    def agent_retry_job(job_id: str, new_seed: bool = False):
+        return agent("studio_retry_job", job_id, lambda: engine.job_view(op_retry_job(job_id, new_seed)))
+
+    @app.post("/api/jobs/{job_id}/retry")
+    def ui_retry_job(job_id: str, new_seed: bool = False):
+        return op_retry_job(job_id, new_seed)
+
     # --------------------------------------------------------------- assets
     @app.get("/api/agent/studio_assets")
     def agent_assets(project: str, kind: Optional[str] = None, query: Optional[str] = None,
@@ -3454,6 +3486,64 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.get("/api/assets/{asset_id}/lineage")
     def ui_lineage(asset_id: str):
         return engine.get_lineage(store, asset_id)
+
+    # ------------------------------------------------------ agent curation
+    @app.post("/api/agent/studio_asset_update")
+    def agent_asset_update(asset_id: str, body: UpdateAssetBody):
+        def run():
+            fields = body.model_dump(exclude_none=True)
+            if not fields:
+                raise engine.EngineError("nothing_to_update", "pass at least one of tags, rating, favourite, notes, name")
+            asset = store.update_asset(asset_id, **fields)
+            return {**engine.asset_view(asset), "tags": asset.get("tags"), "rating": asset.get("rating"),
+                    "favourite": bool(asset.get("favourite"))}
+        return agent("studio_asset_update", asset_id, run)
+
+    @app.post("/api/agent/studio_project_update")
+    def agent_project_update(project: str, body: UpdateProjectBody):
+        def run():
+            p = store.update_project(project, body.name, body.brief, body.cover_asset_id, body.image_engine)
+            return {"id": p["id"], "name": p["name"], "brief": engine._clip(p.get("brief"), 160),
+                    "cover_asset_id": p.get("cover_asset_id"), "image_engine": p.get("image_engine")}
+        return agent("studio_project_update", project, run)
+
+    def board_view(board: dict[str, Any]) -> dict[str, Any]:
+        items = board.get("items") or []
+        return {"id": board["id"], "name": board["name"], "kind": board["kind"], "count": len(items),
+                "items": [{k: v for k, v in {"asset_id": i.get("asset_id"), "note": engine._clip(i.get("note"), 80)}.items() if v}
+                          for i in items[:60]], "has_more": len(items) > 60}
+
+    @app.post("/api/agent/studio_board")
+    def agent_board(project: str, body: AgentBoardBody):
+        def run():
+            if body.action == "list":
+                return {"items": [{"id": b["id"], "name": b["name"], "kind": b["kind"], "count": len(b.get("items") or [])}
+                                  for b in store.list_boards(project)]}
+            if body.action == "create":
+                board = store.create_board(project, body.name or "", body.kind or "moodboard")
+            elif body.action in ("add", "set"):
+                if not body.board_id:
+                    raise engine.EngineError("board_required", f"action '{body.action}' needs board_id")
+                board = store.get_board(body.board_id)
+            elif body.action == "get":
+                board = store.get_board(body.board_id or "")
+                if board["project_id"] != project:
+                    raise engine.EngineError("wrong_project", "that board belongs to another project")
+                return board_view(board)
+            else:
+                raise engine.EngineError("bad_action", f"unknown board action '{body.action}'; use list, get, create, add or set")
+            if board["project_id"] != project:
+                raise engine.EngineError("wrong_project", "that board belongs to another project")
+            if body.asset_ids is not None or body.action == "set":
+                notes = body.notes or {}
+                new_items = []
+                for aid in body.asset_ids or []:
+                    store.get_asset(aid)
+                    new_items.append({"asset_id": aid, **({"note": notes[aid]} if notes.get(aid) else {})})
+                items = new_items if body.action in ("set", "create") else [*(board.get("items") or []), *new_items]
+                board = store.update_board_items(board["id"], items)
+            return board_view(board)
+        return agent("studio_board", f"{body.action} {body.board_id or body.name or ''}".strip(), run)
 
     # ---------------------------------------------------------------- boards
     @app.post("/api/projects/{project_id}/boards")

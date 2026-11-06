@@ -309,6 +309,8 @@ loading anything of its own.
 | `studio_timeline` / `studio_render` | Auto-cut, read, edit a timeline / render it | no |
 | `studio_jobs` / `studio_job` / `studio_cancel_job` | Queue, one job (with wait), cancel | yes / yes / no |
 | `studio_assets` / `studio_show` / `studio_lineage` | Find assets, look at them, their recipe | yes |
+| `studio_asset_update` / `studio_board` / `studio_project_update` | Rate, tag and favourite assets / build mood boards and storyboards / project settings and cover | no |
+| `studio_retry_job` | Queue a failed or cancelled job again | no |
 | `studio_productions` / `studio_production` | List productions / one production's stages, renders and next step | yes |
 | `studio_production_create` / `studio_production_continue` / `studio_production_shots` | Start a whole production from a spec / resume or approve it / change shots before the render (including `continue_from` and approving shots with `locked`) | no |
 | `studio_production_takes` | Every take a shot has had (stills and clips, the one in use marked); put one back with `studio_production_shots` `{"key", "take"}` | yes |

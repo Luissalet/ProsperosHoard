@@ -1560,6 +1560,94 @@
       }
     },
     {
+      "name": "studio_asset_update",
+      "description": "Curate an asset: rating 0-5, favourite true/false, tags (replaces the list), notes, name.\nPass only what changes. studio_assets filters on tag and favourite, so this is how the best\ntakes are marked for later. Returns the asset.\n\nKeywords: rate image, favourite, tag asset, rename, mark best take, puntuar, favorito, etiquetar, renombrar",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tags"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rating"
+          },
+          "favourite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Favourite"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "studio_assets",
       "description": "Find assets in a project, newest first: kind image|video|audio|lyrics|font, query (searches\nnames, notes, tags and generation prompts), tag, favourite. Compact items (id, kind, name, size,\nrating, recipe summary); has_more/next_offset page further (limit up to 30). Use studio_show to look.\n\nKeywords: find assets, search library, list images, my photos, buscar recursos, buscar en biblioteca, mis imagenes",
       "inputSchema": {
@@ -1621,6 +1709,102 @@
       },
       "annotations": {
         "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_board",
+      "description": "Mood boards and storyboards: ordered sets of a project's assets.\naction: \"list\" (the project's boards) | \"get\" (board_id) | \"create\" (name, kind moodboard|storyboard|\nshotlist, optional asset_ids) | \"add\" (append asset_ids to board_id) | \"set\" (replace board_id's items\nwith asset_ids, in order). notes maps an asset id to a short note. A board's order feeds\nstudio_timeline(board_id=...) for an auto-cut. Returns the board (id first) with its items.\n\nKeywords: moodboard, storyboard, board, collect images, tablero, guion grafico, reunir imagenes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "action": {
+            "default": "list",
+            "title": "Action",
+            "type": "string"
+          },
+          "board_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Board Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Asset Ids"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
       }
     },
     {
@@ -2594,7 +2778,7 @@
     },
     {
       "name": "studio_compose",
-      "description": "Compose a song with vocals on ComfyUI (ACE-Step 1.5; needs ace_step_1.5_turbo_aio.safetensors -\nsee studio_status's music_generation). tags describe the sound: genre, mood, instruments, vocal style\n(\"dark trap, horror rap, eerie music box melody, heavy 808, half-time 140 bpm, male rap vocals,\nspanish, minor key\"). lyrics use [Section] tags in English (Intro/Verse/Chorus/Bridge/Outro) even when\nthe words are in another language. key: a note plus major/minor, e.g. \"F# minor\". duration 4-240 s,\nbpm 40-220. The output is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage,\nready for studio_analyze_audio and a timeline. Returns the job (poll studio_job).\n\nKeywords: compose song, make music, write a song, generate audio, ace-step, componer cancion, hacer musica",
+      "description": "Compose a song with vocals on ComfyUI (ACE-Step 1.5; needs ace_step_1.5_turbo_aio.safetensors -\nsee studio_status's music_generation). tags describe the sound: genre, mood, instruments, vocal style\n(\"dark trap, horror rap, eerie music box melody, heavy 808, half-time 140 bpm, male rap vocals,\nspanish, minor key\"). lyrics use [Section] tags in English (Intro/Verse/Chorus/Bridge/Outro) even when\nthe words are in another language. key: a note plus major/minor, e.g. \"F# minor\". duration 4-240 s,\nbpm 40-220. The output is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage,\nready for studio_analyze_audio and a timeline. checkpoint overrides the ACE-Step checkpoint file.\nReturns the job (poll studio_job).\n\nKeywords: compose song, make music, write a song, generate audio, ace-step, componer cancion, hacer musica",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4100,7 +4284,7 @@
     },
     {
       "name": "studio_jobs",
-      "description": "List jobs newest first, compact (id, type, state, progress, message, asset_ids). state filters:\nqueued, waiting_gpu, running, done, failed, cancelled, or \"active\" (the first three).\n\nKeywords: jobs, queue, what is running, pending work, trabajos, cola, que se esta ejecutando, pendientes",
+      "description": "List jobs newest first, compact (id, type, state, progress, message, asset_ids). state filters:\nqueued, waiting_gpu, running, done, failed, cancelled, or \"active\" (the first three). Page with\noffset (the result's next_offset while has_more).\n\nKeywords: jobs, queue, what is running, pending work, trabajos, cola, que se esta ejecutando, pendientes",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5357,8 +5541,81 @@
       }
     },
     {
+      "name": "studio_project_update",
+      "description": "Change a project's name, brief, cover image (an image asset id) or default image_engine\n(\"auto\" | \"qwen21\" | \"flux\" | \"sdxl\"). Pass only what changes. Returns the project.\n\nKeywords: rename project, project settings, cover image, image engine, renombrar proyecto, portada, motor de imagen",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brief"
+          },
+          "cover_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cover Asset Id"
+          },
+          "image_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Engine"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "studio_projects",
-      "description": "List studio projects (a group, a single, a music video...), newest activity first, with counts\nof assets, characters and timelines. query searches name and brief. Every other tool takes the\nproject id as `project`.\n\nKeywords: projects, list projects, my groups, productions, proyectos, mis grupos, listar proyectos",
+      "description": "List studio projects (a group, a single, a music video...), newest activity first, with counts\nof assets, characters and timelines. query searches name and brief. Every other tool takes the\nproject id as `project`. Page with offset (the result's next_offset while has_more).\n\nKeywords: projects, list projects, my groups, productions, proyectos, mis grupos, listar proyectos",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5503,7 +5760,7 @@
     },
     {
       "name": "studio_recipe_export",
-      "description": "Turn a finished production into a reusable recipe with a {lead} casting slot / exportar receta.\n\nEvery stage, prompt, seed, template and setting is kept; the lead's name, look, negative and\npalette become placeholders ({lead}, {lead.look}, {lead.negative}, {lead.palette[0]}), described in\nthe `cast` block. warnings list shot prompts that still repeat words of the old lead's look. Works\non productions made in the app and by the production script. Saved as data/recipes/<name>.json.\n\nKeywords: recipe, export recipe, template production, recreate, receta, exportar receta, plantilla",
+      "description": "Turn a finished production into a reusable recipe with a {lead} casting slot / exportar receta.\n\nEvery stage, prompt, seed, template and setting is kept; the lead's name, look, negative and\npalette become placeholders ({lead}, {lead.look}, {lead.negative}, {lead.palette[0]}), described in\nthe `cast` block. warnings list shot prompts that still repeat words of the old lead's look. Works\non productions made in the app and by the production script. Saved as a recipe named `name`.\n\nKeywords: recipe, export recipe, template production, recreate, receta, exportar receta, plantilla",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5825,6 +6082,34 @@
       "annotations": {
         "readOnlyHint": false,
         "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_retry_job",
+      "description": "Queue a failed or cancelled job again with the same parameters and inputs (for example after\nComfyUI ran out of memory or was restarted). new_seed=true picks a new seed for a generation.\nProductions are not retried here: studio_production_continue resumes them. Returns the new job.\n\nKeywords: retry job, run again, try again, redo failed, reintentar trabajo, volver a intentar, repetir fallido",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "new_seed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "job_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
       }
     },
     {
@@ -7112,7 +7397,7 @@
     },
     {
       "name": "studio_timeline",
-      "description": "Build, read or edit a music-video timeline (then render it with studio_render).\naction=\"auto\": cut `song_asset_id` on its beats using asset_ids, or board_id, or (default) the\nproject's generated/imported images and videos. aspect 9:16 | 16:9 | 1:1. lyrics_asset_id adds\ntimed lyric captions. options: beats_low/beats_mid/beats_high (beats per shot, default 4/4/2),\nflash_on_strong_downbeats (true), ken_burns_variety (true), karaoke (false), seed, fps (24/25/30),\nvideo_lead_in_s (0) and video_rotate_offsets (false) to skip a video's still opening and vary repeats.\naction=\"get\": read timeline_id (options.clip_offset/clip_limit page through clips).\naction=\"update\": patch timeline_id with {\"clip_updates\": [{\"index\": 3, \"duration_s\": 2.0,\n\"transition_in\": {\"type\": \"crossfade\", \"duration_s\": 0.3}}, {\"index\": 5, \"asset_id\": \"a_...\"},\n{\"index\": 7, \"delete\": true}, {\"index\": 2, \"move_to\": 0}], \"name\", \"aspect\", \"fps\",\n\"lyrics_asset_id\", \"karaoke\", \"finishing\"}. Transitions: cut, crossfade, dip_black, flash_white.\nfinishing (applied once at render, all optional): {\"color_grade\": \"teal_orange\"|\"sodium_night\"|\n\"bleach_bypass\", \"grain\": 0-1, \"vignette\": true, \"letterbox\": true, \"glitch_on_downbeats\": true,\n\"lyric_style\": \"default\"|\"horror\" (uppercase condensed captions with a slight per-line jitter)|\"bold\"|\n\"pop\" (one big word at a time)|\"pulse\" (the line swells on every beat)|\"typewriter\"|\"handwritten\"|\"cinema\",\n\"beat_fx\": {\"source\": \"kick\"|\"beats\"|\"downbeats\"|\"drums\"|\"bass\"|\"vocals\"|\"other\" (a stem: its own attacks, once split with studio_stems), \"zoom\": 0-1, \"flash\": 0-1, \"shake\": 0-1},\n\"framing\": \"fill\"|\"blur\"|\"fit\" (how clips of another shape fill the frame)}.\nReturns a compact view: duration, clips_total, finishing and one page of clips with their index.\n\nKeywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, colour grade, color grade, vignette, film grain, letterbox, glitch flash, horror captions, linea de tiempo, montaje al ritmo, video musical, editar clips, gradacion de color",
+      "description": "Build, read or edit a music-video timeline (then render it with studio_render).\naction=\"auto\": cut `song_asset_id` on its beats using asset_ids, or board_id, or (default) the\nproject's generated/imported images and videos. aspect 9:16 | 16:9 | 1:1. lyrics_asset_id adds\ntimed lyric captions. options: beats_low/beats_mid/beats_high (beats per shot, default 4/4/2),\nflash_on_strong_downbeats (true), ken_burns_variety (true), karaoke (false), seed, fps (24/25/30),\nvideo_lead_in_s (0) and video_rotate_offsets (false) to skip a video's still opening and vary repeats.\naction=\"get\": read timeline_id (options.clip_offset/clip_limit page through clips).\naction=\"update\": patch timeline_id with {\"clip_updates\": [{\"index\": 3, \"duration_s\": 2.0,\n\"transition_in\": {\"type\": \"crossfade\", \"duration_s\": 0.3}}, {\"index\": 5, \"asset_id\": \"a_...\"},\n{\"index\": 7, \"delete\": true}, {\"index\": 2, \"move_to\": 0}], \"name\", \"aspect\", \"fps\",\n\"lyrics_asset_id\", \"karaoke\", \"finishing\"}. Every index in one clip_updates batch means the clip list\nas it was before the batch (edits, then deletes, then moves; move_to is a position in the result).\nTransitions: cut, crossfade, dip_black, flash_white.\nfinishing (applied once at render, all optional): {\"color_grade\": \"teal_orange\"|\"sodium_night\"|\n\"bleach_bypass\", \"grain\": 0-1, \"vignette\": true, \"letterbox\": true, \"glitch_on_downbeats\": true,\n\"lyric_style\": \"default\"|\"horror\" (uppercase condensed captions with a slight per-line jitter)|\"bold\"|\n\"pop\" (one big word at a time)|\"pulse\" (the line swells on every beat)|\"typewriter\"|\"handwritten\"|\"cinema\",\n\"beat_fx\": {\"source\": \"kick\"|\"beats\"|\"downbeats\"|\"drums\"|\"bass\"|\"vocals\"|\"other\" (a stem: its own attacks, once split with studio_stems), \"zoom\": 0-1, \"flash\": 0-1, \"shake\": 0-1},\n\"framing\": \"fill\"|\"blur\"|\"fit\" (how clips of another shape fill the frame)}.\nReturns a compact view: duration, clips_total, finishing and one page of clips with their index.\n\nKeywords: timeline, auto-cut, music video edit, cut to the beat, edit clips, colour grade, color grade, vignette, film grain, letterbox, glitch flash, horror captions, linea de tiempo, montaje al ritmo, video musical, editar clips, gradacion de color",
       "inputSchema": {
         "type": "object",
         "properties": {

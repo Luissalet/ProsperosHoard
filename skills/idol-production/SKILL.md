@@ -79,3 +79,6 @@ Traps:
 - Voices are generic Piper voices (first use downloads ~60 MB); never imitate a
   real person. Without a music model (see `studio_status`), ask the user for
   an audio file.
+- A job that failed on a busy or restarted ComfyUI can be queued again with
+  `studio_retry_job`; mark the best takes with `studio_asset_update`
+  (favourite, rating, tags) and collect them on a board with `studio_board`.

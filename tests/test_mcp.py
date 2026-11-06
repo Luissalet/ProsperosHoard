@@ -423,3 +423,25 @@ async def test_the_adapter_without_a_matching_token_keeps_using_the_per_tool_rou
             assert not again.isError
     token = (app.state.store.data_dir / "mcp-token").read_text(encoding="utf-8").strip()
     assert _journal(url, token) == []                                          # nothing reached the agent journal
+
+
+def test_every_agent_route_has_an_mcp_tool_and_back(tmp_path, monkeypatch):
+    """/api/agent/<tool> and the MCP tool share a name, and every tool's
+    docstring carries a Keywords: line."""
+    import importlib
+
+    from prosperos_hoard.api import create_app
+
+    app = create_app(tmp_path / "data", start_workers=False)
+    routes = {r.path.rsplit("/", 1)[1] for r in app.routes
+              if getattr(r, "path", "").startswith("/api/agent/") and "{" not in r.path}
+    monkeypatch.setenv("PROSPERO_URL", "http://127.0.0.1:8815")
+    sys.modules.pop("prosperos_hoard.mcp_server", None)
+    mod = importlib.import_module("prosperos_hoard.mcp_server")
+    tools = {t.name: t for t in mod.mcp._tool_manager.list_tools()}
+    assert {"studio_asset_update", "studio_board", "studio_project_update", "studio_retry_job"} <= set(tools)
+    # the family's generic agent routes (tool catalogue, call, journal, undo, token use) are not MCP tools
+    generic = {"call", "journal", "tools", "undo", "tokens"}
+    assert routes - generic == set(tools), ((routes - generic) ^ set(tools))
+    for name, t in tools.items():
+        assert "Keywords:" in (t.description or ""), name
