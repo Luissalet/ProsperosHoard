@@ -1504,6 +1504,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if not reference and body.use_character_reference:
                 reference = composed["reference_asset_id"]
             all_refs = extra_refs or ([reference] if reference else [])
+            if all_refs and not is_edit_call:
+                # a cast member's own reference makes this an edit: it needs the edit model too
+                engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"), "edit")
             added = engine.add_element_references(composed, all_refs, engine_name, body.template,
                                                   body.use_element_references)
             all_refs = all_refs + [r["asset_id"] for r in added]

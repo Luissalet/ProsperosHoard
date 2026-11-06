@@ -264,3 +264,23 @@ def test_edits_need_the_kontext_model_for_flux():
     kontext = dict(flux_only, UNETLoader={"input": {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"]]}}})
     assert engine.resolve_image_engine(kontext, "flux", "edit") == "flux"
     assert engine.resolve_image_engine(kontext, "auto", "edit") == "flux"
+
+
+def test_a_cast_reference_edit_needs_the_edit_model_of_the_engine(client, monkeypatch):
+    """`use_character_reference` makes a render an edit only once the reference is found: a Flux checkpoint
+    without the Kontext UNet must then fall back instead of queueing a template that cannot run."""
+    c, app, _ = client
+    flux_only = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["flux1-schnell-fp8.safetensors"]]}}}}
+    monkeypatch.setattr(engine, "_object_info", lambda backend, autostart=False: flux_only)
+    project_id = c.post("/api/projects", json={"name": "Cast edit"}).json()["id"]
+    ref = _upload_png(c, project_id)
+    made = c.post(f"/api/agent/studio_cast?project={project_id}", json={"action": "create", "name": "FAROL",
+                                                                       "fields": {"prompt": "lantern head"}}).json()
+    char_id = made.get("id") or made["character"]["id"]
+    c.post(f"/api/agent/studio_cast?project={project_id}",
+           json={"action": "update", "id": char_id, "fields": {"canonical_asset_id": ref}}).raise_for_status()
+    r = c.post(f"/api/projects/{project_id}/generate", json={
+        "prompt": "@FAROL at night", "engine": "flux", "use_character_reference": True, "seed": 3, "count": 1})
+    assert r.status_code == 200, r.text
+    job = app.state.store.get_job(r.json()["job"]["id"])
+    assert job["params"]["template"] == "sdxl_img2img", job["params"]
