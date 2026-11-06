@@ -339,7 +339,7 @@ The job's `outputs.segments` (and the manifest) carry `plan` and `qc` per
 segment, and `outputs.summary` counts `fits`, `tight`, `impossible`,
 `shortened`, `flagged`, `qc_skipped` and `untranslated` (plus `retimed` and
 `added_s` with `fit_mode="smart"`). Through MCP, `voice_job` on a finished
-dub returns that table under `result` (without file paths); the Dub tab shows
+dub returns the first lines of that table under `result` (without file paths, with `segments_total` when there are more; `voice_dub_segments` pages through the rest); the Dub tab shows
 a timing badge and the error rate per line, highlights flagged lines and shows
 what was heard on hover.
 
