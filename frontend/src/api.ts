@@ -1404,7 +1404,7 @@ export const api = {
   lyrics: (assetId: string) => request<{ text: string; lines: { time_s: number; text: string }[]; all_lines?: { time_s: number; text: string }[] }>("GET", `/generation/api/assets/${assetId}/lyrics`),
   timeLyrics: (pid: string, songAssetId: string, lyrics: string, name?: string) =>
     request<{ id: string; lines: number; sections: { label: string; energy: string; start_s: number; end_s: number }[]; note: string }>(
-      "POST", `/generation/api/agent/studio_time_lyrics${q({ project: pid })}`, { song_asset_id: songAssetId, lyrics, name }),
+      "POST", `/generation/api/projects/${pid}/lyrics/time`, { song_asset_id: songAssetId, lyrics, name }),
   saveLyrics: (assetId: string, text: string) => request<{ lines: { time_s: number; text: string }[] }>("PUT", `/generation/api/assets/${assetId}/lyrics`, { text }),
   createLyrics: (pid: string, text: string, name: string) => request<Asset>("POST", `/generation/api/projects/${pid}/lyrics`, { text, name }),
 
