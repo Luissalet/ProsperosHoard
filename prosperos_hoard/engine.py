@@ -582,6 +582,23 @@ def comfy_timeout_s(kind: Optional[str]) -> float:
     return COMFY_TIMEOUT_S.get(kind or "", COMFY_TIMEOUT_DEFAULT_S)
 
 
+COMFY_QUEUE_CHECK_EVERY_S = 15.0
+COMFY_LOST_GRACE_S = 30.0  # a prompt absent from ComfyUI's queue this long (and from its history) is lost
+
+
+async def _comfy_queue_ids(comfy: Any) -> tuple[set, set]:
+    """(running, pending) prompt ids from ComfyUI's `GET /queue`."""
+    response = await comfy._client.get(comfy.url + "/queue", timeout=5.0)
+    response.raise_for_status()
+    queue = response.json() if response.content else {}
+
+    def ids(key: str) -> set:
+        items = queue.get(key) if isinstance(queue, dict) else None
+        return {item[1] for item in items or [] if isinstance(item, (list, tuple)) and len(item) > 1}
+
+    return ids("queue_running"), ids("queue_pending")
+
+
 async def _cancel_comfy_prompt(comfy: Any, prompt_id: str) -> str:
     """Stop only this job's prompt on a (possibly shared) ComfyUI.
 
@@ -675,6 +692,8 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
         record(dict(receipt, phase="accepted", prompt_id=prompt_id))
     deadline = time.monotonic() + timeout_s
     cancelled = getattr(progress, "cancelled", lambda: False)
+    next_queue_check = time.monotonic() + COMFY_QUEUE_CHECK_EVERY_S
+    missing_since: Optional[float] = None
     while True:
         if cancelled():
             try:
@@ -686,6 +705,22 @@ def _run_comfy_workflow(backend: Backend, workflow: dict[str, Any], uploads: lis
             backend.run_async(comfy.wait(prompt_id, timeout_s=2.0, poll_interval_s=0.5))
             break
         except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
+            now = time.monotonic()
+            if now >= next_queue_check:
+                # not in the history yet: if it is not in ComfyUI's queue either, ComfyUI forgot
+                # the prompt (it was restarted, or the job was deleted there) and waiting is pointless
+                next_queue_check = now + COMFY_QUEUE_CHECK_EVERY_S
+                try:
+                    running, pending = backend.run_async(_comfy_queue_ids(comfy))
+                except Exception:  # noqa: BLE001 - busy or an odd server: rely on the deadline
+                    running = pending = None
+                if running is not None and prompt_id not in running and prompt_id not in pending:
+                    missing_since = missing_since or now
+                    if now - missing_since > COMFY_LOST_GRACE_S:
+                        raise EngineError("comfy_lost_job", f"ComfyUI no longer has job {prompt_id} in its queue or history "
+                                          "(it was probably restarted, or the job was deleted there); run it again") from None
+                else:
+                    missing_since = None
             # TimeoutError: not finished yet. An httpx timeout or dropped
             # connection: ComfyUI is too busy to answer /history right now
             # (a model loading, a heavy step) - the render is still going,
