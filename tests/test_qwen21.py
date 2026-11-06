@@ -254,3 +254,13 @@ def test_ui_generate_with_an_engine_and_references_edits_at_full_denoise(client)
         "strength": 0.55, "seed": 6, "count": 1})
     job = app.state.store.get_job(r.json()["job"]["id"])
     assert job["params"]["template"] == "sdxl_img2img" and job["params"]["strength"] == 0.55
+
+
+def test_edits_need_the_kontext_model_for_flux():
+    flux_only = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["flux1-schnell-fp8.safetensors"]]}}}}
+    assert engine.resolve_image_engine(flux_only, "auto", "txt2img") == "flux"
+    assert engine.resolve_image_engine(flux_only, "auto", "edit") == "sdxl"
+    assert engine.resolve_image_engine(flux_only, "flux", "edit") == "sdxl"
+    kontext = dict(flux_only, UNETLoader={"input": {"required": {"unet_name": [["flux1-dev-kontext_fp8_scaled.safetensors"]]}}})
+    assert engine.resolve_image_engine(kontext, "flux", "edit") == "flux"
+    assert engine.resolve_image_engine(kontext, "auto", "edit") == "flux"
