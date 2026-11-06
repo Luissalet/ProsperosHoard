@@ -17,6 +17,7 @@ import numpy as np
 from .. import engine
 from ..backend import Backend
 from ..store import Store
+from ..util import now_iso
 
 CHARACTERS = [
     {"name": "Iris Volt", "role": "Leader / Main Vocal",
@@ -134,7 +135,13 @@ def _run_generation(store: Store, backend: Backend, project_id: str, prompt: str
     store.conn.execute("UPDATE jobs SET params_json=? WHERE id=?", (__import__("json").dumps(params), job["id"]))
     store.conn.commit()
     job = {**job, "params": params}
-    result = engine.generate_image(store, backend, job, _no_progress)
+    try:
+        result = engine.generate_image(store, backend, job, _no_progress)
+    except Exception as exc:
+        # never leave a "running" job behind: nothing else would ever end it
+        store.update_job(job["id"], state="failed", message=f"demo seed failed: {str(exc)[:300]}",
+                         started_at=job["created_at"], finished_at=now_iso())
+        raise
     store.update_job(job["id"], state="done", progress=1.0, outputs=result, message="demo seed",
                      started_at=job["created_at"], finished_at=job["created_at"])
     return result["asset_ids"][0]
