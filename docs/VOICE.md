@@ -66,6 +66,23 @@ used.
 (optionally cloning-capable, optionally a preferred id) so a pipeline can
 say plainly "no engine installed" instead of guessing.
 
+**Loaded models are cached.** Each engine loads its model once per
+`(model, device, language)` and keeps it (`voice_engines.cached_model`),
+with one lock per engine around load *and* inference - an audiobook calls
+the engine once per sentence, a dub once per line. The app's free-memory
+action (`POST /api/backend/comfy/free`) also calls
+`voice_engines.unload_models()`, which drops every cached voice model and
+empties the CUDA cache.
+
+**Languages.** A `language` anywhere (voice spec, dub target, transcription)
+may be a code or a name - `es`, `es-ES`, `es_MX`, `Spanish`, `español`,
+`Castellano` all mean `es` (`normalize_language`); anything unrecognised
+fails with `bad_language`/`unsupported_language`. Each engine maps the code
+to its own convention: XTTS uses `zh-cn` for Chinese, Kokoro its one-letter
+`lang_code` (`en`->`a`, `en-GB`->`b`, `es`->`e`, `fr`->`f`, `hi`->`h`,
+`it`->`i`, `ja`->`j`, `pt`->`p`, `zh`->`z`) with a default voice pack that
+speaks that language. For transcription, `auto` (or nothing) detects it.
+
 ## Voice library (`voice_lab.py`, table `studio_voices`)
 
 `POST /api/voice/voices` (or the upload form, or `voice_create`) turns a
@@ -87,16 +104,37 @@ sample into a reusable voice:
    creation).
 4. **Stored**: `name, engine_id, sample path (relative to the data folder),
    language, cloned flag, reference transcript, quality report, tags,
-   presets[{name, speed?, pitch?, style?}], project_id?`. A preset is a
-   named shortcut for `speed`/`pitch`/`style` on that voice.
+   presets[{name, speed?, pitch?, style?, lexicon?}], lexicon, project_id?`.
+   A preset is a named shortcut for `speed`/`pitch`/`style` on that voice.
+5. **Deleted** with the voice: `DELETE /api/voice/voices/{id}` also removes
+   the voice's own folder under `data/voice_studio/voices/` (the processed
+   sample is a recording of someone's voice; it is not left behind).
 
 A `voice` request anywhere in the studio (speak, audiobook, dub) is a
 **spec**: `{engine_id?, voice_id?, voice_ref?, preset?, speed?, pitch?,
-style?, language?}`. `resolve_voice_spec` fills it in: a `voice_id` supplies
-its own engine and sample unless `engine_id`/`voice_ref` override them, a
-named `preset` merges in its saved parameters, and a cloning engine with
-neither a library sample nor an explicit `voice_ref` fails clearly
-(`cloning_needs_sample`).
+style?, language?, lexicon?}`. `resolve_voice_spec` fills it in: a
+`voice_id` supplies its own engine, sample, language and reference
+transcript unless `engine_id`/`voice_ref` override them, a named `preset`
+merges in its saved parameters, and a cloning engine with neither a library
+sample nor an explicit `voice_ref` fails clearly (`cloning_needs_sample`).
+F5-TTS receives the voice's reference transcript as its `ref_text`.
+`pitch` is in semitones (-12..12) and applied after synthesis with ffmpeg
+(`asetrate`+`aresample`+`atempo`, duration unchanged) since no engine here
+shifts pitch natively. A Piper `voice_ref` must be a plain voice id
+(letters, digits, `_`, `.`, `-`).
+
+**Pronunciation lexicon.** `{"Prospero": "PROS-per-oh"}`: each written word
+is replaced by its spoken form before synthesis - whole words only,
+case-insensitively, longest term first - so it covers speak, audiobooks and
+dubs alike. It merges voice < preset < request: the voice's own lexicon
+(`PATCH /api/voice/voices/{id}` with `{"lexicon": {...}}`, `{}` clears it;
+kept as a reserved `_lexicon` entry in the voice's presets, so preset names
+cannot start with `_`), a preset's `lexicon`, then the request's
+`voice.lexicon`. At most 500 entries.
+
+Audiobook and dub requests validate the voice (engine known and installed,
+pitch in range, language supported by the engine) **before** the job is
+queued, so a bad voice fails the request rather than the job.
 
 ## Transcription and dictation
 
@@ -107,7 +145,9 @@ language, text, per-segment `start_s`/`end_s`/`text`/word timestamps - plus
 `POST /api/voice/dictate` is the short-clip path for a browser microphone
 recording: no timestamps, tuned for a fast turnaround (a 30 MB cap). All
 three go through `best_installed_stt`, so with nothing installed the error
-says exactly what to `pip install`.
+says exactly what to `pip install`. The upload routes run the processing and
+transcription in a worker thread, so the rest of the app keeps answering
+while a long file is transcribed.
 
 ## Audiobooks (`voice_pipelines.py`, job type `audiobook`)
 
@@ -116,8 +156,16 @@ says exactly what to `pip install`.
 a background job:
 
 1. **Split into chapters** (`split_into_chapters`): a markdown `#`/`##`/`###`
-   heading, or a line starting "Chapter N"/"Capítulo N"/"Part N"/"Parte N",
-   starts a new chapter; otherwise the whole text is one.
+   heading, or a short line that is *only* a heading - "Chapter 3",
+   "Capítulo IV: El mar", "Part II", "Book One" (at most 80 characters; a
+   roman numeral must be upper case; a title after the number is short and
+   does not end like a sentence) - starts a new chapter; otherwise the whole
+   text is one. Narration that merely starts with "Part I think..." is never
+   taken for a heading, and a heading with no text under it (a "Part One"
+   right before "Chapter 1") stays as a chapter that narrates its title. In
+   an EPUB, every block element ends a paragraph and `<h1>`-`<h6>` become
+   heading lines, so a chapter's first paragraph never merges into its title;
+   manifest `href`s are URL-decoded and normalised.
 2. **Split into sentences** (`split_into_sentences`): paragraph breaks, then
    `.`/`!`/`?`/`…` followed by a capital letter, digit or opening quote - a
    regex splitter, not a language model, good enough to pace narration and
@@ -125,16 +173,21 @@ a background job:
 3. **Synthesize** each sentence with the chosen voice spec, resampled to a
    common 24 kHz and joined with a 0.35 s pause between sentences and a
    0.9 s pause between chapters (`SENTENCE_PAUSE_S`, `CHAPTER_PAUSE_S`,
-   `COMMON_SR` in `voice_pipelines.py`); each chapter is kept as its own
-   file. Progress is reported per sentence.
-4. **Assemble** with ffmpeg into one file: `mp3` (loudness-normalised), or
-   `m4b` with real chapter markers (an ffmetadata sidecar). An aligned SRT
-   and LRC (one entry per sentence, timed to where it landed) are written
-   alongside.
-5. **Resume**: the job's work directory is keyed by a hash of its exact
-   inputs (text, voice, format); re-running the same audiobook after a
-   crash or a cancel picks up from whichever chapters already rendered
-   instead of re-synthesizing them.
+   `COMMON_SR` in `voice_pipelines.py`); each chapter is streamed to its own
+   WAV file. Progress is reported, and a cancel honoured, per sentence (a
+   book with no chapters can be cancelled too). A single chapter over ~24.8
+   hours would overflow the WAV size field and fails with `chapter_too_long`.
+4. **Assemble** with ffmpeg into one file, reading the chapter files through
+   the concat demuxer (no single joined WAV, so no 4 GB RIFF limit for the
+   book): `mp3` (loudness-normalised), or `m4b` with real chapter markers
+   (an ffmetadata sidecar). An aligned SRT and LRC (one entry per sentence,
+   timed to where it landed) are written alongside.
+5. **Resume**: the job's work directory is keyed by a hash of its text and
+   voice (plus the library voice's lexicon, when it has one); re-running the
+   same audiobook after a crash or a cancel picks up from whichever chapters
+   already rendered instead of re-synthesizing them. A chapter's transcript
+   sidecar is written before its WAV is renamed into place, so an existing
+   chapter file always means a complete chapter.
 
 `GET /api/voice/audiobook/{job_id}/download?file=final|srt|lrc` serves the
 outputs; `project` on the request also saves the final file as an audio
@@ -144,17 +197,19 @@ asset. A text over 2,000,000 characters is rejected up front
 ## Dubbing (`dubbing.py`, job type `dub`)
 
 `POST /api/voice/dub` (a video by `source_path` or `video_asset_id`, plus
-`target_language`) runs, as one background job:
+`target_language` - a code or a name, normalised to a code and checked
+before the job is queued) runs, as one background job:
 
-1. **Extract** the video's audio track with ffmpeg.
+1. **Extract** the video's audio track with ffmpeg (to a temporary name,
+   renamed into place when complete - a retry reuses it).
 2. **Transcribe** it with timestamps (the chosen or best installed STT
-   engine).
+   engine; `source_language` `auto`/empty detects it).
 3. **Translate** each segment through the local model behind Hoard Link
    (`Link.chat()`), with an optional `glossary` (`{"term": "translation"}`)
    pinned into every instruction; with no local model resolved, the job fails
    clearly (`llm_unavailable`) instead of silently skipping translation - this
    is the one stage that needs a language model, and only for this step.
-   Every dubbing call asks the model for no reasoning (`effort="off"`): the
+   The reply budget scales with the line's length. Every dubbing call asks the model for no reasoning (`effort="off"`): the
    lines are short, and a reasoning model left on its default spent the whole
    token budget thinking and returned an empty line after ~100 s.
    `translation_mode` picks how:
@@ -269,10 +324,16 @@ asset. A text over 2,000,000 characters is rejected up front
    watching") is `skipped` with reason `filtered_phrase` when nothing is
    heard, instead of being flagged.
 8. **Mix and mux**: the dubbed line plays at the segment's start (in the
-   retimed video, its `timeline.start_s`),
-   ducked under the rest of the original track (`DUCK_DB = -18 dB`, or
-   fully replacing it where a background separator is installed), muxed
-   into a new video alongside target-language subtitles.
+   retimed video, its `timeline.start_s`). The mix is built in numpy,
+   streamed in 10 s chunks - one ffmpeg decoder for the background, each line
+   read only while it plays - with the background ducked under each line by a
+   gain envelope (`DUCK_DB = -18 dB`, 80 ms ramps) or fully replaced where a
+   background separator is installed (`python -m demucs`; if it is missing or
+   fails to start, the job falls back to ducking; a separated background is
+   reused, never recomputed). One ffmpeg pass then loudness-normalises it, so
+   hundreds of lines are never hundreds of ffmpeg inputs and nothing depends on
+   filter options only newer ffmpeg builds have. The video stream is copied and
+   muxed with the dubbed audio and target-language subtitles at its full length.
 
 The job's `outputs.segments` (and the manifest) carry `plan` and `qc` per
 segment, and `outputs.summary` counts `fits`, `tight`, `impossible`,
@@ -289,9 +350,18 @@ and the job's `options` including `translation_mode` and `fit_mode`), so
 `voice_resynthesize_segment`) can fix one line's translation and/or voice
 and re-run just that segment (its plan is re-estimated and its QC redone) - and, with `remix=true` (the default), rebuild
 the mixed audio and re-mux the final video - without repeating
-transcription or translation for the rest.
+transcription or translation for the rest. A new voice applies to that line
+only (the dub's default voice is kept), the target language is passed to the
+voice, one re-synthesis runs per dub at a time, the fixed line is written back
+to the job's outputs, and when the dub was saved to a project the remixed
+video becomes a new video asset (its id is returned).
 `GET /api/voice/dub/{job_id}/download?file=video|subtitles` serves the
-outputs.
+outputs; downloads only ever serve files under `data/voice_studio/`.
+
+Agents see a compact view: `voice_job` shows a finished dub's first 20
+lines and their total, and `voice_dub_segments(job_id, offset, limit)`
+(`GET /api/agent/voice_dub_segments`) pages through the rest - no file
+paths either way.
 
 ## Errors
 
@@ -300,5 +370,7 @@ unless noted: `engine_not_installed`, `unknown_engine`,
 `cloning_needs_sample`, `unknown_preset`, `silent_sample`, `unreadable`,
 `stt_not_installed`, `text_required`/`too_long`, `source_required`,
 `bad_format`, `bad_segment`, `job_not_done`, `no_installer`,
-`unknown_voice`, and (409) `llm_unavailable` when dubbing's translation
-step finds no local model resolved through Hoard Link.
+`unknown_voice`, `voice_download_failed`, `bad_language`,
+`unsupported_language`, `bad_pitch`, `bad_lexicon`, `bad_preset_name`,
+`chapter_too_long`, `not_dub_job`, and (409) `llm_unavailable` when
+dubbing's translation step finds no local model resolved through Hoard Link.

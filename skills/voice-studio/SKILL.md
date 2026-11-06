@@ -22,21 +22,26 @@ need an explicit install first.
 3. `voice_speak(text, voice_id=...)` to preview it. `voice_list()` shows
    what is saved. A saved voice can also be a character's voice in
    `studio_cast`: `fields={"voice": {"backend": "studio", "voice_id": "..."}}`.
+4. Names mispronounced? Pass `lexicon={"Prospero": "PROS-per-oh"}` (whole
+   words) to `voice_speak`/`voice_audiobook`/`voice_dub`; the voice's own
+   lexicon (set in the app) is merged underneath.
 
 ## Narrate an audiobook
 `voice_audiobook(text=... or source_path=..., voice_id=..., format="mp3"|"m4b")`
-returns a job - poll with `voice_job(job_id, wait_s=60)`. Chapters come from
-markdown headings or "Chapter N" lines; re-running the exact same text and
-voice resumes chapters already rendered instead of redoing them. `format:
-"m4b"` adds chapter markers; either way an SRT/LRC aligned transcript comes
-with it.
+returns a job - poll with `voice_job(job_id, wait_s=60)`; when done its
+`outputs` list the chapters (title, start, duration) and `asset_ids`, never
+file paths. Chapters come from markdown headings or short standalone
+"Chapter N" / "Capítulo IV" lines; re-running the exact same text and voice
+resumes chapters already rendered instead of redoing them. `format: "m4b"`
+adds chapter markers; either way an SRT/LRC aligned transcript comes with it.
 
 ## Dub a video
-`voice_dub(source_path=..., target_language=..., voice_id=...)` needs a
+`voice_dub(source_path=..., target_language="es" or "Spanish", voice_id=...)` needs a
 local LLM for translation (see `studio_status`'s `llm` capability) - it
-fails clearly, not silently, when none is reachable. It is a job: poll with
-`voice_job`. The finished job's `result` lists every segment (source text,
-translated text, timing) with a `plan` (estimated speech vs the slot:
+fails clearly, not silently, when none is reachable. The voice speaks the target
+language. It is a job: poll with `voice_job`. The finished job's `outputs` list the
+first 20 segments (`voice_dub_segments(job_id, offset=20)` pages through the rest),
+each with source text, translated text, timing, a `plan` (estimated speech vs the slot:
 `fits`, `tight` or `impossible`; lines that cannot fit are shortened by the
 model, `shortened_from` keeps the original) and a `qc` (what a transcription
 of the synthetic clip heard, word or character error rate, `flagged` when
@@ -53,7 +58,8 @@ every later line (`summary.retimed` / `added_s`, per-segment `fit`): tell
 the person the video will be a little longer. A
 wrong line does not need a full re-run -
 `voice_resynthesize_segment(job_id, index, text=...)` fixes just that one
-and remixes the final video.
+and remixes the final video (a new voice applies to that line only; when the dub
+was saved to a project, the new video's `asset_id` is returned).
 
 ## Transcribe / dictate
 `voice_transcribe(path=... or asset_id=...)` for a file (word timestamps
