@@ -65,6 +65,29 @@ def test_no_immediate_repeat_asset_with_small_pool():
         assert clips[i]["asset_id"] != clips[i - 1]["asset_id"]
 
 
+def test_fallback_clip_length_is_validated_and_bounded():
+    pool = [{"id": "a1", "kind": "image"}, {"id": "a2", "kind": "image"}]
+    for bad in (0, -1, 0.1, 61, float("nan"), "abc"):
+        with pytest.raises(tl.TimelineError, match="fallback_clip_s"):
+            tl.build_auto_cut(10.0, [], [], pool, options={"fallback_clip_s": bad})
+    clips = tl.build_auto_cut(10.0, [], [], pool, options={"fallback_clip_s": 0.5})["tracks"][0]["clips"]
+    assert all(c["duration_s"] >= tl.MIN_CLIP_S - 1e-6 for c in clips)
+    assert sum(c["duration_s"] for c in clips) == pytest.approx(10.0)
+    # a 60 s step on a 120.4 s song leaves a 60.4 s remainder: split, never past MAX_CLIP_S
+    clips = tl.build_auto_cut(120.4, [], [], pool, options={"fallback_clip_s": 60})["tracks"][0]["clips"]
+    assert all(tl.MIN_CLIP_S <= c["duration_s"] <= tl.MAX_CLIP_S for c in clips)
+    assert sum(c["duration_s"] for c in clips) == pytest.approx(120.4)
+
+
+def test_song_shorter_than_one_clip_is_refused():
+    pool = [{"id": "a1", "kind": "image"}]
+    for beats in ([], [0.0, 0.2]):
+        with pytest.raises(tl.TimelineError, match="too short"):
+            tl.build_auto_cut(0.3, beats, [], pool)
+    clips = tl.build_auto_cut(0.5, [], [], pool)["tracks"][0]["clips"]
+    assert [c["duration_s"] for c in clips] == [0.5]
+
+
 def _lookup(assets):
     table = {a["id"]: a for a in assets}
     return lambda aid: table.get(aid)
@@ -83,6 +106,19 @@ def test_normalise_tracks_rejects_bad_edits_with_clip_index():
         ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "transition_in": {"type": "spin"}}]}], "transition"),
         ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "ken_burns": {"zoom_start": 9}}]}], "zoom"),
         ([{"type": "lyrics", "clips": []}], "visual track"),
+        # JSON bodies can carry NaN/Infinity, which pass every range comparison
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "trim_start_s": float("nan")}]}], "trim_start_s"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "trim_start_s": float("inf")}]}], "trim_start_s"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": float("nan")}]}], "duration_s"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2,
+                                        "transition_in": {"type": "cut", "duration_s": float("nan")}}]}], "transition"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2,
+                                        "transition_in": {"type": "crossfade", "duration_s": "slow"}}]}], "transition"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2, "ken_burns": {"zoom_end": float("nan")}}]}], "zoom"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2}]},
+          {"type": "lyrics", "clips": [{"text": "x", "start_s": float("nan"), "end_s": 2}]}], "lyrics clip 0"),
+        ([{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2}]},
+          {"type": "lyrics", "clips": [{"text": "x", "start_s": 1, "end_s": float("inf")}]}], "lyrics clip 0"),
     ]
     for tracks, fragment in bad_cases:
         with pytest.raises(tl.TimelineError) as exc:
@@ -93,11 +129,31 @@ def test_normalise_tracks_rejects_bad_edits_with_clip_index():
 def test_clip_updates_edit_move_and_delete():
     tracks = [{"type": "visual", "clips": [{"asset_id": f"a{i}", "kind": "image", "duration_s": 1.0} for i in range(4)]}]
     out = tl.apply_clip_updates(tracks, [{"index": 0, "duration_s": 3.0}, {"index": 3, "move_to": 0}, {"index": 1, "delete": True}])
-    assert [c["asset_id"] for c in out[0]["clips"]] == ["a3", "a1", "a2"]
+    # every index names the clip as it was before the batch
+    assert [c["asset_id"] for c in out[0]["clips"]] == ["a3", "a0", "a2"]
+    assert out[0]["clips"][1]["duration_s"] == 3.0
+    assert tracks[0]["clips"][0]["duration_s"] == 1.0  # the input is not mutated
     with pytest.raises(tl.TimelineError):
         tl.apply_clip_updates(tracks, [{"index": 9, "duration_s": 1}])
     with pytest.raises(tl.TimelineError):
         tl.apply_clip_updates(tracks, [{"index": 0, "file_path": "/etc/passwd"}])
+
+
+def test_clip_updates_resolve_indexes_against_the_original_list():
+    tracks = [{"type": "visual", "clips": [{"asset_id": f"a{i}", "kind": "image", "duration_s": 1.0} for i in range(5)]}]
+    ids = lambda out: [c["asset_id"] for c in out[0]["clips"]]  # noqa: E731
+    # two deletes: the second must not shift onto a neighbour
+    assert ids(tl.apply_clip_updates(tracks, [{"index": 1, "delete": True}, {"index": 3, "delete": True}])) == ["a0", "a2", "a4"]
+    # a delete then an edit of a later clip edits the clip the caller meant
+    out = tl.apply_clip_updates(tracks, [{"index": 0, "delete": True}, {"index": 4, "duration_s": 2.5}])
+    assert ids(out) == ["a1", "a2", "a3", "a4"] and out[0]["clips"][-1]["duration_s"] == 2.5
+    # a move plus an edit on the same clip; move_to past the shortened end is clamped
+    out = tl.apply_clip_updates(tracks, [{"index": 0, "move_to": 4, "duration_s": 2.0}, {"index": 2, "delete": True}])
+    assert ids(out) == ["a1", "a3", "a4", "a0"] and out[0]["clips"][-1]["duration_s"] == 2.0
+    # a deleted clip is not resurrected by a move
+    assert ids(tl.apply_clip_updates(tracks, [{"index": 2, "delete": True}, {"index": 2, "move_to": 0}])) == ["a0", "a1", "a3", "a4"]
+    with pytest.raises(tl.TimelineError):
+        tl.apply_clip_updates(tracks, [{"index": 0, "move_to": 5}])
 
 
 def test_auto_cut_on_real_demo_analysis_covers_song_on_beats(tmp_path):
