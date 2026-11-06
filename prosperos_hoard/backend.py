@@ -589,17 +589,19 @@ class Backend:
         name = self._raw_config().get("bg_removal_model")
         return name.strip() if isinstance(name, str) and name.strip() else "birefnet.safetensors"
 
-    def import_roots(self) -> list[Path]:
+    def import_roots(self, lexical: bool = False) -> list[Path]:
         """Folders `studio_import` may read from: the user's home folder,
         the app's own `data/inbox/`, and any extra folders configured in
-        Settings (`backend.json -> import_roots`)."""
+        Settings (`backend.json -> import_roots`). `lexical=True` gives them
+        made absolute without touching the filesystem (no symlink
+        resolution), for a check that must run before any stat."""
         roots = [Path.home(), self.data_dir / "inbox"]
         for extra in self._raw_config().get("import_roots") or []:
             roots.append(Path(extra))
         out: list[Path] = []
         for r in roots:
             try:
-                resolved = r.expanduser().resolve()
+                resolved = Path(os.path.abspath(r.expanduser())) if lexical else r.expanduser().resolve()
             except OSError:
                 continue
             if resolved not in out:
