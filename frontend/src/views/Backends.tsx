@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Cpu, Download, HardDrive, Loader2, Music, RefreshCw, Server, Type as TypeIcon, Volume2, Zap } from "lucide-react";
 import { api } from "../api";
 import { useT } from "../i18n";
-import { ConfirmButton, useApp, useAsync } from "../components/ui";
+import { ConfirmButton, ErrorNote, useApp, useAsync } from "../components/ui";
 import { LocalServices } from "./LocalServices";
 
 export function BackendsView() {
@@ -26,20 +26,27 @@ export function BackendsView() {
     }
   };
 
+  // the download poll stops when the view goes away
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
   const download = async (id: string) => {
     setDownloading(id);
     try {
       const job = await api.downloadVoice(id);
       app.refreshJobs();
-      for (let i = 0; i < 240; i++) {
+      for (let i = 0; i < 240 && alive.current; i++) {
         await new Promise((r) => setTimeout(r, 1000));
+        if (!alive.current) return;
         const j = await api.job(job.id);
         if (j.state === "done") { app.toast(`${t("downloaded")}: ${id}`, "ok"); break; }
-        if (j.state === "failed") { app.toast(j.message || "failed", "bad"); break; }
+        if (j.state === "failed" || j.state === "cancelled") { app.toast(j.message || t("downloadFailed"), "bad"); break; }
       }
-      voices.reload();
+      if (alive.current) voices.reload();
+    } catch (e) {
+      if (alive.current) app.toast(`${t("downloadFailed")}: ${(e as Error).message}`, "bad");
     } finally {
-      setDownloading(null);
+      if (alive.current) setDownloading(null);
     }
   };
 
@@ -53,7 +60,7 @@ export function BackendsView() {
           </button>
         </div>
       </div>
-      {!s ? <p className="muted">{t("loading")}</p> : (
+      {!s ? (status.error ? <ErrorNote error={status.error} onRetry={status.reload} /> : <p className="muted">{t("loading")}</p>) : (
         <div className="stack">
           {s.demo && <div className="demo-banner"><Zap size={14} /> {t("demoHint")}</div>}
           <LocalServices initial={s.services} onChange={status.reload} />

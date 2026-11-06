@@ -101,6 +101,8 @@ export interface Project {
   brief: string | null;
   cover_asset_id: string | null;
   auto_cover_asset_id?: string | null;   // the newest favourite / image when no cover was chosen
+  /** "auto" (default) | "qwen21" | "flux" | "sdxl": what Generate and productions use unless a run overrides it */
+  image_engine?: ImageEngine | null;
   created_at: string;
   updated_at: string;
   counts: Record<string, number>;
@@ -111,6 +113,11 @@ export interface TrashedProject extends Pick<Project, "id" | "name" | "brief" | 
   deleted_at: string;
   productions: string[];
 }
+
+export type ImageEngine = "auto" | "qwen21" | "flux" | "sdxl";
+export const IMAGE_ENGINES: ImageEngine[] = ["auto", "qwen21", "flux", "sdxl"];
+/** Model names are not translated; "auto" is (see i18n engineAuto). */
+export const ENGINE_NAMES: Record<Exclude<ImageEngine, "auto">, string> = { qwen21: "Qwen-Image 2.1", flux: "Flux", sdxl: "SDXL" };
 
 export interface Voice {
   backend?: string;
@@ -577,7 +584,13 @@ export interface BackendStatus {
   comfy_dedicated?: boolean;
   vram_estimates_mb: Record<string, number>;
   music: { name: string; available: boolean; reason: string }[];
-  overrides: { faustus_url?: string | null; comfy_url?: string | null; import_roots: string[] };
+  overrides: {
+    faustus_url?: string | null; comfy_url?: string | null;
+    /** every folder imports may read from: the built-in ones first, then the configured ones (resolved, deduplicated) */
+    import_roots: string[];
+    /** only the folders configured in Settings, as saved (older servers omit it) */
+    import_roots_user?: string[];
+  };
   token_set: boolean;
   services?: ServicesStatus;
 }
@@ -948,7 +961,14 @@ export interface SongChange {
   run?: boolean;
 }
 
-export interface ProductionView extends ProductionSummary {
+/** `view.animatic` of a production that has one (compact_view); `false` otherwise. */
+export interface ProductionAnimaticView {
+  renders: Record<string, string>;
+  gpu_minutes_estimate?: number | null;
+  clips_planned?: number | null;
+}
+
+export interface ProductionView extends Omit<ProductionSummary, "animatic"> {
   explainer?: ExplainerProject;
   stages?: Record<string, "done" | "partial" | "pending">;
   title?: string;
@@ -959,8 +979,12 @@ export interface ProductionView extends ProductionSummary {
   narration?: { asset_id: string; duration_s: number; timing: string };
   soundtrack_asset_id?: string;
   lead?: string;
+  character_id?: string;
+  song_asset_id?: string;
   renders?: Record<string, Record<string, string>>;
-  animatic?: boolean;
+  animatic?: ProductionAnimaticView | boolean;
+  qa?: { stage: string; passed: number; failed: number; skipped: number; at: string };
+  qa_retries?: number;
   next?: string;
   note?: string;
 }
@@ -991,6 +1015,24 @@ export interface ShortShot { key: string; segment: number; index: number; start_
 
 export interface StockStatus {
   providers: Record<string, { configured: boolean; key_hint: string | null; get_key: string }>;
+}
+
+/** `animatic/plan.json` (GET /api/productions/{slug}/animatic). */
+export interface AnimaticPlan {
+  production: string;
+  made_at: string;
+  duration_s: number;
+  fps: number;
+  cuts_total: number;
+  shots: { key: string; lead: boolean; prompt: string | null; motion?: string | null; still: string | null;
+           screen_time_s: number; cuts: number; will_be_clip: boolean; clip_keys: string[]; clips_to_render: string[] }[];
+  unused_shots: string[];
+  clips_planned: number;
+  clips_to_render: string[];
+  gpu_minutes: number;
+  cpu_minutes_renders?: number;
+  renders?: Record<string, string>;
+  note?: string;
 }
 
 export interface ProductionState {
@@ -1349,7 +1391,7 @@ export const api = {
   purgeProject: (id: string) => request<{ id: string; assets: number; files_deleted: number; productions_deleted: number }>(
     "POST", `/generation/api/projects/${id}/purge`),
   projectTrash: () => request<{ items: TrashedProject[] }>("GET", "/generation/api/trash/projects"),
-  updateProject: (id: string, patch: Partial<Pick<Project, "name" | "brief" | "cover_asset_id">>) =>
+  updateProject: (id: string, patch: Partial<Pick<Project, "name" | "brief" | "cover_asset_id" | "image_engine">>) =>
     request<Project>("PATCH", `/generation/api/projects/${id}`, patch),
 
   characters: (pid: string) => request<{ items: Character[] }>("GET", `/generation/api/projects/${pid}/characters`),
@@ -1430,7 +1472,7 @@ export const api = {
   render: (id: string, quality: "preview" | "final") =>
     request<{ job: Job }>("POST", `/generation/api/timelines/${id}/render`, { timeline_id: id, quality }),
 
-  jobs: (params: { state?: string; project?: string; limit?: number } = {}) => request<Paged<Job>>("GET", `/generation/api/jobs${q(params)}`),
+  jobs: (params: { state?: string; project?: string; limit?: number; offset?: number } = {}) => request<Paged<Job>>("GET", `/generation/api/jobs${q(params)}`),
   job: (id: string) => request<Job>("GET", `/generation/api/jobs/${id}`),
   cancelJob: (id: string) => request<Job>("POST", `/generation/api/jobs/${id}/cancel`),
 
@@ -1661,6 +1703,11 @@ export const api = {
     request<{ job: Job; scorecard?: QaScorecard }>("POST", `/generation/api/productions/${slug}/qa`, { production: slug, ...body }),
   makeAnimatic: (slug: string, aspects?: string[]) =>
     request<{ job: Job }>("POST", `/generation/api/productions/${slug}/animatic`, { production: slug, aspects }),
+  animaticPlan: (slug: string) => request<AnimaticPlan>("GET", `/generation/api/productions/${slug}/animatic`),
+  productionReport: async (slug: string) => {
+    const body = await request<Blob>("GET", `/generation/api/productions/${slug}/report`);
+    return typeof body === "string" ? body : await body.text();
+  },
   critiquePlan: (body: Record<string, unknown>, signal?: AbortSignal) =>
     request<{ issues: string[]; revised: boolean; shots?: VideoShot[] }>("POST", "/generation/api/productions/plan/critique", body, signal),
   planVideo: (body: Record<string, unknown>, signal?: AbortSignal) => request<{ draft: VideoDraft; lead: { name: string; look?: string; character_id?: string } }>("POST", "/generation/api/productions/plan", body, signal),

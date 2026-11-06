@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, Film, Loader2, Megaphone, Music,
+  AlertTriangle, ArrowLeft, BookCopy, Check, Circle, CircleDot, Clapperboard, Download, FileText, Film, Loader2, Megaphone, Music,
   Pause as PauseIcon, Play, RotateCcw, Info, FileDown, Save, ShieldCheck, Repeat, Shuffle, Sparkles, Users, Ratio, Plus,
 } from "lucide-react";
 import {
-  api, fileUrl, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
+  api, fileUrl, type AnimaticPlan, type Character, type Job, type Project, type ProductionState, type ProductionSummary, type RecipeSummary,
 } from "../api";
 import { useT, type Lang, type MessageKey } from "../i18n";
 import { ShotReviewsCard } from "../components/ShotReviews";
 import { errorText, jobMessage, lineageEvent, stageName, translateText } from "../messages";
 import { LookPanel } from "../components/LookPanel";
-import { Modal, timeAgo, useApp, useAsync } from "../components/ui";
+import { ErrorNote, Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
 import { VideoModal } from "./VideoModal";
 import { StoryboardCard, liveRun } from "./Storyboard";
@@ -43,7 +43,7 @@ export function StatusPill({ status, pending }: { status: string; pending?: bool
 
 /** "Recreate with…": pick a studio character (any project) or describe a new lead, then run the recipe. */
 export function RecastModal({ recipe, fromProduction, defaultTitle, onClose, onStarted }: {
-  recipe?: RecipeSummary; fromProduction?: ProductionSummary; defaultTitle?: string; onClose: () => void; onStarted: (slug: string) => void;
+  recipe?: RecipeSummary; fromProduction?: { slug: string }; defaultTitle?: string; onClose: () => void; onStarted: (slug: string) => void;
 }) {
   const { t, lang } = useT();
   const app = useApp();
@@ -361,7 +361,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
 }) {
   const { t, lang } = useT();
   const app = useApp();
-  const { data, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
+  const { data, error, reload } = useAsync(() => api.production(slug), [slug, app.dataVersion]);
   const [recast, setRecast] = useState(false);
   const [tab, setTab] = useState<Tab | null>(null);
   const [shotOpen, setShotOpen] = useState(false);
@@ -376,7 +376,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
   const status = data?.status;
   useEffect(() => { if (status) reloadList(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!data) return <p className="muted">{t("loading")}</p>;
+  if (!data) return error ? <ErrorNote error={error} onRetry={reload} /> : <p className="muted">{t("loading")}</p>;
   const view = data.view;
   const legacy = Boolean(view.legacy);
   const isShort = data.kind === "short";
@@ -556,6 +556,8 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
           )}
           {current === "qa" && <QaCard state={data} onRan={reload} />}
           {current === "history" && (
+            <>
+            {!legacy && <ReportCard slug={slug} version={`${view.status}:${view.stage || ""}`} />}
             <div className="card">
               <h2>{t("lineageTitle")}</h2>
               {data.message && <p className="small muted">{jobMessage(data.message, lang)}</p>}
@@ -568,6 +570,7 @@ function ProductionDetail({ slug, reloadList, onStarted, onBack }: {
                 </ul>
               )}
             </div>
+            </>
           )}
         </>
       )}
@@ -582,14 +585,24 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
   const [editing, setEditing] = useState(false);
   const legacy = Boolean(state.view.legacy);
   const entry = (legacy ? (state as unknown as { animatic?: Record<string, any> }).animatic : state.done?.animatic) as
-    { renders?: Record<string, string>; plan?: { cuts_total: number; clips_planned: number; gpu_minutes: number; unused_shots?: string[] } } | undefined;
+    { renders?: Record<string, string>; made_at?: string;
+      plan?: { cuts_total: number; clips_planned: number; gpu_minutes: number; unused_shots?: string[] } } | undefined;
   const framesReady = legacy || state.view.stages?.frames === "done";
+  // the full plan (per shot, which clips are left) lives next to the animatic
+  const [full, setFull] = useState<AnimaticPlan | null>(null);
+  const hasRenders = Boolean(entry?.renders);
+  useEffect(() => {
+    if (!hasRenders) { setFull(null); return; }
+    let alive = true;
+    api.animaticPlan(state.slug).then((p) => { if (alive) setFull(p); }).catch(() => { if (alive) setFull(null); });
+    return () => { alive = false; };
+  }, [state.slug, hasRenders, entry?.made_at]);
   if (!entry?.renders && !framesReady) return null;
   const make = async () => {
     try { await api.makeAnimatic(state.slug); app.toast(t("animaticQueued"), "info"); onChanged(); }
     catch (e) { app.toast((e as Error).message, "bad"); }
   };
-  const plan = entry?.plan;
+  const plan = full || entry?.plan;
   return (
     <div className="card">
       <h2>
@@ -603,10 +616,38 @@ function AnimaticCard({ state, onChanged }: { state: ProductionState; onChanged:
       </h2>
       <p className="small muted" style={{ marginTop: -6 }}>{t("animaticLead")}</p>
       {plan && (
-        <p className="small">
-          {t("animaticPlan", { cuts: plan.cuts_total, clips: plan.clips_planned, gpu: plan.gpu_minutes })}
-          {plan.unused_shots && plan.unused_shots.length > 0 && <span className="muted"> · {t("unusedShots", { list: plan.unused_shots.join(", ") })}</span>}
-        </p>
+        <div className="stack" style={{ gap: 6, marginBottom: 10 }}>
+          <p className="small" style={{ margin: 0 }}>
+            {full && <span className="muted">{t("planDuration", { s: full.duration_s.toFixed(1) })} · </span>}
+            {t("animaticPlan", { cuts: plan.cuts_total, clips: plan.clips_planned, gpu: plan.gpu_minutes })}
+            {full?.cpu_minutes_renders != null && <span className="muted"> · {t("planCpu", { cpu: full.cpu_minutes_renders })}</span>}
+          </p>
+          {plan.unused_shots && plan.unused_shots.length > 0 && <p className="small muted" style={{ margin: 0 }}>{t("unusedShots", { list: plan.unused_shots.join(", ") })}</p>}
+          {full && full.clips_to_render.length > 0 && (
+            <p className="small muted mono" style={{ margin: 0 }}>{t("planClipsToRender", { list: full.clips_to_render.join(", ") })}</p>
+          )}
+          {full && full.shots.length > 0 && (
+            <details>
+              <summary className="small muted" style={{ cursor: "pointer" }}>{t("planPerShot")}</summary>
+              <div className="table-scroll">
+                <table className="list">
+                  <thead><tr><th>#</th><th>{t("cutsLabel")}</th><th>{t("screenTime")}</th><th>{t("clipBadge")}</th><th>{t("prompt")}</th></tr></thead>
+                  <tbody>
+                    {full.shots.map((s) => (
+                      <tr key={s.key} className={s.cuts === 0 ? "muted" : ""}>
+                        <td className="mono small nowrap">{s.key}{s.lead ? ` · ${t("leadBadge")}` : ""}</td>
+                        <td className="mono small">{s.cuts}</td>
+                        <td className="mono small nowrap">{s.screen_time_s.toFixed(1)} s</td>
+                        <td className="mono small">{s.clips_to_render.length ? s.clips_to_render.join(", ") : s.will_be_clip ? "✓" : "-"}</td>
+                        <td className="small">{s.prompt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </div>
       )}
       {entry?.renders && (
         <div className="row wrap" style={{ alignItems: "flex-start" }}>
@@ -637,7 +678,11 @@ function ShotsModal({ state, onClose, onSaved }: { state: ProductionState; onClo
     const changes = Object.entries(edits).map(([key, e]) => {
       const shot = (state.spec.shots || []).find((s) => s.key === key)!;
       const change: Record<string, unknown> = { key };
-      if (e.best !== undefined) change.best = e.best;
+      // re-picking the variant that is already the best is no change: sending it would
+      // make the server redo everything built on that still (animatic, album, cut)
+      const entry = frames[key] || {};
+      const currentBest = Math.max(0, (entry.variants || []).indexOf(entry.best || ""));
+      if (e.best !== undefined && e.best !== currentBest) change.best = e.best;
       if (e.clip !== undefined && e.clip !== shot.clips.length > 0) change.clip = e.clip;
       if (e.regenerate) change.regenerate = true;
       if (e.prompt !== undefined && e.prompt.trim() && e.prompt !== shot.prompt) change.prompt = e.prompt.trim();
@@ -747,6 +792,37 @@ function QaCard({ state, onRan }: { state: ProductionState; onRan: () => void })
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** REPORT.md of the production, on demand (the server writes it the first time it is asked for). */
+function ReportCard({ slug, version }: { slug: string; version: string }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setError(null);
+    api.productionReport(slug)
+      .then((r) => { if (alive) setText(r); })
+      .catch((e) => { if (alive) setError((e as Error).message); });
+    return () => { alive = false; };
+  }, [open, slug, version, tick]);
+  return (
+    <div className="card">
+      <h2>
+        <FileText size={16} /> {t("reportTitle")}
+        <div className="card-actions">
+          <button className="btn sm" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? t("hideReport") : t("showReport")}</button>
+        </div>
+      </h2>
+      {open && (error ? <ErrorNote error={error} onRetry={() => setTick((x) => x + 1)} />
+        : text === null ? <p className="small muted">{t("loading")}</p>
+        : <pre className="report-text">{text}</pre>)}
     </div>
   );
 }

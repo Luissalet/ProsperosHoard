@@ -7,6 +7,7 @@ import { useDeleteAssets } from "../components/useDeleteAssets";
 import { LinkDownload } from "../components/LinkDownload";
 import { assetName, kindName, sourceName } from "../messages";
 
+
 export function LibraryView() {
   const { t, lang } = useT();
   const app = useApp();
@@ -73,7 +74,8 @@ export function LibraryView() {
       if (e.key === "Delete" && picked && picked.length) { del.remove(picked).then(() => setPicked([])); }
       if ((e.key === "f" || e.key === "F") && items[focus]) {
         const a = items[focus];
-        api.updateAsset(a.id, { favourite: !a.favourite }).then((u) => setItems((xs) => xs.map((x) => (x.id === u.id ? u : x))));
+        api.updateAsset(a.id, { favourite: !a.favourite }).then((u) => setItems((xs) => xs.map((x) => (x.id === u.id ? u : x))))
+          .catch((err) => app.toast((err as Error).message, "bad"));
       }
     };
     window.addEventListener("keydown", onKey);

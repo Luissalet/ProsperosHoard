@@ -22,6 +22,13 @@ const ENGINE_DEFAULTS: Record<string, { steps: number; cfg: number; sampler: str
 };
 const ENGINE_LABELS: Record<string, string> = { qwen21: "Qwen-Image 2.1", flux: "FLUX.1", sdxl: "SDXL", sd15: "SD 1.5" };
 const MAX_REFS: Record<string, number> = { qwen21: 10, flux: 1, sdxl: 1, sd15: 0, custom: 1 };
+function readSession(key: string): string {
+  try { return sessionStorage.getItem(key) || ""; } catch { return ""; }
+}
+function writeSession(key: string, value: string) {
+  try { sessionStorage.setItem(key, value); } catch { /* storage disabled */ }
+}
+
 const SAMPLERS = ["euler", "dpmpp_2m", "dpmpp_2m_sde", "euler_ancestral", "dpmpp_sde", "heun", "uni_pc", "ddim"];
 const SCHEDULERS = ["simple", "karras", "normal", "exponential", "sgm_uniform"];
 
@@ -53,7 +60,7 @@ export function GenerateView({ onAnimate }: { onAnimate?: (asset: Asset) => void
   const recent = useAsync(() => api.assets(pid, { source: "generated", kind: "image", limit: 24 }), [pid, app.dataVersion]);
   const engines = useAsync(() => api.imageEngines(pid), [pid]);
 
-  const [prompt, setPrompt] = useState(() => sessionStorage.getItem(`prospero.prompt.${pid}`) || "");
+  const [prompt, setPrompt] = useState(() => readSession(`prospero.prompt.${pid}`));
   const [negative, setNegative] = useState("");
   const [style, setStyle] = useState<string>("");
   // "auto" | "qwen21" | "flux" | "sdxl" | "tmpl:<template>" (SD 1.5, imported workflows)
@@ -103,7 +110,7 @@ export function GenerateView({ onAnimate }: { onAnimate?: (asset: Asset) => void
   const textRef = useRef<HTMLTextAreaElement>(null);
   const slash = useSlashMenu(prompt, setPrompt, textRef);
 
-  useEffect(() => { sessionStorage.setItem(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
+  useEffect(() => { writeSession(`prospero.prompt.${pid}`, prompt); }, [prompt, pid]);
 
   // live final-prompt preview
   const roleInstructions: Record<string, string> = {
@@ -220,6 +227,9 @@ export function GenerateView({ onAnimate }: { onAnimate?: (asset: Asset) => void
   };
 
   const myJobs: Job[] = queuedIds.map((id) => app.jobs.find((j) => j.id === id)).filter(Boolean) as Job[];
+  // a job this view started stays in the app-wide poll even once it is older than its window
+  const { trackJobs } = app;
+  useEffect(() => { trackJobs(queuedIds); }, [queuedIds, trackJobs]);
   const comfy = backend.data?.comfy;
   const checkpoints = comfy?.checkpoints || [];
   const customs: WorkflowSpec[] = workflows.data?.custom || [];
@@ -323,7 +333,7 @@ export function GenerateView({ onAnimate }: { onAnimate?: (asset: Asset) => void
                     if (e.key === "ArrowUp") { e.preventDefault(); setMenu({ ...menu, index: (menu.index - 1 + menuSize) % menuSize }); }
                     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMenu(Math.min(menu.index, menuSize - 1)); }
                     if (e.key === "Escape") setMenu(null);
-                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) queue();
+                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); queue(); }
                 }} />
               {slash.menu}
               <div className="prompt-enhance"><Enhance text={prompt} kind="image" onDone={(v) => setPrompt(v)} className="btn xs" /></div>
