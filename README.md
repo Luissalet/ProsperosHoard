@@ -560,7 +560,7 @@ loads no model: memory is only used when a job runs. The agent does the
 same with `studio_services`, `studio_service_start` and `studio_service_stop`.
 
 ComfyUI is found in `COMFYUI_DIR`, the folder saved in Backends, or the
-usual places (`D:\LocalAI\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, the portable
+usual places (`E:\Development\Tools\ComfyUI`, `C:\ComfyUI`, `~/ComfyUI`, the portable
 build...), with the Python of its `venv`, `.venv` or `python_embeded`.
 It is started on loopback with `--cuda-device` for the chosen GPU; a server
 on any port other than 8188 gets its own output, temp, user and database
@@ -575,10 +575,10 @@ hand or by Faustus is shown as running and never stopped.
 
 ```json
 {
-  "comfyui": {"dir": "D:/LocalAI/ComfyUI", "gpu": "auto", "args": ["--lowvram"]},
+  "comfyui": {"dir": "E:/Development/Tools/ComfyUI", "gpu": "auto", "args": ["--lowvram"]},
   "ollama": {"exe": null},
   "commands": [
-    {"id": "llamacpp", "label": "llama.cpp", "argv": ["powershell", "-NoProfile", "-File", "D:/LocalAI/Start-LlamaServer.ps1"],
+    {"id": "llamacpp", "label": "llama.cpp", "argv": ["powershell", "-NoProfile", "-File", "E:/Development/Tools/llama.cpp/Start-LlamaServer.ps1"],
      "health": "http://127.0.0.1:8081/health", "capabilities": ["llm", "vision"]}
   ]
 }
@@ -923,9 +923,9 @@ Configure (or `training` in `data/backend.json`):
 
 ```json
 "training": {
-  "lora_dir": "D:/LocalAI/ComfyUI/models/loras",
+  "lora_dir": "E:/Development/Tools/ComfyUI/models/loras",
   "gpu": "auto",
-  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "D:/LocalAI/ai-toolkit"}],
+  "trainers": [{"kind": "ai_toolkit", "name": "ai-toolkit", "dir": "E:/Development/Tools/ai-toolkit"}],
   "base_models": {"qwen_image": "Qwen/Qwen-Image", "flux1": "black-forest-labs/FLUX.1-dev"}
 }
 ```
