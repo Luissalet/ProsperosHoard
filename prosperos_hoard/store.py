@@ -1425,7 +1425,9 @@ class Store:
         ts = now_iso()
         self.conn.execute(
             "UPDATE jobs SET state='cancelled', message='cancelled', finished_at=?, updated_at=? "
-            "WHERE state IN ('running','waiting_gpu') AND cancel_requested=1",
+            "WHERE state IN ('running','waiting_gpu') AND cancel_requested=1 "
+            # an image job that may already be on the GPU is held below, whatever the user asked
+            "AND NOT (type IN ('generate_image','edit_image') AND comfy_submission_json IS NOT NULL)",
             (ts, ts),
         )
         # Legacy running image jobs have no receipt: absence is not proof that

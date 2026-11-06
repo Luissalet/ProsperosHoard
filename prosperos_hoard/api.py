@@ -2647,8 +2647,13 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         outputs = job.get("outputs") or {}
         if job.get("state") == "done" and outputs:
             if job.get("type") == "dub":
-                view.pop("result", None)  # the same rows, first page only, under outputs
                 view["outputs"] = dubbing_mod.dub_outputs_view(outputs)
+                result = view.get("result")
+                preview = len(view["outputs"].get("segments", {}).get("items") or [])
+                if isinstance(result, dict) and len(result.get("segments") or []) > preview:
+                    # the line table, first page only (voice_dub_segments pages through the rest)
+                    result["segments_total"] = len(result["segments"])
+                    result["segments"] = result["segments"][:preview]
             elif job.get("type") == "audiobook":
                 view["outputs"] = vp.audiobook_outputs_view(outputs)
         return view

@@ -256,7 +256,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET | `/api/voice/audiobook/{job_id}` | the job |
 | GET | `/api/voice/audiobook/{job_id}/download?file=final\|srt\|lrc` | the file |
 | POST | `/api/voice/dub` | `{source_path?, video_asset_id?, target_language, source_language?, glossary?, voice, stt_engine_id?, plan?, qc?, qc_threshold?, translation_mode?: adapt\|direct, fit_mode?: audio\|smart, title?, project?, wait_s}` -> `{job}`. `translation_mode` (default `adapt`: literal, critique, adapted line; `direct`: one call per line) and `fit_mode` (default `audio`; `smart` also slows the picture, re-encoding the video) only enter the job params when they differ from the default |
-| GET | `/api/voice/dub/{job_id}` | the job (a finished dub also carries `result`: the line table with `plan` and `qc`) |
+| GET | `/api/voice/dub/{job_id}` | the job (a finished dub also carries `result`: the first lines of the table with `plan` and `qc`, `segments_total` when there are more - `voice_dub_segments` pages through them) |
 | GET | `/api/voice/dub/{job_id}/download?file=video\|subtitles` | the file |
 | POST | `/api/voice/dub/{job_id}/segments/{index}/resynthesize` | `{text?, voice?, remix}` -> `{segment, summary, final_video?, asset_id?}` |
 

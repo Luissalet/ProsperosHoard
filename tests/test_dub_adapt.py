@@ -506,7 +506,7 @@ def test_dub_params_only_carry_modes_that_differ_from_the_defaults(client):
     c, app, allowed = client
     clip = allowed / "clip.mp4"
     clip.write_bytes(b"not really a video")
-    body = {"source_path": str(clip), "target_language": "es", "voice": {"engine_id": "fake-tts"}}
+    body = {"source_path": str(clip), "target_language": "es", "voice": {"engine_id": "piper"}}
 
     def params_of(extra):
         resp = c.post("/api/voice/dub", json={**body, **extra})
