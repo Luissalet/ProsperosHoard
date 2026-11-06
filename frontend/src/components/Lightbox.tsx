@@ -151,8 +151,8 @@ export function Lightbox({ assetId, list, onClose, onNavigate, copilotOpen = fal
           {delArmed && <span className="pill bad">{t("confirm")} (Supr / Del)</span>}
         </div>
         {list.length > 1 && <>
-          <button className="btn icon lightbox-nav prev" onClick={() => move(-1)} aria-label="previous"><ChevronLeft size={18} /></button>
-          <button className="btn icon lightbox-nav next" onClick={() => move(1)} aria-label="next"><ChevronRight size={18} /></button>
+          <button className="btn icon lightbox-nav prev" onClick={() => move(-1)} aria-label={t("previous")} title={t("previous")}><ChevronLeft size={18} /></button>
+          <button className="btn icon lightbox-nav next" onClick={() => move(1)} aria-label={t("next")} title={t("next")}><ChevronRight size={18} /></button>
         </>}
         {asset.kind === "image" && <img src={fileUrl(asset.id)} alt={asset.name || ""} className={zoom ? "zoomed" : ""} onClick={() => setZoom(!zoom)} />}
         {asset.kind === "video" && <video src={fileUrl(asset.id)} controls autoPlay loop />}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Clapperboard, Image as ImageIcon, Pencil, Plus, ArrowRight, Film } from "lucide-react";
-import { api, fileUrl } from "../api";
+import { api, ENGINE_NAMES, fileUrl, IMAGE_ENGINES, type ImageEngine } from "../api";
 import { useT } from "../i18n";
 import { AssetPicker, AssetTile, useApp, useAsync } from "../components/ui";
 import { ProjectCast } from "../components/ProjectCast";
@@ -15,6 +15,7 @@ export function OverviewView() {
   const productions = useAsync(() => api.productions(), [pid, app.dataVersion]);
   const [newVideo, setNewVideo] = useState(false), [editing, setEditing] = useState(false), [pickCover, setPickCover] = useState(false);
   const [brief, setBrief] = useState(""), [saving, setSaving] = useState(false), [error, setError] = useState("");
+  const [savingEngine, setSavingEngine] = useState(false);
   const p = project.data;
   if (project.error) return <div role="alert">{project.error}<button className="btn" onClick={project.reload}>{es ? "Reintentar" : "Retry"}</button></div>;
   if (!p) return <p className="muted">{t("loading")}</p>;
@@ -25,6 +26,12 @@ export function OverviewView() {
     try { await api.updateProject(pid, { brief }); setEditing(false); app.bump(); }
     catch (err) { setError((err as Error).message); }
     finally { setSaving(false); }
+  };
+  const saveEngine = async (engine: ImageEngine) => {
+    setSavingEngine(true);
+    try { await api.updateProject(pid, { image_engine: engine }); app.toast(t("saved"), "ok"); project.reload(); }
+    catch (err) { app.toast((err as Error).message, "bad"); }
+    finally { setSavingEngine(false); }
   };
   return <div className="project-dashboard">
     <header className="project-dashboard-head">
@@ -47,6 +54,10 @@ export function OverviewView() {
       </section>
     </div><aside className="project-dashboard-side"><ProjectCast />
       <section className="dashboard-section"><h2>{es ? "Crear en este proyecto" : "Create in this project"}</h2><div className="dashboard-shortcuts"><button className="btn" onClick={() => app.go("generate", "clip")}><Film size={16} />{es ? "Estudio de clips" : "Clip studio"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("spaces")}>{es ? "Lienzos y nodos" : "Canvases and nodes"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("audio")}>{es ? "Canción, letra y voz" : "Song, lyrics and voice"}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("designer")}>{t("navDesigner")}<ArrowRight size={15} /></button><button className="btn" onClick={() => app.go("timeline")}>{t("navTimeline")}<ArrowRight size={15} /></button></div></section>
+      <section className="dashboard-section"><h2>{t("projectSettings")}</h2><label className="field">{t("imageEngine")}
+        <select value={p.image_engine || "auto"} disabled={savingEngine} onChange={event => saveEngine(event.target.value as ImageEngine)}>
+          {IMAGE_ENGINES.map(x => <option key={x} value={x}>{x === "auto" ? t("engineAuto") : ENGINE_NAMES[x]}</option>)}</select>
+        <span className="hint">{t("imageEngineHint")}</span></label></section>
     </aside></div>
     {pickCover && <AssetPicker projectId={pid} kind="image" title={t("overviewPickCover")} onClose={() => setPickCover(false)} onPick={async asset => { try { await api.updateProject(pid, { cover_asset_id: asset.id }); setPickCover(false); app.bump(); } catch (err) { app.toast((err as Error).message, "bad"); } }} />}
     {newVideo && <VideoModal projectId={pid} onClose={() => setNewVideo(false)} onStarted={slug => { setNewVideo(false); app.go("video", slug); }} />}
