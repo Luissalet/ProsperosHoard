@@ -16,8 +16,12 @@ the same graph data and operations. See [MCP.md](MCP.md).
 Base URL `http://127.0.0.1:8815`. JSON in and out. Errors are always
 `{"error": "<code>", "message": "<what to do>"}` with a 4xx status (404
 `not_found`, 400 for validation, 409 `<capability>_unavailable` when no
-backend resolves, 422 `invalid_arguments` for malformed bodies, 502
-`backend_error` when ComfyUI/Faustus failed a call). Character-kit routes
+backend resolves, 413 `too_large` for an oversized body, 422
+`invalid_arguments` for malformed bodies, 502 `backend_error` when
+ComfyUI/Faustus failed a call, 503 `database_busy` when SQLite stayed locked,
+504 `subprocess_timeout`). A write whose `Content-Length` is over the cap (the
+media cap for the upload routes, 64 MB for everything else) is refused before
+its body is read. Character-kit routes
 raise `charkit.KitError`, `charpack.PackError` or `trainers.TrainingError`,
 which all answer 400 with their own `code` the same way (e.g. `no_canonical`,
 `bad_pack`, `trainer_unavailable`).
@@ -60,9 +64,13 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | GET | `/api/agent/studio_jobs` | `?state&limit&offset` |
 | GET | `/api/agent/studio_job` | `?job_id&wait_s` |
 | POST | `/api/agent/studio_cancel_job?job_id=` | - |
+| POST | `/api/agent/studio_retry_job?job_id=&new_seed=false` | - -> the new job (copy of a failed/cancelled one, `params.retry_of`) |
 | GET | `/api/agent/studio_assets` | `?project&kind&query&tag&favourite&limit&offset` |
 | GET | `/api/agent/studio_show` | `?asset_ids=a,b,c&size=768` -> `{items:[{asset_id, kind, mime, base64, order?}]}` |
 | GET | `/api/agent/studio_lineage` | `?asset_id` |
+| POST | `/api/agent/studio_asset_update?asset_id=` | `{tags?, rating?, favourite?, notes?, name?}` |
+| POST | `/api/agent/studio_board?project=` | `{action: list\|get\|create\|add\|set, board_id?, name?, kind?, asset_ids?, notes?: {asset_id: note}}` |
+| POST | `/api/agent/studio_project_update?project=` | `{name?, brief?, cover_asset_id?, image_engine?}` |
 | GET | `/api/agent/studio_productions` | - -> `{items:[{slug, name, status, stage, project_id, recipe, legacy?}]}` |
 | GET | `/api/agent/studio_production` | `?production=<slug>` -> compact view: `{slug, status, stages{stage: done\|partial\|pending}, character_id, song_asset_id, renders, animatic?, qa?, next}` |
 | POST | `/api/agent/studio_production_create` | `{name, spec, settings?, project?}` -> `{production, job}` |
@@ -221,6 +229,7 @@ POST /api/agent/studio_generate_image?project=proj_01M35C...
 | GET | `/api/jobs?state&project&limit&offset` | full jobs (`state=active` for queued+waiting+running) |
 | GET | `/api/jobs/{id}` | one job |
 | POST | `/api/jobs/{id}/cancel` | cancel |
+| POST | `/api/jobs/{id}/retry?new_seed=false` | queue a copy of a failed or cancelled job |
 | GET | `/api/projects/{id}/assets` | `?kind&query&tag&favourite&source&min_rating&limit&offset` |
 | GET / PATCH | `/api/assets/{id}` | full asset (waveform, analysis, recipe) / `{tags?, rating?, favourite?, notes?, name?}` |
 | GET | `/api/assets/{id}/file?download=` | the file, resolved by id only |

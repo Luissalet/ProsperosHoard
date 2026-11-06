@@ -115,7 +115,7 @@ is exempt.
 `studio_stems`, `studio_download_media`, `studio_stock_search`, `studio_qa_run`, `studio_animatic`, `studio_production_regenerate` /
 `_promote` / `_reframe` / `_continue` / `_song`, `studio_short_create`, `studio_video_from_plan`, `studio_recipe_run`), because the result is
 a file a GPU made and cancelling a running job is `studio_cancel_job`'s business; the timeline, space, design, photocard, character-kit
-and voice-library tools; `studio_cancel_job`, `studio_service_start` / `_stop`; the family tools `production_export_lumiere`,
+and voice-library tools; `studio_cancel_job`, `studio_retry_job`, `studio_asset_update`, `studio_board`, `studio_project_update`, `studio_service_start` / `_stop`; the family tools `production_export_lumiere`,
 `cast_import_character`, `production_from_storyboard`, `voice_tts`; and emptying the trash (`studio_trash` with `action="empty"`).
 An undo of a `studio_cast` update does not delete an image the update cropped for the canonical.
 
@@ -125,7 +125,8 @@ too). `read_only` may call the read-only tools; `drafts` those plus the tools ma
 edit drafts and never delete or publish: project and import, every generation, voice and render tool, `studio_graphic_shot`, the
 production create / segments / settings / finishing / script tools); `all` everything, and undo. Not draft-safe: `studio_cast`,
 `studio_style_cards`, `studio_trash`, `studio_delete_*`, `studio_production_shots` (it can delete a shot), `studio_timeline`,
-`studio_spaces`, the other character-kit tools (`studio_character_sheet` is draft-safe), `studio_cancel_job`, the service tools and the tools that send to other apps. A blocked call
+`studio_spaces`, the other character-kit tools (`studio_character_sheet` is draft-safe), `studio_cancel_job`, `studio_retry_job`,
+`studio_asset_update`, `studio_board`, `studio_project_update`, the service tools and the tools that send to other apps. A blocked call
 is `403 profile_forbidden`. A scoped token fixes the agent id of its calls. Give the MCP server that token with `PROSPERO_TOKEN`.
 
 ## Tools
@@ -182,9 +183,13 @@ is `403 profile_forbidden`. A scoped token fixes the agent id of its calls. Give
 | `studio_jobs` | yes | `state=None ("active" = queued+waiting+running), limit=10` | `items[job]`, `has_more` |
 | `studio_job` | yes | `job_id, wait_s=0, include_image=False` | job (+ `assets`; + picture for a finished image job only when `include_image=true`) |
 | `studio_cancel_job` | no | `job_id` | job (queued/waiting ones are cancelled at once; running ones stop at the next checkpoint) |
+| `studio_retry_job` | no | `job_id, new_seed=False` | the new job (a copy of a failed or cancelled one, `params.retry_of` set); productions resume with `studio_production_continue` instead |
 | `studio_assets` | yes | `project, kind, query, tag, favourite, limit=12 (max 30), offset=0` | `items[asset summary]`, `has_more`, `next_offset` |
 | `studio_show` | yes | `asset_ids[1-24], size=768 (128-1024)` | pictures: up to 4 images, or one contact sheet with `contact_sheet_order`; video = 3-frame strip; audio = waveform with sections |
 | `studio_lineage` | yes | `asset_id` | `{asset_id, kind, source, recipe, reproduce?, inputs[{asset_id, operation, template, seed}]}` |
+| `studio_asset_update` | no | `asset_id, rating=None (0-5), favourite=None, tags=None, notes=None, name=None` | asset summary + `tags, rating, favourite` |
+| `studio_board` | no | `project, action="list"\|"get"\|"create"\|"add"\|"set", board_id=None, name=None, kind=None, asset_ids=None, notes=None` | list: `items[{id, name, kind, count}]`; otherwise `{id, name, kind, count, items[{asset_id, note?}]}` |
+| `studio_project_update` | no | `project, name=None, brief=None, cover_asset_id=None, image_engine=None` | `{id, name, brief, cover_asset_id, image_engine}` |
 
 | `studio_productions` | yes | - | `items[{slug, name, status, stage, project_id, recipe, legacy?}]` |
 | `studio_production` | yes | `production` | `{slug, status, stages{...}, lead, shots, character_id, song_asset_id, renders{aspect: {quality: asset_id}}, animatic?, qa?, next}` |
