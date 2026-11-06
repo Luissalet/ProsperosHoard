@@ -32,6 +32,27 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+  backend-bundled-ffmpeg:
+    # no system ffmpeg: the app falls back to the imageio-ffmpeg binary
+    # (ffmpeg 4.2, no xfade or amix normalize=), as on a fresh Windows PC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lock.txt
+      - name: Remove any system ffmpeg from PATH
+        run: |
+          for tool in ffmpeg ffprobe; do
+            while command -v "$tool" >/dev/null; do sudo rm -f "$(command -v "$tool")"; done
+          done
+      - name: Run tests
+        run: python -m pytest -q
+
   frontend:
     runs-on: ubuntu-latest
     steps:
