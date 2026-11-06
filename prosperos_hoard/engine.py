@@ -2058,6 +2058,14 @@ def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] =
     return "sdxl"
 
 
+def _has_text_encoder(template: str, store: Store) -> bool:
+    try:
+        workflow, _ = comfy_driver.load_template(template, store.data_dir)
+    except comfy_driver.WorkflowError:
+        return False
+    return any(comfy_driver._is_text_encoder(str(n.get("class_type"))) for n in workflow.values())
+
+
 def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
     template = params.get("template")
@@ -2077,9 +2085,22 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         for key, expected in (("steps", 8), ("scheduler", "manual_sigmas"), ("denoise", 1.0)):
             if values[key] != expected:
                 raise EngineError("fixed_sampling", f"{template} uses fixed {key}={expected}")
-    for key in spec.get("map", {}):
-        if key not in _CORE_GENERATION_KEYS and params.get(key) is not None:
+    mapping = spec.get("map", {})
+    for key in mapping:
+        # "prompt" is the job's raw request (with @mentions), never a node value
+        if key not in _CORE_GENERATION_KEYS and key != "prompt" and params.get(key) is not None:
             values[key] = params[key]
+    if "positive_prompt" not in mapping and comfy_driver.CUSTOM_ID_RE.match(template):
+        if "prompt" in mapping:
+            # imported before the map said positive_prompt/text_N: its one
+            # unclassified prompt input takes the composed prompt
+            values["prompt"] = values["positive_prompt"]
+        elif str(params.get("positive_prompt") or "").strip() and (
+                any(k.startswith("text_") for k in mapping) or _has_text_encoder(template, store)):
+            raise EngineError("unmapped_prompt",
+                              f"workflow {template} has no positive_prompt in its parameter map, so this prompt would be "
+                              "ignored; edit the workflow's map and point positive_prompt at its prompt input "
+                              f"(candidates: {', '.join(k for k in mapping if k.startswith('text_')) or 'none detected'})")
     if params.get("loras"):
         values["loras"] = list(params["loras"])
     if template == "wan_animate2" and not params.get("unet_name"):
