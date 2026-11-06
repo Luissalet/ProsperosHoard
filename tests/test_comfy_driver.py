@@ -137,6 +137,16 @@ def test_template_hash_changes_with_the_graph():
     assert comfy_driver.template_hash(workflow, spec) != h1
 
 
+def test_template_hash_covers_linked_params_and_still_accepts_old_recipes():
+    workflow, spec = comfy_driver.load_template("ace15_song")
+    old = comfy_driver._template_hash_v1(workflow, spec)
+    assert comfy_driver.template_hash_matches(old, workflow, spec)  # recorded before the hash grew
+    assert comfy_driver.template_hash_matches(comfy_driver.template_hash(workflow, spec), workflow, spec)
+    changed = dict(spec, linked_params={"duration": []})
+    assert comfy_driver.template_hash(workflow, changed) != comfy_driver.template_hash(workflow, spec)
+    assert not comfy_driver.template_hash_matches(comfy_driver.template_hash(workflow, spec), workflow, changed)
+
+
 def test_style_checkpoint_is_a_preference_an_explicit_one_a_requirement():
     workflow, spec = comfy_driver.load_template("sdxl_txt2img")
     info = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["juggernautXL_v9.safetensors"]]}}}}
