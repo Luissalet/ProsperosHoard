@@ -3079,26 +3079,31 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             tmp_path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------ audio
-    @app.post("/api/agent/studio_time_lyrics")
-    def agent_time_lyrics(project: str, body: TimeLyricsBody):
+    def op_time_lyrics(project: str, body: TimeLyricsBody) -> Any:
         from . import lyrics_sync
 
-        def run():
-            if body.production:
-                state = productions_mod.load_state(store.data_dir, body.production)
-                if state['project_id'] != project:
-                    raise engine.EngineError('wrong_project', 'The production belongs to a different project.')
-                return lyrics_sync.production_timing(store, body.production, method=body.method, lines=body.lines,
-                    preview=body.preview, song_asset_id=body.song_asset_id, text=body.lyrics,
-                    language=body.language, model=body.model, capture_undo=True)
-            if body.method == 'estimate':
-                if body.preview:
-                    raise engine.EngineError('bad_timing_method', 'Preview supports align or manual timing.')
-                return engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name)
-            return lyrics_sync.time_asset(store, project, body.song_asset_id, body.lyrics, name=body.name,
-                method=body.method, lines=body.lines, preview=body.preview, language=body.language, model=body.model)
-        return agent("studio_time_lyrics", body.song_asset_id,
-                     run)
+        if body.production:
+            state = productions_mod.load_state(store.data_dir, body.production)
+            if state['project_id'] != project:
+                raise engine.EngineError('wrong_project', 'The production belongs to a different project.')
+            return lyrics_sync.production_timing(store, body.production, method=body.method, lines=body.lines,
+                preview=body.preview, song_asset_id=body.song_asset_id, text=body.lyrics,
+                language=body.language, model=body.model, capture_undo=True)
+        if body.method == 'estimate':
+            if body.preview:
+                raise engine.EngineError('bad_timing_method', 'Preview supports align or manual timing.')
+            return engine.time_lyrics(store, project, body.song_asset_id, body.lyrics, body.name)
+        return lyrics_sync.time_asset(store, project, body.song_asset_id, body.lyrics, name=body.name,
+            method=body.method, lines=body.lines, preview=body.preview, language=body.language, model=body.model)
+
+    @app.post("/api/agent/studio_time_lyrics")
+    def agent_time_lyrics(project: str, body: TimeLyricsBody):
+        return agent("studio_time_lyrics", body.song_asset_id, lambda: op_time_lyrics(project, body))
+
+    @app.post("/api/projects/{project_id}/lyrics/time")
+    def ui_time_lyrics(project_id: str, body: TimeLyricsBody):
+        # the UI's "Auto-time" button: same operation, not logged as assistant activity
+        return op_time_lyrics(project_id, body)
 
     @app.post('/api/productions/{slug}/lyrics-timing')
     def production_lyrics_timing(slug: str, body: TimeLyricsBody):
