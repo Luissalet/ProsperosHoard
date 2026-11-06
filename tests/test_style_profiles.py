@@ -52,7 +52,8 @@ def test_profile_reaches_native_prompts_duration_and_timeline_transition(tmp_pat
     apply_timeline_transitions(store, runner.state, timeline["id"])
     visual = next(t for t in store.get_timeline(timeline["id"])["tracks"] if t["type"] == "visual")
     assert sum(c["duration_s"] for c in visual["clips"]) == 6
-    assert all(c["transition_in"]["type"] == "crossfade" for c in visual["clips"])
+    # the first clip has nothing before it, so its transition is stored as a cut
+    assert all(c["transition_in"]["type"] == "crossfade" for c in visual["clips"][1:])
 
 
 def test_zero_duration_is_rejected_instead_of_replaced(tmp_path):

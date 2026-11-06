@@ -327,6 +327,9 @@ def test_mcp_tool_sends_context_engine(monkeypatch):
     sent = {}
     monkeypatch.setattr(mcp_server, "_call", lambda method, path, json=None, **kw: sent.update(path=path, body=json) or {})
     fn = getattr(mcp_server.voice_retake_words, "fn", mcp_server.voice_retake_words)
-    fn("a1", 1, 1, "dieciocho", in_context=True, seeds=4)
+    import asyncio, inspect
+    out = fn("a1", 1, 1, "dieciocho", in_context=True, seeds=4)
+    if inspect.isawaitable(out):  # the MCP adapter runs tools off the event loop
+        asyncio.run(out)
     assert sent["path"] == "/api/agent/voice_retake_words"
     assert sent["body"]["context_engine"] == "auk" and sent["body"]["seeds"] == 4 and sent["body"]["voice"] is None
