@@ -338,7 +338,10 @@ def _layer_image(canvas: Image.Image, layer: dict, fields: dict[str, Any], asset
         canvas.alpha_composite(overlay)
         return
     with Image.open(path) as opened:
-        src = opened.convert("RGBA")
+        # a phone photo stores its pixels sideways plus an EXIF orientation:
+        # lay it out the way it is viewed (imports bake this in; older
+        # imports and outside files may still carry the tag)
+        src = ImageOps.exif_transpose(opened).convert("RGBA")
     fit = layer.get("fit", "cover")
     if fit == "cover":
         focal = _resolve(layer.get("focal", [0.5, 0.4]), fields) or [0.5, 0.4]
@@ -435,7 +438,11 @@ def _draw_columns(canvas: Image.Image, overlay: Image.Image, draw: ImageDraw.Ima
     """A tracklist-style table: each line splits on a tab or 2+ spaces into
     number / title / time; the first column sits at x, the middle one at
     x + `columns.indent` (fraction of the width), the last is right-aligned.
-    One size for every row, the largest at which all rows fit the box."""
+    One size for every row, the largest at which all rows fit the box. A
+    row too wide even at the smallest size has its title (or, for a
+    one-column row, its text) cut with an ellipsis; rows that do not fit
+    the box's height at that size are dropped, the last kept one ending in
+    an ellipsis - nothing is drawn outside the box."""
     import re as _re
 
     x, y, w, h = box
@@ -444,30 +451,57 @@ def _draw_columns(canvas: Image.Image, overlay: Image.Image, draw: ImageDraw.Ima
         return
     indent = float((layer.get("columns") or {}).get("indent", 0.1)) * w if isinstance(layer.get("columns"), dict) else 0.1 * w
     muted = _hex(layer.get("muted_colour", "#ffffff99"))
+    min_size = 10
+
+    def split(r: list[str]) -> tuple[str, str, str]:
+        """(number, title, time) of a row; a one-column row is all title."""
+        if len(r) == 1:
+            return "", r[0], ""
+        if len(r) == 2:
+            return r[0], r[1], ""
+        return r[0], " ".join(r[1:-1]), r[-1]
+
+    def title_room(r: list[str], font: ImageFont.FreeTypeFont, sp: float, gap: float) -> float:
+        """Width left for the title of row `r` at this font."""
+        num, _, last = split(r)
+        end = _text_width(draw, last, font, sp) + gap if last else 0.0
+        return w - title_x(num, font, sp, gap) - end
+
+    def title_x(num: str, font: ImageFont.FreeTypeFont, sp: float, gap: float) -> float:
+        """The title starts at the indent, or after a number wider than it."""
+        return max(indent, _text_width(draw, num, font, sp) + gap / 4) if num else 0.0
+
+    def fits(font: ImageFont.FreeTypeFont, sp: float, gap: float) -> bool:
+        return all(_text_width(draw, split(r)[1], font, sp) <= title_room(r, font, sp, gap) for r in rows)
+
     size = max_size
-    while size > 10:
+    while size > min_size:
         font = get_font(font_name, size)
         sp = spacing_em * size
-        widest = max(indent + sum(_text_width(draw, c, font, sp) for c in r[1:]) + size for r in rows)
-        if widest <= w and _line_px(font) * line_height * len(rows) <= h:
+        if fits(font, sp, size) and _line_px(font) * line_height * len(rows) <= h:
             break
         size -= 2
+    size = max(size, min_size)
     font = get_font(font_name, size)
     sp = spacing_em * size
     lh = _line_px(font) * line_height
+    keep = max(1, int((h + 1) // lh)) if lh > 0 else len(rows)
+    truncated = len(rows) > keep
+    rows = rows[:keep]
     cy = float(y)
-    for r in rows:
-        if len(r) == 1:
-            _draw_line(draw, (x, cy), r[0], font, colour, sp, {})
-        else:
-            _draw_line(draw, (x, cy), r[0], font, muted, sp, {})
-            if len(r) >= 3:
-                last = r[-1]
-                _draw_line(draw, (x + w - _text_width(draw, last, font, sp), cy), last, font, muted, sp, {})
-                middle = " ".join(r[1:-1])
-            else:
-                middle = r[1]
-            _draw_line(draw, (x + indent, cy), middle, font, colour, sp, {})
+    for k, r in enumerate(rows):
+        num, title, last = split(r)
+        room = title_room(r, font, sp, size)
+        ellipsis = truncated and k == len(rows) - 1
+        if ellipsis or _text_width(draw, title, font, sp) > room:
+            while title and _text_width(draw, title.rstrip() + "...", font, sp) > room:
+                title = title[:-1]
+            title = title.rstrip() + "..."
+        if num:
+            _draw_line(draw, (x, cy), num, font, muted, sp, {})
+        if last:
+            _draw_line(draw, (x + w - _text_width(draw, last, font, sp), cy), last, font, muted, sp, {})
+        _draw_line(draw, (x + title_x(num, font, sp, size), cy), title, font, colour, sp, {})
         cy += lh
     canvas.alpha_composite(overlay)
 
