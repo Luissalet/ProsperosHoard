@@ -2034,7 +2034,7 @@ def clip_template(object_info: dict[str, Any], motion_ref: bool = False) -> str:
     return "wan22_ti2v"
 
 
-def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None) -> str:
+def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] = None, op: str = "txt2img") -> str:
     """`auto|qwen21|flux|sdxl` (spec item 3) -> the engine this call
     actually gets. `auto` picks Qwen-Image 2.1 when its node class
     (`TextEncodeQwenImage21`) *and* a matching model file are installed,
@@ -2042,12 +2042,17 @@ def resolve_image_engine(object_info: dict[str, Any], requested: Optional[str] =
     ship as built-in checkpoints/templates. An engine requested by name
     that turns out not to be installed falls back the same way, so a
     project already set to "qwen21" keeps rendering before the model
-    finishes downloading."""
+    finishes downloading. `op` is "txt2img" or "edit": Flux's edit template
+    is Kontext, a separate UNet, so a Flux checkpoint alone does not make
+    Flux an edit engine."""
     requested = (requested or "auto").lower()
     if requested not in IMAGE_ENGINES:
         requested = "auto"
     has_qwen = "TextEncodeQwenImage21" in object_info and _has_model_file(object_info, "UNETLoader", "unet_name", "qwen")
-    has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
+    if op == "edit":
+        has_flux = _has_model_file(object_info, "UNETLoader", "unet_name", "kontext")
+    else:
+        has_flux = _has_model_file(object_info, "CheckpointLoaderSimple", "ckpt_name", "flux")
     if requested == "sdxl":
         return "sdxl"
     if requested == "flux":
@@ -2075,7 +2080,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     engine_name = TEMPLATE_TO_ENGINE.get(template)
     if not template:
         is_edit = bool(params.get("reference_asset_id") or params.get("reference_asset_ids"))
-        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"))
+        engine_name = resolve_image_engine(_object_info(backend), params.get("engine"), "edit" if is_edit else "txt2img")
         template = ENGINE_TEMPLATES[engine_name]["edit" if is_edit else "txt2img"]
     try:
         _, spec = comfy_driver.load_template(template, store.data_dir)
@@ -2298,6 +2303,27 @@ def _opaque_share(store: Store, asset_id: str) -> Optional[float]:
         return None
 
 
+_SD_TEMPLATES = {"sdxl_txt2img", "sdxl_img2img", "sdxl_inpaint", "sdxl_hires", "sd15_txt2img"}
+_INSTRUCTION_TEMPLATES = {"flux_kontext_edit", "qwen21_edit"}
+
+
+def _is_sd_family(store: Store, recipe: dict[str, Any]) -> bool:
+    """Was this recipe made with an SDXL/SD1.5 template (built-in, or an
+    imported workflow whose VRAM class says so)?"""
+    template = recipe.get("template")
+    if recipe.get("backend") != "comfyui" or not template:
+        return False
+    if template in _SD_TEMPLATES:
+        return True
+    if comfy_driver.CUSTOM_ID_RE.match(str(template)):
+        try:
+            _, spec = comfy_driver.load_template(template, store.data_dir)
+        except comfy_driver.WorkflowError:
+            return False
+        return spec.get("vram_class") in ("sdxl", "sd15")
+    return False
+
+
 def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
     params = job["params"]
     operation = params["operation"]
@@ -2308,11 +2334,22 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
     if operation in MODEL_EDIT_OPERATIONS:
         return _edit_with_model(store, backend, job, progress, src, operation)
     template = _EDIT_TEMPLATES[operation]
-    src_params = (src.get("recipe") or {}).get("params") or {}
+    src_recipe = src.get("recipe") or {}
+    all_src_params = src_recipe.get("params") or {}
+    # the SDXL edit templates only inherit sampling settings and the
+    # checkpoint from an SD-family source: a Flux/Qwen/Kontext recipe's
+    # cfg 1 / 4 steps / UNet name would wash out or break an SDXL pass
+    sd_source = _is_sd_family(store, src_recipe)
+    src_params = all_src_params if sd_source else {}
+    source_prompt = all_src_params.get("positive_prompt")
+    if src_recipe.get("template") in _INSTRUCTION_TEMPLATES or (not sd_source and src_recipe.get("prompt")):
+        # an edit template's positive_prompt is an instruction ("keep <image1>
+        # ..., now ..."), not a scene an img2img pass can use
+        source_prompt = src_recipe.get("prompt") or ""
     values = {
         "checkpoint": src_params.get("checkpoint"),
-        "positive_prompt": _first(params.get("prompt"), src_params.get("positive_prompt"), ""),
-        "negative_prompt": _first(params.get("negative_prompt"), src_params.get("negative_prompt"), ""),
+        "positive_prompt": _first(params.get("prompt"), source_prompt, ""),
+        "negative_prompt": _first(params.get("negative_prompt"), all_src_params.get("negative_prompt"), ""),
         "seed": params.get("seed"),
         "steps": _first(params.get("steps"), src_params.get("steps"), 30),
         "cfg": _first(params.get("cfg"), src_params.get("cfg"), 6.5),

@@ -1420,7 +1420,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if terms:
                 body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})
         object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
-        engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"))
+        # an edit needs the engine's edit model (Kontext for Flux), not only its txt2img one
+        is_edit_call = bool(body.consistent or body.reference_asset_id or any(body.reference_asset_ids or []))
+        engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"),
+                                                  "edit" if is_edit_call else "txt2img")
         if body.template == "auto_clip":
             from .video_engines import catalog as video_catalog
             ready = video_catalog(backend, object_info)
