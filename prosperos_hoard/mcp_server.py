@@ -11,6 +11,7 @@ Run standalone for a smoke test: `PROSPERO_URL=http://127.0.0.1:8815
 python prosperos_hoard/mcp_server.py`.
 """
 
+import asyncio
 import base64
 import contextvars
 import functools
@@ -33,15 +34,18 @@ APP_NAME = "Prospero's Hoard"
 DEFAULT_URL = "http://127.0.0.1:8815"
 
 
-def _app_url() -> str:
+def _app_url() -> tuple[str, Optional[str]]:
+    """The app's URL, or the default plus the reason PROSPERO_URL was
+    refused. A bad value must not kill the adapter at import time (the MCP
+    host would only see a failed handshake): every tool reports it instead."""
     url = os.environ.get("PROSPERO_URL", DEFAULT_URL)
     host = urlsplit(url).hostname or ""
     if host not in ("127.0.0.1", "localhost", "::1"):
-        raise RuntimeError(f"PROSPERO_URL must be a loopback address, got '{url}'")
-    return url.rstrip("/")
+        return DEFAULT_URL, f"prosperos-hoard_bad_url: PROSPERO_URL must be a loopback address, got '{url}'"
+    return url.rstrip("/"), None
 
 
-APP_URL = _app_url()
+APP_URL, _URL_ERROR = _app_url()
 # one INFO line per HTTP request would flood the MCP host's stderr log
 logging.getLogger("httpx").setLevel(logging.WARNING)
 # trust_env=False: a proxy variable in the environment must never route this loopback call through a proxy
@@ -148,6 +152,8 @@ def _call(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     # through here and None ones are dropped before the request is built.
     if "params" in kwargs and kwargs["params"] is not None:
         kwargs["params"] = {k: v for k, v in kwargs["params"].items() if v is not None}
+    if _URL_ERROR:
+        raise ToolError(_URL_ERROR)
     try:
         resp = _send(method, path, kwargs)
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
@@ -205,19 +211,26 @@ REASON_FIELD = Annotated[Optional[str], Field(description=(
 
 
 def tool(annotations: ToolAnnotations):
+    """Every tool runs its blocking HTTP call on a worker thread: FastMCP
+    calls a sync tool on the event loop itself, so a long `wait_s` would
+    freeze the whole stdio server (no pings, no parallel calls, no
+    cancellation) for as long as it waits."""
     def deco(fn):
         write = not annotations.readOnlyHint
 
         @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not write:
-                return _compact(fn(*args, **kwargs))
+                return _compact(await asyncio.to_thread(fn, *args, **kwargs))
             reason = kwargs.pop("reason", None)
-            marker = _WRITE.set({"reason": (reason or "").strip()})
-            try:
-                return _compact(fn(*args, **kwargs))
-            finally:
-                _WRITE.reset(marker)
+
+            def run() -> Any:  # the reason is set on the worker thread that makes the call
+                marker = _WRITE.set({"reason": (reason or "").strip()})
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    _WRITE.reset(marker)
+            return _compact(await asyncio.to_thread(run))
         if write:             # every tool that changes something takes a reason (the schema the model sees)
             sig = inspect.signature(fn)
             wrapper.__signature__ = sig.replace(parameters=[*sig.parameters.values(), inspect.Parameter(
@@ -395,14 +408,14 @@ def studio_service_stop(id: str = "comfyui") -> dict[str, Any]:
 
 
 @tool(_ro(readOnlyHint=True))
-def studio_projects(query: Optional[str] = None, limit: int = 10) -> dict[str, Any]:
+def studio_projects(query: Optional[str] = None, limit: int = 10, offset: int = 0) -> dict[str, Any]:
     """List studio projects (a group, a single, a music video...), newest activity first, with counts
     of assets, characters and timelines. query searches name and brief. Every other tool takes the
-    project id as `project`.
+    project id as `project`. Page with offset (the result's next_offset while has_more).
 
     Keywords: projects, list projects, my groups, productions, proyectos, mis grupos, listar proyectos
     """
-    return _call("GET", "/api/agent/studio_projects", params={"query": query, "limit": limit})
+    return _call("GET", "/api/agent/studio_projects", params={"query": query, "limit": limit, "offset": offset})
 
 
 @tool(_ro(destructiveHint=False, idempotentHint=False))
@@ -559,6 +572,7 @@ def studio_edit_image(
     asset_id: str, operation: str, prompt: Optional[str] = None, strength: Optional[float] = None,
     mask_asset_id: Optional[str] = None, count: int = 1, seed: Optional[int] = None, scale: Optional[int] = None,
     model: Optional[str] = None, wait_s: float = 0, include_image: bool = False,
+    width: Optional[int] = None, height: Optional[int] = None,
 ) -> Any:
     """Change or re-run an existing image asset. operation:
     "img2img" - restyle it with `prompt` (strength 0-1 = how much changes, default 0.55);
@@ -583,7 +597,7 @@ def studio_edit_image(
     """
     body = {"asset_id": asset_id, "operation": operation, "prompt": prompt, "strength": strength,
             "mask_asset_id": mask_asset_id, "count": count, "seed": seed, "scale": scale, "model": model,
-            "wait_s": wait_s}
+            "wait_s": wait_s, "width": width, "height": height}
     return _with_preview(_call("POST", "/api/agent/studio_edit_image", json=body), include_image)
 
 
@@ -638,7 +652,7 @@ def studio_animate(asset_id: str, prompt: Optional[str] = None, engine: str = "a
 def studio_compose(
     project: str, tags: str, lyrics: str, bpm: int = 120, duration: float = 120.0, key: str = "C major",
     language: str = "en", time_signature: int = 4, seed: Optional[int] = None, count: int = 1,
-    wait_s: float = 0,
+    wait_s: float = 0, checkpoint: Optional[str] = None,
 ) -> Any:
     """Compose a song with vocals on ComfyUI (ACE-Step 1.5; needs ace_step_1.5_turbo_aio.safetensors -
     see studio_status's music_generation). tags describe the sound: genre, mood, instruments, vocal style
@@ -646,12 +660,14 @@ def studio_compose(
     spanish, minor key"). lyrics use [Section] tags in English (Intro/Verse/Chorus/Bridge/Outro) even when
     the words are in another language. key: a note plus major/minor, e.g. "F# minor". duration 4-240 s,
     bpm 40-220. The output is an mp3 (or a real-beat wav on the fake backend) audio asset with lineage,
-    ready for studio_analyze_audio and a timeline. Returns the job (poll studio_job).
+    ready for studio_analyze_audio and a timeline. checkpoint overrides the ACE-Step checkpoint file.
+    Returns the job (poll studio_job).
 
     Keywords: compose song, make music, write a song, generate audio, ace-step, componer cancion, hacer musica
     """
     body = {"tags": tags, "lyrics": lyrics, "bpm": bpm, "duration": duration, "key": key, "language": language,
-            "time_signature": time_signature, "seed": seed, "count": count, "wait_s": wait_s}
+            "time_signature": time_signature, "seed": seed, "count": count, "wait_s": wait_s,
+            "checkpoint": checkpoint}
     return _call("POST", "/api/agent/studio_compose", params={"project": project}, json=body)
 
 
@@ -847,13 +863,14 @@ def studio_render(timeline_id: str, quality: str = "preview", wait_s: float = 0)
 # -------------------------------------------------------------------- jobs
 
 @tool(_ro(readOnlyHint=True))
-def studio_jobs(state: Optional[str] = None, limit: int = 10) -> dict[str, Any]:
+def studio_jobs(state: Optional[str] = None, limit: int = 10, offset: int = 0) -> dict[str, Any]:
     """List jobs newest first, compact (id, type, state, progress, message, asset_ids). state filters:
-    queued, waiting_gpu, running, done, failed, cancelled, or "active" (the first three).
+    queued, waiting_gpu, running, done, failed, cancelled, or "active" (the first three). Page with
+    offset (the result's next_offset while has_more).
 
     Keywords: jobs, queue, what is running, pending work, trabajos, cola, que se esta ejecutando, pendientes
     """
-    return _call("GET", "/api/agent/studio_jobs", params={"state": state, "limit": limit})
+    return _call("GET", "/api/agent/studio_jobs", params={"state": state, "limit": limit, "offset": offset})
 
 
 @tool(_ro(readOnlyHint=True))
@@ -898,7 +915,7 @@ def studio_assets(project: str, kind: Optional[str] = None, query: Optional[str]
 
 
 @tool(_ro(readOnlyHint=True, idempotentHint=True))
-def studio_show(asset_ids: list[str], size: int = 768) -> list[Any]:
+def studio_show(asset_ids: list[str] | str, size: int = 768) -> list[Any]:
     """Look at assets as real images: up to 4 separately, or one labelled contact sheet for 5-24 ids;
     a video becomes a 3-frame strip, a song a waveform with its sections. size 128-1024 px (longest
     side). Call this before describing or judging any image - never guess from metadata.
@@ -950,7 +967,7 @@ def voice_engines() -> dict[str, Any]:
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def voice_create(name: str, engine_id: str, source_path: str, language: Optional[str] = None,
-                  project: Optional[str] = None) -> dict[str, Any]:
+                  project: Optional[str] = None, tags: Optional[list[str]] = None) -> dict[str, Any]:
     """Create a reusable voice in the library from a clean sample (source_path, an absolute path on the
     PC running the app - see studio_import for the allowed folders): trims silence, normalises loudness,
     runs a quality check (duration, signal-to-noise, clipping) and, when an STT engine is installed,
@@ -963,7 +980,7 @@ def voice_create(name: str, engine_id: str, source_path: str, language: Optional
     """
     return _call("POST", "/api/agent/voice_create",
                 json={"name": name, "engine_id": engine_id, "source_path": source_path, "language": language,
-                      "project": project})
+                      "project": project, "tags": tags})
 
 
 @tool(_ro(readOnlyHint=True))
@@ -1036,6 +1053,7 @@ def voice_audiobook(
     text: Optional[str] = None, source_path: Optional[str] = None, title: Optional[str] = None,
     engine_id: Optional[str] = None, voice_id: Optional[str] = None, voice_ref: Optional[str] = None,
     speed: Optional[float] = None, format: str = "mp3", project: Optional[str] = None, wait_s: float = 0,
+    preset: Optional[str] = None, language: Optional[str] = None,
 ) -> dict[str, Any]:
     """Narrate text (or a .txt/.md/.epub file at source_path) as a long-form audiobook: splits it into
     chapters and sentences, synthesizes each as a background job with progress (poll with voice_job),
@@ -1048,7 +1066,8 @@ def voice_audiobook(
     """
     body = {"text": text, "source_path": source_path, "title": title, "format": format, "project": project,
             "wait_s": wait_s,
-            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "speed": speed}}
+            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "speed": speed,
+                      "preset": preset, "language": language}}
     return _call("POST", "/api/agent/voice_audiobook", json=body)
 
 
@@ -1060,6 +1079,7 @@ def voice_dub(
     plan: bool = True, qc: bool = True, qc_threshold: Optional[float] = None,
     translation_mode: Literal["direct", "adapt"] = "adapt", fit_mode: Literal["audio", "smart"] = "audio",
     title: Optional[str] = None, project: Optional[str] = None, wait_s: float = 0,
+    stt_engine_id: Optional[str] = None, preset: Optional[str] = None, speed: Optional[float] = None,
 ) -> dict[str, Any]:
     """Dub a video: 3-step translation, smart fit / doblar video: traduccion en 3 pasos, ajuste con video.
 
@@ -1090,7 +1110,8 @@ def voice_dub(
     body = {"target_language": target_language, "source_path": source_path, "video_asset_id": video_asset_id,
             "source_language": source_language, "glossary": glossary, "title": title, "project": project,
             "plan": plan, "qc": qc, "qc_threshold": qc_threshold, "translation_mode": translation_mode,
-            "fit_mode": fit_mode, "wait_s": wait_s, "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref}}
+            "fit_mode": fit_mode, "wait_s": wait_s, "stt_engine_id": stt_engine_id,
+            "voice": {"engine_id": engine_id, "voice_id": voice_id, "voice_ref": voice_ref, "preset": preset, "speed": speed}}
     return _call("POST", "/api/agent/voice_dub", json=body)
 
 
@@ -1981,7 +2002,7 @@ def studio_recipe_export(production: str, name: Optional[str] = None) -> dict[st
     Every stage, prompt, seed, template and setting is kept; the lead's name, look, negative and
     palette become placeholders ({lead}, {lead.look}, {lead.negative}, {lead.palette[0]}), described in
     the `cast` block. warnings list shot prompts that still repeat words of the old lead's look. Works
-    on productions made in the app and by the production script. Saved as data/recipes/<name>.json.
+    on productions made in the app and by the production script. Saved as a recipe named `name`.
 
     Keywords: recipe, export recipe, template production, recreate, receta, exportar receta, plantilla
     """

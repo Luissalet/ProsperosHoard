@@ -99,6 +99,11 @@ def test_normalise_tracks_rejects_bad_edits_with_clip_index():
                                                                                 "transition_in": {"type": "crossfade", "duration_s": 0.3}}]}]
     clean = tl.normalise_tracks(good, _lookup(assets))
     assert [c["start_s"] for c in clean[0]["clips"]] == [0.0, 2.0]
+    assert clean[0]["clips"][1]["transition_in"] == {"type": "crossfade", "duration_s": 0.3}
+    # the first clip's transition is never rendered: stored as a cut
+    first = [{"type": "visual", "clips": [{"asset_id": "a1", "duration_s": 2.0,
+                                           "transition_in": {"type": "dip_black", "duration_s": 1.5}}]}]
+    assert tl.normalise_tracks(first, _lookup(assets))[0]["clips"][0]["transition_in"] == {"type": "cut", "duration_s": 0.0}
     bad_cases = [
         ([{"type": "visual", "clips": [{"asset_id": "s1", "duration_s": 2.0}]}], "audio"),
         ([{"type": "visual", "clips": [{"asset_id": "zz", "duration_s": 2.0}]}], "does not exist"),
