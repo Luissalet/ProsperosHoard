@@ -833,6 +833,36 @@ def agent_result(outputs: dict[str, Any]) -> dict[str, Any]:
     return {"title": outputs.get("title"), "summary": outputs.get("summary"), "segments": rows}
 
 
+def _clip(text: Any, n: int) -> str:
+    text = str(text or "")
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def dub_segments_view(outputs: dict[str, Any], offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """One page of a finished dub's line table for agents (the rows of
+    `agent_result`, with the texts clipped); no file paths."""
+    rows = agent_result(outputs)["segments"]
+    offset = max(0, int(offset))
+    limit = max(1, min(200, int(limit)))
+    items = [{**r, "source_text": _clip(r.get("source_text"), 300), "translated_text": _clip(r.get("translated_text"), 300)}
+             for r in rows[offset: offset + limit]]
+    has_more = offset + limit < len(rows)
+    return {"total": len(rows), "offset": offset, "items": items, "next_offset": offset + limit if has_more else None}
+
+
+def dub_outputs_view(outputs: dict[str, Any], preview: int = 20) -> dict[str, Any]:
+    """Compact, path-free summary of a finished dub job's outputs: the first
+    lines with their plan and quality check, and where to page for the rest."""
+    view = {
+        "title": outputs.get("title"), "target_language": outputs.get("target_language"),
+        "background_separated": outputs.get("background_separated"), "asset_ids": outputs.get("asset_ids") or [],
+        "summary": outputs.get("summary"), "segments": dub_segments_view(outputs, 0, preview),
+    }
+    if view["segments"]["next_offset"] is not None:
+        view["hint"] = "the rest: voice_dub_segments(job_id, offset=next_offset)"
+    return {k: v for k, v in view.items() if v is not None}
+
+
 def _job_summary(segments: list[dict[str, Any]], chunks: Optional[list[dict[str, Any]]], fit_mode: str) -> dict[str, Any]:
     summary: dict[str, Any] = dub_plan.summarize(segments)
     summary["calibrated_cps"] = _calibration(segments)

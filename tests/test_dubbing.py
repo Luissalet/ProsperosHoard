@@ -578,3 +578,17 @@ def test_resynthesize_segment_keeps_default_voice_updates_job_and_registers_asse
     # re-synthesizing another segment keeps using the default voice
     db.resynthesize_segment(store, backend, work_dir, 0, new_text="bonjour", remix=False)
     assert db.load_manifest(work_dir)["segments"][0]["engine_id"] == "fake-tts"
+
+
+def test_dub_segments_view_pages_and_clips():
+    rows = [{"index": i, "start_s": i, "end_s": i + 1, "source_text": "s" * 500, "translated_text": f"t{i}",
+             "plan": {"class": "fits", "est_s": 0.5}, "fit": {"applied_factor": 1.0}, "engine_id": "x"}
+            for i in range(75)]
+    page = db.dub_segments_view({"segments": rows}, 0, 50)
+    assert page["total"] == 75 and len(page["items"]) == 50 and page["next_offset"] == 50
+    assert page["items"][0]["plan"]["class"] == "fits" and "engine_id" not in page["items"][0]
+    assert len(page["items"][0]["source_text"]) <= 300
+    last = db.dub_segments_view({"segments": rows}, 50, 50)
+    assert len(last["items"]) == 25 and last["next_offset"] is None
+    view = db.dub_outputs_view({"segments": rows, "final_video": "voice_studio/dub/x/dubbed.mp4"})
+    assert "final_video" not in view and view["segments"]["total"] == 75 and "hint" in view
