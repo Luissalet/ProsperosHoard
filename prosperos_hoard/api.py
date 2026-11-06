@@ -6254,7 +6254,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 "capabilities": {cap: {k: v for k, v in {"state": r.get("state"), "provider": r.get("provider"),
                                                          "model": r.get("model"), "reason": engine._clip(r.get("reason"), 140)}.items() if v}
                                  for cap, r in link.items()},
-                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason")},
+                "comfyui": {k: status["comfy"].get(k) for k in ("reachable", "url", "checkpoints", "vram_free_mb", "reason",
+                                                                "templates") if k != "templates" or status["comfy"].get(k)},
                 "services": [{"id": i["id"], "state": i["state"], "startable": i["startable"]}
                              for i in status["services"]["items"]],
                 "autostart_comfy": status["services"]["autostart_comfy"],
