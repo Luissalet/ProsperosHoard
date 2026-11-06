@@ -376,3 +376,205 @@ def test_resynthesize_segment_bad_index(tmp_path):
 def test_demucs_installed_false_when_not_present():
     assert db.demucs_installed() is False
     assert db.separate_background(Path("/nonexistent.wav"), Path("/tmp/does-not-matter")) is None
+
+
+# ------------------------------------------------------------ regressions
+
+def _read_wav(path: Path) -> tuple[np.ndarray, int]:
+    import wave
+
+    with wave.open(str(path), "rb") as wf:
+        sr = wf.getframerate()
+        data = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+    return data, sr
+
+
+def test_duck_gain_envelope():
+    gain = db.duck_gain(0, 1000, [(400, 600)], 0.1, ramp=100)
+    assert gain[0] == 1.0 and gain[299] == 1.0
+    assert gain[450] == pytest.approx(0.1)
+    assert 0.1 < gain[350] < 1.0  # ramping down
+    assert 0.1 < gain[650] < 1.0  # ramping back up
+    assert gain[800] == 1.0
+    # a chunk that starts mid-span sees the same envelope
+    tail = db.duck_gain(500, 500, [(400, 600)], 0.1, ramp=100)
+    assert np.allclose(tail, gain[500:])
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_mix_many_segments_keeps_length_and_places_clips(tmp_path):
+    # hundreds of segments: one ffmpeg input per clip used to hit command line / file descriptor limits
+    sr = db.MIX_SAMPLE_RATE
+    original = tmp_path / "original.wav"
+    original.write_bytes(ve.wav_bytes_mono16(np.full(sr * 30, 0.2, np.float32), sr))
+    segments, clips = [], []
+    for i in range(300):
+        start = i * 0.1
+        clip = tmp_path / f"c{i:03d}.wav"
+        clip.write_bytes(ve.wav_bytes_mono16(np.full(int(0.05 * sr), 0.5, np.float32), sr))
+        segments.append({"start_s": start, "end_s": start + 0.05})
+        clips.append(clip)
+    out = tmp_path / "mixed.wav"
+    db.mix_dub_audio(original, clips, segments, out)
+    samples, out_sr = _read_wav(out)
+    assert out_sr == sr
+    assert samples.size == pytest.approx(sr * 30, rel=0.001)
+
+
+def test_mix_numpy_core_ducks_and_adds(tmp_path, monkeypatch):
+    # the mix itself, without loudnorm: the final ffmpeg pass is replaced by one that captures the raw float mix
+    sr = 1000
+    original = tmp_path / "bg.wav"
+    original.write_bytes(ve.wav_bytes_mono16(np.full(sr * 3, 0.5, np.float32), sr))
+    clip = tmp_path / "clip.wav"
+    clip.write_bytes(ve.wav_bytes_mono16(np.full(sr, 0.25, np.float32), sr))
+    captured = {}
+
+    def fake_stream(path, sr_, chunk):
+        data, _ = _read_wav(path)
+        for i in range(0, data.size, chunk):
+            yield data[i:i + chunk]
+
+    class Done:
+        returncode = 0
+        stderr = b""
+
+    def fake_run(cmd, **kw):
+        raw = Path(kw["cwd"]) / cmd[cmd.index("-i") + 1]
+        captured["mix"] = np.frombuffer(raw.read_bytes(), dtype="<f4").copy()
+        (Path(kw["cwd"]) / cmd[-1]).write_bytes(b"x")
+        return Done()
+
+    monkeypatch.setattr(db, "_stream_decode", fake_stream)
+    monkeypatch.setattr(db.procutil, "run", fake_run)
+    monkeypatch.setattr(db, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(db, "MIX_CHUNK_S", 0.7)  # the clip straddles chunk boundaries
+    db.mix_dub_audio(original, [clip], [{"start_s": 1.0, "end_s": 2.0}], tmp_path / "out.wav", duck_db=-20.0,
+                     sample_rate=sr)
+    mix = captured["mix"]
+    assert mix.size == 3 * sr
+    assert mix[100] == pytest.approx(0.5, abs=1e-3)  # untouched before the line
+    assert mix[1500] == pytest.approx(0.5 * 0.1 + 0.25, abs=2e-3)  # ducked by 20 dB plus the dub line
+    assert mix[2900] == pytest.approx(0.5, abs=1e-3)
+
+
+@pytest.mark.parametrize("value,code", [("Spanish", "es"), ("español", "es"), ("es-ES", "es"), ("fr", "fr"),
+                                        ("zh-cn", "zh"), ("Japanese", "ja")])
+def test_target_language_code(value, code):
+    assert db.target_language_code(value) == code
+
+
+def test_target_language_code_rejects_nonsense():
+    with pytest.raises(db.DubbingError) as err:
+        db.target_language_code("Klingonese")
+    assert err.value.code == "bad_language"
+
+
+def test_voice_spec_for_language_keeps_explicit_language():
+    assert db.voice_spec_for_language({"engine_id": "x"}, "es")["language"] == "es"
+    assert db.voice_spec_for_language({"engine_id": "x", "language": "pt"}, "es")["language"] == "pt"
+
+
+def test_translation_max_tokens_scales_with_length():
+    assert db.translation_max_tokens("hola") == 200
+    assert db.translation_max_tokens("x" * 900) > 1000
+    assert db.translation_max_tokens("x" * 100000) == db.MAX_SEGMENT_TEXT_TOKENS
+
+
+class RecordingTTS(FakeTTS):
+    calls: list[dict[str, Any]] = []
+
+    def synthesize(self, text, voice_ref=None, speed=None, pitch=None, style=None, sample_path=None, language=None):
+        RecordingTTS.calls.append({"text": text, "language": language, "voice_ref": voice_ref, "id": self.id})
+        return super().synthesize(text, voice_ref, speed, pitch, style, sample_path, language)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_dub_target_language_reaches_tts_and_prompt(tmp_path, monkeypatch):
+    store = Store(tmp_path / "data")
+    video_path = tmp_path / "clip.mp4"
+    _tiny_video(video_path)
+    RecordingTTS.calls = []
+    monkeypatch.setattr(ve, "default_stt_engines", lambda: [FakeSTT()])
+    monkeypatch.setattr(ve, "default_tts_engines", lambda **kw: [RecordingTTS()])
+    prompts, tokens = [], []
+
+    class Sync(FakeSync):
+        def chat(self, messages, max_tokens=None, temperature=None, effort=None):
+            prompts.append(messages[0]["content"])
+            tokens.append(max_tokens)
+            return super().chat(messages, max_tokens, temperature, effort)
+
+    backend = FakeBackend()
+    backend.link.sync = Sync(_fake_chat({"hello": "hola", "kenobi": "kenobi"}))
+    job = store.create_job("dub", "cpu", {"video_path": str(video_path), "target_language": "español",
+                                          "voice": {"engine_id": "fake-tts"}})
+    outputs = db.dub_job(store, backend, job, Progress(store, job["id"]))
+    assert outputs["target_language"] == "es"
+    assert {c["language"] for c in RecordingTTS.calls} == {"es"}
+    assert any("Spanish" in p for p in prompts)
+    assert all(t >= 200 for t in tokens)
+
+
+def test_separate_background_falls_back_when_demucs_cannot_start(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(db, "demucs_installed", lambda: True)
+
+    def boom(cmd, **kw):
+        assert cmd[:3] == [sys.executable, "-m", "demucs"]
+        raise FileNotFoundError("no demucs")
+
+    monkeypatch.setattr(db.procutil, "run", boom)
+    assert db.separate_background(tmp_path / "original.wav", tmp_path / "background") is None
+
+
+def test_separate_background_reuses_existing_stems(tmp_path, monkeypatch):
+    stem = tmp_path / "background" / "htdemucs" / "original" / "no_vocals.wav"
+    stem.parent.mkdir(parents=True)
+    stem.write_bytes(b"RIFF....")
+    monkeypatch.setattr(db, "demucs_installed", lambda: True)
+    monkeypatch.setattr(db.procutil, "run", lambda *a, **k: pytest.fail("demucs must not run again"))
+    got = db.separate_background(tmp_path / "original.wav", tmp_path / "background")
+    assert got and got["no_vocals"] == stem
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg not installed")
+def test_resynthesize_segment_keeps_default_voice_updates_job_and_registers_asset(tmp_path, monkeypatch):
+    store = Store(tmp_path / "data")
+    project = store.create_project("Dub fix")
+    video_path = tmp_path / "clip.mp4"
+    _tiny_video(video_path)
+
+    class OtherTTS(RecordingTTS):
+        id = "other-tts"
+
+    RecordingTTS.calls = []
+    monkeypatch.setattr(ve, "default_stt_engines", lambda: [FakeSTT()])
+    monkeypatch.setattr(ve, "default_tts_engines", lambda **kw: [RecordingTTS(), OtherTTS()])
+    backend = FakeBackend(_fake_chat({"hello": "hola", "kenobi": "kenobi"}))
+    job = store.create_job("dub", "cpu", {"video_path": str(video_path), "target_language": "fr",
+                                          "voice": {"engine_id": "fake-tts"}, "project_id": project["id"]})
+    outputs = db.dub_job(store, backend, job, Progress(store, job["id"]))
+    store.update_job(job["id"], state="done", outputs=outputs)
+    work_dir = tmp_path / "data" / outputs["work_dir"]
+
+    result = db.resynthesize_segment(store, backend, work_dir, 1, new_text="salut",
+                                     voice_spec={"engine_id": "other-tts"}, job_id=job["id"])
+    assert result["asset_id"] and result["asset_id"] != outputs["asset_ids"][0]
+    assert store.get_asset(result["asset_id"])["kind"] == "video"
+    assert RecordingTTS.calls[-1] == {"text": "salut", "language": "fr", "voice_ref": None, "id": "other-tts"}
+
+    manifest = db.load_manifest(work_dir)
+    assert manifest["voice"]["engine_id"] == "fake-tts"  # the dub's default voice is untouched
+    assert manifest["segments"][1]["voice"] == {"engine_id": "other-tts"}
+    assert manifest["segments"][1]["engine_id"] == "other-tts"
+    assert not list(work_dir.glob("*.tmp"))
+
+    updated = store.get_job(job["id"])["outputs"]
+    assert updated["segments"][1]["translated_text"] == "salut"
+    assert updated["asset_ids"][0] == result["asset_id"]
+
+    # re-synthesizing another segment keeps using the default voice
+    db.resynthesize_segment(store, backend, work_dir, 0, new_text="bonjour", remix=False)
+    assert db.load_manifest(work_dir)["segments"][0]["engine_id"] == "fake-tts"

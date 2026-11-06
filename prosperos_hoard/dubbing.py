@@ -12,8 +12,16 @@ can be inspected or re-synthesized without re-running the rest (see
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import wave
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+import numpy as np
 
 from . import audio as audio_mod
 from . import dub_plan
@@ -34,6 +42,9 @@ MIN_ATEMPO, MAX_ATEMPO = 0.5, 2.0
 MAX_OVERALL_FACTOR = 4.0  # two chained atempo stages cover 0.25x-4x
 DUCK_DB = -18.0
 MIX_SAMPLE_RATE = 44100  # matches extract_audio's default; every mix input is normalised to this
+DUCK_RAMP_S = 0.08  # the original fades in/out around each dubbed line instead of a hard step
+MIX_CHUNK_S = 10.0  # the mix is streamed in chunks of this length, never the whole track in memory
+MAX_SEGMENT_TEXT_TOKENS = 2048
 
 
 class DubbingError(RuntimeError):
@@ -90,37 +101,59 @@ def fit_audio_to_duration(src_wav: Path, target_duration_s: float, dest_wav: Pat
 # --------------------------------------------------------------- audio I/O
 
 def extract_audio(video_path: Path, out_wav: Path, sr: int = 44100) -> None:
+    """The video's audio as mono WAV at `out_wav`, written to a temporary
+    name and renamed into place, so an existing `out_wav` is always complete
+    (the dub job reuses it on a retry)."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
+    part = out_wav.with_name(out_wav.stem + ".part" + out_wav.suffix)
     cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(video_path), "-vn", "-ac", "1", "-ar",
-           str(sr), str(out_wav)]
-    proc = procutil.run(cmd, timeout=600)
-    if proc.returncode != 0 or not out_wav.is_file():
-        raise DubbingError("extract_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500])
+           str(sr), str(part)]
+    try:
+        proc = procutil.run(cmd, timeout=600)
+        if proc.returncode != 0 or not part.is_file():
+            raise DubbingError("extract_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500])
+        os.replace(part, out_wav)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def demucs_installed() -> bool:
     import importlib.util
 
-    return importlib.util.find_spec("demucs") is not None
+    try:
+        return importlib.util.find_spec("demucs") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _existing_stems(audio_path: Path, out_dir: Path) -> Optional[dict[str, Path]]:
+    for candidate in sorted(out_dir.glob(f"*/{audio_path.stem}/no_vocals.wav")):
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return {"vocals": candidate.parent / "vocals.wav", "no_vocals": candidate}
+    return None
 
 
 def separate_background(audio_path: Path, out_dir: Path) -> Optional[dict[str, Path]]:
-    """Runs `demucs` (2-stem: vocals/no_vocals) when it is installed;
-    returns None otherwise so the caller falls back to ducking the
-    original track instead of replacing it."""
+    """Background (no-vocals) stem via `demucs` (2-stem), reusing one a
+    previous run already produced in `out_dir`. Returns None when demucs is
+    not installed or fails to start, so the caller ducks the original track
+    instead of replacing it. Runs `python -m demucs` with this app's own
+    interpreter (a bare "demucs" is often not on PATH, e.g. on Windows)."""
+    if out_dir.is_dir():
+        existing = _existing_stems(audio_path, out_dir)
+        if existing:
+            return existing
     if not demucs_installed():
         return None
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ["demucs", "--two-stems", "vocals", "-o", str(out_dir), str(audio_path)]
-    proc = procutil.run(cmd, timeout=1800)
+    cmd = [sys.executable, "-m", "demucs", "--two-stems", "vocals", "-o", str(out_dir), str(audio_path)]
+    try:
+        proc = procutil.run(cmd, timeout=1800)
+    except (OSError, subprocess.SubprocessError):
+        return None
     if proc.returncode != 0:
         return None
-    stem = audio_path.stem
-    candidates = list(out_dir.glob(f"*/{stem}/no_vocals.wav"))
-    if not candidates:
-        return None
-    folder = candidates[0].parent
-    return {"vocals": folder / "vocals.wav", "no_vocals": folder / "no_vocals.wav"}
+    return _existing_stems(audio_path, out_dir)
 
 
 def build_dub_mix_filter(segments: list[dict[str, Any]], duck_db: float = DUCK_DB,
@@ -152,25 +185,148 @@ def build_dub_mix_filter(segments: list[dict[str, Any]], duck_db: float = DUCK_D
     return ";".join(parts)
 
 
+def _decode(path: Path, sr: int = MIX_SAMPLE_RATE) -> np.ndarray:
+    """Any audio file -> mono float32 at `sr`: a plain 16-bit WAV already at
+    `sr` is read directly, anything else goes through ffmpeg."""
+    try:
+        with wave.open(str(path), "rb") as wf:
+            if wf.getsampwidth() == 2 and wf.getframerate() == sr:
+                ch = wf.getnchannels()
+                data = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+                return data.reshape(-1, ch).mean(axis=1) if ch > 1 else data
+    except (wave.Error, EOFError):
+        pass
+    cmd = [_ffmpeg(), "-nostdin", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"]
+    proc = procutil.run(cmd, timeout=600)
+    if proc.returncode != 0:
+        raise DubbingError("decode_failed", (proc.stderr or b"").decode("utf-8", "replace")[:500])
+    return np.frombuffer(proc.stdout, dtype="<f4").copy()
+
+
+def duck_gain(start: int, length: int, spans: list[tuple[int, int]], duck_gain_linear: float, ramp: int) -> np.ndarray:
+    """The background's gain for samples [start, start+length): 1.0, dipping
+    to `duck_gain_linear` inside each (start, end) span with a linear ramp
+    of `ramp` samples on either side. Pure numpy."""
+    gain = np.ones(length, dtype=np.float32)
+    end = start + length
+    idx = None
+    for s0, s1 in spans:
+        lo, hi = s0 - ramp, s1 + ramp
+        if hi <= start or lo >= end:
+            continue
+        if idx is None:
+            idx = np.arange(start, end, dtype=np.float64)
+        a, b = max(lo, start) - start, min(hi, end) - start
+        pos = idx[a:b]
+        w = np.ones(b - a, dtype=np.float64)
+        if ramp > 0:
+            w = np.minimum(w, np.clip((pos - lo) / ramp, 0.0, 1.0))
+            w = np.minimum(w, np.clip((hi - pos) / ramp, 0.0, 1.0))
+        seg_gain = (1.0 - (1.0 - duck_gain_linear) * w).astype(np.float32)
+        gain[a:b] = np.minimum(gain[a:b], seg_gain)
+    return gain
+
+
+def _stream_decode(path: Path, sr: int, chunk: int):
+    """Yield `path` as mono float32 chunks of `chunk` samples at `sr`."""
+    cmd = [_ffmpeg(), "-nostdin", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"]
+    proc = procutil.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        pending = b""
+        while True:
+            data = proc.stdout.read(chunk * 4)
+            if not data:
+                break
+            pending += data
+            usable = len(pending) - len(pending) % 4
+            if usable >= chunk * 4 or usable and len(data) < chunk * 4:
+                yield np.frombuffer(pending[:usable], dtype="<f4")
+                pending = pending[usable:]
+        if len(pending) >= 4:
+            yield np.frombuffer(pending[: len(pending) - len(pending) % 4], dtype="<f4")
+        if proc.wait(timeout=60) != 0:
+            raise DubbingError("mix_failed", f"could not decode {path.name}")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+
+
 def mix_dub_audio(original_audio: Path, dub_clip_paths: list[Path], segments: list[dict[str, Any]],
                   out_path: Path, duck_db: float = DUCK_DB, sample_rate: int = MIX_SAMPLE_RATE) -> None:
+    """Mix each dubbed clip in at its segment's start over the original (or
+    separated background) track, ducking the track under each segment, then
+    loudness-normalise the result with one ffmpeg call.
+
+    The mix itself is numpy, streamed in `MIX_CHUNK_S` chunks: one ffmpeg
+    decoder for the background, each clip read only while it overlaps the
+    current chunk - so hundreds of segments never become hundreds of ffmpeg
+    inputs (command-line and file-descriptor limits), and nothing depends on
+    filter options newer ffmpeg builds added (the bundled 4.2 has no
+    `amix normalize=`). `segments`: [{"start_s", "end_s"}] in the same order
+    as `dub_clip_paths`."""
+    if len(dub_clip_paths) != len(segments):
+        raise DubbingError("mix_failed", "one dub clip per segment is required")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # loudnorm has to be part of the same filtergraph as the mix (ffmpeg
-    # refuses to chain a simple `-af` onto a stream that came out of
-    # `-filter_complex`), so it is appended to the [mixed] label here.
-    filter_complex = (build_dub_mix_filter(segments, duck_db, sample_rate)
-                      + ";[mixed]loudnorm=I=-18:TP=-1.5:LRA=9[out]")
-    cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-i", str(original_audio)]
-    for p in dub_clip_paths:
-        cmd += ["-i", str(p)]
-    # loudnorm's single-pass true-peak limiting emits at 192kHz regardless
-    # of the graph's own aformat upstream of it; force the output back down
-    # explicitly so the mixed track is actually `sample_rate` (see
-    # build_dub_mix_filter's docstring for the same issue on the inputs).
-    cmd += ["-filter_complex", filter_complex, "-map", "[out]", "-ar", str(sample_rate), str(out_path)]
-    proc = procutil.run(cmd, timeout=1200)
-    if proc.returncode != 0 or not out_path.is_file():
-        raise DubbingError("mix_failed", (proc.stderr or b"").decode("utf-8", "replace")[:800])
+    chunk = int(MIX_CHUNK_S * sample_rate)
+    ramp = int(DUCK_RAMP_S * sample_rate)
+    g = 10 ** (duck_db / 20)
+    order = sorted(range(len(segments)), key=lambda i: segments[i]["start_s"])
+    clips = [(max(0, int(round(segments[i]["start_s"] * sample_rate))), dub_clip_paths[i]) for i in order]
+    spans = [(max(0, int(round(s["start_s"] * sample_rate))), max(0, int(round(s["end_s"] * sample_rate))))
+             for s in segments]
+    raw = out_path.with_name(out_path.stem + ".mix.f32")
+    loaded: dict[int, np.ndarray] = {}
+    next_clip = 0
+    pos = 0
+
+    def add_clips(buf: np.ndarray, start: int) -> None:
+        nonlocal next_clip
+        end = start + buf.size
+        while next_clip < len(clips) and clips[next_clip][0] < end:
+            loaded[next_clip] = _decode(clips[next_clip][1], sample_rate)
+            next_clip += 1
+        for k in list(loaded):
+            c0 = clips[k][0]
+            data = loaded[k]
+            c1 = c0 + data.size
+            if c1 <= start:
+                del loaded[k]
+                continue
+            a, b = max(c0, start), min(c1, end)
+            if b > a:
+                buf[a - start:b - start] += data[a - c0:b - c0]
+
+    try:
+        with raw.open("wb") as fh:
+            for bg in _stream_decode(original_audio, sample_rate, chunk):
+                buf = bg * duck_gain(pos, bg.size, spans, g, ramp)
+                add_clips(buf, pos)
+                fh.write(buf.astype("<f4").tobytes())
+                pos += bg.size
+            # a line that runs past the end of the original track still plays out
+            while next_clip < len(clips) or loaded:
+                last_end = max([clips[k][0] + loaded[k].size for k in loaded] +
+                               [clips[k][0] + 1 for k in range(next_clip, len(clips))])
+                if last_end <= pos:
+                    break
+                buf = np.zeros(min(chunk, last_end - pos), dtype=np.float32)
+                add_clips(buf, pos)
+                fh.write(buf.astype("<f4").tobytes())
+                pos += buf.size
+        if pos == 0:
+            raise DubbingError("mix_failed", f"{original_audio.name} has no audio")
+        # loudnorm's single-pass true-peak limiting emits at 192kHz regardless
+        # of its input; force the output back to `sample_rate`
+        cmd = [_ffmpeg(), "-y", "-nostdin", "-loglevel", "error", "-f", "f32le", "-ar", str(sample_rate), "-ac", "1",
+               "-i", raw.name, "-af", "loudnorm=I=-18:TP=-1.5:LRA=9", "-ar", str(sample_rate), "-ac", "1",
+               out_path.name]
+        proc = procutil.run(cmd, timeout=1800, cwd=str(out_path.parent))
+        if proc.returncode != 0 or not out_path.is_file():
+            raise DubbingError("mix_failed", (proc.stderr or b"").decode("utf-8", "replace")[:800])
+    finally:
+        raw.unlink(missing_ok=True)
 
 
 def mux_video(video_path: Path, dub_audio_path: Path, out_path: Path, srt_path: Optional[Path] = None) -> None:
@@ -183,10 +339,15 @@ def mux_video(video_path: Path, dub_audio_path: Path, out_path: Path, srt_path: 
     # the result is as long as the video: `-shortest` would also stop at the last subtitle cue
     length = audio_mod.probe_duration_s(video_path)
     limit = ["-t", f"{length:.3f}"] if length else ["-shortest"]
-    cmd += maps + ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"] + limit + [str(out_path)]
-    proc = procutil.run(cmd, timeout=1800)
-    if proc.returncode != 0 or not out_path.is_file():
-        raise DubbingError("mux_failed", (proc.stderr or b"").decode("utf-8", "replace")[:800])
+    part = out_path.with_name(out_path.stem + ".part" + out_path.suffix)
+    cmd += maps + ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"] + limit + ["-f", "mp4", str(part)]
+    try:
+        proc = procutil.run(cmd, timeout=1800)
+        if proc.returncode != 0 or not part.is_file():
+            raise DubbingError("mux_failed", (proc.stderr or b"").decode("utf-8", "replace")[:800])
+        os.replace(part, out_path)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------- translation
@@ -414,6 +575,34 @@ def translate_segments(chat_fn: ChatFn, segments: list[dict[str, Any]], target_l
     return out
 
 
+def translation_max_tokens(text: str) -> int:
+    """A reply budget that scales with the line (a token is roughly 3-4
+    characters of Latin-script text; CJK can be ~1 per character), so a
+    long segment is never cut off mid-sentence."""
+    return max(200, min(MAX_SEGMENT_TEXT_TOKENS, 2 * len(text or "") + 64))
+
+
+def target_language_code(target_language: Any) -> str:
+    """The dub's target language as a canonical code, or DubbingError."""
+    try:
+        code = ve.normalize_language(target_language)
+    except ve.UnsupportedLanguage as exc:
+        raise DubbingError("bad_language", str(exc)) from None
+    if not code:
+        raise DubbingError("bad_language", "give target_language (e.g. 'es' or 'Spanish')")
+    return code
+
+
+def voice_spec_for_language(voice_spec: Optional[dict[str, Any]], language_code: Optional[str]) -> dict[str, Any]:
+    """The dub's voice speaks the target language: the spec's own
+    `language` wins, otherwise the target language (never the library
+    voice's own language, which is the language its sample was recorded in)."""
+    spec = dict(voice_spec or {})
+    if not spec.get("language") and language_code:
+        spec["language"] = language_code
+    return spec
+
+
 # ------------------------------------------------------------------- job --
 
 def _work_dir(store: Store, key: str) -> Path:
@@ -436,15 +625,19 @@ def _rel(store: Store, path: Path) -> str:
 def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) -> dict[str, Any]:
     params = job["params"]
     video_path = Path(params["video_path"])
-    target_lang = params["target_language"]
-    source_lang = params.get("source_language")
+    target_code = target_language_code(params["target_language"])
+    target_lang = ve.language_name(target_code) or target_code  # the name the prompts use
+    try:
+        source_lang = ve.normalize_language(params.get("source_language"), allow_auto=True)
+    except ve.UnsupportedLanguage as exc:
+        raise DubbingError("bad_language", str(exc)) from None
     glossary = params.get("glossary") or {}
-    voice_spec = params["voice"]
+    voice_spec = voice_spec_for_language(params["voice"], target_code)
     project_id = params.get("project_id")
     title = params.get("title") or video_path.stem
 
     if not video_path.is_file():
-        raise DubbingError("video_not_found", f"video not found: {video_path}")
+        raise DubbingError("video_not_found", f"video not found: {video_path.name}")
 
     work_dir = _work_dir(store, _content_key(job))
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -467,14 +660,21 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
     if not segments:
         raise DubbingError("no_speech", "no speech was detected in this video's audio track")
     detected_source_lang = source_lang or transcript.get("language")
+    source_name = ve.language_name(detected_source_lang) if detected_source_lang else None
 
     progress(0.2, f"translating {len(segments)} segment(s) to {target_lang}")
 
+    calls = {"n": 0}
+
     def chat_fn(messages: list[dict[str, Any]]) -> str:
+        # one call per step per line: progress moves, and a cancelled job stops here instead of after every line
+        calls["n"] += 1
+        progress(0.2 + 0.06 * min(1.0, calls["n"] / (3.0 * len(segments))), f"translating ({calls['n']})")
         # room for models that reason before answering: 200 tokens could be spent thinking and leave no line
         # dubbing lines are short: no reasoning (a reasoning model left on its default spent the whole budget thinking
         # and returned an empty line, ~100 s per call, measured live), the same "off" the rest of the studio uses
-        result = backend.link.sync.chat(messages=messages, max_tokens=800, temperature=0.3, effort="off")
+        result = backend.link.sync.chat(messages=messages, max_tokens=max(800, translation_max_tokens(messages[-1]["content"])),
+                                        temperature=0.3, effort="off")
         return result.text
 
     translation_mode = resolve_translation_mode(params.get("translation_mode"), chat_fn)
@@ -486,7 +686,7 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
             item["char_budget"] = planned["char_budget"]
     statuses: list[str] = []
     steps: list[Optional[dict[str, Any]]] = []
-    translations = translate_segments(chat_fn, items, target_lang, detected_source_lang, glossary, report=statuses,
+    translations = translate_segments(chat_fn, items, target_lang, source_name, glossary, report=statuses,
                                       mode=translation_mode, steps=steps)
     for i, (seg, tr, status) in enumerate(zip(segments, translations, statuses or ["ok"] * len(segments))):
         seg["translated_text"] = tr
@@ -519,13 +719,15 @@ def dub_job(store: Store, backend: Backend, job: dict[str, Any], progress: Any) 
     summary = _job_summary(segments, chunks, fit_mode)
 
     _write_manifest(manifest_path, {
-        "title": title, "target_language": target_lang, "source_language": detected_source_lang,
+        "title": title, "target_language": target_code, "source_language": detected_source_lang,
         "glossary": glossary, "voice": voice_spec, "video_path": str(video_path), "segments": segments,
-        "options": options, "summary": summary, "created_at": now_iso(),
+        "options": options, "summary": summary, "project_id": project_id, "job_id": job.get("id"),
+        "created_at": now_iso(),
     })
 
     progress(0.82, "mixing audio")
     outputs = _assemble_dub(store, backend, work_dir, video_path, segments, project_id, title, progress, chunks=chunks)
+    outputs["target_language"] = target_code
     outputs["work_dir"] = _rel(store, work_dir)
     outputs["manifest"] = _rel(store, manifest_path)
     outputs["segments"] = [{k: v for k, v in s.items() if k != "fitted_path"} for s in segments]
@@ -786,7 +988,7 @@ def _assemble_dub(store: Store, backend: Backend, work_dir: Path, video_path: Pa
 
         asset_id = new_id("a")
         dest = store.path_for_asset_file(asset_id, ".mp4")
-        dest.write_bytes(final_video.read_bytes())
+        shutil.copyfile(final_video, dest)
         duration_s = audio_mod.probe_duration_s(dest)
         asset = store.create_asset(
             project_id=project_id, kind="video", file_path=engine_mod._rel(store, dest), mime="video/mp4",
@@ -801,19 +1003,58 @@ def _assemble_dub(store: Store, backend: Backend, work_dir: Path, video_path: Pa
 def _write_manifest(path: Path, data: dict[str, Any]) -> None:
     clean = dict(data)
     clean["segments"] = [{k: v for k, v in s.items() if k != "fitted_path"} for s in data["segments"]]
-    path.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")  # atomic: a reader never sees half a manifest
+    tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def load_manifest(work_dir: Path) -> dict[str, Any]:
     path = work_dir / "manifest.json"
     if not path.is_file():
-        raise DubbingError("no_manifest", f"no dub manifest at {path}")
+        raise DubbingError("no_manifest", "this dub has no manifest (the job did not finish)")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+_WORK_DIR_LOCKS: dict[str, threading.Lock] = {}
+_WORK_DIR_LOCKS_GUARD = threading.Lock()
+
+
+def _work_dir_lock(work_dir: Path) -> threading.Lock:
+    key = str(work_dir.resolve())
+    with _WORK_DIR_LOCKS_GUARD:
+        return _WORK_DIR_LOCKS.setdefault(key, threading.Lock())
+
+
+def _update_job_outputs(store: Store, job_id: str, seg: dict[str, Any], asset_id: Optional[str],
+                        summary: Optional[dict[str, Any]] = None) -> None:
+    job = store.get_job(job_id)
+    outputs = dict(job.get("outputs") or {})
+    rows = list(outputs.get("segments") or [])
+    row = {k: v for k, v in seg.items() if k != "fitted_path"}
+    for i, existing in enumerate(rows):
+        if existing.get("index") == seg["index"]:
+            rows[i] = row
+            break
+    outputs["segments"] = rows
+    if summary is not None:
+        outputs["summary"] = summary
+    if asset_id:
+        outputs["asset_ids"] = [asset_id, *[a for a in outputs.get("asset_ids") or [] if a != asset_id]][:8]
+    store.update_job(job_id, outputs=outputs)
 
 
 def resynthesize_segment(
     store: Store, backend: Backend, work_dir: Path, segment_index: int, new_text: Optional[str] = None,
-    voice_spec: Optional[dict[str, Any]] = None, remix: bool = True,
+    voice_spec: Optional[dict[str, Any]] = None, remix: bool = True, job_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """One re-synthesis per work directory at a time (see `_resynthesize_segment`)."""
+    with _work_dir_lock(work_dir):
+        return _resynthesize_segment(store, backend, work_dir, segment_index, new_text, voice_spec, remix, job_id)
+
+
+def _resynthesize_segment(
+    store: Store, backend: Backend, work_dir: Path, segment_index: int, new_text: Optional[str],
+    voice_spec: Optional[dict[str, Any]], remix: bool, job_id: Optional[str],
 ) -> dict[str, Any]:
     """Re-translate-free re-synthesis of one segment (optionally with edited
     text and/or a different voice), then optionally rebuild the mixed audio
@@ -836,10 +1077,14 @@ def resynthesize_segment(
     plan_on = bool(options.get("plan", "plan" in seg))
     fit_mode = "smart" if options.get("fit_mode") == "smart" else "audio"
     if new_text is not None:
-        seg["translated_text"] = new_text
+        if not new_text.strip():
+            raise DubbingError("empty_text", "the segment's new text is empty")
+        seg["translated_text"] = " ".join(new_text.split())
         seg.pop("translation_steps", None)  # the steps described the old text
         seg.pop("raw_duration_s", None)  # measured on the old text: no use for calibration
-    spec = voice_spec or manifest["voice"]
+    if voice_spec is not None:
+        seg["voice"] = voice_spec  # this segment only; manifest["voice"] stays the dub's default
+    spec = voice_spec_for_language(seg.get("voice") or manifest["voice"], manifest.get("target_language"))
 
     tts_engines = ve.default_tts_engines(voices_dir=store.data_dir / "voices")
     _synthesize_and_fit_segment(store, tts_engines, spec, seg, seg_dir, borrow_gap=plan_on, fit_mode=fit_mode)
@@ -855,8 +1100,6 @@ def resynthesize_segment(
         run_qc(stt_engine, seg, target_lang, options.get("qc_threshold"))
     else:
         seg.pop("qc", None)
-    if voice_spec is not None:
-        manifest["voice"] = voice_spec  # only the manifest's own default changes; per-segment engine_id is recorded above
     video_path = Path(manifest["video_path"])
     chunks = _timeline(video_path, segments, fit_mode)
     manifest["summary"] = _job_summary(segments, chunks, fit_mode)
@@ -865,7 +1108,11 @@ def resynthesize_segment(
     result: dict[str, Any] = {"segment": {k: v for k, v in seg.items() if k != "fitted_path"},
                               "summary": manifest["summary"]}
     if remix:
-        outputs = _assemble_dub(store, backend, work_dir, video_path, segments, None, manifest["title"],
-                                lambda *a, **k: None, chunks=chunks)
+        outputs = _assemble_dub(store, backend, work_dir, video_path, segments, manifest.get("project_id"),
+                                manifest["title"], lambda *a, **k: None, chunks=chunks)
         result["final_video"] = outputs["final_video"]
+        if outputs.get("asset_ids"):
+            result["asset_id"] = outputs["asset_ids"][0]
+    if job_id:
+        _update_job_outputs(store, job_id, seg, result.get("asset_id"), manifest["summary"])
     return result
