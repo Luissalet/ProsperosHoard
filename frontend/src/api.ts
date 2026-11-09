@@ -89,6 +89,17 @@ export interface Asset {
   analysis?: Analysis | null;
 }
 
+export interface ManimStatus {
+  installed: boolean; version: string | null; pin: string; python_required: string; environment: string;
+  python_found: string | null; env: Record<string, string>; hint: string | null;
+}
+export interface ManimExample { id: string; kind: "2d" | "3d"; title: string; description: string; code: string }
+export interface ManimCheck {
+  ok: boolean; scene: string; code: string; duration_s: number; plays: number; layout: string | null; layout_problems: string[];
+  timeline: { n: number; start_s: number; end_s: number; line: number; what: string }[];
+  storyboard_asset_id?: string; written_by_model?: boolean; attempts?: number;
+}
+
 export interface Paged<T> {
   items: T[];
   has_more: boolean;
@@ -1647,6 +1658,13 @@ export const api = {
     request<Paged<Asset & { project_name?: string }>>("GET", `/generation/api/assets${q(params)}`),
   setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>
     request<{ status: string; redraw: string[] }>("PUT", `/generation/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
+  manimStatus: () => request<ManimStatus>("GET", "/generation/api/manim/status"),
+  manimExamples: () => request<{ examples: ManimExample[]; notes: string[] }>("GET", "/generation/api/manim/examples"),
+  manimEngine: (action: "status" | "install") => request<{ job?: Job } & Partial<ManimStatus>>("POST", "/generation/api/manim/engine", { action }),
+  manimCheck: (body: { code?: string; description?: string; project?: string; language?: string; scene?: string }) =>
+    request<ManimCheck>("POST", "/generation/api/manim/check", body),
+  manimRender: (pid: string, body: { code?: string; description?: string; name?: string; quality?: string; language?: string; scene?: string }) =>
+    request<{ job: Job }>("POST", `/generation/api/projects/${pid}/manim/render`, body),
   downloadMedia: (pid: string, body: { url: string; audio_only?: boolean; start_s?: number | null; end_s?: number | null }) =>
     request<{ job: Job }>("POST", `/generation/api/projects/${pid}/download`, body),
   videoFrames: (assetId: string, count = 6, atS?: number) =>

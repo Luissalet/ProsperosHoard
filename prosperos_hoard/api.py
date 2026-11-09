@@ -62,6 +62,7 @@ from . import style_profiles as style_profiles_mod
 from . import style_cards
 from . import shot_review as shot_review_mod
 from . import edit_plans as edit_plans_mod
+from . import manim_scene as manim_mod
 from . import continuity as continuity_mod
 from . import continuity_regen as regen_mod
 from . import segment_repair as segment_repair_mod
@@ -742,6 +743,36 @@ class DownloadMediaBody(BaseModel):
     end_s: Optional[float] = None
 
 
+class ManimRenderBody(BaseModel):
+    project: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    scene: Optional[str] = None
+    name: Optional[str] = None
+    quality: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    fps: Optional[int] = None
+    preset: Optional[str] = None
+    crf: Optional[float] = None
+    language: Optional[str] = None
+    wait_s: float = 0
+
+
+class ManimCheckBody(BaseModel):
+    project: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    scene: Optional[str] = None
+    times: Optional[list[str]] = None
+    language: Optional[str] = None
+
+
+class ManimEngineBody(BaseModel):
+    action: str = "status"
+    wait_s: float = 0
+
+
 class VideoFramesBody(BaseModel):
     asset_id: str
     count: int = 6
@@ -1310,6 +1341,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
     queue.register("clip_edit", lambda job, p: engine.clip_edit_job(store, backend, job, p))
     queue.register("graphic_render", lambda job, p: graphic_shots.render_job(store, job, p))
+    queue.register("manim_render", lambda job, p: manim_mod.render_job(store, job, p, chat=_manim_chat()))
+    queue.register("install_manim_engine", lambda job, p: manim_mod.install_job(store, job, p))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -5244,6 +5277,94 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_workflow_preflight(body: WorkflowPreflightBody):
         return agent("workflow_preflight", body.production or body.template or "workflow", lambda: op_workflow_preflight(body))
     # -- end workflow preflight
+
+    # ---------------------------------------------------- Manim scenes (manim_scene.py): ManimGX code -> a video clip of the project
+
+    def _manim_chat() -> Optional[Callable[..., str]]:
+        hook = (getattr(app.state, "short_hooks", None) or {}).get("chat")
+        if hook:
+            return hook
+        try:
+            return mv_planner.writer_chat(backend, busy=_renders_on_llm_gpus)
+        except Exception:  # noqa: BLE001 - no model: only code is accepted, and the error says so
+            return None
+
+    def op_manim_render(body: ManimRenderBody) -> dict[str, Any]:
+        if not body.project:
+            raise engine.EngineError("project_required", "name the project the clip goes into (project)")
+        store.get_project(body.project)
+        has_code = bool((body.code or "").strip())
+        if not has_code and not (body.description or "").strip():
+            raise manim_mod.ManimError("empty_scene", "give the scene code or a description of what to draw")
+        manim_mod.quality_settings(body.quality, body.width, body.height, body.fps, body.preset, body.crf)
+        if has_code:
+            manim_mod.static_check(body.code, body.scene)      # a broken scene is refused here, with its line, before it queues
+        if not manim_mod.venv_python(store.data_dir).is_file():
+            raise manim_mod.ManimError("manim_not_installed", "the ManimGX engine is not installed; install it with "
+                                       "manim_engine(action='install') or the Install button on the Manim scenes panel")
+        params = {"project_id": body.project, "code": body.code if has_code else None, "description": (body.description or "").strip(),
+                  "scene": body.scene, "name": body.name, "quality": body.quality, "width": body.width, "height": body.height,
+                  "fps": body.fps, "preset": body.preset, "crf": body.crf, "language": body.language or ""}
+        job = queue.enqueue("manim_render", "cpu", params, project_id=body.project)
+        return {"job": wait(job, body.wait_s)}
+
+    def op_manim_check(body: ManimCheckBody) -> dict[str, Any]:
+        has_code = bool((body.code or "").strip())
+        return manim_mod.check_in_project(store, body.project, code=body.code, description=(body.description or ""), scene=body.scene,
+                                          times=body.times, chat=None if has_code else _manim_chat(), language=body.language or "")
+
+    def op_manim_engine(body: ManimEngineBody) -> dict[str, Any]:
+        if body.action == "status":
+            return manim_mod.status(store.data_dir)
+        if body.action != "install":
+            raise engine.EngineError("bad_action", "action is 'status' or 'install'")
+        current = manim_mod.status(store.data_dir)
+        if current["installed"]:
+            return {**current, "already_installed": True}
+        return {"job": wait(queue.enqueue("install_manim_engine", "cpu", {}), body.wait_s)}
+
+    @app.get("/api/manim/status")
+    def manim_status():
+        return manim_mod.status(store.data_dir)
+
+    @app.get("/api/manim/examples")
+    def manim_examples_route():
+        return manim_mod.examples()
+
+    @app.post("/api/manim/engine")
+    def manim_engine_route(body: ManimEngineBody):
+        out = op_manim_engine(body)
+        return {**out, "job": engine.job_view(out["job"])} if "job" in out else out
+
+    @app.post("/api/manim/check")
+    def manim_check_route(body: ManimCheckBody):
+        return op_manim_check(body)
+
+    @app.post("/api/projects/{project_id}/manim/render")
+    def project_manim_render(project_id: str, body: ManimRenderBody):
+        body.project = project_id
+        return {"job": engine.job_view(op_manim_render(body)["job"])}
+
+    @app.post("/api/agent/manim_render")
+    def agent_manim_render(body: ManimRenderBody):
+        return agent("manim_render", f"{body.project}:{(body.description or body.scene or 'code')[:80]}",
+                     lambda: {"job": job_result(op_manim_render(body)["job"])})
+
+    @app.post("/api/agent/manim_check")
+    def agent_manim_check(body: ManimCheckBody):
+        return agent("manim_check", (body.description or body.scene or "code")[:100], lambda: op_manim_check(body))
+
+    @app.get("/api/agent/manim_examples")
+    def agent_manim_examples():
+        return agent("manim_examples", "", manim_mod.examples)
+
+    @app.post("/api/agent/manim_engine")
+    def agent_manim_engine(body: ManimEngineBody):
+        def run() -> dict[str, Any]:
+            out = op_manim_engine(body)
+            return {**out, "job": job_result(out["job"])} if "job" in out else out
+        return agent("manim_engine", body.action, run)
+    # -- end Manim scenes
 
     # ---------------------------------------------------- edit plans: plan -> run -> verify (edit_plans.py)
 

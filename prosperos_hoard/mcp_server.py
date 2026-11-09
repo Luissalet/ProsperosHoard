@@ -2414,6 +2414,77 @@ def studio_video_engines() -> dict[str, Any]:
     return _call("GET", "/api/video-engines")
 
 
+# ------------------------------------------------- Manim scenes: ManimGX code -> a video clip --
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def manim_render(project: str, code: Optional[str] = None, description: Optional[str] = None, scene: Optional[str] = None,
+                 name: Optional[str] = None, quality: str = "standard", width: Optional[int] = None, height: Optional[int] = None,
+                 fps: Optional[int] = None, language: Optional[str] = None, wait_s: float = 0) -> dict[str, Any]:
+    """Render a Manim scene (2D maths, formulas, graphs, 3D) to a video clip of the project / renderizar una escena Manim a un clip.
+
+    Give `code` (ManimGX, Manim Community compatible: `import manimgx as m`, a class deriving m.Scene or m.ThreeDScene with
+    construct(self)) or a `description` the local writing model turns into code (it checks the code and corrects it with the
+    engine's own errors, up to 3 tries; no model running -> pass code). Code is checked before it queues: a syntax error,
+    a missing scene class or a forbidden import (os, subprocess, sockets...) comes back at once with its line. A scene that fails
+    to run fails the job with a readable message (line, exception, hint): correct the code and call again. quality: draft
+    1280x720@30, standard 1920x1080@30, high 1920x1080@60; or width/height (even) and fps. `scene` picks one class when the
+    code has several; `name` names the clip. The clip is a project video asset (tag manim, the code kept in its recipe): use
+    its id in edit_plan clips like any video. Queues a job (CPU lane); wait_s (up to 150) waits for it; the job's result holds
+    the code that ran (written by the model when you gave a description), duration, size and layout warnings. Needs the engine:
+    manim_engine(action='install') once.
+
+    Keywords: manim, manimgx, math animation, formula video, 3D scene, graph animation, equation, explainer clip, animacion matematica, escena manim, formula, grafica, 3D
+    """
+    return _call("POST", "/api/agent/manim_render", json={
+        "project": project, "code": code, "description": description, "scene": scene, "name": name, "quality": quality,
+        "width": width, "height": height, "fps": fps, "language": language, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def manim_check(code: Optional[str] = None, description: Optional[str] = None, scene: Optional[str] = None,
+                project: Optional[str] = None, times: Optional[list[str]] = None, language: Optional[str] = None) -> dict[str, Any]:
+    """Validate a Manim scene without rendering a video / validar una escena Manim sin renderizar.
+
+    Runs the static rules (syntax, a scene class, no files/network/processes) and the engine's inspect: returns ok, the scene
+    name, the code that was checked (with `from manim import *` rewritten to manimgx), duration_s, plays, the timeline (what
+    each play does and where, by line), layout_problems (text overlapping or clipped, shapes leaving the frame; warnings, the
+    scene still renders) and, with `project`, a storyboard picture saved as an image asset (storyboard_asset_id: look at it with
+    studio_show). `times` inspects chosen moments ("1.5", "end"). With `description` instead of code the writing model writes
+    the code first (and corrects it up to 3 tries), then it is checked. A scene that cannot run is an error whose message names the
+    line, the exception and the engine's hint: correct the code and check again. Seconds, not minutes.
+
+    Keywords: validate manim scene, check animation code, dry run, layout problems, storyboard, validar escena, comprobar codigo, sin renderizar
+    """
+    return _call("POST", "/api/agent/manim_check", json={"code": code, "description": description, "scene": scene,
+                                                         "project": project, "times": times, "language": language})
+
+
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def manim_examples() -> dict[str, Any]:
+    """Ready-made Manim scenes and the rules for writing them / ejemplos de escenas Manim.
+
+    Returns examples (id, kind 2d/3d, title, description, code: a formula, a plotted curve, a shape transformation, a 3D cube)
+    that pass manim_check as they are, and notes on the dialect (import manimgx as m, allowed imports, the 240 s limit,
+    qualities). Start from one and change it.
+
+    Keywords: manim examples, scene templates, formula example, 3D example, ejemplos manim, plantillas de escena
+    """
+    return _call("GET", "/api/agent/manim_examples")
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True))
+def manim_engine(action: str = "status", wait_s: float = 0) -> dict[str, Any]:
+    """Status or install of the Manim engine (ManimGX) / estado o instalacion del motor Manim.
+
+    action 'status' says whether it is installed (version, its own Python 3.13+ environment under Prospero's data, the GPU
+    filter in use). 'install' builds that environment and runs `pip install manimgx` (a few minutes, downloads about 100 MB) as a
+    job; wait_s waits for it. It is never installed silently.
+
+    Keywords: install manim, manimgx engine, engine status, instalar manim, motor manim
+    """
+    return _call("POST", "/api/agent/manim_engine", json={"action": action, "wait_s": wait_s})
+
+
 # ------------------------------------------------- edit plans: plan -> run -> verify --
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

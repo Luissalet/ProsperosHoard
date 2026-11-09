@@ -88,7 +88,8 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_services", "studio_service_start", "studio_service_stop", "studio_gpu_memory",
                         "studio_delete_assets", "studio_trash", "studio_delete_project", "studio_video_plan", "studio_video_from_plan",
                         "studio_production_lyrics", "studio_production_cast", "studio_production_song", "studio_production_timing", "studio_production_settings", "studio_production_finishing", "studio_canvas", "studio_spaces", "studio_prompt_enhance", "studio_cinema", "studio_export_timeline", "studio_video_frames", "studio_download_media",
-                         "production_export_lumiere", "cast_import_character", "production_from_storyboard", "voice_tts"}
+                         "production_export_lumiere", "cast_import_character", "production_from_storyboard", "voice_tts",
+                        "manim_render", "manim_check", "manim_examples", "manim_engine"}
             assert expected <= set(by_name)
             native_contracts = json.loads((REPO_ROOT / 'prosperos_hoard' / 'studio_mcp_catalog.json').read_text(encoding='utf-8'))
             generation_names = {t['name'] for t in native_contracts['generation']}
@@ -127,6 +128,15 @@ async def test_mcp_protocol_end_to_end(running_app):
 
             result = await session.call_tool("studio_recipes_list", {})
             assert json.loads(result.content[0].text) == {"items": []}
+            # Manim scenes: the tools reach their routes (the engine itself is not installed here)
+            assert by_name["manim_examples"].annotations.readOnlyHint is True
+            result = await session.call_tool("manim_examples", {})
+            shown = json.loads(result.content[0].text)
+            assert {"formula_euler", "cubo_3d"} <= {e["id"] for e in shown["examples"]} and shown["notes"]
+            result = await session.call_tool("manim_engine", {"action": "status"})
+            assert json.loads(result.content[0].text)["installed"] is False
+            result = await session.call_tool("manim_check", {"code": "import manimgx as m\nx = ("})
+            assert result.isError and "syntax_error" in result.content[0].text
             result = await session.call_tool("studio_production", {"production": "nope"})
             assert result.isError and "not_found" in result.content[0].text
             # graphic shots and style cards: the tools reach their routes

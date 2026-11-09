@@ -480,3 +480,12 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 .sp-frame-picker video { display: block; width: 100%; max-height: 190px; object-fit: contain; background: var(--monitor-black, #08090a); border-radius: 6px; }
 .sp-frame-picker .sp-num { justify-content: space-between; }
 .sp-frame-picker p { margin: 0; }
+
+/* Manim scenes */
+.manim-code { width: 100%; min-height: 280px; resize: vertical; font-family: "JetBrains Mono Variable", ui-monospace, monospace; font-size: 13px; line-height: 1.45; tab-size: 4; }
+.manim-error { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--bad, #c0504d); color: var(--bad, #c0504d); white-space: pre-wrap; overflow-wrap: anywhere; }
+.manim-error svg { flex: none; margin-top: 2px; }
+.manim-warn { margin: 8px 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--warn, #b8860b); }
+.manim-timeline { margin: 8px 0; }
+.manim-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.manim-clip video { width: 100%; border-radius: 8px; background: #000; }
