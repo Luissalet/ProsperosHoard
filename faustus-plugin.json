@@ -14,6 +14,7 @@
   "capabilities": [
     "image generation",
     "video editing",
+    "manim scenes (2D maths and 3D animation drawn by code)",
     "local frame interpolation",
     "graphic design",
     "audio analysis",

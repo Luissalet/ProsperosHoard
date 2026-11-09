@@ -87,6 +87,15 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/agent/studio_animatic` | `{production, aspects?, wait_s=0}` -> `{job, animatic?: {renders{aspect: asset_id}, plan{cuts_total, clips_planned, gpu_minutes, cpu_minutes_renders, unused_shots, duration_s}}}` |
 | POST | `/api/agent/studio_graphic_shot` | `{production, key?, after?, grammar?, data?, mode?, start_s?, end_s?, style?, look?, cues?, safe?, seed?, suppress_captions?, section?, run=true}` -> `{shot, changed, production, job?}`; no `key` adds a shot, a key changes it (`data` and `look` are merged, a new grammar replaces the graphic; `look: {}` clears the overrides) |
 | POST | `/api/agent/studio_graphic_render` | `{production?, shot?, project?, graphic?, duration_s?, what="video"\|"still"\|"alpha", aspect?, fps=30, wait_s=0}` -> `{job, asset_id?}` (a CPU `graphic_render` job; `still` is a PNG) |
+| POST | `/api/agent/manim_render` | `{project, code?, description?, scene?, name?, quality="draft"\|"standard"\|"high", width?, height?, fps?, language?, wait_s=0}` -> `{job}` (a CPU `manim_render` job; the video asset is tagged `manim`) |
+| POST | `/api/agent/manim_check` | `{code?, description?, scene?, project?, times?, language?}` -> `{ok, scene, duration_s, plays, timeline, layout_problems, storyboard_asset_id?}` |
+| GET | `/api/agent/manim_examples` | -> `{examples, notes}` |
+| POST | `/api/agent/manim_engine` | `{action="status"\|"install", wait_s=0}` -> engine status, or `{job}` for an install |
+| GET | `/api/manim/status` | engine status |
+| GET | `/api/manim/examples` | example scenes |
+| POST | `/api/manim/engine` | `{action}` as above (UI) |
+| POST | `/api/manim/check` | as `manim_check` (UI) |
+| POST | `/api/projects/{project_id}/manim/render` | as `manim_render` (UI) |
 | POST | `/api/agent/studio_style_cards` | `{action="list"\|"get"\|"create"\|"update"\|"delete", id?, name?, from_card?, technique?, palette?, motion?, signature_transition?, quality?, pitfalls?, typography?, prompt_prefix?, prompt_suffix?, negative?, notes?}` -> a card or `{items}`; built-in cards are read-only (400) |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
