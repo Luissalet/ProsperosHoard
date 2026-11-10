@@ -13,14 +13,14 @@ const JOB_LABELS: Record<Lang, Record<string, string>> = {
     download_voice: "Voice download", audiobook: "Audiobook", dub: "Dubbing", install_voice_engine: "Install voice engine",
     download_media: "Download video", reframe: "Reframe", retake: "Retake", clip_edit: "Edit clip", stems: "Stems",
     character_sheet: "Character sheet", train_lora: "Train LoRA", character_caption: "Caption dataset",
-    character_identity: "Score likeness", production: "Production", space_run: "Space", production_qa: "QA pass", animatic: "Animatic", graphic_render: "Graphic", manim_render: "Manim scene", install_manim_engine: "Install Manim engine",
+    character_identity: "Score likeness", production: "Production", space_run: "Space", production_qa: "QA pass", animatic: "Animatic", graphic_render: "Graphic", manim_render: "Manim scene", install_manim_engine: "Install Manim engine", promo_render: "Promo from a web page",
   },
   es: {
     generate_image: "Generar", edit_image: "Editar", animate: "Animar", compose_song: "Componer canción", render_timeline: "Renderizar",
     download_voice: "Descarga de voz", audiobook: "Audiolibro", dub: "Doblaje", install_voice_engine: "Instalar motor de voz",
     download_media: "Descargar vídeo", reframe: "Reencuadre", retake: "Retoque de tramo", clip_edit: "Editar clip", stems: "Pistas",
     character_sheet: "Hoja de personaje", train_lora: "Entrenar LoRA", character_caption: "Describir dataset",
-    character_identity: "Puntuar parecido", production: "Producción", space_run: "Espacio", production_qa: "Revisión QA", animatic: "Animático", graphic_render: "Rótulo", manim_render: "Escena Manim", install_manim_engine: "Instalar motor Manim",
+    character_identity: "Puntuar parecido", production: "Producción", space_run: "Espacio", production_qa: "Revisión QA", animatic: "Animático", graphic_render: "Rótulo", manim_render: "Escena Manim", install_manim_engine: "Instalar motor Manim", promo_render: "Promo desde una web",
   },
 };
 

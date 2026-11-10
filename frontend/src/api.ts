@@ -100,6 +100,17 @@ export interface ManimCheck {
   storyboard_asset_id?: string; written_by_model?: boolean; attempts?: number;
 }
 
+export interface PromoKit {
+  id: string; url: string; host: string; site_name: string; headline: string; value_prop: string; phrases: string[]; language: string;
+  colors: { hex: string; role: string; derived: boolean }[]; palette: Record<string, string>;
+  fonts: { display: { family: string; source: string }; body: { family: string; source: string } };
+  logo: { width: number; height: number; luminance: number } | null; assets?: Record<string, string>;
+}
+export interface PromoOptions {
+  vibes: Record<string, { label: string; bpm: number; about: string }>; formats: Record<string, { width: number; height: number }>;
+  fps: number[]; length_s: { min: number; max: number; default: number };
+}
+
 export interface Paged<T> {
   items: T[];
   has_more: boolean;
@@ -1658,6 +1669,13 @@ export const api = {
     request<Paged<Asset & { project_name?: string }>>("GET", `/generation/api/assets${q(params)}`),
   setProductionCast: (slug: string, cast: CastMember[], perShot?: number, run = false) =>
     request<{ status: string; redraw: string[] }>("PUT", `/generation/api/productions/${slug}/cast`, { cast, per_shot: perShot, run }),
+  promoOptions: () => request<PromoOptions>("GET", "/generation/api/promo/options"),
+  promoKits: () => request<{ items: { id: string; host: string; site_name: string }[] }>("GET", "/generation/api/promo/kits"),
+  promoKit: (id: string) => request<PromoKit>("GET", `/generation/api/promo/kits/${id}`),
+  brandScan: (url: string, project?: string) => request<PromoKit>("POST", "/generation/api/brand/scan", { url, project }),
+  promoRender: (pid: string, body: { url?: string; kit_id?: string; length_s: number; formats: string[]; vibe: string; fps: number; language: string; music_asset_id?: string }) =>
+    request<{ job: Job }>("POST", `/generation/api/projects/${pid}/promo`, body),
+  promoContactSheet: (assetId: string, fps = 4) => request<{ asset_id: string }>("POST", "/generation/api/contact-sheet", { asset_id: assetId, fps }),
   manimStatus: () => request<ManimStatus>("GET", "/generation/api/manim/status"),
   manimExamples: () => request<{ examples: ManimExample[]; notes: string[] }>("GET", "/generation/api/manim/examples"),
   manimEngine: (action: "status" | "install") => request<{ job?: Job } & Partial<ManimStatus>>("POST", "/generation/api/manim/engine", { action }),

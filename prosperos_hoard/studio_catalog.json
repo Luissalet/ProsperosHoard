@@ -1,6 +1,45 @@
 {
   "generation": [
     {
+      "name": "brand_scan",
+      "description": "Scan a web page for its brand: logo, three main colours, fonts, headline, value proposition and key phrases / escanear la marca de una web.\n\nOpens the page in a real browser (Playwright) and returns the brand kit: `colors` (primary, secondary, accent, from the pixels, the buttons, the\nCSS variables and the theme colour), `palette` (background, text, dark and light ink too), `fonts` (display and body: the site's own file only when its\nlicence allows reusing it, else the closest open font that ships with Prospero, with the reason), `logo` (a trimmed transparent PNG), `headline`,\n`value_prop` and up to five `phrases`. The kit is kept (`id`, use it as `kit_id` in promo_from_url, no new scan) and, with `project`, the logo and a\nbrand board picture are saved as image assets of the project (tag brand; look at the board with studio_show). Takes 5-20 seconds.\n\nKeywords: brand kit, brand scan, logo, palette, fonts, website colors, escanear marca, kit de marca, colores de una web",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "url",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
       "name": "cast_import_character",
       "description": "Add a cast member that another app describes / importar personaje al reparto desde otra app.\n\nname, description (bio), look (the prompt that keeps its appearance), images (reference image paths in the\nfolders Prospero may import from; the first becomes the canonical image) and source_ref (hoard://... of the\noriginal). Goes into `project`, or the \"Casting\" project. The same name and source_ref again returns the same\nmember (existing=true). Returns ok, character_id.\n\nKeywords: import character, cast, family, from another app, writer, importar personaje, reparto, personaje de otra app",
       "inputSchema": {
@@ -61,6 +100,60 @@
       },
       "annotations": {
         "readOnlyHint": false
+      }
+    },
+    {
+      "name": "contact_sheet",
+      "description": "A contact sheet of a video asset: a frame every 1/fps seconds with its time, as an image asset / hoja de contactos de un vídeo.\n\nDefault 4 frames per second (fewer when the video would give more than 400 frames); look at the picture with studio_show to find text cut off, overlaps, off-brand\ncolours, jumps between shots or anything illegible. Returns the image `asset_id`, its size and how many frames it holds.\n\nKeywords: contact sheet, frame grid, review video, check frames, hoja de contactos, revisar vídeo, fotogramas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Every N"
+          },
+          "count": {
+            "default": 12,
+            "title": "Count",
+            "type": "integer"
+          },
+          "columns": {
+            "default": 4,
+            "title": "Columns",
+            "type": "integer"
+          },
+          "width": {
+            "default": 320,
+            "title": "Width",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
       }
     },
     {
@@ -1199,8 +1292,7 @@
         "properties": {}
       },
       "annotations": {
-        "readOnlyHint": true,
-        "draftSafeHint": true
+        "readOnlyHint": true
       }
     },
     {
@@ -1667,6 +1759,123 @@
       },
       "annotations": {
         "readOnlyHint": false
+      }
+    },
+    {
+      "name": "promo_from_url",
+      "description": "Make a promo video from a web page, in 16:9 and 9:16 / hacer un promo en vídeo a partir de una web.\n\nScans the brand (or takes `kit_id` of an earlier brand_scan), writes the shots (the local writing model when one runs, else a template made of the site's\nown phrases), builds every frame in code on an HTML timeline with the brand's colours, fonts and logo, and checks it before rendering: text boxes measured\nin the page at every shot (cut, outside the frame, overlapping, too small), contrast, colours that are not the brand's, shots that do not change, jumps at\nthe cuts, on a 4 fps contact sheet. What fails is repaired by rules and checked again (twice at most). Then each format is rendered frame by frame into ffmpeg\n(formats [\"16:9\",\"9:16\"] = 1920x1080 and 1080x1920; fps 24-60, 60 by default; H.264 yuv420p) with a soundtrack synthesised in code (a pulse at the tempo of\nthe shots, a whoosh on every movement, a hit on the logo) mastered to about -14 LUFS, or over `music_asset_id` (an audio asset of the project) when given.\nlength_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour) or minimal (light, slow). Queues a CPU job (a 30 s promo in both formats takes\na few minutes); wait_s (up to 150) waits. The job result has `videos` {format: asset_id}, `contact_sheets` {format: asset_id} (look at them with studio_show:\nflagged frames have a red or amber border), `script`, `checks` {rounds, fixes, remaining[]}, `files` (ffprobe of each: size, fps, pix_fmt, audio) and `loudness`.\n\nKeywords: promo video, website to video, motion graphics from a url, brand video, ad from a website, promo desde una web, video promocional, anuncio, 9:16, 16:9",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "kit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kit Id"
+          },
+          "length_s": {
+            "default": 30,
+            "title": "Length S",
+            "type": "number"
+          },
+          "formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Formats"
+          },
+          "vibe": {
+            "default": "keynote",
+            "title": "Vibe",
+            "type": "string"
+          },
+          "fps": {
+            "default": 60,
+            "title": "Fps",
+            "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Language"
+          },
+          "music_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Music Asset Id"
+          },
+          "wait_s": {
+            "default": 0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
       }
     },
     {

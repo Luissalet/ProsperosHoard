@@ -96,6 +96,14 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/manim/engine` | `{action}` as above (UI) |
 | POST | `/api/manim/check` | as `manim_check` (UI) |
 | POST | `/api/projects/{project_id}/manim/render` | as `manim_render` (UI) |
+| POST | `/api/agent/brand_scan` | `{url, project?}` -> the kit `{id, host, site_name, headline, value_prop, phrases, colors, palette, logo, fonts, assets?}`; with a project the logo and a brand board become image assets tagged `brand` |
+| POST | `/api/agent/promo_from_url` | `{project, url? \| kit_id?, length_s=30 (6-120), formats=["16:9","9:16"], vibe="keynote"\|"launch"\|"minimal", fps=60, language?, music_asset_id?, wait_s=0}` -> `{job}` (a CPU `promo_render` job; result `videos` and `contact_sheets` {format: asset_id}, `checks`, `loudness`, `script`) |
+| POST | `/api/agent/contact_sheet` | `{asset_id, fps=4, columns?}` -> `{asset_id, width, height, ...}` contact sheet of a video asset, saved as an image asset |
+| GET | `/api/promo/options` | vibes, formats, frame rates and length limits (UI) |
+| GET | `/api/promo/kits`, `/api/promo/kits/{kit_id}` | saved brand kits (UI) |
+| POST | `/api/brand/scan` | as `brand_scan` (UI) |
+| POST | `/api/projects/{project_id}/promo` | as `promo_from_url` (UI) |
+| POST | `/api/contact-sheet` | as the agent `contact_sheet` (UI); the edit plan contact sheet stays at `/api/assets/{asset_id}/contact-sheet` |
 | POST | `/api/agent/studio_style_cards` | `{action="list"\|"get"\|"create"\|"update"\|"delete", id?, name?, from_card?, technique?, palette?, motion?, signature_transition?, quality?, pitfalls?, typography?, prompt_prefix?, prompt_suffix?, negative?, notes?}` -> a card or `{items}`; built-in cards are read-only (400) |
 | POST | `/api/agent/studio_qa_run` | `{production, stage="all", dry_run=true, keys?, wait_s=120}` -> `{job, scorecard?, requeued?}`; scorecard `{stage, vision, passed, failed, skipped, items:[{stage, key, asset_id, verdict, score?, why}]}` |
 | GET | `/api/agent/studio_qa_report` | `?production=` -> the last scorecard (failures first) + `retries[{at, stage, key, attempt, reason, fix}]` |
