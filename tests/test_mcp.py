@@ -89,7 +89,8 @@ async def test_mcp_protocol_end_to_end(running_app):
                         "studio_delete_assets", "studio_trash", "studio_delete_project", "studio_video_plan", "studio_video_from_plan",
                         "studio_production_lyrics", "studio_production_cast", "studio_production_song", "studio_production_timing", "studio_production_settings", "studio_production_finishing", "studio_canvas", "studio_spaces", "studio_prompt_enhance", "studio_cinema", "studio_export_timeline", "studio_video_frames", "studio_download_media",
                          "production_export_lumiere", "cast_import_character", "production_from_storyboard", "voice_tts",
-                        "manim_render", "manim_check", "manim_examples", "manim_engine"}
+                        "manim_render", "manim_check", "manim_examples", "manim_engine",
+                        "brand_scan", "promo_from_url", "contact_sheet"}
             assert expected <= set(by_name)
             native_contracts = json.loads((REPO_ROOT / 'prosperos_hoard' / 'studio_mcp_catalog.json').read_text(encoding='utf-8'))
             generation_names = {t['name'] for t in native_contracts['generation']}

@@ -656,5 +656,5 @@ DRAFT_SAFE = frozenset({
     "studio_style_profile_extract", "studio_style_profile_update", "studio_production_shot_comment", "studio_production_shot_comment_resolve",
     "voice_create", "voice_speak", "voice_tts", "voice_audiobook", "voice_dub", "production_from_storyboard",
     "edit_plan", "edit_verify", "edit_contact_sheet",
-    "manim_render", "manim_check",
+    "manim_render", "manim_check", "promo_from_url", "brand_scan", "contact_sheet",
 })

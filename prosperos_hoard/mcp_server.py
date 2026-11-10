@@ -2485,6 +2485,57 @@ def manim_engine(action: str = "status", wait_s: float = 0) -> dict[str, Any]:
     return _call("POST", "/api/agent/manim_engine", json={"action": action, "wait_s": wait_s})
 
 
+# ------------------------------------------------- promo from a web page --
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def brand_scan(url: str, project: Optional[str] = None) -> dict[str, Any]:
+    """Scan a web page for its brand: logo, three main colours, fonts, headline, value proposition and key phrases / escanear la marca de una web.
+
+    Opens the page in a real browser (Playwright) and returns the brand kit: `colors` (primary, secondary, accent, from the pixels, the buttons, the
+    CSS variables and the theme colour), `palette` (background, text, dark and light ink too), `fonts` (display and body: the site's own file only when its
+    licence allows reusing it, else the closest open font that ships with Prospero, with the reason), `logo` (a trimmed transparent PNG), `headline`,
+    `value_prop` and up to five `phrases`. The kit is kept (`id`, use it as `kit_id` in promo_from_url, no new scan) and, with `project`, the logo and a
+    brand board picture are saved as image assets of the project (tag brand; look at the board with studio_show). Takes 5-20 seconds.
+
+    Keywords: brand kit, brand scan, logo, palette, fonts, website colors, escanear marca, kit de marca, colores de una web
+    """
+    return _call("POST", "/api/agent/brand_scan", json={"url": url, "project": project})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def promo_from_url(project: str, url: Optional[str] = None, kit_id: Optional[str] = None, length_s: float = 30, formats: Optional[list[str]] = None,
+                   vibe: str = "keynote", fps: int = 60, language: Optional[str] = None, music_asset_id: Optional[str] = None,
+                   wait_s: float = 0) -> dict[str, Any]:
+    """Make a promo video from a web page, in 16:9 and 9:16 / hacer un promo en vídeo a partir de una web.
+
+    Scans the brand (or takes `kit_id` of an earlier brand_scan), writes the shots (the local writing model when one runs, else a template made of the site's
+    own phrases), builds every frame in code on an HTML timeline with the brand's colours, fonts and logo, and checks it before rendering: text boxes measured
+    in the page at every shot (cut, outside the frame, overlapping, too small), contrast, colours that are not the brand's, shots that do not change, jumps at
+    the cuts, on a 4 fps contact sheet. What fails is repaired by rules and checked again (twice at most). Then each format is rendered frame by frame into ffmpeg
+    (formats ["16:9","9:16"] = 1920x1080 and 1080x1920; fps 24-60, 60 by default; H.264 yuv420p) with a soundtrack synthesised in code (a pulse at the tempo of
+    the shots, a whoosh on every movement, a hit on the logo) mastered to about -14 LUFS, or over `music_asset_id` (an audio asset of the project) when given.
+    length_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour) or minimal (light, slow). Queues a CPU job (a 30 s promo in both formats takes
+    a few minutes); wait_s (up to 150) waits. The job result has `videos` {format: asset_id}, `contact_sheets` {format: asset_id} (look at them with studio_show:
+    flagged frames have a red or amber border), `script`, `checks` {rounds, fixes, remaining[]}, `files` (ffprobe of each: size, fps, pix_fmt, audio) and `loudness`.
+
+    Keywords: promo video, website to video, motion graphics from a url, brand video, ad from a website, promo desde una web, video promocional, anuncio, 9:16, 16:9
+    """
+    return _call("POST", "/api/agent/promo_from_url", json={"project": project, "url": url, "kit_id": kit_id, "length_s": length_s, "formats": formats,
+                                                            "vibe": vibe, "fps": fps, "language": language, "music_asset_id": music_asset_id, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def contact_sheet(asset_id: str, fps: float = 4.0, columns: Optional[int] = None) -> dict[str, Any]:
+    """A contact sheet of a video asset: a frame every 1/fps seconds with its time, as an image asset / hoja de contactos de un vídeo.
+
+    Default 4 frames per second (fewer when the video would give more than 400 frames); look at the picture with studio_show to find text cut off, overlaps, off-brand
+    colours, jumps between shots or anything illegible. Returns the image `asset_id`, its size and how many frames it holds.
+
+    Keywords: contact sheet, frame grid, review video, check frames, hoja de contactos, revisar vídeo, fotogramas
+    """
+    return _call("POST", "/api/agent/contact_sheet", json={"asset_id": asset_id, "fps": fps, "columns": columns})
+
+
 # ------------------------------------------------- edit plans: plan -> run -> verify --
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

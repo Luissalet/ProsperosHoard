@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AudioLines, Clapperboard, Film, FolderKanban, Images, LayoutDashboard, LayoutGrid, ListChecks, Mic2, Moon,
-  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search, ShieldCheck, Sigma,
+  Aperture, Palette, Server, Settings as SettingsIcon, Sun, Users, Wand2, Workflow, Menu, X, Search, ShieldCheck, Sigma, Megaphone,
 } from "lucide-react";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource/cinzel";
@@ -34,6 +34,7 @@ import { ProductionsView } from "./views/Productions";
 import { CinemaView } from "./views/Cinema";
 import { EditPlansView } from "./views/EditPlans";
 import { ManimScenesView } from "./views/ManimScenes";
+import { PromoFromWebView } from "./views/PromoFromWeb";
 import { ContinuityView } from "./views/Continuity";
 import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
@@ -67,6 +68,7 @@ const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = 
   { id: "boards", key: "navBoards", icon: LayoutGrid },
   { id: "delivery", key: "navDelivery", icon: ShieldCheck },
   { id: "manim", key: "navManim", icon: Sigma },
+  { id: "promo", key: "navPromo", icon: Megaphone },
   { id: "continuity", key: "navContinuity", icon: ShieldCheck },
 ];
 const GLOBAL_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = [
@@ -295,6 +297,7 @@ export default function App() {
   else if (section === "boards") view = <BoardsView key={projectId} />;
   else if (section === "delivery") view = <EditPlansView key={projectId} />;
   else if (section === "manim") view = <ManimScenesView key={projectId} />;
+  else if (section === "promo") view = <PromoFromWebView key={projectId} />;
   else if (section === "continuity") view = <ContinuityView key={projectId} />;
   else if (section === "voice") view = <VoiceView />;
   else if (section === "cinema") view = <CinemaView />;
@@ -378,7 +381,7 @@ export default function App() {
               </select>
               <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
                 <button className={section === "spaces" || section === "create" ? "on" : ""} onClick={() => go("create")}>{lang === "es" ? "Lienzo de vídeo" : "Video canvas"}</button>
-                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")], ["delivery", lang === "es" ? "Entrega" : "Deliver"], ["manim", t("navManim")], ["continuity", lang === "es" ? "Continuidad" : "Continuity"]].map(([id, label]) =>
+                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")], ["delivery", lang === "es" ? "Entrega" : "Deliver"], ["manim", t("navManim")], ["promo", t("navPromo")], ["continuity", lang === "es" ? "Continuidad" : "Continuity"]].map(([id, label]) =>
                   <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
               </nav>
               <div className="spacer" />

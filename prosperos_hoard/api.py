@@ -63,6 +63,9 @@ from . import style_cards
 from . import shot_review as shot_review_mod
 from . import edit_plans as edit_plans_mod
 from . import manim_scene as manim_mod
+from . import promo_web as promo_mod
+from . import promo_brand as promo_brand_mod
+from . import promo_compose as promo_compose_mod
 from . import continuity as continuity_mod
 from . import continuity_regen as regen_mod
 from . import segment_repair as segment_repair_mod
@@ -773,6 +776,30 @@ class ManimEngineBody(BaseModel):
     wait_s: float = 0
 
 
+class PromoBody(BaseModel):
+    project: Optional[str] = None
+    url: Optional[str] = None
+    kit_id: Optional[str] = None
+    length_s: float = 30
+    formats: Optional[list[str]] = None
+    vibe: str = "keynote"
+    fps: int = 60
+    language: Optional[str] = None
+    music_asset_id: Optional[str] = None
+    wait_s: float = 0
+
+
+class BrandScanBody(BaseModel):
+    url: str
+    project: Optional[str] = None
+
+
+class PromoSheetBody(BaseModel):
+    asset_id: str
+    fps: float = 4.0
+    columns: Optional[int] = None
+
+
 class VideoFramesBody(BaseModel):
     asset_id: str
     count: int = 6
@@ -1343,6 +1370,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("graphic_render", lambda job, p: graphic_shots.render_job(store, job, p))
     queue.register("manim_render", lambda job, p: manim_mod.render_job(store, job, p, chat=_manim_chat()))
     queue.register("install_manim_engine", lambda job, p: manim_mod.install_job(store, job, p))
+    queue.register("promo_render", lambda job, p: promo_mod.render_job(store, job, p, chat=_manim_chat()))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -5365,6 +5393,69 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             return {**out, "job": job_result(out["job"])} if "job" in out else out
         return agent("manim_engine", body.action, run)
     # -- end Manim scenes
+
+    # ---------------------------------------------------- promo from a web page (promo_web.py): brand scan, script, checks, render, sound
+
+    def op_brand_scan(body: BrandScanBody) -> dict[str, Any]:
+        return promo_mod.scan_for_project(store, body.url, body.project)
+
+    def op_promo(body: PromoBody) -> dict[str, Any]:
+        if not body.project:
+            raise engine.EngineError("project_required", "name the project the promo goes into (project)")
+        store.get_project(body.project)
+        promo_compose_mod.check_request(body.length_s, body.formats, body.vibe, body.fps)
+        if not (body.url or "").strip() and not body.kit_id:
+            raise engine.EngineError("url_required", "give the address of the web page (url) or a saved brand kit (kit_id)")
+        if body.url:
+            promo_brand_mod.normalise_url(body.url)
+        if body.kit_id:
+            promo_brand_mod.load_kit(store.data_dir, body.kit_id)
+        if body.music_asset_id and store.get_asset(body.music_asset_id)["kind"] != "audio":
+            raise engine.EngineError("bad_music", "music_asset_id must be an audio asset of the project")
+        params = {"project_id": body.project, "url": body.url, "kit_id": body.kit_id, "length_s": body.length_s, "formats": body.formats or ["16:9", "9:16"],
+                  "vibe": body.vibe, "fps": body.fps, "language": body.language or "auto", "music_asset_id": body.music_asset_id}
+        job = queue.enqueue("promo_render", "cpu", params, project_id=body.project)
+        return {"job": wait(job, body.wait_s)}
+
+    @app.get("/api/promo/options")
+    def promo_options():
+        return {"vibes": {k: {"label": v["label"], "bpm": v["bpm"], "about": v["about"]} for k, v in promo_compose_mod.VIBES.items()},
+                "formats": {k: {"width": w, "height": h} for k, (w, h) in promo_compose_mod.FORMATS.items()}, "fps": [24, 25, 30, 50, 60],
+                "length_s": {"min": promo_compose_mod.MIN_LENGTH_S, "max": promo_compose_mod.MAX_LENGTH_S, "default": 30}}
+
+    @app.get("/api/promo/kits")
+    def promo_kits():
+        return {"items": promo_brand_mod.list_kits(store.data_dir)}
+
+    @app.get("/api/promo/kits/{kit_id}")
+    def promo_kit(kit_id: str):
+        return promo_brand_mod.load_kit(store.data_dir, kit_id)
+
+    @app.post("/api/brand/scan")
+    def brand_scan_route(body: BrandScanBody):
+        return op_brand_scan(body)
+
+    @app.post("/api/projects/{project_id}/promo")
+    def project_promo(project_id: str, body: PromoBody):
+        body.project = project_id
+        return {"job": engine.job_view(op_promo(body)["job"])}
+
+    @app.post("/api/contact-sheet")
+    def contact_sheet_route(body: PromoSheetBody):
+        return promo_mod.contact_sheet_for_asset(store, body.asset_id, fps=body.fps, columns=body.columns)
+
+    @app.post("/api/agent/brand_scan")
+    def agent_brand_scan(body: BrandScanBody):
+        return agent("brand_scan", body.url[:100], lambda: op_brand_scan(body))
+
+    @app.post("/api/agent/promo_from_url")
+    def agent_promo_from_url(body: PromoBody):
+        return agent("promo_from_url", f"{body.project}:{(body.url or body.kit_id or '')[:80]}", lambda: {"job": job_result(op_promo(body)["job"])})
+
+    @app.post("/api/agent/contact_sheet")
+    def agent_contact_sheet(body: PromoSheetBody):
+        return agent("contact_sheet", body.asset_id, lambda: promo_mod.contact_sheet_for_asset(store, body.asset_id, fps=body.fps, columns=body.columns))
+    # -- end promo from a web page
 
     # ---------------------------------------------------- edit plans: plan -> run -> verify (edit_plans.py)
 
