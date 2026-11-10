@@ -4,6 +4,7 @@ import { api as appApi } from "../api.js";
 import { useCopilotForm, useCopilotRefresh } from "../copilot-hooks.js";
 import { Spinner } from "./ui.jsx";
 import HtmlMotionSound from "./HtmlMotionSound.jsx";
+import HtmlMotionVariants from "./HtmlMotionVariants.jsx";
 import HtmlMotionDirection, { StylePicker } from "./HtmlMotionDirection.jsx";
 
 const initial = { name: "", html: "", width: 1280, height: 720, fps: 30, duration: 3 };
@@ -191,6 +192,7 @@ export default function HtmlMotionSection({ projectId = null, onReceived }) {
         </div>
         <HtmlMotionSound saved={saved} dirty={dirty} busy={busy || active} lang={lang} exportAudio={exportAudio} setExportAudio={setExportAudio} onChanged={refresh} operate={operate} cuesOwn={cueCount > 0} />
         <HtmlMotionDirection saved={saved} dirty={dirty} busy={busy || active} lang={lang} operate={operate} onChanged={refresh} onCueCount={setCueCount} />
+        <HtmlMotionVariants saved={saved} dirty={dirty} busy={busy || active} lang={lang} operate={(action) => operate(async () => { await action(); await refresh(); })} onOpen={load} />
         {preview && <figure><img src={preview.url} alt={`${t.preview} · ${preview.at} s · ${t.saved} ${preview.revision}`} /><figcaption>{preview.at} s · {t.saved}: {preview.revision}</figcaption></figure>}
         <div className="html-motion-review-mode">
           <label className="field-label"><span>{dir.mode}</span>

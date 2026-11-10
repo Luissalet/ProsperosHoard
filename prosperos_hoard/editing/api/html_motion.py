@@ -92,6 +92,24 @@ def render(request: Request, composition: str, revision: int | None = Query(None
     return _store(request).queue_render(services(request), composition, revision, audio=audio)
 
 
+class VariantsBody(BaseModel):
+    rows: list[dict] | str
+    revision: int | None = None
+    name_field: str = ""
+    render: bool = False
+    audio: bool = True
+
+
+@router.get("/{composition}/props")
+def props(request: Request, composition: str, revision: int | None = Query(None, ge=1)):
+    return tool(request, "html_motion_props", composition=composition, revision=revision)
+
+
+@router.post("/{composition}/variants")
+def variants(request: Request, composition: str, body: VariantsBody):
+    return tool(request, "html_motion_variants", composition=composition, **body.model_dump(exclude_none=True))
+
+
 @router.get("/sound/roles")
 def sound_roles(request: Request, kit: str = Query("launch")):
     return tool(request, "motion_sound_roles", kit=kit)

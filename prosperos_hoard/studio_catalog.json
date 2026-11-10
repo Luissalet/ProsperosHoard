@@ -10480,6 +10480,124 @@
       }
     },
     {
+      "name": "html_motion_props",
+      "description": "Parameters an HTML composition takes ({{name}} and its motion-props block). Parametros de la animacion.\nEach with default, type (text, number, color, boolean) and where it is used. Make a template by writing {{name}} in the markup and, for the script, <script type=\"application/json\" id=\"motion-props\">{defaults}</script>. Keywords: template, props, variables, plantilla, datos.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "composition"
+        ],
+        "title": "HtmlMotionRefArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "html_motion_variants",
+      "description": "One composition per data row from a template, optionally exported. Variantes con datos.\nRows: list of objects, JSON or CSV with a header; every row is checked before anything is saved (unknown or missing parameters refuse). The template stays as it is; each variant is a normal revisioned composition. Keywords: batch render, personalised video, localise, versions, lote, CSV.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "composition": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Composition",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Omit for the current revision.",
+            "title": "Revision"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "One variant per row: a list of {name: value}, a JSON array or CSV text with a header. Column names are the composition's parameters (html_motion_props); _name labels a row.",
+            "title": "Rows"
+          },
+          "name_field": {
+            "default": "",
+            "description": "Column whose value names each variant (default: _name, else the row number).",
+            "maxLength": 60,
+            "title": "Name Field",
+            "type": "string"
+          },
+          "render": {
+            "default": false,
+            "description": "Also queue every variant as an MP4 export (follow job_status).",
+            "title": "Render",
+            "type": "boolean"
+          },
+          "audio": {
+            "default": true,
+            "description": "With render: export with the template's declared sound.",
+            "title": "Audio",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "composition",
+          "rows",
+          "reason"
+        ],
+        "title": "HtmlMotionVariantsArgs",
+        "type": "object"
+      }
+    },
+    {
       "name": "motion_export",
       "description": "Queue an HTML animation as H264 + AAC MP4 with its declared sound. Exportar animacion con sonido.\nThe mix is -14 LUFS under -1 dBTP. Effects are placed by their measured sync point; result.sound_report lists every placement, the loudness delivered and the measured sync error. audio=false for a silent file. Keywords: export, render, sound effects, music, soundtrack, sfx, animation with audio.",
       "annotations": {
