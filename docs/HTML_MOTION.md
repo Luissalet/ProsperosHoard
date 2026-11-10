@@ -16,6 +16,30 @@ storyboard, sound preview, treatment, cues and facts. It refuses with `html_moti
 composition is queued or running, and with `html_motion_in_use` while a library media still reads one of its renders
 (`media_receive` imports a render where it is, without a copy: remove that media first).
 
+## Templates and variants from data
+
+A composition becomes a template by writing `{{name}}` where a value goes (a text, a colour in a style, a number) and, if its
+script needs the values too, a JSON block with the defaults that the script reads:
+
+```html
+<script type="application/json" id="motion-props">{"title": "Hola", "accent": "#b5583d", "count": 3}</script>
+<h1 style="color:{{accent}}">{{title}}</h1><p>{{city}}</p>
+<script>const P = JSON.parse(document.getElementById('motion-props').textContent); window.seek = t => { /* uses P.count */ };</script>
+```
+
+| Where | What |
+| --- | --- |
+| UI | **Animación HTML** → *Variantes con datos*: the parameters with their defaults, a CSV/JSON box pre-filled with a header, the column that names each variant, *Exportar también cada una a vídeo*, the list of variants made (each opens in the workshop) |
+| REST | `GET /editing/api/html-motion/{id}/props`, `POST /editing/api/html-motion/{id}/variants` `{rows, revision?, name_field?, render?, audio?}` |
+| MCP | `html_motion_props` (each parameter with default, type text/number/color/boolean, in markup and/or in the script), `html_motion_variants` |
+
+Each data row (a list of objects, a JSON array, or CSV with a header, comma or semicolon) becomes a **new composition**
+named `<template> · <row>` (the `name_field` column, `_name`, or the row number) with the template's size, frame rate,
+duration, project and sound. Placeholders are replaced HTML-escaped; the `motion-props` block carries the merged values; a
+CSV cell takes the type of its default (`"7"` becomes 7, `"sí"` true). Every row is checked before anything is saved: a
+column the template does not take, or a placeholder with no value and no default, refuses the whole call. `render: true`
+queues each variant as an MP4 (follow `job_status`). The template itself never changes. At most 50 variants per call.
+
 ## Sound
 
 An animation can carry sound. It is **declared**, not recorded: a list of events `{t, role}` (the moment in the picture and

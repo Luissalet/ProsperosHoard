@@ -1091,8 +1091,20 @@ from .html_motion_args import (HtmlMotionSaveArgs, HtmlMotionRefArgs, HtmlMotion
                                HtmlMotionFrameArgs, HtmlMotionRestoreArgs, HtmlMotionStoryboardArgs, HtmlMotionRenderArgs,
                                MotionSoundRolesArgs, MotionSoundEventsArgs, MotionSoundPreviewArgs, AudioSyncPointsArgs,
                                MotionStylesArgs, MotionTreatmentArgs, MotionCuesArgs, MotionCuecheckArgs, MotionReadcheckArgs, MotionLintArgs,
-                               MotionFactsArgs, MotionFromStyleArgs)
+                               MotionFactsArgs, MotionFromStyleArgs, HtmlMotionVariantsArgs)
 from . import audio_sync, cut_proposals, motion_direction, motion_scaffold, motion_sound, timeline_text
+from . import html_motion_props
+
+
+def run_html_motion_props(svc: Services, a: HtmlMotionRefArgs):
+    store = HtmlMotion(svc.config.data_dir)
+    manifest = store.get(a.composition, a.revision)
+    return {"composition": manifest["id"], "revision": manifest["revision"], "name": manifest["name"], **html_motion_props.props(store.source(manifest))}
+
+
+def run_html_motion_variants(svc: Services, a: HtmlMotionVariantsArgs):
+    return html_motion_props.variants(HtmlMotion(svc.config.data_dir), svc, a.composition, a.rows, revision=a.revision,
+                                      name_field=a.name_field, render=a.render, audio=a.audio)
 
 
 def run_html_motion_list(svc: Services, a: Empty):
@@ -1329,6 +1341,8 @@ TOOLS: list[Tool] = [
     Tool("html_motion_frame", "Render an exact-time PNG from an HTML composition. Revisar fotograma HTML.\nTime is seconds; returns an MCP image, source revision and frame hash. Keywords: snapshot, visual critique, storyboard, seek.", HtmlMotionFrameArgs, _ann(True), run_html_motion_frame),
     Tool('html_motion_storyboard', 'Review multiple exact-time frames from one HTML revision. Revisar varios momentos.\nReturns a real contact-sheet MCP image, original PNG links, times and source/frame hashes. Keywords: storyboard, contact sheet, motion review, visual critique.', HtmlMotionStoryboardArgs, _ann(True), run_html_motion_storyboard),
     Tool("html_motion_render", "Queue an HTML animation as verified H264 MP4, with its sound. Exportar animacion HTML a video.\nFollow job_status; use media_receive(path=result.render_path) to add the video to a timeline. Keywords: render, export, MP4, motion graphics.", HtmlMotionRefArgs, _ann(False, False, True), run_html_motion_render),
+    Tool("html_motion_props", "Parameters an HTML composition takes ({{name}} and its motion-props block). Parametros de la animacion.\nEach with default, type (text, number, color, boolean) and where it is used. Make a template by writing {{name}} in the markup and, for the script, <script type=\"application/json\" id=\"motion-props\">{defaults}</script>. Keywords: template, props, variables, plantilla, datos.", HtmlMotionRefArgs, _ann(True), run_html_motion_props),
+    Tool("html_motion_variants", "One composition per data row from a template, optionally exported. Variantes con datos.\nRows: list of objects, JSON or CSV with a header; every row is checked before anything is saved (unknown or missing parameters refuse). The template stays as it is; each variant is a normal revisioned composition. Keywords: batch render, personalised video, localise, versions, lote, CSV.", HtmlMotionVariantsArgs, _ann(False, False, False), run_html_motion_variants),
     Tool("motion_export", "Queue an HTML animation as H264 + AAC MP4 with its declared sound. Exportar animacion con sonido.\nThe mix is -14 LUFS under -1 dBTP. Effects are placed by their measured sync point; result.sound_report lists every placement, the loudness delivered and the measured sync error. audio=false for a silent file. Keywords: export, render, sound effects, music, soundtrack, sfx, animation with audio.", HtmlMotionRenderArgs, _ann(False, False, True), run_motion_export),
     Tool("motion_sound_roles", "List the sound roles of a kit with their sound, sync point and offset. Roles de sonido.\nUse the names (or Spanish/English aliases: tap, golpe, clic, whoosh) in motion_sound_events. Keywords: sfx, sound effects, foley, kit, launch, roles, offsets.", MotionSoundRolesArgs, _ann(True), run_motion_sound_roles),
     Tool("motion_sound_events", "Read or change the sound events {t, role} and music of an HTML animation. Eventos de sonido.\nChanging saves a new revision (expected_revision). Events are picture moments in seconds; the effect is generated from code and placed by its sync point. Keywords: sound events, sfx, cues, sound design, music, audio for animation.", MotionSoundEventsArgs, _ann(False, False, False), run_motion_sound_events),

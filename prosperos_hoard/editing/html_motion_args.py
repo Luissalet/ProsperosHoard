@@ -25,6 +25,14 @@ class HtmlMotionRefArgs(BaseModel):
     revision: int | None = Field(None, ge=1, description="Omit for the current revision.")
 
 
+class HtmlMotionVariantsArgs(HtmlMotionRefArgs):
+    rows: list[dict[str, Any]] | str = Field(..., description="One variant per row: a list of {name: value}, a JSON array or CSV text with a header. "
+                                                               "Column names are the composition's parameters (html_motion_props); _name labels a row.")
+    name_field: str = Field("", max_length=60, description="Column whose value names each variant (default: _name, else the row number).")
+    render: bool = Field(False, description="Also queue every variant as an MP4 export (follow job_status).")
+    audio: bool = Field(True, description="With render: export with the template's declared sound.")
+
+
 class HtmlMotionGetArgs(HtmlMotionRefArgs):
     offset: int = Field(0, ge=0, description="Character offset into the complete editable source.")
     limit: int = Field(12000, ge=1, le=12000)
