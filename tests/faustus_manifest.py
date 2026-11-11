@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 SCHEMA = 1
 TOP_LEVEL_KEYS = {
     "schema", "id", "name", "purpose", "capabilities",
-    "app", "mcp", "placeholders", "defaults", "provides", "notes",
+    "app", "mcp", "placeholders", "defaults", "provides", "notes", "skills",
 }
 APP_KEYS = {"url_default", "ui_url", "health", "identify", "launch_hint"}
 MCP_KEYS = {"transport", "command", "args", "env", "optional_env"}
@@ -115,6 +115,15 @@ def validate(data: Any) -> Dict[str, Any]:
     if not isinstance(data.get("notes") or "", str):
         raise ManifestError("'notes' must be a string")
 
+    wanted = data.get("skills") or {}
+    _unknown(wanted, {"slugs", "tags", "categories", "limit"}, "'skills'")
+    for key in ("slugs", "tags", "categories"):
+        _str_list(wanted.get(key), f"'skills.{key}'")
+    if wanted.get("limit") is not None:
+        limit = wanted["limit"]
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ManifestError("'skills.limit' must be a whole number, zero or more")
+
     # Native discovery also recognises the owner's own manifest for module
     # launches. The canonical parser does not require a script path in args.
     return data
@@ -132,7 +141,8 @@ def check_repo(root: Path) -> Dict[str, Any]:
                 rel = arg[len(token):].lstrip("/\\")
                 if not (root / rel).is_file():
                     raise ManifestError(f"mcp arg points at a missing file: {rel}")
-    for skill in (data.get("provides") or {}).get("skills", []) or []:
+    provided = (data.get("provides") or {}).get("skills", []) or []
+    for skill in provided if isinstance(provided, list) else []:
         if isinstance(skill, str) and not (root / skill).is_file():
             raise ManifestError(f"provides.skills names a missing file: {skill}")
     return data
