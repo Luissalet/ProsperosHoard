@@ -38,6 +38,7 @@ from . import charpack
 from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
 from . import comfy_driver, engine, procutil
+from . import qr_video
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
 from . import motion_graphics as mg
@@ -899,6 +900,27 @@ class StyleCardBody(BaseModel):
     kind: Optional[str] = None                  # import: "lemo-opuscar" or "mg-styles-15"
 
 
+class QrSceneBody(BaseModel):
+    payload: str
+    duration_s: float = 3
+    caption: str = ""
+
+
+class QrVideoBody(BaseModel):
+    project: str
+    scenes: list[QrSceneBody]
+    aspect: str = "9:16"
+    fps: int = 24
+    motion: str = "pulse"
+    name: str = "QR film"
+    wait_s: float = Field(default=0, ge=0, le=150)
+
+
+class QrVerifyBody(BaseModel):
+    asset_id: str
+    wait_s: float = Field(default=0, ge=0, le=150)
+
+
 class ReframeBody(BaseModel):
     asset_id: str
     aspect: str = "9:16"                        # 9:16, 16:9, 1:1, 4:5, 2:3, 3:2, 21:9
@@ -1371,6 +1393,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("install_voice_engine", lambda job, p: _install_voice_engine_job(job, p))
     queue.register("download_media", lambda job, p: media_download.download_job(store, job, p))
     queue.register("reframe", lambda job, p: engine.reframe_job(store, job, p))
+    queue.register("qr_video", lambda job, p: qr_video.render_job(store, job, p))
+    queue.register("qr_verify", lambda job, p: qr_video.verify_job(store, job, p))
     queue.register("interpolate", lambda job, p: interpolate_mod.run(store, job, p))
     queue.register("retake", lambda job, p: engine.retake_job(store, backend, job, p))
     queue.register("clip_edit", lambda job, p: engine.clip_edit_job(store, backend, job, p))
@@ -4694,6 +4718,51 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_production_settings")
     def agent_production_settings(production: str, body: ProductionSettingsBody):
         return agent("studio_production_settings", production, lambda: op_production_settings(production, body))
+
+    def op_qr_video(body: QrVideoBody) -> dict[str, Any]:
+        store.get_project(body.project)
+        qr_video.plan([scene.model_dump() for scene in body.scenes], body.aspect, body.fps, body.motion)
+        job = queue.enqueue("qr_video", "cpu", body.model_dump(exclude={"wait_s"}), project_id=body.project)
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/qr/video")
+    def create_qr_video(body: QrVideoBody):
+        return op_qr_video(body)
+
+    @app.post("/api/agent/studio_qr_video")
+    def agent_qr_video(body: QrVideoBody):
+        return agent("studio_qr_video", body.project, lambda: op_qr_video(body))
+
+    def op_qr_verify(body: QrVerifyBody) -> dict[str, Any]:
+        asset = store.get_asset(body.asset_id)
+        if asset["kind"] != "video":
+            raise engine.EngineError("not_video", "QR verification needs a video asset")
+        qr_video.dependencies()
+        job = queue.enqueue("qr_verify", "cpu", {"asset_id": body.asset_id}, project_id=asset["project_id"])
+        if body.wait_s:
+            job = queue.wait_for(job["id"], body.wait_s)
+        return {"job": engine.job_view(job)}
+
+    @app.post("/api/qr/verify")
+    def verify_qr_video(body: QrVerifyBody):
+        return op_qr_verify(body)
+
+    @app.post("/api/agent/studio_qr_verify")
+    def agent_qr_verify(body: QrVerifyBody):
+        return agent("studio_qr_verify", body.asset_id, lambda: op_qr_verify(body))
+
+    @app.get("/api/agent/studio_qr_report")
+    def agent_qr_report(job_id: str, offset: int = 0, limit: int = 50):
+        return qr_video.read_report(store, job_id, offset, limit)
+
+    @app.get("/api/qr/reports/{job_id}")
+    def qr_report_download(job_id: str):
+        path = qr_video.report_path(store, job_id)
+        if not path.is_file():
+            raise engine.EngineError("qr_report_pending", "The QR verification report is not ready")
+        return FileResponse(path, media_type="application/json", filename=f"{job_id}-qr.json")
 
     def op_reframe(body: ReframeBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)

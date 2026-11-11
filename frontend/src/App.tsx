@@ -36,6 +36,7 @@ import { EditPlansView } from "./views/EditPlans";
 import { ManimScenesView } from "./views/ManimScenes";
 import { PromoFromWebView } from "./views/PromoFromWeb";
 import { ContinuityView } from "./views/Continuity";
+import { QrVideoView } from "./views/QrVideo";
 import { Vitals } from "./components/Vitals";
 import { JobsMenu } from "./components/JobsMenu";
 
@@ -68,6 +69,7 @@ const PROJECT_SECTIONS: { id: string; key: MessageKey; icon: typeof Users }[] = 
   { id: "boards", key: "navBoards", icon: LayoutGrid },
   { id: "delivery", key: "navDelivery", icon: ShieldCheck },
   { id: "manim", key: "navManim", icon: Sigma },
+  { id: "qr", key: "navQr", icon: Film },
   { id: "promo", key: "navPromo", icon: Megaphone },
   { id: "continuity", key: "navContinuity", icon: ShieldCheck },
 ];
@@ -297,6 +299,7 @@ export default function App() {
   else if (section === "boards") view = <BoardsView key={projectId} />;
   else if (section === "delivery") view = <EditPlansView key={projectId} />;
   else if (section === "manim") view = <ManimScenesView key={projectId} />;
+  else if (section === "qr") view = <QrVideoView key={projectId} />;
   else if (section === "promo") view = <PromoFromWebView key={projectId} />;
   else if (section === "continuity") view = <ContinuityView key={projectId} />;
   else if (section === "voice") view = <VoiceView />;
@@ -381,7 +384,7 @@ export default function App() {
               </select>
               <nav className="studio-tabs" aria-label={lang === "es" ? "Estudio creativo" : "Creative studio"}>
                 <button className={section === "spaces" || section === "create" ? "on" : ""} onClick={() => go("create")}>{lang === "es" ? "Lienzo de vídeo" : "Video canvas"}</button>
-                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")], ["delivery", lang === "es" ? "Entrega" : "Deliver"], ["manim", t("navManim")], ["promo", t("navPromo")], ["continuity", lang === "es" ? "Continuidad" : "Continuity"]].map(([id, label]) =>
+                {[["overview", lang === "es" ? "Proyecto" : "Project"], ["generate", "Clips"], ["library", t("navLibrary")], ["video", t("navProductions")], ["delivery", lang === "es" ? "Entrega" : "Deliver"], ["manim", t("navManim")], ["qr", t("navQr")], ["promo", t("navPromo")], ["continuity", lang === "es" ? "Continuidad" : "Continuity"]].map(([id, label]) =>
                   <button key={id} className={section === id ? "on" : ""} onClick={() => go(id)}>{label}</button>)}
               </nav>
               <div className="spacer" />

@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+**Corto QR** crea un MP4 con escenas temporizadas, cada una con su texto o URL y un rótulo opcional. Permite formato vertical, horizontal o cuadrado, entre 1 y 60 fps y movimiento fijo, pulso u órbita. Un decodificador independiente comprueba todos los fotogramas del MP4 comprimido y su contenido esperado antes de guardar el vídeo en la biblioteca. Se descargan el vídeo y un informe JSON con el resultado y la huella de cada fotograma. La misma pantalla comprueba vídeos existentes. MCP ofrece `studio_qr_video`, `studio_qr_verify` y `studio_qr_report` paginado. Todo se ejecuta en CPU con ffmpeg local. Las duraciones se redondean a fotogramas enteros, con un mínimo de uno por escena. Los textos demasiado densos y los rótulos que no caben reciben un error. La comprobación corresponde a los píxeles del archivo guardado. La lectura con una cámara depende también del tamaño de reproducción, la pantalla y la cámara.
+
 **Continuar desde el último fotograma** añade un nodo conectado junto a un vídeo con una sola toma incluida. Conserva el modelo y la duración, describe la siguiente acción y genera allí; añadir el nodo no inicia un render.
 
 **Crear vídeo** abre directamente el último lienzo de nodos del proyecto. Conecta referencias, prompts y generadores, reproduce el resultado en el propio nodo, compara generaciones y descarga sin cambiar de pantalla. El selector comprueba los modelos instalados y muestra cuál ejecuta Automático. Las producciones nuevas continúan sin paradas de revisión; revisar sigue siendo una opción explícita. [Recorrido, MCP y pruebas reales](docs/video-workspace.md).

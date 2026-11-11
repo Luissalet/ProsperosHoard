@@ -20,6 +20,8 @@ imageio-ffmpeg==0.5.1
 iniconfig==2.3.0
 mcp==1.9.4
 numpy==2.2.1
+qrcode==8.2
+zxing-cpp==3.0.0
 onnxruntime==1.30.0
 packaging==26.3
 pathvalidate==3.3.1
