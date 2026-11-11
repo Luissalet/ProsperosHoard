@@ -1829,6 +1829,42 @@ def studio_stems(asset_id: str, force: bool = False, device: Optional[str] = Non
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_qr_video(project: str, scenes: list[dict[str, Any]], aspect: str = "9:16", fps: int = 24,
+                    motion: str = "pulse", name: str = "QR film", wait_s: float = 0) -> dict[str, Any]:
+    """Render a QR film and decode every compressed output frame before saving it / corto QR verificado.
+
+    scenes contains payload (text or URL), duration_s and optional caption. Each duration is rounded
+    to the nearest frame. Choose aspect 9:16, 16:9 or 1:1 and motion still, pulse or orbit. Runs on CPU.
+    Poll studio_job, then studio_qr_report for exact counts and per-frame evidence. The output is
+    a normal video asset usable in the library and editor. A failed decode fails the render.
+
+    Keywords: QR, barcode, film, short, every frame, decode, codigo, corto, fotograma, decodificar
+    """
+    return _call("POST", "/api/agent/studio_qr_video", json={"project": project, "scenes": scenes,
+                 "aspect": aspect, "fps": fps, "motion": motion, "name": name, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_qr_verify(asset_id: str, wait_s: float = 0) -> dict[str, Any]:
+    """Decode every frame of a video asset, checking expected scene payloads for QR films / comprobar QR.
+
+    Returns a CPU job. Read studio_qr_report after completion. Other videos report every missing QR.
+    Keywords: QR, verify, decode, frames, comprobar, decodificar, fotogramas
+    """
+    return _call("POST", "/api/agent/studio_qr_verify", json={"asset_id": asset_id, "wait_s": wait_s})
+
+
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_qr_report(job_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """Read a QR verification report with paged frame hashes, decoded payloads and exact matches / informe QR.
+
+    limit=0 returns just the summary. Download the full JSON from /generation/api/qr/reports/{job_id}.
+    Keywords: QR, report, frames, hashes, informe, fotogramas, comprobacion
+    """
+    return _call("GET", "/api/agent/studio_qr_report", params={"job_id": job_id, "offset": offset, "limit": limit})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_reframe(asset_id: str, aspect: str = "9:16", framing: str = "fill", focus_x: Optional[float] = None,
                    focus_y: Optional[float] = None, quality: str = "final", wait_s: float = 0) -> dict[str, Any]:
     """A picture or clip in another shape (9:16, 16:9, 1:1, 4:5, 2:3, 3:2, 21:9) without regenerating it / reencuadrar.

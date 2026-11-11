@@ -12,6 +12,8 @@ dependencies = [
     "httpx==0.28.1",
     "python-multipart==0.0.20",
     "pillow==11.1.0",
+    "qrcode==8.2",
+    "zxing-cpp==3.0.0",
     "numpy==2.2.1",
     "scipy==1.14.1",
     "mcp==1.9.4",

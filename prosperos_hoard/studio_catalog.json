@@ -1956,6 +1956,21 @@
       }
     },
     {
+      "name": "skills",
+      "description": "skills",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
       "name": "studio_analyze_audio",
       "description": "Analyse a song (audio asset): duration, tempo in BPM, the first 32 beat times (beat_count has\nthe total), downbeats, and sections (\"section A/B/A\" with low/mid/high energy - estimates from\nloudness and timbre, not verse/chorus detection). Cached after the first call. studio_timeline\naction=\"auto\" runs this itself.\n\nKeywords: analyze song, bpm, beats, tempo, sections, analizar cancion, ritmo, tiempos, compases",
       "inputSchema": {
@@ -6353,6 +6368,151 @@
       },
       "annotations": {
         "readOnlyHint": false
+      }
+    },
+    {
+      "name": "studio_qr_report",
+      "description": "Read a QR verification report with paged frame hashes, decoded payloads and exact matches / informe QR.\n\nlimit=0 returns just the summary. Download the full JSON from /generation/api/qr/reports/{job_id}.\nKeywords: QR, report, frames, hashes, informe, fotogramas, comprobacion",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_qr_verify",
+      "description": "Decode every frame of a video asset, checking expected scene payloads for QR films / comprobar QR.\n\nReturns a CPU job. Read studio_qr_report after completion. Other videos report every missing QR.\nKeywords: QR, verify, decode, frames, comprobar, decodificar, fotogramas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "wait_s": {
+            "default": 0,
+            "maximum": 150.0,
+            "minimum": 0.0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_qr_video",
+      "description": "Render a QR film and decode every compressed output frame before saving it / corto QR verificado.\n\nscenes contains payload (text or URL), duration_s and optional caption. Each duration is rounded\nto the nearest frame. Choose aspect 9:16, 16:9 or 1:1 and motion still, pulse or orbit. Runs on CPU.\nPoll studio_job, then studio_qr_report for exact counts and per-frame evidence. The output is\na normal video asset usable in the library and editor. A failed decode fails the render.\n\nKeywords: QR, barcode, film, short, every frame, decode, codigo, corto, fotograma, decodificar",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "scenes": {
+            "items": {
+              "$ref": "#/$defs/QrSceneBody"
+            },
+            "title": "Scenes",
+            "type": "array"
+          },
+          "aspect": {
+            "default": "9:16",
+            "title": "Aspect",
+            "type": "string"
+          },
+          "fps": {
+            "default": 24,
+            "title": "Fps",
+            "type": "integer"
+          },
+          "motion": {
+            "default": "pulse",
+            "title": "Motion",
+            "type": "string"
+          },
+          "name": {
+            "default": "QR film",
+            "title": "Name",
+            "type": "string"
+          },
+          "wait_s": {
+            "default": 0,
+            "maximum": 150.0,
+            "minimum": 0.0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "scenes",
+          "reason"
+        ],
+        "$defs": {
+          "QrSceneBody": {
+            "properties": {
+              "payload": {
+                "title": "Payload",
+                "type": "string"
+              },
+              "duration_s": {
+                "default": 3,
+                "title": "Duration S",
+                "type": "number"
+              },
+              "caption": {
+                "default": "",
+                "title": "Caption",
+                "type": "string"
+              }
+            },
+            "required": [
+              "payload"
+            ],
+            "title": "QrSceneBody",
+            "type": "object"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
       }
     },
     {

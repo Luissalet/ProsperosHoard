@@ -4,6 +4,12 @@ import { errorText } from "./messages";
 
 export type Kind = "image" | "video" | "audio" | "lyrics" | "font" | "layout";
 
+export interface QrScene { payload: string; duration_s: number; caption: string }
+export interface QrReport {
+  verified: boolean; checked_frames: number; expected_frames: number; undecodable_frames: number;
+  mismatched_frames: number; payloads: string[]; video_sha256: string; asset_id: string;
+}
+
 export interface ClipReview {
   asset_id: string;
   vision: string;
@@ -1405,6 +1411,10 @@ export const thumbUrl = (a: Pick<Asset, "id" | "thumb_path" | "kind">) =>
   a.thumb_path ? `/generation/api/assets/${a.id}/thumb` : a.kind === "image" ? fileUrl(a.id) : "";
 
 export const api = {
+  qrVideo: (body: { project: string; scenes: QrScene[]; aspect: string; fps: number; motion: string; name: string }) =>
+    request<{ job: Job }>("POST", "/generation/api/qr/video", body),
+  qrVerify: (asset_id: string) => request<{ job: Job }>("POST", "/generation/api/qr/verify", { asset_id }),
+  qrReport: (job_id: string) => request<QrReport>("GET", `/generation/api/agent/studio_qr_report?job_id=${encodeURIComponent(job_id)}&limit=0`),
   health: () => request<{ service: string; version: string; demo: boolean; active_jobs: number }>("GET", "/generation/api/health"),
   projects: () => request<Paged<Project>>("GET", "/generation/api/projects"),
   createProject: (name: string, brief?: string) => request<Project>("POST", "/generation/api/projects", { name, brief }),
