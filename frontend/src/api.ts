@@ -107,8 +107,8 @@ export interface PromoKit {
   logo: { width: number; height: number; luminance: number } | null; assets?: Record<string, string>;
 }
 export interface PromoOptions {
-  vibes: Record<string, { label: string; bpm: number; about: string }>; formats: Record<string, { width: number; height: number }>;
-  fps: number[]; length_s: { min: number; max: number; default: number };
+  vibes: Record<string, { label: string; bpm: number; about: string; sound?: string; transition?: string }>; formats: Record<string, { width: number; height: number }>;
+  fps: number[]; length_s: { min: number; max: number; default: number }; min_hold_s?: number; custom_script?: string[];
 }
 
 export interface Paged<T> {
@@ -1673,7 +1673,8 @@ export const api = {
   promoKits: () => request<{ items: { id: string; host: string; site_name: string }[] }>("GET", "/generation/api/promo/kits"),
   promoKit: (id: string) => request<PromoKit>("GET", `/generation/api/promo/kits/${id}`),
   brandScan: (url: string, project?: string) => request<PromoKit>("POST", "/generation/api/brand/scan", { url, project }),
-  promoRender: (pid: string, body: { url?: string; kit_id?: string; length_s: number; formats: string[]; vibe: string; fps: number; language: string; music_asset_id?: string }) =>
+  promoRender: (pid: string, body: { url?: string; kit_id?: string; length_s: number; formats: string[]; vibe: string; fps: number; language: string; music_asset_id?: string;
+    script?: string; hook?: string; value?: string; cta?: string; cta_text?: string }) =>
     request<{ job: Job }>("POST", `/generation/api/projects/${pid}/promo`, body),
   promoContactSheet: (assetId: string, fps = 4) => request<{ asset_id: string }>("POST", "/generation/api/contact-sheet", { asset_id: assetId, fps }),
   manimStatus: () => request<ManimStatus>("GET", "/generation/api/manim/status"),

@@ -462,7 +462,7 @@ def pick_phrases(texts: list[dict[str, Any]], headline: str, value_prop: str, co
         key = re.sub(r"\W+", "", text.lower())
         words = len(text.split())
         if (not text or key in seen or _NOISE.search(text) or words < 3 or len(text) < 14 or text.startswith((">>>", "$", "#", "//"))
-                or (text.endswith(("…", "...")) and words < 5)):
+                or text.endswith(("…", "..."))):                  # a sentence cut in the middle reads as a mistake on screen
             continue
         seen.add(key)
         base = {"h1": 1.0, "h2": 3.0, "h3": 2.2, "blockquote": 2.0, "p": 1.2}.get(row.get("tag"), 1.0)

@@ -244,7 +244,9 @@ def _wait(c, job_id, timeout=120.0):
 def test_options_and_brand_scan_routes(promo_client):
     c, app = promo_client
     options = c.get("/api/promo/options").json()
-    assert set(options["vibes"]) == {"keynote", "launch", "minimal"} and set(options["formats"]) == {"16:9", "9:16"}
+    assert set(options["vibes"]) == {"keynote", "launch", "minimal", "editorial", "energetic"} and set(options["formats"]) == {"16:9", "9:16"}
+    assert options["vibes"]["editorial"]["sound"] == "soft" and options["vibes"]["energetic"]["sound"] == "drive" and options["min_hold_s"] == 1.5
+    assert "cta_text" in options["custom_script"]
     project = c.post("/api/projects", json={"name": "Promo", "brief": "x"}).json()
     scanned = c.post("/api/brand/scan", json={"url": "acme.test", "project": project["id"]}).json()
     assert scanned["host"] == "acme.test" and scanned["assets"]
@@ -310,3 +312,159 @@ def test_a_short_promo_is_rendered_for_real(data_dir, store, project, tmp_path):
     assert sheet["kind"] == "image"
     again = web.contact_sheet_for_asset(store, video, fps=2)
     assert again["asset_id"] and again["width"] > 0
+
+
+# ------------------------------------------------------------------ the pace of the text: every line is complete before its cut
+
+@pytest.mark.parametrize("vibe", list(compose.VIBES))
+@pytest.mark.parametrize("length", [10, 12, 30, 60])
+def test_every_text_is_complete_long_enough_before_the_cut(kit, vibe, length):
+    script = compose.plan_script(kit, length, vibe, "auto", None)
+    for shot in script["shots"]:
+        assert shot["tm"]["settle"] <= shot["dur"] - compose.MIN_HOLD_S + 0.011, (vibe, length, shot["key"], shot["tm"], shot["dur"])
+    assert web.hold_issues(script) == []
+    assert abs(script["shots"][-1]["start"] + script["shots"][-1]["dur"] - length) < 0.05
+
+
+def test_hold_is_checked_on_the_timeline_and_repaired_by_a_faster_reveal():
+    script = {"vibe": "keynote", "shots": [{"key": "s1", "kind": "point", "start": 0.0, "dur": 2.0, "text": "one two three four five six seven eight nine ten",
+                                            "sub": "", "pace": 1.0, "lead_in": False}]}
+    compose.retime(script["shots"][0], "keynote")
+    found = web.hold_issues(script)
+    assert found and found[0]["kind"] == "short_hold" and found[0]["severity"] == "error"
+    done = web.apply_fixes(script, found)
+    assert done and script["shots"][0]["pace"] < 1.0
+    assert compose.hold_of(script["shots"][0]) > found[0]["hold_s"]
+
+
+def test_late_text_on_the_frames_is_reported():
+    assert web.late_text_issues({"s1": [], "s2": [(5.5, "Still arriving", 0.4)]})[0]["kind"] == "late_text"
+    assert web.late_text_issues({"s1": []}) == []
+
+
+def test_fewer_longer_shots_when_there_is_no_room_to_read_everything(kit):
+    long_kit = {**kit, "phrases": ["word " * 14] * 5, "value_prop": "word " * 24}
+    script = compose.plan_script(long_kit, 12, "keynote", "en", None)
+    assert len(script["shots"]) >= 4 and web.hold_issues(script) == [] or any(s["pace"] < 1.0 for s in script["shots"])
+
+
+# ------------------------------------------------------------------ the styles
+
+def test_styles_have_their_own_character(kit):
+    shapes = {v: compose.look_of(v) for v in compose.VIBES}
+    assert shapes["editorial"]["transition"] == "fade" and shapes["editorial"]["deco"] == "hair" and shapes["editorial"]["sound"] == "soft"
+    assert shapes["energetic"]["reveal"] == "pop" and shapes["energetic"]["upper"] and shapes["energetic"]["pulse"] > 0 and shapes["energetic"]["sound"] == "drive"
+    shots = {v: len(compose.plan_script(kit, 30, v, "auto", None)["shots"]) for v in compose.VIBES}
+    assert shots["energetic"] >= shots["keynote"] and shots["editorial"] <= shots["keynote"]
+    assert compose.VIBES["energetic"]["wipe_s"] < compose.VIBES["keynote"]["wipe_s"] < compose.VIBES["editorial"]["wipe_s"]
+
+
+@pytest.mark.parametrize("vibe", list(compose.VIBES))
+def test_each_style_writes_a_valid_page(kit, tmp_path, vibe):
+    script = compose.plan_script(kit, 12, vibe, "en", None)
+    for width, height in ((1920, 1080), (1080, 1920)):
+        html = compose.build_html(kit, script, width, height, 30, tmp_path / f"{vibe}{width}").read_text(encoding="utf-8")
+        assert '"look"' in html and f'"reveal": "{compose.look_of(vibe)["reveal"]}"' in html and html.count("<section") == len(script["shots"])
+
+
+@pytest.mark.parametrize("vibe", list(compose.VIBES))
+def test_each_style_has_its_own_sound(kit, vibe, tmp_path):
+    script = compose.plan_script(kit, 20, vibe, "en", None)
+    profile = compose.look_of(vibe)["sound"]
+    events = sound.events_for(script["shots"], script["bpm"], 20, profile)
+    kinds = {e["kind"] for e in events}
+    assert all(0 <= e["t"] <= 20 for e in events)
+    if profile == "soft":
+        assert {"pad", "tick"} <= kinds and "beat" not in kinds and "clap" not in kinds
+    elif profile == "drive":
+        assert {"beat", "clap", "hat", "bass"} <= kinds
+    else:
+        assert "beat" in kinds and "pad" not in kinds
+    audio = sound.synthesise(events, 20)
+    assert audio.shape[-1] >= 20 * sound.SR and 0.05 < np.max(np.abs(audio)) <= 1.0
+    with_music = sound.synthesise(events, 20, pulse=False)               # a track of the user's own replaces the rhythm and the chords
+    assert np.max(np.abs(with_music)) <= np.max(np.abs(audio)) + 1e-6
+
+
+def test_the_three_sound_profiles_are_different(kit):
+    shots = compose.plan_script(kit, 20, "keynote", "en", None)["shots"]
+    renders = {p: sound.synthesise(sound.events_for(shots, 100, 20, p), 20) for p in sound.PROFILES}
+    for a in sound.PROFILES:
+        for b in sound.PROFILES:
+            if a < b:
+                assert renders[a].shape != renders[b].shape or not np.allclose(renders[a], renders[b], atol=1e-3)
+
+
+# ------------------------------------------------------------------ own script and call to action
+
+def test_own_texts_replace_the_sites(kit):
+    custom = {"headlines": ["Built in a day", "  Safe   for\nthe family "], "hook": "Launch day", "value": "One rocket. One afternoon.",
+              "cta": "Order yours at", "cta_text": "acme.test/order"}
+    script = compose.plan_script(kit, 20, "keynote", "en", None, custom)
+    shots = script["shots"]
+    assert shots[0]["text"] == "Launch day" and [s["text"] for s in shots if s["kind"] == "point"] == ["Built in a day", "Safe for the family"]
+    assert [s for s in shots if s["kind"] == "value"][0]["text"] == "One rocket. One afternoon."
+    assert shots[-1]["text"] == "acme.test/order" and shots[-1]["sub"] == "Order yours at" and script["written_by"] == "custom"
+    assert len(shots) == 6                       # 4 + 2 own headlines: longer shots, no filler
+    plain = compose.plan_script(kit, 20, "keynote", "en", None)
+    assert plain["shots"][-1]["text"] == kit["host"] and plain["written_by"] == "template"
+
+
+def test_own_script_as_multiline_text_and_partial_overrides(kit):
+    got = compose.check_custom({"script": "One\n\nTwo\nThree", "cta": " Join us "})
+    assert got == {"headlines": ["One", "Two", "Three"], "cta": "Join us"}
+    only_cta = compose.plan_script(kit, 20, "minimal", "en", None, {"cta_text": "go.acme.test"})
+    assert only_cta["shots"][-1]["text"] == "go.acme.test" and only_cta["shots"][-1]["sub"] == "Discover it at"
+    assert only_cta["shots"][0]["text"] == kit["headline"]          # what is not given comes from the site
+
+
+def test_own_script_is_validated():
+    for bad in ({"headlines": ["x"] * 11}, {"headlines": "not a list"}, {"hook": 5}, "text"):
+        with pytest.raises(compose.PromoError) as e:
+            compose.check_custom(bad)
+        assert e.value.code == "bad_script"
+    assert compose.check_custom(None) == {} and compose.check_custom({"hook": "   "}) == {}
+    assert len(compose.check_custom({"hook": "a b " * 100})["hook"]) <= compose.MAX_OWN_LINE
+
+
+def test_own_script_route_refuses_what_is_malformed(promo_client):
+    c, app = promo_client
+    project = c.post("/api/projects", json={"name": "Promo", "brief": "x"}).json()
+    res = c.post(f"/api/projects/{project['id']}/promo", json={"url": "acme.test", "headlines": ["x"] * 11})
+    assert res.status_code in (400, 422) and "bad_script" in res.text
+
+
+# ------------------------------------------------------------------ real browser: every style passes the review in both formats
+
+@pytest.mark.parametrize("vibe", list(compose.VIBES))
+def test_each_style_passes_the_review_in_both_formats(data_dir, tmp_path, vibe):
+    if not _real_browser():
+        pytest.skip("no headless browser")
+    kit = brand.scan(data_dir, "acme.test", collector=fake_page)
+    script = compose.plan_script(kit, 12, vibe, "en", None)            # the shortest, hardest case
+    review = web.review_script(kit, script, ["16:9", "9:16"], 30, tmp_path / vibe)
+    errors = [i for i in review["issues"] if i["severity"] == "error"]
+    assert errors == [], errors
+    assert all(i["kind"] not in ("short_hold", "late_text") for i in review["issues"])
+    assert min(compose.hold_of(s) for s in script["shots"]) >= compose.MIN_HOLD_S - 0.011
+
+
+def test_the_incoming_shot_is_revealed_whole_by_the_wipe(data_dir, tmp_path):
+    """The text of the shot that arrives must not show on the shot it covers (the stripe seen in 9:16 mid-wipe): the transition clips the whole shot."""
+    if not _real_browser():
+        pytest.skip("no headless browser")
+    kit = brand.scan(data_dir, "acme.test", collector=fake_page)
+    script = compose.plan_script(kit, 12, "keynote", "en", None)
+    html = compose.build_html(kit, script, 1080, 1920, 30, tmp_path / "w")
+    with brand.open_browser() as browser:
+        page, _ = web._page(browser, html, 1080, 1920)
+        try:
+            second = script["shots"][1]
+            page.evaluate("t => window.seek(t)", second["start"] + 0.15)
+            clips = page.evaluate("() => [...document.querySelectorAll('.shot')].filter(e => e.style.display !== 'none').map(e => [e.dataset.key, e.style.clipPath, e.querySelector('.bg').style.clipPath])")
+            incoming = [c for c in clips if c[0] == second["key"]][0]
+            assert incoming[1].startswith("inset(") and incoming[2] == ""
+            late = page.evaluate("t => { window.seek(t); return window.measure().items.map(i => i.rev) }", second["start"] + second["dur"] - compose.MIN_HOLD_S)
+            assert late and max(late) < 0.01
+        finally:
+            page.close()

@@ -28,9 +28,21 @@ class SoundError(RuntimeError):
 
 # ------------------------------------------------------------------ events
 
-def events_for(shots: list[dict[str, Any]], bpm: float, duration_s: float) -> list[dict[str, Any]]:
-    """The sound events of a promo: a beat on every pulse of the tempo (the first of each shot louder), a whoosh where each shot's
-    wipe arrives and where its second line comes up, and a hit where the logo lands."""
+PROFILES = ("pulse", "soft", "drive")
+CHORDS = [(220.0, "min"), (174.61, "maj"), (261.63, "maj"), (196.0, "maj")]       # A minor, F, C, G: one chord per shot
+BASS_ROOTS = [55.0, 43.65, 65.41, 49.0]
+RHYTHMIC = ("beat", "clap", "hat", "bass", "tick", "pad")                            # the kinds a track of the user's own replaces
+
+
+def events_for(shots: list[dict[str, Any]], bpm: float, duration_s: float, profile: str = "pulse") -> list[dict[str, Any]]:
+    """The sound events of a promo. Profile "pulse": a beat on every pulse of the tempo (the first of each shot louder), a whoosh where each
+    shot's wipe arrives and where its second line comes up, and a hit where the logo lands. "soft" (editorial): a slow chord under each shot,
+    quiet ticks on the beat, a breath where the pages dissolve. "drive" (energetic): four on the floor, a clap on 2 and 4, hats between,
+    a bass note per shot and short risers into every cut."""
+    if profile == "soft":
+        return _soft_events(shots, bpm, duration_s)
+    if profile == "drive":
+        return _drive_events(shots, bpm, duration_s)
     events: list[dict[str, Any]] = []
     period = 60.0 / max(40.0, float(bpm))
     first = shots[0]["start"] if shots else 0.0
@@ -54,7 +66,113 @@ def events_for(shots: list[dict[str, Any]], bpm: float, duration_s: float) -> li
     return events
 
 
+def _soft_events(shots: list[dict[str, Any]], bpm: float, duration_s: float) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    period = 60.0 / max(40.0, float(bpm))
+    first = shots[0]["start"] if shots else 0.0
+    downbeats = {round(s["start"], 3) for s in shots}
+    n = 0
+    t = first
+    while t < duration_s - 0.05:
+        strong = any(abs(t - d) < period * 0.25 for d in downbeats)
+        events.append({"t": round(t, 4), "kind": "tick", "level": 0.9 if strong else 0.4 if n % 2 == 0 else 0.0})
+        n += 1
+        t = first + n * period
+    events = [e for e in events if e["level"] > 0]
+    for i, shot in enumerate(shots):
+        start = float(shot["start"])
+        root, quality = CHORDS[i % len(CHORDS)]
+        third = 1.189 if quality == "min" else 1.26
+        events.append({"t": round(start, 4), "kind": "pad", "freqs": [root, root * third, root * 1.498, root * 2.0], "dur": float(shot["dur"]) + 0.9,
+                       "level": 0.8})
+        if i > 0:
+            events.append({"t": round(max(0.0, start - 0.1), 4), "kind": "whoosh", "dur": 0.9, "pan": 0.3 if i % 2 else -0.3, "level": 0.32})
+        if shot.get("kind") == "logo":
+            events.append({"t": round(start + 0.5, 4), "kind": "hit", "level": 0.55})
+    events.sort(key=lambda e: (e["t"], e["kind"]))
+    return events
+
+
+def _drive_events(shots: list[dict[str, Any]], bpm: float, duration_s: float) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    period = 60.0 / max(40.0, float(bpm))
+    first = shots[0]["start"] if shots else 0.0
+    downbeats = {round(s["start"], 3) for s in shots}
+    n = 0
+    t = first
+    while t < duration_s - 0.05:
+        strong = any(abs(t - d) < period * 0.25 for d in downbeats)
+        events.append({"t": round(t, 4), "kind": "beat", "level": 1.0 if strong else 0.8})
+        if n % 4 in (1, 3):
+            events.append({"t": round(t, 4), "kind": "clap", "level": 0.8})
+        if t + period / 2 < duration_s - 0.05:
+            events.append({"t": round(t + period / 2, 4), "kind": "hat", "level": 0.55 if n % 2 == 0 else 0.4})
+        n += 1
+        t = first + n * period
+    for i, shot in enumerate(shots):
+        start = float(shot["start"])
+        end = start + float(shot["dur"])
+        root = BASS_ROOTS[i % len(BASS_ROOTS)]
+        b = start
+        k = 0
+        while b < end - 0.05 and b < duration_s - 0.05:
+            if k % 4 in (0, 2):
+                events.append({"t": round(b + (period / 2 if k % 4 == 2 else 0.0), 4), "kind": "bass", "freq": root, "dur": period * 0.9, "level": 0.9})
+            b += period
+            k += 1
+        if i > 0:
+            events.append({"t": round(max(0.0, start - 0.3), 4), "kind": "whoosh", "dur": 0.34, "pan": 0.5 if i % 2 else -0.5, "level": 0.8})
+        if shot.get("kind") == "logo":
+            events.append({"t": round(start + 0.3, 4), "kind": "hit", "level": 1.0})
+    events.sort(key=lambda e: (e["t"], e["kind"]))
+    return events
+
+
 # ------------------------------------------------------------------ voices
+
+def _tick(level: float) -> np.ndarray:
+    n = int(0.09 * SR)
+    t = np.arange(n) / SR
+    body = (np.sin(2 * np.pi * 1760.0 * t) + 0.4 * np.sin(2 * np.pi * 2640.0 * t)) * np.exp(-t * 70.0)
+    return (body * level * 0.35).astype(np.float32)
+
+
+def _pad(freqs: list[float], dur: float, level: float) -> np.ndarray:
+    """A soft chord: a few slightly detuned sines per note, a slow attack and a long release."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    out = np.zeros(n)
+    for j, f in enumerate(freqs):
+        for detune in (-0.0035, 0.0, 0.0035):
+            out += np.sin(2 * np.pi * f * (1 + detune) * t + j) * (0.5 if f > 400 else 1.0)
+    attack, release = min(0.7, dur * 0.4), min(0.9, dur * 0.4)
+    env = np.minimum(1.0, t / max(attack, 1e-3)) * np.minimum(1.0, (dur - t) / max(release, 1e-3))
+    return (out / (len(freqs) * 3.0) * env ** 2 * level * 0.9).astype(np.float32)
+
+
+def _clap(level: float) -> np.ndarray:
+    n = int(0.22 * SR)
+    t = np.arange(n) / SR
+    rng = np.random.default_rng(21)
+    noise = np.diff(rng.standard_normal(n + 1))                       # a first difference: the highs of white noise
+    env = np.exp(-t * 28.0) + 0.7 * np.exp(-np.clip(t - 0.012, 0, None) * 60.0) * (t > 0.012) + 0.5 * np.exp(-np.clip(t - 0.026, 0, None) * 60.0) * (t > 0.026)
+    return (noise * env * level * 0.22).astype(np.float32)
+
+
+def _hat(level: float) -> np.ndarray:
+    n = int(0.07 * SR)
+    t = np.arange(n) / SR
+    noise = np.diff(np.random.default_rng(5).standard_normal(n + 2), n=2)
+    return (noise * np.exp(-t * 110.0) * level * 0.16).astype(np.float32)
+
+
+def _bass(freq: float, dur: float, level: float) -> np.ndarray:
+    n = int(max(0.12, dur) * SR)
+    t = np.arange(n) / SR
+    body = np.sin(2 * np.pi * freq * t) + 0.35 * np.sin(2 * np.pi * freq * 2 * t)
+    env = np.minimum(1.0, t / 0.008) * np.exp(-t * 4.5)
+    return (body * env * level * 0.5).astype(np.float32)
+
 
 def _kick(level: float) -> np.ndarray:
     n = int(0.3 * SR)
@@ -131,6 +249,16 @@ def synthesise(events: list[dict[str, Any]], duration_s: float, *, pulse: bool =
             _place(mix, _whoosh(float(e.get("dur", 0.5)), 0.55 * level, seed + i), e["t"], float(e.get("pan", 0.0)))
         elif kind == "hit":
             _place(mix, _hit(0.7 * level), e["t"])
+        elif kind == "tick" and pulse:
+            _place(mix, _tick(level), e["t"])
+        elif kind == "pad" and pulse:
+            _place(mix, _pad(list(e["freqs"]), float(e["dur"]), level), e["t"])
+        elif kind == "clap" and pulse:
+            _place(mix, _clap(level), e["t"])
+        elif kind == "hat" and pulse:
+            _place(mix, _hat(level), e["t"], 0.2 if i % 2 else -0.2)
+        elif kind == "bass" and pulse:
+            _place(mix, _bass(float(e["freq"]), float(e.get("dur", 0.3)), level), e["t"])
     fade = int(0.35 * SR)
     end = int(round(duration_s * SR))
     if end < total:
@@ -222,6 +350,27 @@ def master_wav(ffmpeg: str, source: Path, destination: Path, lufs: float = TARGE
                 got, mode = other, "dynamic"
         trial.unlink(missing_ok=True)
     return {"target_lufs": lufs, "true_peak_db": true_peak, "lufs": got["lufs"], "mode": mode}
+
+
+def master_for_delivery(ffmpeg: str, source: Path, destination: Path, lufs: float = TARGET_LUFS, ceiling: float = -1.0) -> dict[str, Any]:
+    """`master_wav`, then the check that matters: the master is encoded as the AAC that goes into the video and measured again. AAC overshoots a
+    dense, loud mix (drums) by a dB or more above the wav's true peak, so when the encoded peak is above `ceiling` the master is made again
+    with a lower true-peak target (three tries at most)."""
+    ceil_now = TRUE_PEAK_DB
+    info: dict[str, Any] = {}
+    for _ in range(3):
+        info = master_wav(ffmpeg, source, destination, lufs, ceil_now)
+        probe = destination.with_name(destination.stem + ".aac-check.m4a")
+        subprocess.run([ffmpeg, "-hide_banner", "-v", "error", "-y", "-i", str(destination), "-c:a", "aac", "-b:a", "192k", "-ar", str(SR), str(probe)],
+                       capture_output=True, text=True, timeout=300, creationflags=_NO_WINDOW)
+        got = measure(ffmpeg, probe) if probe.exists() else {"lufs": None, "true_peak_db": None}
+        probe.unlink(missing_ok=True)
+        info["aac_true_peak_db"] = got["true_peak_db"]
+        if got["true_peak_db"] is None or got["true_peak_db"] <= ceiling:
+            break
+        ceil_now = round(ceil_now - (got["true_peak_db"] - ceiling) - 0.3, 2)
+    info["tp_target"] = ceil_now
+    return info
 
 
 def measure(ffmpeg: str, path: Path) -> dict[str, Optional[float]]:

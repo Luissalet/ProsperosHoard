@@ -97,9 +97,9 @@ Compact, id-first results; every call is logged in `agent_calls`.
 | POST | `/api/manim/check` | as `manim_check` (UI) |
 | POST | `/api/projects/{project_id}/manim/render` | as `manim_render` (UI) |
 | POST | `/api/agent/brand_scan` | `{url, project?}` -> the kit `{id, host, site_name, headline, value_prop, phrases, colors, palette, logo, fonts, assets?}`; with a project the logo and a brand board become image assets tagged `brand` |
-| POST | `/api/agent/promo_from_url` | `{project, url? \| kit_id?, length_s=30 (6-120), formats=["16:9","9:16"], vibe="keynote"\|"launch"\|"minimal", fps=60, language?, music_asset_id?, wait_s=0}` -> `{job}` (a CPU `promo_render` job; result `videos` and `contact_sheets` {format: asset_id}, `checks`, `loudness`, `script`) |
+| POST | `/api/agent/promo_from_url` | `{project, url? \| kit_id?, length_s=30 (6-120), formats=["16:9","9:16"], vibe="keynote"\|"launch"\|"minimal"\|"editorial"\|"energetic", fps=60, language?, music_asset_id?, wait_s=0, headlines?[] \| script? (one headline per line), hook?, hook_sub?, value?, cta? (small line of the last shot), cta_text? (its big line, the address by default)}` -> `{job}` (a CPU `promo_render` job; what the own script leaves out comes from the site; every text is checked to be complete 1.5 s before its cut; result `videos` and `contact_sheets` {format: asset_id}, `checks` {rounds, fixes, remaining[], min_hold_s, required_hold_s}, `loudness`, `script`) |
 | POST | `/api/agent/contact_sheet` | `{asset_id, fps=4, columns?}` -> `{asset_id, width, height, ...}` contact sheet of a video asset, saved as an image asset |
-| GET | `/api/promo/options` | vibes, formats, frame rates and length limits (UI) |
+| GET | `/api/promo/options` | vibes (label, tempo, about, sound profile, transition), formats, frame rates, length limits, the required hold (`min_hold_s`) and the own-script fields (UI) |
 | GET | `/api/promo/kits`, `/api/promo/kits/{kit_id}` | saved brand kits (UI) |
 | POST | `/api/brand/scan` | as `brand_scan` (UI) |
 | POST | `/api/projects/{project_id}/promo` | as `promo_from_url` (UI) |
