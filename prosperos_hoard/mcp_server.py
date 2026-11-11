@@ -2900,5 +2900,12 @@ def main() -> None:
     mcp.run()
 
 
+try:  # the skills this app carries, for the agent that connects
+    from prosperos_hoard.hoard_link import skills as _family_skills
+    _family_skills.attach(mcp, 'prospero', root=__file__)
+except Exception:  # noqa: BLE001 - the bridge works without them
+    pass
+
+
 if __name__ == "__main__":
     main()
