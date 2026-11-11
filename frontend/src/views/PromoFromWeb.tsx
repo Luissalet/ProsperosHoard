@@ -16,6 +16,8 @@ const ISSUE_LABELS: Record<string, [string, string]> = {
   palette: ["Colour outside the brand palette", "Color fuera de la paleta de la marca"],
   frozen: ["Shot without change", "Plano sin cambio"],
   jump: ["Jump between shots", "Salto entre planos"],
+  short_hold: ["Text complete too little time before the cut", "Texto completo muy poco tiempo antes del corte"],
+  late_text: ["Text still appearing 1.5 s before the cut", "Texto aún apareciendo 1,5 s antes del corte"],
   slideshow: ["Reads as a slideshow", "Parece una presentación de diapositivas"],
 };
 interface Issue { kind: string; shot: string; t: number; detail: string; severity: string; format?: string }
@@ -35,6 +37,11 @@ export function PromoFromWebView() {
   const [fps, setFps] = useState(60);
   const [language, setLanguage] = useState("auto");
   const [music, setMusic] = useState("");
+  const [ownScript, setOwnScript] = useState("");
+  const [hook, setHook] = useState("");
+  const [value, setValue] = useState("");
+  const [cta, setCta] = useState("");
+  const [ctaText, setCtaText] = useState("");
   const [kit, setKit] = useState<PromoKit | null>(null);
   const [kitAssets, setKitAssets] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,7 +69,8 @@ export function PromoFromWebView() {
   });
   const create = () => act("render", async () => {
     const r = await api.promoRender(projectId, { url: kit ? undefined : url, kit_id: kit?.id, length_s: length, formats, vibe, fps, language,
-      music_asset_id: music || undefined });
+      music_asset_id: music || undefined, script: ownScript.trim() || undefined, hook: hook.trim() || undefined, value: value.trim() || undefined,
+      cta: cta.trim() || undefined, cta_text: ctaText.trim() || undefined });
     setJobId(r.job.id); app.refreshJobs(); app.toast(L(lang, "Making the promo", "Haciendo el promo"), "info");
   });
   const loadKit = (id: string) => act("kit", async () => { const k = await api.promoKit(id); setKit(k); setUrl(k.url); setKitAssets({}); });
@@ -109,6 +117,25 @@ export function PromoFromWebView() {
               <option value="">{L(lang, "Sound written in code", "Sonido escrito en código")}</option>
               {(audioPage?.items || []).map((a: Asset) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         </div>
+        <details style={{ marginTop: 12 }} data-testid="promo-own">
+          <summary className="small">{L(lang, "Own script and closing call to action (optional)", "Guion propio y llamada a la acción final (opcional)")}</summary>
+          <p className="small muted">{L(lang, "What you leave empty is taken from the web page. One line per shot in the script.",
+            "Lo que dejes vacío se toma de la web. En el guion, una línea por plano.")}</p>
+          <div className="stack" style={{ gap: 8 }}>
+            <label className="small">{L(lang, "Opening line", "Frase de apertura")}
+              <input className="grow" style={{ width: "100%" }} value={hook} maxLength={140} onChange={(e) => setHook(e.target.value)} data-testid="promo-hook" /></label>
+            <label className="small">{L(lang, "Headlines (one per line)", "Titulares (uno por línea)")}
+              <textarea rows={4} style={{ width: "100%" }} value={ownScript} onChange={(e) => setOwnScript(e.target.value)} data-testid="promo-script" /></label>
+            <label className="small">{L(lang, "Value proposition line", "Frase de propuesta de valor")}
+              <input style={{ width: "100%" }} value={value} maxLength={140} onChange={(e) => setValue(e.target.value)} data-testid="promo-value" /></label>
+            <div className="row wrap" style={{ gap: 12 }}>
+              <label className="small">{L(lang, "Closing call to action", "Llamada a la acción final")}{" "}
+                <input value={cta} maxLength={80} placeholder={L(lang, "Discover it at", "Descúbrelo en")} onChange={(e) => setCta(e.target.value)} data-testid="promo-cta" /></label>
+              <label className="small">{L(lang, "Closing line (address)", "Línea final (dirección)")}{" "}
+                <input value={ctaText} maxLength={80} placeholder={kit?.host || "python.org"} onChange={(e) => setCtaText(e.target.value)} data-testid="promo-cta-text" /></label>
+            </div>
+          </div>
+        </details>
         <div className="row wrap" style={{ gap: 8, marginTop: 12 }}>
           <button className="btn primary" disabled={!canCreate} onClick={create} data-testid="promo-create">
             {running || busy === "render" ? <Loader2 size={14} className="spin" /> : <Play size={14} />} {L(lang, "Make the promo", "Hacer el promo")}</button>

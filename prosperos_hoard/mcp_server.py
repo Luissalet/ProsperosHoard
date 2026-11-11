@@ -2505,7 +2505,9 @@ def brand_scan(url: str, project: Optional[str] = None) -> dict[str, Any]:
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 def promo_from_url(project: str, url: Optional[str] = None, kit_id: Optional[str] = None, length_s: float = 30, formats: Optional[list[str]] = None,
                    vibe: str = "keynote", fps: int = 60, language: Optional[str] = None, music_asset_id: Optional[str] = None,
-                   wait_s: float = 0) -> dict[str, Any]:
+                   wait_s: float = 0, headlines: Optional[list[str]] = None, script: Optional[str] = None, hook: Optional[str] = None,
+                   hook_sub: Optional[str] = None, value: Optional[str] = None, cta: Optional[str] = None,
+                   cta_text: Optional[str] = None) -> dict[str, Any]:
     """Make a promo video from a web page, in 16:9 and 9:16 / hacer un promo en vídeo a partir de una web.
 
     Scans the brand (or takes `kit_id` of an earlier brand_scan), writes the shots (the local writing model when one runs, else a template made of the site's
@@ -2514,14 +2516,21 @@ def promo_from_url(project: str, url: Optional[str] = None, kit_id: Optional[str
     the cuts, on a 4 fps contact sheet. What fails is repaired by rules and checked again (twice at most). Then each format is rendered frame by frame into ffmpeg
     (formats ["16:9","9:16"] = 1920x1080 and 1080x1920; fps 24-60, 60 by default; H.264 yuv420p) with a soundtrack synthesised in code (a pulse at the tempo of
     the shots, a whoosh on every movement, a hit on the logo) mastered to about -14 LUFS, or over `music_asset_id` (an audio asset of the project) when given.
-    length_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour) or minimal (light, slow). Queues a CPU job (a 30 s promo in both formats takes
+    length_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour), minimal (light, slow), editorial (typographic, lots of space, pages that
+    dissolve, soft chords) or energetic (quick cuts, capitals, words that slam in on the beat, four-on-the-floor drive); each has its own synthesised sound.
+    Every text is complete and readable at least 1.5 s before the cut that ends its shot, in both formats (checked on the timeline and on the frames).
+    Own texts instead of the site's: `headlines` (list of lines, one per middle shot) or `script` (the same, one line per row), `hook` (opening line) with `hook_sub`,
+    `value` (value proposition line), `cta` (small line of the last shot, "Discover it at" by default) and `cta_text` (its big line, the address by default);
+    what you leave out is taken from the site. Queues a CPU job (a 30 s promo in both formats takes
     a few minutes); wait_s (up to 150) waits. The job result has `videos` {format: asset_id}, `contact_sheets` {format: asset_id} (look at them with studio_show:
     flagged frames have a red or amber border), `script`, `checks` {rounds, fixes, remaining[]}, `files` (ffprobe of each: size, fps, pix_fmt, audio) and `loudness`.
 
     Keywords: promo video, website to video, motion graphics from a url, brand video, ad from a website, promo desde una web, video promocional, anuncio, 9:16, 16:9
     """
     return _call("POST", "/api/agent/promo_from_url", json={"project": project, "url": url, "kit_id": kit_id, "length_s": length_s, "formats": formats,
-                                                            "vibe": vibe, "fps": fps, "language": language, "music_asset_id": music_asset_id, "wait_s": wait_s})
+                                                            "vibe": vibe, "fps": fps, "language": language, "music_asset_id": music_asset_id, "wait_s": wait_s,
+                                                            "headlines": headlines, "script": script, "hook": hook, "hook_sub": hook_sub, "value": value,
+                                                            "cta": cta, "cta_text": cta_text})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

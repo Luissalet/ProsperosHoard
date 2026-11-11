@@ -787,6 +787,13 @@ class PromoBody(BaseModel):
     language: Optional[str] = None
     music_asset_id: Optional[str] = None
     wait_s: float = 0
+    headlines: Optional[list[str]] = None     # own lines for the middle shots (instead of the site's phrases)
+    script: Optional[str] = None              # the same as a text, one line per shot
+    hook: Optional[str] = None
+    hook_sub: Optional[str] = None
+    value: Optional[str] = None
+    cta: Optional[str] = None                 # the small line of the last shot ("Discover it at")
+    cta_text: Optional[str] = None            # its big line (the address of the site by default)
 
 
 class BrandScanBody(BaseModel):
@@ -5412,14 +5419,18 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             promo_brand_mod.load_kit(store.data_dir, body.kit_id)
         if body.music_asset_id and store.get_asset(body.music_asset_id)["kind"] != "audio":
             raise engine.EngineError("bad_music", "music_asset_id must be an audio asset of the project")
+        custom = promo_compose_mod.check_custom({k: getattr(body, k) for k in ("headlines", "script", "hook", "hook_sub", "value", "cta", "cta_text")
+                                                 if getattr(body, k) is not None})
         params = {"project_id": body.project, "url": body.url, "kit_id": body.kit_id, "length_s": body.length_s, "formats": body.formats or ["16:9", "9:16"],
-                  "vibe": body.vibe, "fps": body.fps, "language": body.language or "auto", "music_asset_id": body.music_asset_id}
+                  "vibe": body.vibe, "fps": body.fps, "language": body.language or "auto", "music_asset_id": body.music_asset_id, "custom": custom}
         job = queue.enqueue("promo_render", "cpu", params, project_id=body.project)
         return {"job": wait(job, body.wait_s)}
 
     @app.get("/api/promo/options")
     def promo_options():
-        return {"vibes": {k: {"label": v["label"], "bpm": v["bpm"], "about": v["about"]} for k, v in promo_compose_mod.VIBES.items()},
+        return {"vibes": {k: {"label": v["label"], "bpm": v["bpm"], "about": v["about"], "sound": promo_compose_mod.look_of(k)["sound"],
+                              "transition": promo_compose_mod.look_of(k)["transition"]} for k, v in promo_compose_mod.VIBES.items()},
+                "min_hold_s": promo_compose_mod.MIN_HOLD_S, "custom_script": ["headlines", "script", "hook", "hook_sub", "value", "cta", "cta_text"],
                 "formats": {k: {"width": w, "height": h} for k, (w, h) in promo_compose_mod.FORMATS.items()}, "fps": [24, 25, 30, 50, 60],
                 "length_s": {"min": promo_compose_mod.MIN_LENGTH_S, "max": promo_compose_mod.MAX_LENGTH_S, "default": 30}}
 

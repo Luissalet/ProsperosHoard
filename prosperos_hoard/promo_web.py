@@ -31,8 +31,8 @@ from . import promo_brand as brand
 from . import promo_sound as sound
 from .backend import ffmpeg_path, ffprobe_path
 from .jobs import JobCancelled
-from .promo_compose import (FORMATS, LEAVE_S, SETTLE_S, VIBES, PromoError, build_html, check_request, plan_script, shot_colors,
-                            shot_windows)
+from .promo_compose import (FORMATS, LEAVE_S, MIN_HOLD_S, MIN_PACE, SETTLE_S, VIBES, PromoError, build_html, check_custom, check_request, hold_of,
+                            look_of, plan_script, retime, shot_colors, shot_windows)
 from .store import Store
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -159,9 +159,31 @@ def motion_issues(frames: dict[float, Image.Image], script: dict[str, Any]) -> t
     return out, measured
 
 
-def jump_issues(boundary: dict[str, float]) -> list[dict[str, Any]]:
+def hold_issues(script: dict[str, Any]) -> list[dict[str, Any]]:
+    """On the timeline: a shot whose text is not complete at least MIN_HOLD_S before the cut that ends it (the cut is the end of the shot)."""
+    out = []
+    for shot in script["shots"]:
+        hold = hold_of(shot)
+        if hold < MIN_HOLD_S - 0.01:
+            out.append(_issue("short_hold", shot["key"], shot["start"] + shot["dur"] - MIN_HOLD_S,
+                              f"the text is complete only {max(hold, 0):.2f} s before the cut (it needs {MIN_HOLD_S:g} s)", "error", hold_s=hold))
+    return out
+
+
+def late_text_issues(late: dict[str, list[tuple[float, str, float]]]) -> list[dict[str, Any]]:
+    """On the frames: at the last moment the text must already be complete (MIN_HOLD_S before the cut), words still on their way in."""
+    out = []
+    for shot, rows in late.items():
+        if rows:
+            t, item, rev = max(rows, key=lambda r: r[2])
+            out.append(_issue("late_text", shot, t, f"at {t:.2f} s, {MIN_HOLD_S:g} s before the cut, '{item[:30]}' is still appearing ({rev * 100:.0f}% to go)", "error"))
+    return out
+
+
+def jump_issues(boundary: dict[str, float], limit: float = JUMP_DIFF) -> list[dict[str, Any]]:
+    """A cut that changes the picture by more than `limit` grey levels from one frame to the next (a style of quick cuts allows more)."""
     return [_issue("jump", key, 0.0, f"the picture jumps {diff:.0f} grey levels between two frames at the cut", "error")
-            for key, diff in boundary.items() if diff > JUMP_DIFF]
+            for key, diff in boundary.items() if diff > limit]
 
 
 def logo_colors(path: Path) -> list[tuple[int, int, int]]:
@@ -210,6 +232,7 @@ def review_format(html_path: Path, script: dict[str, Any], kit: dict[str, Any], 
     frames: dict[float, Image.Image] = {}
     measures: list[tuple[float, dict[str, Any]]] = []
     boundary: dict[str, float] = {}
+    late: dict[str, list[tuple[float, str, float]]] = {}
     with brand.open_browser() as browser:
         page, errors = _page(browser, html_path, width, height)
         try:
@@ -220,6 +243,12 @@ def review_format(html_path: Path, script: dict[str, Any], kit: dict[str, Any], 
                 frames[t] = Image.open(io.BytesIO(page.screenshot(type="jpeg", quality=85))).convert("RGB")
                 if any(first - 1e-6 <= t <= last + 1e-6 for _s, first, last in windows):
                     measures.append((t, page.evaluate("() => window.measure()")))
+            for shot in script["shots"]:
+                # the latest moment at which the text of the shot has to be complete and still on screen
+                t_late = max(shot["start"], shot["start"] + shot["dur"] - MIN_HOLD_S)
+                page.evaluate("t => window.seek(t)", t_late)
+                report = page.evaluate("() => window.measure()")
+                late[shot["key"]] = [(t_late, i["text"], i["rev"]) for i in report["items"] if i["shot"] == shot["key"] and i.get("rev", 0) > 0.01]
             for shot in script["shots"][1:]:
                 grays = []
                 for k in range(-1, 7):
@@ -232,7 +261,8 @@ def review_format(html_path: Path, script: dict[str, Any], kit: dict[str, Any], 
             page.close()
     extra = logo_colors(Path(kit["files"]["folder"]) / kit["logo"]["file"]) if kit.get("logo") else []
     motion, motion_values = motion_issues(frames, script)
-    issues = (dom_issues(measures) + palette_issues(frames, script, allowed_colors(kit["palette"], extra)) + motion + jump_issues(boundary))
+    issues = (dom_issues(measures) + palette_issues(frames, script, allowed_colors(kit["palette"], extra)) + motion + jump_issues(boundary, look_of(script["vibe"])["jump"])
+              + hold_issues(script) + late_text_issues(late))
     try:
         from .editing.motion_lint import slideshow_lint
         lint = slideshow_lint(html_path.read_text(encoding="utf-8"))
@@ -240,7 +270,7 @@ def review_format(html_path: Path, script: dict[str, Any], kit: dict[str, Any], 
             issues.append(_issue("slideshow", "-", 0.0, lint["reprompt"], "warn"))
     except ImportError:
         pass
-    return {"format": fmt, "frames": frames, "issues": issues, "motion": motion_values, "jumps": {k: round(v, 2) for k, v in boundary.items()},
+    return {"format": fmt, "frames": frames, "issues": issues, "motion": motion_values, "holds": {s["key"]: hold_of(s) for s in script["shots"]}, "jumps": {k: round(v, 2) for k, v in boundary.items()},
             "samples": len(frames), "text_checks": len(measures)}
 
 
@@ -271,6 +301,11 @@ def apply_fixes(script: dict[str, Any], issues: list[dict[str, Any]]) -> list[st
             if not script.get("deco", True):
                 script["deco"] = True
             done.append(f"{shot['key']}: stronger drift so the shot does not read as a slide")
+        elif kind in ("short_hold", "late_text") and shot:
+            before = shot.get("pace", 1.0)
+            shot["pace"] = round(max(MIN_PACE, before * 0.8), 4)
+            retime(shot, script["vibe"])
+            done.append(f"{shot['key']}: faster reveal ({before:.2f} -> {shot['pace']:.2f}) so the text is complete {MIN_HOLD_S:g} s before the cut")
         elif kind == "jump":
             script["wipe_s"] = round(min(1.1, float(script.get("wipe_s", 0.5)) + 0.2), 2)
             done.append(f"wipe between shots lengthened to {script['wipe_s']} s")
@@ -423,6 +458,38 @@ def prepare(store: Store, params: dict[str, Any], progress: Callable[..., Any]) 
     return brand.scan(data_dir, params["url"])
 
 
+def review_script(kit: dict[str, Any], script: dict[str, Any], formats: list[str], fps: int, work: Path,
+                  cancelled: Optional[Callable[[], bool]] = None, on_round: Optional[Callable[[int], None]] = None) -> dict[str, Any]:
+    """Builds the page of every format, checks it (text, contrast, palette, motion, jumps, the hold of every text before its cut) and repairs
+    by rules what failed, checking again, twice at most. The script is changed in place by the repairs."""
+    rounds: list[dict[str, Any]] = []
+    fixes_done: list[str] = []
+    html_paths: dict[str, Path] = {}
+    issues: list[dict[str, Any]] = []
+    frames: dict[str, dict[float, Image.Image]] = {}
+    for attempt in range(MAX_FIX_ROUNDS + 1):
+        if on_round:
+            on_round(attempt)
+        issues = []
+        reviews = {}
+        for fmt in formats:
+            html_paths[fmt] = build_html(kit, script, *FORMATS[fmt], fps, work / fmt.replace(":", "x"))
+            reviews[fmt] = review_format(html_paths[fmt], script, kit, fmt, fps, cancelled)
+            issues += [{**i, "format": fmt} for i in reviews[fmt]["issues"]]
+        frames = {fmt: r["frames"] for fmt, r in reviews.items()}
+        rounds.append({"round": attempt + 1, "issues": [{k: v for k, v in i.items()} for i in issues[:30]],
+                       "motion": {f: r["motion"] for f, r in reviews.items()}, "jumps": {f: r["jumps"] for f, r in reviews.items()},
+                       "holds": {f: r["holds"] for f, r in reviews.items()}})
+        if not issues or attempt == MAX_FIX_ROUNDS:
+            break
+        changed = apply_fixes(script, issues)
+        rounds[-1]["fixes"] = changed
+        fixes_done += changed
+        if not changed:
+            break
+    return {"rounds": rounds, "fixes": fixes_done, "html": html_paths, "issues": issues, "frames": frames}
+
+
 def render_job(store: Store, job: dict[str, Any], progress: Any, chat: Optional[Callable[..., str]] = None) -> dict[str, Any]:
     """The ``promo_render`` job: scan, script, checks and fixes, render, sound, import."""
     p = job["params"]
@@ -442,36 +509,15 @@ def render_job(store: Store, job: dict[str, Any], progress: Any, chat: Optional[
     if not p.get("skip_kit_assets"):
         kit_assets = brand.import_kit_assets(store, project_id, kit)
     progress(0.1, "writing the script")
-    script = plan_script(kit, length, vibe, p.get("language") or "auto", chat)
+    script = plan_script(kit, length, vibe, p.get("language") or "auto", chat, p.get("custom"))
     work = data_dir / "tmp" / "promo" / (str(job.get("id") or "job"))
     if work.exists():
         shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    rounds: list[dict[str, Any]] = []
-    fixes_done: list[str] = []
-    sheet_frames: dict[str, dict[float, Image.Image]] = {}
     try:
-        html_paths: dict[str, Path] = {}
-        for attempt in range(MAX_FIX_ROUNDS + 1):
-            progress(0.14 + 0.06 * attempt, "checking the composition" + (f" (round {attempt + 1})" if attempt else ""))
-            issues: list[dict[str, Any]] = []
-            reviews = {}
-            for fmt in formats:
-                html_paths[fmt] = build_html(kit, script, *FORMATS[fmt], fps, work / fmt.replace(":", "x"))
-                reviews[fmt] = review_format(html_paths[fmt], script, kit, fmt, fps, cancelled)
-                issues += [{**i, "format": fmt} for i in reviews[fmt]["issues"]]
-            sheet_frames = {fmt: r["frames"] for fmt, r in reviews.items()}
-            errors = [i for i in issues if i["severity"] == "error"]
-            last_issues = issues
-            rounds.append({"round": attempt + 1, "issues": [{k: v for k, v in i.items()} for i in issues[:30]],
-                           "motion": {f: r["motion"] for f, r in reviews.items()}, "jumps": {f: r["jumps"] for f, r in reviews.items()}})
-            if not issues or attempt == MAX_FIX_ROUNDS:
-                break
-            changed = apply_fixes(script, issues)
-            rounds[-1]["fixes"] = changed
-            fixes_done += changed
-            if not changed:
-                break
+        review = review_script(kit, script, formats, fps, work, cancelled,
+                               lambda attempt: progress(0.14 + 0.06 * attempt, "checking the composition" + (f" (round {attempt + 1})" if attempt else "")))
+        rounds, fixes_done, html_paths, last_issues = review["rounds"], review["fixes"], review["html"], review["issues"]
         remaining = last_issues
         total = int(round(length * fps)) * len(formats)
         done = {"n": 0}
@@ -490,14 +536,14 @@ def render_job(store: Store, job: dict[str, Any], progress: Any, chat: Optional[
             for future in futures:
                 future.result()
         progress(0.82, "writing the sound")
-        events = sound.events_for(script["shots"], script["bpm"], length)
+        events = sound.events_for(script["shots"], script["bpm"], length, look_of(vibe)["sound"])
         audio = sound.synthesise(events, length, pulse=music_path is None)
         exe = ffmpeg_path()
         if music_path:
             audio = sound.mix_with_music(audio, sound.decode_music(exe, music_path, length))
         raw_wav, master = work / "mix.wav", work / "master.wav"
         sound.write_wav(raw_wav, audio)
-        sound.master_wav(exe, raw_wav, master)
+        sound.master_for_delivery(exe, raw_wav, master)
         loud = sound.measure(exe, master)
         results: dict[str, Any] = {}
         asset_ids: dict[str, str] = {}
@@ -527,7 +573,7 @@ def render_job(store: Store, job: dict[str, Any], progress: Any, chat: Optional[
             sheet.save(sheet_path)
             recipe = {"operation": "promo_from_url", "url": kit["url"], "kit_id": kit["id"], "vibe": vibe, "length_s": length, "format": fmt, "fps": fps,
                       "input_asset_ids": [p["music_asset_id"]] if p.get("music_asset_id") else [], "script": script, "fixes": fixes_done,
-                      "sound": {"bpm": script["bpm"], "events": len(events), "music": bool(music_path), "lufs": results[fmt]["loudness"]["lufs"]}}
+                      "sound": {"bpm": script["bpm"], "profile": look_of(vibe)["sound"], "events": len(events), "music": bool(music_path), "lufs": results[fmt]["loudness"]["lufs"]}}
             name = f"{kit['host']} promo {fmt.replace(':', 'x')}"
             asset = engine.import_asset(store, project_id, final, "video", original_name=f"{name}.mp4", recipe=recipe, tags=["promo", fmt, vibe], source="rendered")
             asset_ids[fmt] = asset["id"]
@@ -538,7 +584,8 @@ def render_job(store: Store, job: dict[str, Any], progress: Any, chat: Optional[
         ids = list(asset_ids.values()) + list(sheet_ids.values())
         return {"asset_id": ids[0], "asset_ids": ids, "videos": asset_ids, "contact_sheets": sheet_ids, "kit": {k: kit.get(k) for k in ("id", "host", "site_name", "colors", "palette", "headline")},
                 "kit_assets": kit_assets, "script": script, "written_by": script["written_by"], "checks": {"rounds": len(rounds), "fixes": fixes_done,
-                "remaining": [{k: i[k] for k in ("kind", "shot", "t", "detail", "severity", "format")} for i in remaining[:40]], "log": rounds},
+                "remaining": [{k: i[k] for k in ("kind", "shot", "t", "detail", "severity", "format")} for i in remaining[:40]], "log": rounds,
+                "min_hold_s": min(hold_of(s) for s in script["shots"]), "required_hold_s": MIN_HOLD_S},
                 "files": results, "loudness": loud, "fps": fps, "length_s": length}
     finally:
         shutil.rmtree(work, ignore_errors=True)

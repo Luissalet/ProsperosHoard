@@ -18,6 +18,8 @@ from typing import Any, Callable, Optional
 from . import engine
 from .promo_brand import clean_text, contrast, from_hex, mix, to_hex, luminance
 
+LOOK_DEFAULT: dict[str, Any] = {"reveal": "mask", "transition": "wipe", "deco": "ring", "speed": 1.0, "pulse": 0.0, "slam": 0.0, "upper": False,
+                                "idx": 0.42, "leading": 1.06, "left": 8.0, "width": (70.0, 84.0), "sound": "pulse", "jump": 34.0}
 VIBES: dict[str, dict[str, Any]] = {
     "keynote": {"label": "Keynote", "shot_s": 4.0, "bpm": 96, "scale": 1.0, "wipe_s": 0.55, "hook_bg": "dark",
                 "about": "Big type, calm pace, dark opening."},
@@ -25,12 +27,78 @@ VIBES: dict[str, dict[str, Any]] = {
                "about": "Fast shots, strong colour, more beats."},
     "minimal": {"label": "Minimal", "shot_s": 5.0, "bpm": 80, "scale": 0.92, "wipe_s": 0.7, "hook_bg": "light",
                 "about": "Light background, slow, few words."},
+    "editorial": {"label": "Editorial", "shot_s": 4.8, "bpm": 72, "scale": 0.86, "wipe_s": 0.9, "hook_bg": "light",
+                  "about": "Typographic, lots of space, light pages that dissolve into each other, soft chords and ticks.",
+                  "cycle": ["light", "light", "dark", "light", "secondary", "light"], "value_bg": "dark", "cta_bg": "light",
+                  "look": {"reveal": "fade", "transition": "fade", "deco": "hair", "speed": 1.35, "idx": 0.78, "leading": 1.14, "left": 13.0,
+                           "width": (56.0, 76.0), "sound": "soft"}},
+    "energetic": {"label": "Energético", "shot_s": 2.5, "bpm": 140, "scale": 1.1, "wipe_s": 0.28, "hook_bg": "primary",
+                  "about": "Quick cuts, capitals, words that slam in on the beat, bars that move, four-on-the-floor drive.",
+                  "cycle": ["dark", "accent", "light", "secondary", "dark", "primary"], "value_bg": "dark", "cta_bg": "accent", "fragments": True,
+                  "look": {"reveal": "pop", "transition": "wipe", "deco": "bars", "speed": 0.55, "pulse": 0.07, "slam": 0.12, "upper": True,
+                           "idx": 0.5, "leading": 1.0, "sound": "drive", "jump": 72.0}},
 }
 FORMATS: dict[str, tuple[int, int]] = {"16:9": (1920, 1080), "9:16": (1080, 1920)}
 CTA = {"es": "Descúbrelo en", "en": "Discover it at"}
 MIN_LENGTH_S, MAX_LENGTH_S = 6.0, 120.0
-SETTLE_S = 0.95            # a shot's text has arrived this long after the shot starts
+SETTLE_S = 0.95            # fallback: a shot's text has arrived this long after the shot starts (the real figure is shot["tm"]["settle"])
 LEAVE_S = 0.45            # and starts to leave this long before the next one covers it
+MIN_HOLD_S = 1.5          # every text is complete and readable at least this long before the cut that ends its shot
+MIN_PACE = 0.35           # the reveal can be sped up to this fraction of its normal duration to make room for the hold
+MAX_OWN_LINE = 140
+
+
+def look_of(vibe: str) -> dict[str, Any]:
+    return {**LOOK_DEFAULT, **VIBES[vibe].get("look", {})}
+
+
+def retime(shot: dict[str, Any], vibe: str) -> dict[str, Any]:
+    """The timeline of a shot's text, the one source the page and the checks share: when each word starts and how long it takes, and
+    `settle`, the second (after the shot starts) at which all its text is complete. `shot["pace"]` shortens the reveal to make room."""
+    k = max(MIN_PACE * 0.5, float(shot.get("pace", 1.0))) * look_of(vibe)["speed"]
+    n = max(1, len(str(shot["text"]).split()))
+    m = len(str(shot.get("sub") or "").split())
+    t0, tw = 0.04 * k, 0.75 * k
+    ts = min(0.07, 0.5 / max(1, n - 1)) * k
+    title_end = t0 + ts * (n - 1) + tw
+    s0 = (0.45 + min(0.2, 0.016 * n)) * k
+    sst = min(0.05, 0.4 / max(1, m - 1)) * k
+    sw = 0.7 * k
+    end = max(title_end, (s0 + sst * (m - 1) + sw) if m else 0.0)
+    if shot.get("kind") == "logo":
+        end = max(end, 0.9 * k)
+    # Outgoing text finishes its dissolve 0.05 s after the cut. Give the
+    # new text a short gap without spending half a second of a short shot.
+    lead = -0.2 if shot.get("lead_in") else 0.14
+    shot["tm"] = {"lead": lead, "t0": round(t0, 4), "ts": round(ts, 4), "tw": round(tw, 4), "s0": round(s0, 4), "sst": round(sst, 4), "sw": round(sw, 4),
+                  "settle": round(max(0.0, lead + end), 4)}
+    return shot["tm"]
+
+
+def fit_hold(shot: dict[str, Any], vibe: str) -> bool:
+    """Speeds the reveal of a shot up (never below MIN_PACE) until its text has settled MIN_HOLD_S before the cut; False if even that is not enough."""
+    shot["pace"] = 1.0
+    if retime(shot, vibe)["settle"] <= shot["dur"] - MIN_HOLD_S:
+        return True
+    lo, hi = MIN_PACE, 1.0
+    shot["pace"] = lo
+    if retime(shot, vibe)["settle"] > shot["dur"] - MIN_HOLD_S:
+        return False
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        shot["pace"] = mid
+        if retime(shot, vibe)["settle"] <= shot["dur"] - MIN_HOLD_S:
+            lo = mid
+        else:
+            hi = mid
+    shot["pace"] = round(lo, 4)
+    retime(shot, vibe)
+    return True
+
+
+def hold_of(shot: dict[str, Any]) -> float:
+    """Seconds the shot's text is complete on screen before the cut."""
+    return round(shot["dur"] - float((shot.get("tm") or {}).get("settle", SETTLE_S)), 3)
 
 
 class PromoError(engine.EngineError):
@@ -133,15 +201,75 @@ def _model_texts(chat: Callable[..., str], kit: dict[str, Any], n_points: int, v
     return out
 
 
+def own_line(value: Any, limit: int = MAX_OWN_LINE) -> str:
+    """A line of the user's own: whitespace collapsed and cut at a word if it is longer than the limit (never an ellipsis: it is their text)."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:- ") if " " in text[:limit] else text[:limit]
+
+
+def check_custom(custom: Any) -> dict[str, Any]:
+    """The user's own script, validated: `headlines` (the lines of the middle shots, or a multi-line `script`), `hook`, `hook_sub`, `value`, `cta`
+    (the small line of the last shot) and `cta_text` (its big line, the address by default). Empty things are dropped."""
+    if not custom:
+        return {}
+    if not isinstance(custom, dict):
+        raise PromoError("bad_script", "the own script must be an object")
+    out: dict[str, Any] = {}
+    lines = custom.get("headlines")
+    if lines is None and custom.get("script"):
+        lines = str(custom["script"]).splitlines()
+    if lines is not None:
+        if not isinstance(lines, (list, tuple)):
+            raise PromoError("bad_script", "headlines must be a list of lines")
+        cleaned = [own_line(x) for x in lines if own_line(x)]
+        if len(cleaned) > 10:
+            raise PromoError("bad_script", "at most 10 headlines")
+        if cleaned:
+            out["headlines"] = cleaned
+    for key in ("hook", "hook_sub", "value", "cta", "cta_text"):
+        if custom.get(key) is not None:
+            if not isinstance(custom[key], str):
+                raise PromoError("bad_script", f"{key} must be text")
+            text = own_line(custom[key], 80 if key in ("cta", "cta_text", "hook_sub") else MAX_OWN_LINE)
+            if text:
+                out[key] = text
+    return out
+
+
+def fragments(kit: dict[str, Any], taken: list[str]) -> list[str]:
+    """Short clauses of the site's own value proposition (the headline is the hook already): more lines for a style with quick cuts when the page
+    has few phrases. The whole proposition still closes the video as its own shot."""
+    seen = {p.lower() for p in taken} | {str(kit.get("headline") or "").lower()}
+    out: list[str] = []
+    for piece in re.split(r"[.;:!?\u2014\u2013]+|,\s+| and ", str(kit.get("value_prop") or "")):
+        text = clean_text(piece.strip(" -"), 80)
+        words = len(text.split())
+        if 2 <= words <= 11 and text.lower() not in seen and text != kit.get("value_prop"):
+            seen.add(text.lower())
+            out.append(text[:1].upper() + text[1:])
+    return out[:4]
+
+
 def plan_script(kit: dict[str, Any], length_s: float, vibe: str = "keynote", language: str = "auto",
-                chat: Optional[Callable[..., str]] = None) -> dict[str, Any]:
+                chat: Optional[Callable[..., str]] = None, custom: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """The shots of the promo. Shots are all the same length and that length is a whole number of beats, so the tempo of the pulse
-    and the cuts agree."""
+    and the cuts agree. Every shot's text is timed so that it is complete MIN_HOLD_S before the cut: the reveal is sped up when needed and,
+    when even that is not enough, there are fewer and longer shots."""
     style = VIBES[vibe]
     lang = resolve_language(kit, language)
+    own = check_custom(custom)
     n = max(4, min(12, round(length_s / style["shot_s"])))
-    phrases = [p for p in kit.get("phrases") or [] if p]
-    n = max(4, min(n, 4 + len(phrases)))
+    if own.get("headlines"):
+        n = max(4, min(12, 4 + len(own["headlines"])))          # every own line gets its shot (fewer only if the length leaves no room to read them)
+    else:
+        phrases = [p for p in kit.get("phrases") or [] if p]
+        if style.get("fragments"):
+            phrases += fragments(kit, phrases)
+            kit = {**kit, "phrases": phrases}
+        n = max(4, min(n, 4 + len(phrases)))
+    n_max = n
     n_points = n - 4
     texts = template_texts(kit, n_points, lang)
     written_by = "template"
@@ -149,39 +277,65 @@ def plan_script(kit: dict[str, Any], length_s: float, vibe: str = "keynote", lan
         try:
             got = _model_texts(chat, kit, n_points, vibe, lang)
             for key in ("hook", "points", "value"):
-                if key in got:
+                if key in got and not (key == "points" and own.get("headlines")):
                     texts[key] = got[key]
             if "cta" in got:
                 texts["cta"]["sub"] = got["cta"]
             written_by = "model" if got else "template"
         except Exception:  # noqa: BLE001 - no model, a stalled one, bad JSON: the template stands
             written_by = "template"
-    texts["points"] = (texts["points"] + [kit["site_name"]] * n_points)[:n_points]
-    dur = length_s / n
-    beats = choose_beats(dur, style["bpm"])
+    if own.get("headlines"):
+        texts["points"] = list(own["headlines"])
+    if own.get("hook"):
+        texts["hook"] = {"text": own["hook"], "sub": own.get("hook_sub", texts["hook"]["sub"])}
+    elif own.get("hook_sub"):
+        texts["hook"]["sub"] = own["hook_sub"]
+    if own.get("value"):
+        texts["value"] = own["value"]
+    if own.get("cta"):
+        texts["cta"]["sub"] = own["cta"]
+    if own.get("cta_text"):
+        texts["cta"]["text"] = own["cta_text"]
+    if own:
+        written_by = "custom" if written_by == "template" else written_by + "+custom"
+    texts["points"] = (texts["points"] + [kit["site_name"]] * 12)
     logo = kit.get("logo") or {}
     logo_bg = "dark" if (logo.get("luminance") or 0) > 0.5 else "light"
-    cycle = ["light", "secondary", "dark", "accent", "light", "primary"]
-    kinds = ["hook"] + ["point"] * n_points + ["value", "logo", "cta"]
-    shots = []
-    pi = 0
-    for i, kind in enumerate(kinds):
-        if kind == "hook":
-            text, sub, bg = texts["hook"]["text"], texts["hook"]["sub"], style["hook_bg"]
-        elif kind == "point":
-            text, sub, bg = texts["points"][pi], "", cycle[pi % len(cycle)]
-            pi += 1
-        elif kind == "value":
-            text, sub, bg = texts["value"], "", "primary"
-        elif kind == "logo":
-            text, sub, bg = texts["logo"]["text"], texts["logo"]["sub"], logo_bg
-        else:
-            text, sub, bg = texts["cta"]["text"], texts["cta"]["sub"], "primary" if kinds[i - 1] != "value" else "dark"
-        shots.append({"key": f"s{i + 1}", "kind": kind, "text": text, "sub": sub, "start": round(i * dur, 4), "dur": round(dur, 4),
-                      "bg_role": bg, "fit": 1.0, "layout": "center" if kind in ("logo", "cta") else "left", "drift": 1.0,
-                      "index": f"{pi:02d}" if kind == "point" else ""})
+    cycle = style.get("cycle") or ["light", "secondary", "dark", "accent", "light", "primary"]
+    result: dict[str, Any] = {}
+    while True:
+        n_points = n - 4
+        dur = length_s / n
+        kinds = ["hook"] + ["point"] * n_points + ["value", "logo", "cta"]
+        shots = []
+        pi = 0
+        for i, kind in enumerate(kinds):
+            if kind == "hook":
+                text, sub, bg = texts["hook"]["text"], texts["hook"]["sub"], style["hook_bg"]
+            elif kind == "point":
+                text, sub, bg = texts["points"][pi], "", cycle[pi % len(cycle)]
+                pi += 1
+            elif kind == "value":
+                text, sub, bg = texts["value"], "", style.get("value_bg", "primary")
+            elif kind == "logo":
+                text, sub, bg = texts["logo"]["text"], texts["logo"]["sub"], logo_bg
+            else:
+                text, sub = texts["cta"]["text"], texts["cta"]["sub"]
+                bg = style.get("cta_bg") or ("primary" if kinds[i - 1] != "value" else "dark")
+            shots.append({"key": f"s{i + 1}", "kind": kind, "text": text, "sub": sub, "start": round(i * dur, 4), "dur": round(dur, 4),
+                          "bg_role": bg, "fit": 1.0, "layout": "center" if kind in ("logo", "cta") else "left", "drift": 1.0,
+                          "index": f"{pi:02d}" if kind == "point" else "", "lead_in": i == 0})
+        feasible = all([fit_hold(s, vibe) for s in shots])
+        result = {"shots": shots, "n": n}
+        if feasible or n <= 4:
+            break
+        n -= 1                                   # not enough room to read everything: fewer, longer shots
+    shots = result["shots"]
+    dur = length_s / len(shots)
+    beats = choose_beats(dur, style["bpm"])
     return {"vibe": vibe, "language": lang, "length_s": round(length_s, 3), "shots": shots, "beats_per_shot": beats,
-            "bpm": round(beats * 60.0 / dur, 2), "written_by": written_by, "wipe_s": style["wipe_s"], "deco": True}
+            "bpm": round(beats * 60.0 / dur, 2), "written_by": written_by, "wipe_s": style["wipe_s"], "deco": True, "min_hold_s": MIN_HOLD_S,
+            "shots_planned": n_max, "own_headlines_dropped": max(0, len(own.get("headlines", [])) - (len(shots) - 4)) if own.get("headlines") else 0}
 
 
 # ------------------------------------------------------------------ the page
@@ -230,7 +384,7 @@ PAGE_JS = r"""
     el, i, d: DATA.shots[i], bg: el.querySelector('.bg'), copy: el.querySelector('.copy'),
     words: [...el.querySelectorAll('.t .wi')], subs: [...el.querySelectorAll('.sub .wi')], rule: el.querySelector('.rule'),
     idx: el.querySelector('.idx'), logo: el.querySelector('.logo'), ring: el.querySelector('.ring'), deco: el.querySelector('.deco') }));
-  const WIPE = DATA.wipe_s, TOTAL = DATA.length_s;
+  const WIPE = DATA.wipe_s, TOTAL = DATA.length_s, LOOK = DATA.look;
   function wipePath(i, p) {
     const r = (1 - p) * 100, side = portrait ? (i % 2 ? 'v' : 'v2') : ['h', 'v', 'h2'][i % 3];
     if (side === 'h') return `inset(0 ${r}% 0 0)`;
@@ -238,28 +392,43 @@ PAGE_JS = r"""
     if (side === 'v') return `inset(${r}% 0 0 0)`;
     return `inset(0 0 ${r}% 0)`;
   }
+  // one word of a line: p is its progress 0..1 (the checks read it back from window.measure)
+  function setWord(w, p, k) {
+    w._p = p;
+    if (LOOK.reveal === 'fade') { w.style.transform = `translateY(${(1 - p) * 46}%)`; w.style.opacity = p; }
+    else if (LOOK.reveal === 'pop') { w.style.transform = `translate(${(1 - p) * (k % 2 ? -34 : 34)}%, ${(1 - p) * 118}%) skewY(${(1 - p) * -7}deg)`; }
+    else { w.style.transform = `translateY(${(1 - p) * 118}%) skewY(${(1 - p) * 4}deg)`; }
+  }
   window.seek = function (t) {
     const last = shots.length - 1;
+    const phase = (t * DATA.bpm / 60) % 1, pulse = LOOK.pulse * Math.exp(-phase * 7);
     for (const s of shots) {
-      const d = s.d, end = d.start + d.dur;
+      const d = s.d, tm = d.tm, end = d.start + d.dur;
       const show = (s.i === 0 ? t < end + WIPE : (t >= d.start && t < end + WIPE)) || (s.i === last && t >= d.start);
       s.el.style.display = show ? 'block' : 'none';
       if (!show) continue;
       s.el.style.zIndex = s.i + 1;
       const wp = s.i === 0 ? 1 : E.inout(prog(t, d.start, WIPE));
-      s.bg.style.clipPath = wp >= 1 ? 'none' : wipePath(s.i, wp);
-      const lt = t - d.start - (s.i === 0 ? -0.2 : 0.14);
+      // the whole shot is revealed by the transition (not only its background), so its text never shows on the shot it is covering
+      if (LOOK.transition === 'fade') { s.el.style.clipPath = 'none'; s.el.style.opacity = wp >= 1 ? 1 : wp; }
+      else { s.el.style.opacity = 1; s.el.style.clipPath = wp >= 1 ? 'none' : wipePath(s.i, wp); }
+      const lt = t - d.start - tm.lead;
       const leave = s.i === last ? 0 : E.inout(prog(t, end - 0.35, 0.35 + WIPE));
       const drift = (t - d.start) / d.dur;
-      s.copy.style.transform = `translate(0, ${(-leave * 70 - drift * 14 * d.drift) * U}px)`;
-      s.words.forEach((w, k) => { const p = E.expo(prog(lt, 0.04 + 0.07 * k, 0.75)); w.style.transform = `translateY(${(1 - p) * 118}%) skewY(${(1 - p) * 4}deg)`; });
-      const sw = s.words.length;
-      s.subs.forEach((w, k) => { const p = E.expo(prog(lt, 0.45 + 0.05 * k + 0.04 * sw * 0.4, 0.7)); w.style.transform = `translateY(${(1 - p) * 118}%)`; });
-      if (s.rule) s.rule.style.transform = `scaleX(${E.out(prog(lt, 0.25, 0.8))})`;
+      const slam = 1 + LOOK.slam * (1 - E.out(prog(lt, 0, 0.3)));
+      s.copy.style.transform = `translate(0, ${(-leave * 70 - drift * 14 * d.drift) * U}px) scale(${slam})`;
+      s.copy.style.opacity = (LOOK.transition === 'fade' && s.i !== last) ? 1 - E.inout(prog(t, end - 0.45, 0.5)) : 1;   // in a dissolve the old text goes before the new arrives
+      s.words.forEach((w, k) => setWord(w, E.expo(prog(lt, tm.t0 + tm.ts * k, tm.tw)), k));
+      s.subs.forEach((w, k) => setWord(w, E.expo(prog(lt, tm.s0 + tm.sst * k, tm.sw)), k));
+      if (s.rule) s.rule.style.transform = `scaleX(${E.out(prog(lt, 0.25 * tm.tw / 0.75, 0.8 * tm.tw / 0.75))})`;
       if (s.idx) s.idx.style.transform = `translate(${(1 - E.out(prog(lt, 0, 0.6))) * -60 * U}px, 0)`;
       if (s.logo) { const p = E.back(prog(lt, 0.18, 0.7)); s.logo.style.transform = `scale(${0.55 + 0.45 * p})`; s.logo.style.clipPath = `inset(0 ${(1 - E.out(prog(lt, 0.18, 0.5))) * 100}% 0 0)`; }
       if (s.ring) { const p = E.out(prog(lt, 0.4, 1.0)); s.ring.style.transform = `translate(-50%, -50%) scale(${0.3 + 0.85 * p})`; s.ring.style.borderWidth = ((1 - p) * 20 + 3) * U + 'px'; }
-      if (s.deco) s.deco.style.transform = `translate(${(-drift * 120 * d.drift) * U}px, ${(drift * 90 * d.drift) * U}px) scale(${1 + 0.18 * drift * d.drift})`;
+      if (s.deco) {
+        if (LOOK.deco === 'hair') s.deco.style.transform = `scaleX(${0.08 + 0.92 * E.out(prog(lt, 0, 1.6))})`;
+        else if (LOOK.deco === 'bars') s.deco.style.transform = `translate(${(-drift * 520 * d.drift) * U}px, 0) scale(${1 + pulse})`;
+        else s.deco.style.transform = `translate(${(-drift * 120 * d.drift) * U}px, ${(drift * 90 * d.drift) * U}px) scale(${1 + 0.18 * drift * d.drift + pulse})`;
+      }
       if (t >= d.start && t < end + 0.001) rail.style.background = d.mark;
     }
     rail.style.width = clamp(t / TOTAL) * 100 + '%';
@@ -275,7 +444,8 @@ PAGE_JS = r"""
         x1: Math.max(...rects.map(r => r.right)), y1: Math.max(...rects.map(r => r.bottom)) } : null;
       const cs = getComputedStyle(el);
       items.push({ id: el.dataset.fit, shot: sh.dataset.key, role: el.dataset.role, text: (el.textContent || '').trim().slice(0, 90), box,
-        sw: el.scrollWidth, cw: el.clientWidth, fs: parseFloat(cs.fontSize), color: cs.color, bg: sh.dataset.bg });
+        sw: el.scrollWidth, cw: el.clientWidth, fs: parseFloat(cs.fontSize), color: cs.color, bg: sh.dataset.bg,
+        rev: (() => { const ws = [...el.querySelectorAll('.wi')]; return ws.length ? 1 - Math.min(...ws.map(w => w._p === undefined ? 1 : w._p)) : 0; })() });
     }
     return { W: innerWidth, H: innerHeight, items };
   };
@@ -306,6 +476,7 @@ def build_html(kit: dict[str, Any], script: dict[str, Any], width: int, height: 
     if kit.get("logo"):
         shutil.copyfile(Path(kit["files"]["folder"]) / kit["logo"]["file"], folder / "logo.png")
     shots_html, data_shots = [], []
+    look = look_of(vibe)
     for shot in script["shots"]:
         colours = shot_colors(palette, shot.get("bg_role", "dark"), shot.get("ink_force"))
         size = font_size(shot, portrait, vibe)
@@ -314,7 +485,7 @@ def build_html(kit: dict[str, Any], script: dict[str, Any], width: int, height: 
         key = shot["key"]
         parts = []
         if shot["kind"] == "point" and shot.get("index"):
-            parts.append(f'<div class="idx" data-fit="{key}-idx" data-role="idx" style="font-size:calc(var(--u)*{round(size * 0.42, 1)})">{htmllib.escape(shot["index"])}</div>')
+            parts.append(f'<div class="idx" data-fit="{key}-idx" data-role="idx" style="font-size:calc(var(--u)*{round(size * look["idx"], 1)})">{htmllib.escape(shot["index"])}</div>')
         if shot["kind"] == "logo":
             if kit.get("logo"):
                 parts.append('<div class="logowrap"><div class="ring"></div><img class="logo" src="logo.png" alt=""></div>')
@@ -333,25 +504,37 @@ def build_html(kit: dict[str, Any], script: dict[str, Any], width: int, height: 
             f'style="--bg:{colours["bg"]};--ink:{colours["ink"]};--mark:{colours["mark"]}"><div class="bg"></div>{deco}'
             f'<div class="copy">{"".join(parts)}</div></section>')
         data_shots.append({"key": key, "start": shot["start"], "dur": shot["dur"], "kind": shot["kind"], "mark": colours["mark"],
-                           "drift": float(shot.get("drift", 1.0))})
-    data = {"shots": data_shots, "length_s": script["length_s"], "wipe_s": float(script.get("wipe_s", 0.5)), "fps": fps,
+                           "drift": float(shot.get("drift", 1.0)), "tm": shot.get("tm") or retime(shot, vibe)})
+    data = {"shots": data_shots, "length_s": script["length_s"], "wipe_s": float(script.get("wipe_s", 0.5)), "fps": fps, "bpm": float(script.get("bpm", 96)),
+            "look": {k: look[k] for k in ("reveal", "transition", "deco", "pulse", "slam")},
             "fonts": {"display_weight": int(families["display"].get("weight", 700)), "body_weight": int(families["body"].get("weight", 400))}}
-    width_copy = "84%" if portrait else "70%"
+    width_copy = f"{look['width'][1 if portrait else 0]:g}%"
+    copy_left = f"{look['left']:g}%"
+    upper = "text-transform:uppercase;" if look["upper"] else ""
+    deco_css = {
+        "ring": f""".deco{{position:absolute;right:calc(var(--u)*-230);{"bottom" if portrait else "top"}:calc(var(--u)*-230);width:calc(var(--u)*560);height:calc(var(--u)*560);
+  border:calc(var(--u)*16) solid var(--mark);border-radius:50%;box-sizing:border-box}}""",
+        "hair": f""".deco{{position:absolute;left:{copy_left};right:{copy_left};top:{"13%" if portrait else "12%"};height:calc(var(--u)*3);background:var(--mark);
+  transform-origin:left center;opacity:.9}}""",
+        "bars": f""".deco{{position:absolute;left:-10%;width:240%;bottom:{"22%" if portrait else "14%"};height:calc(var(--u)*{26 if portrait else 34});background:var(--mark);
+  transform:skewY(-6deg);transform-origin:left center}}
+.deco::after{{content:"";position:absolute;left:12%;width:60%;top:calc(var(--u)*{64 if portrait else 78});height:calc(var(--u)*{12 if portrait else 16});background:var(--mark)}}""",
+    }[look["deco"]]
     css = f"""
 {chr(10).join(faces)}
 html,body{{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#000}}
 #stage{{position:absolute;inset:0;overflow:hidden;font-family:"PromoBody","PromoDisplay",sans-serif;font-synthesis:none}}
 .shot{{position:absolute;inset:0;display:none;overflow:hidden;color:var(--ink)}}
 .bg{{position:absolute;inset:0;background:var(--bg)}}
-.copy{{position:absolute;left:8%;top:0;height:100%;width:{width_copy};display:flex;flex-direction:column;justify-content:center;
+.copy{{position:absolute;left:{copy_left};top:0;height:100%;width:{width_copy};display:flex;flex-direction:column;justify-content:center;
   gap:calc(var(--u)*26);will-change:transform}}
 .shot.c .copy{{left:8%;width:84%;align-items:center;text-align:center}}
-.t{{font-family:"PromoDisplay",sans-serif;font-weight:{int(families["display"].get("weight", 700))};line-height:1.06;letter-spacing:-0.012em;color:var(--ink);
+.t{{font-family:"PromoDisplay",sans-serif;font-weight:{int(families["display"].get("weight", 700))};line-height:{look["leading"]};letter-spacing:-0.012em;color:var(--ink);{upper}
   overflow-wrap:break-word;hyphens:manual}}
 .sub{{font-family:"PromoBody",sans-serif;font-weight:{int(families["body"].get("weight", 400))};line-height:1.25;color:var(--ink);overflow-wrap:break-word}}
 .sub.pre{{margin-bottom:calc(var(--u)*-6)}}
 .idx{{font-family:"PromoDisplay",sans-serif;font-weight:{int(families["display"].get("weight", 700))};color:var(--mark);letter-spacing:.08em}}
-.w{{display:inline-block;overflow:hidden;vertical-align:top;padding-bottom:.16em;margin-bottom:-.16em}}
+.w{{display:inline-block;overflow:{"visible" if look["reveal"] == "fade" else "hidden"};vertical-align:top;padding-bottom:.16em;margin-bottom:-.16em}}
 .wi{{display:inline-block;will-change:transform}}
 .rule{{height:calc(var(--u)*10);width:calc(var(--u)*220);background:var(--mark);transform-origin:left center;border-radius:calc(var(--u)*5)}}
 .shot.c .rule{{transform-origin:center}}
@@ -361,8 +544,7 @@ html,body{{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;backgroun
   color:var(--bg);font-family:"PromoDisplay",sans-serif;font-weight:{int(families["display"].get("weight", 700))};font-size:calc(var(--u)*150)}}
 .ring{{position:absolute;left:50%;top:50%;width:calc(var(--u)*260);height:calc(var(--u)*260);border-radius:50%;border:solid var(--mark);
   box-sizing:border-box;transform:translate(-50%,-50%) scale(.3)}}
-.deco{{position:absolute;right:calc(var(--u)*-230);{"bottom" if portrait else "top"}:calc(var(--u)*-230);width:calc(var(--u)*560);height:calc(var(--u)*560);
-  border:calc(var(--u)*16) solid var(--mark);border-radius:50%;box-sizing:border-box}}
+{deco_css}
 #rail{{position:absolute;left:0;right:0;bottom:0;height:calc(var(--u)*10);z-index:99}}
 #rail i{{display:block;height:100%;width:0;background:#fff}}
 """
@@ -380,7 +562,7 @@ def shot_windows(script: dict[str, Any]) -> list[tuple[dict[str, Any], float, fl
     out = []
     for shot in script["shots"]:
         last_shot = shot is script["shots"][-1]
-        first = shot["start"] + SETTLE_S
+        first = shot["start"] + float((shot.get("tm") or {}).get("settle", SETTLE_S)) + 0.02
         last = shot["start"] + shot["dur"] - (0.05 if last_shot else LEAVE_S)
         out.append((shot, first, last))
     return out

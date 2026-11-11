@@ -112,7 +112,12 @@
             "title": "Asset Id",
             "type": "string"
           },
-          "every_n": {
+          "fps": {
+            "default": 4.0,
+            "title": "Fps",
+            "type": "number"
+          },
+          "columns": {
             "anyOf": [
               {
                 "type": "integer"
@@ -122,22 +127,7 @@
               }
             ],
             "default": null,
-            "title": "Every N"
-          },
-          "count": {
-            "default": 12,
-            "title": "Count",
-            "type": "integer"
-          },
-          "columns": {
-            "default": 4,
-            "title": "Columns",
-            "type": "integer"
-          },
-          "width": {
-            "default": 320,
-            "title": "Width",
-            "type": "integer"
+            "title": "Columns"
           },
           "reason": {
             "type": "string",
@@ -1763,7 +1753,7 @@
     },
     {
       "name": "promo_from_url",
-      "description": "Make a promo video from a web page, in 16:9 and 9:16 / hacer un promo en vídeo a partir de una web.\n\nScans the brand (or takes `kit_id` of an earlier brand_scan), writes the shots (the local writing model when one runs, else a template made of the site's\nown phrases), builds every frame in code on an HTML timeline with the brand's colours, fonts and logo, and checks it before rendering: text boxes measured\nin the page at every shot (cut, outside the frame, overlapping, too small), contrast, colours that are not the brand's, shots that do not change, jumps at\nthe cuts, on a 4 fps contact sheet. What fails is repaired by rules and checked again (twice at most). Then each format is rendered frame by frame into ffmpeg\n(formats [\"16:9\",\"9:16\"] = 1920x1080 and 1080x1920; fps 24-60, 60 by default; H.264 yuv420p) with a soundtrack synthesised in code (a pulse at the tempo of\nthe shots, a whoosh on every movement, a hit on the logo) mastered to about -14 LUFS, or over `music_asset_id` (an audio asset of the project) when given.\nlength_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour) or minimal (light, slow). Queues a CPU job (a 30 s promo in both formats takes\na few minutes); wait_s (up to 150) waits. The job result has `videos` {format: asset_id}, `contact_sheets` {format: asset_id} (look at them with studio_show:\nflagged frames have a red or amber border), `script`, `checks` {rounds, fixes, remaining[]}, `files` (ffprobe of each: size, fps, pix_fmt, audio) and `loudness`.\n\nKeywords: promo video, website to video, motion graphics from a url, brand video, ad from a website, promo desde una web, video promocional, anuncio, 9:16, 16:9",
+      "description": "Make a promo video from a web page, in 16:9 and 9:16 / hacer un promo en vídeo a partir de una web.\n\nScans the brand (or takes `kit_id` of an earlier brand_scan), writes the shots (the local writing model when one runs, else a template made of the site's\nown phrases), builds every frame in code on an HTML timeline with the brand's colours, fonts and logo, and checks it before rendering: text boxes measured\nin the page at every shot (cut, outside the frame, overlapping, too small), contrast, colours that are not the brand's, shots that do not change, jumps at\nthe cuts, on a 4 fps contact sheet. What fails is repaired by rules and checked again (twice at most). Then each format is rendered frame by frame into ffmpeg\n(formats [\"16:9\",\"9:16\"] = 1920x1080 and 1080x1920; fps 24-60, 60 by default; H.264 yuv420p) with a soundtrack synthesised in code (a pulse at the tempo of\nthe shots, a whoosh on every movement, a hit on the logo) mastered to about -14 LUFS, or over `music_asset_id` (an audio asset of the project) when given.\nlength_s 6-120; vibe keynote (calm, big type), launch (fast, strong colour), minimal (light, slow), editorial (typographic, lots of space, pages that\ndissolve, soft chords) or energetic (quick cuts, capitals, words that slam in on the beat, four-on-the-floor drive); each has its own synthesised sound.\nEvery text is complete and readable at least 1.5 s before the cut that ends its shot, in both formats (checked on the timeline and on the frames).\nOwn texts instead of the site's: `headlines` (list of lines, one per middle shot) or `script` (the same, one line per row), `hook` (opening line) with `hook_sub`,\n`value` (value proposition line), `cta` (small line of the last shot, \"Discover it at\" by default) and `cta_text` (its big line, the address by default);\nwhat you leave out is taken from the site. Queues a CPU job (a 30 s promo in both formats takes\na few minutes); wait_s (up to 150) waits. The job result has `videos` {format: asset_id}, `contact_sheets` {format: asset_id} (look at them with studio_show:\nflagged frames have a red or amber border), `script`, `checks` {rounds, fixes, remaining[]}, `files` (ffprobe of each: size, fps, pix_fmt, audio) and `loudness`.\n\nKeywords: promo video, website to video, motion graphics from a url, brand video, ad from a website, promo desde una web, video promocional, anuncio, 9:16, 16:9",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1861,6 +1851,93 @@
             "default": 0,
             "title": "Wait S",
             "type": "number"
+          },
+          "headlines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Headlines"
+          },
+          "script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Script"
+          },
+          "hook": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hook"
+          },
+          "hook_sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hook Sub"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          },
+          "cta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cta"
+          },
+          "cta_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cta Text"
           },
           "reason": {
             "type": "string",
