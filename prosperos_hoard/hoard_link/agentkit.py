@@ -342,11 +342,14 @@ def _with_reason(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {**entry, "inputSchema": schema}
 
 
+_SKILL_TOOLS = ("skills_list", "skill_read", "skills_refresh", "skills_library", "skills_assign")
+
+
 def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], call_fn: Callable[..., Any],
                       token_fn: Callable[..., str], instructions: Union[str, Callable[..., str]], app_name: str,
                       error_types: Sequence[type] = (), reasons: bool = False, data_dir: Any = None,
                       tools: Union[Sequence[Tool], Mapping[str, Tool], None] = None, ctx_fn: Optional[Callable[..., Any]] = None,
-                      journal_max_bytes: int = agent_journal.MAX_JOURNAL_BYTES) -> Any:
+                      journal_max_bytes: int = agent_journal.MAX_JOURNAL_BYTES, skills: Any = None) -> Any:
     """The ``APIRouter`` (prefix ``/api/agent``) for the MCP bridge.
 
     * ``GET /tools`` -> ``{"instructions", "tools", "app"}`` (no token: the catalogue is not a secret).
@@ -387,6 +390,13 @@ def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], c
       objects, ``tools_fn`` only returns the catalogue). ``ctx_fn(request)`` gives the context those hooks and ``undo`` get
       (default: ``request.app.state.services``).
 
+    * ``skills``: the app's :class:`hoard_link.skills.Shelf`; left out, the app gets one by itself from its
+      ``faustus-plugin.json`` (:func:`hoard_link.skills.auto`: the manifest's ``skills`` block plus what the person chose;
+      an empty shelf adds nothing to the catalogue), and ``skills=False`` turns that off. Its skills are named at the end of the instructions, the
+      catalogue gains ``skills_list`` / ``skill_read`` / ``skills_refresh`` / ``skills_library`` / ``skills_assign`` (answered
+      here, never by ``call_fn``), ``GET /tools`` also returns ``"skills"`` (the MCP bridge offers them as prompts) and the
+      app gets its skills page at ``/api/agent/skills/page`` (choose, add, take away, write a new one).
+
     Journal lines, the undo answer and the profile rules are described in ``docs/COMMONS.md`` (section *Accountable agents*)."""
     from fastapi import APIRouter, Request
     from fastapi.concurrency import run_in_threadpool
@@ -415,6 +425,20 @@ def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], c
         label: str = Field(default="", max_length=120)
 
     router = APIRouter(prefix="/api/agent")
+    if skills is None:
+        try:
+            from . import skills as _skills
+            skills = _skills.auto(app_name, data_dir)
+        except Exception:  # noqa: BLE001 - an app without skills works as before
+            skills = None
+    elif skills is False:
+        skills = None
+    if skills is not None:
+        try:
+            from . import skills as _skills
+            _skills.mount(router, skills, "/skills", title=app_name)      # the app's skills page: /api/agent/skills/page
+        except Exception:  # noqa: BLE001
+            logging.getLogger(f"hoard_link.agent.{app_name}").exception("skills page not mounted")
     handled = (AppError, *tuple(error_types))
     agent_log = logging.getLogger(f"hoard_link.agent.{app_name}")
     tool_index: dict[str, Tool] = dict(_index(tools)) if tools is not None else {}
@@ -486,6 +510,17 @@ def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], c
     def tools_route(request: Request) -> dict[str, Any]:
         text = _call_with_request(instructions, request) if callable(instructions) else instructions
         listing = list(_call_with_request(tools_fn, request))
+        carried: list[Any] = []
+        if skills is not None:
+            try:
+                carried = skills.list()
+                if carried:                                # an app that carries none shows nothing of this to its agents
+                    taken = {str(entry.get("name")) for entry in listing if isinstance(entry, Mapping)}
+                    listing += [entry for entry in skills.catalog() if entry["name"] not in taken]
+                    extra = skills.instructions()
+                    text = (text or "") + (("\n\n" if text else "") + extra if extra else "")
+            except Exception:  # noqa: BLE001 - the skills never take the tools down with them
+                agent_log.exception("skills shelf failed")
         if reasons:
             listing = [_with_reason(entry) for entry in listing]
             text = (text or "") + ("\n\n" if text else "") + (
@@ -495,6 +530,8 @@ def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], c
         out: dict[str, Any] = {"instructions": text, "tools": listing, "app": app_name}
         if reasons:
             out["reasons_required"] = True
+        if carried:
+            out["skills"] = carried
         return out
 
     # ------------------------------------------------------------------ the call
@@ -543,6 +580,11 @@ def make_agent_router(*, tools_fn: Callable[..., Sequence[Mapping[str, Any]]], c
                 except Exception:  # noqa: BLE001 - the call itself reports a bad argument; no snapshot means no undo
                     capture_failed = True
             outcome["ran"] = True
+            if skills is not None and body.name in _SKILL_TOOLS and tool_index.get(body.name) is None:
+                result = await run_in_threadpool(skills.call, body.name, arguments)
+                outcome["ok"] = True
+                outcome["result"] = result
+                return result
             if inspect.iscoroutinefunction(call_fn):
                 result = await _call_with_request(call_fn, request, body.name, arguments)
             else:

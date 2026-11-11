@@ -1044,3 +1044,7 @@ the source playhead, extract a still locally and connect it as a reference or
 the start of another shot. No model is needed and the original clip stays intact.
 
 For LTX image-to-video, **Refine · 2× resolution** optionally adds native latent upscaling and three refinement steps after the eight-step base. It doubles both dimensions, needs `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` in a native `latent_upscale_models` path, and records the extra stage in the take recipe. The base mode remains the default; refinement does not guarantee correct anatomy, identity or camera motion. API/MCP callers can select `template="ltx23_i2v_hq"`; Spaces accepts `engine="ltx23", refine=true`.
+
+## Skills for the agents that connect
+
+This app carries procedures from the skill library of the family's workspace for the agents that connect to it: prospero: `character-consistency-pack`, `image-composition`, `source-explainer-production`, `deterministic-motion-production`, `ffmpeg-video-editing`, `revision-aware-media`, `local-voice-comparison`, `browser-motion-graphics`; lumiere: `ffmpeg-video-editing`, `revision-aware-media`, `deterministic-motion-production`, `source-explainer-production`. They are named in what an agent reads on connecting, read with `skills_list` and `skill_read`, searched and assigned with `skills_library` and `skills_assign`, and offered as prompts. The person chooses them on the skills page (`/api/agent/skills/page`) or in the hub's Skills tab; the `skills` block of `faustus-plugin.json` holds what the app asks for by default.

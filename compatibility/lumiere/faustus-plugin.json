@@ -129,5 +129,6 @@
       "repository": "https://github.com/Luissalet/ProsperosHoard"
     }
   },
-  "notes": "Capabilities and native data belong to Prospero's Hoard. Modules are enabled explicitly in the owner."
+  "notes": "Capabilities and native data belong to Prospero's Hoard. Modules are enabled explicitly in the owner.",
+  "skills": {"slugs": ["ffmpeg-video-editing", "revision-aware-media", "deterministic-motion-production", "source-explainer-production"], "limit": 4}
 }
