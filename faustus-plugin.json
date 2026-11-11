@@ -14,6 +14,7 @@
   "capabilities": [
     "image generation",
     "video editing",
+    "QR films with exhaustive decoding of every encoded frame",
     "manim scenes (2D maths and 3D animation drawn by code)",
     "promo videos from a web page (brand scan, checked contact sheet, numpy sound)",
     "local frame interpolation",
