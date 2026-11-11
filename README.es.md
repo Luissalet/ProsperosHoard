@@ -1054,3 +1054,7 @@ El montaje permite subir/bajar conexiones de clips. Los16 tipos nativos incluyen
 Extraer fotograma: elige un segundo o usa el instante del reproductor, extrae una
 imagen localmente y conéctala como referencia o inicio de otro plano. No necesita
 un modelo y conserva el clip original.
+
+## Skills para los agentes que se conectan
+
+Esta app lleva procedimientos de la biblioteca de skills del espacio de trabajo de la familia para los agentes que se conectan: prospero: `character-consistency-pack`, `image-composition`, `source-explainer-production`, `deterministic-motion-production`, `ffmpeg-video-editing`, `revision-aware-media`, `local-voice-comparison`, `browser-motion-graphics`; lumiere: `ffmpeg-video-editing`, `revision-aware-media`, `deterministic-motion-production`, `source-explainer-production`. Aparecen en lo que el agente lee al conectarse, se leen con `skills_list` y `skill_read`, se buscan y asignan con `skills_library` y `skills_assign`, y se ofrecen como prompts. Se eligen en la página de skills (`/api/agent/skills/page`) o en la pestaña Skills del hub; el bloque `skills` de `faustus-plugin.json` guarda lo que la app pide por defecto.

@@ -314,6 +314,7 @@ class CatalogBridge:
         self.heartbeat_s = float(heartbeat_s)
         self._base_url = base_url
         self.instructions = instructions
+        self.skills: list[dict[str, Any]] = []
         if root is None:
             root = sys.argv[0] if sys.argv and sys.argv[0] else os.getcwd()
         root_path = Path(root).resolve()
@@ -386,6 +387,7 @@ class CatalogBridge:
         self._catalog = [t for t in tools if isinstance(t, dict) and t.get("name")]
         if isinstance(data, dict) and isinstance(data.get("instructions"), str):
             self.instructions = data["instructions"]
+        self.skills = [s for s in (data.get("skills") or []) if isinstance(s, dict) and s.get("slug")] if isinstance(data, dict) else []
         self._fetched_at = time.monotonic()
         return self._catalog
 
@@ -525,28 +527,73 @@ class CatalogBridge:
             from mcp.server.mcpserver import MCPServer as Base  # type: ignore[no-redef]  # mcp 2.x
             version = 2
         from mcp.types import CallToolResult, ImageContent, TextContent, Tool as MCPTool, ToolAnnotations
+        structured_result = any(name == "structuredContent" or field.alias == "structuredContent"
+                                for name, field in CallToolResult.model_fields.items())
 
         def to_tool(entry: Mapping[str, Any]) -> Any:
             annotations = {k: v for k, v in (entry.get("annotations") or {}).items() if k in _ANNOTATION_KEYS}
-            return MCPTool(name=entry["name"], description=entry.get("description") or "", inputSchema=entry.get("inputSchema") or {"type": "object"},
-                           annotations=ToolAnnotations(**annotations) if annotations else None)
+            schema = entry.get("inputSchema") or {"type": "object"}
+            if "x-timeout-s" in entry:
+                # MCP 1.x keeps Tool extras; 2.x filters them on the wire.
+                # Preserve the existing JSON Schema fallback as well.
+                schema = {**schema, "x-timeout-s": entry["x-timeout-s"]}
+            return MCPTool(name=entry["name"], description=entry.get("description") or "", inputSchema=schema,
+                           annotations=ToolAnnotations(**annotations) if annotations else None,
+                           **({"x-timeout-s": entry["x-timeout-s"]} if "x-timeout-s" in entry else {}))
 
         def to_result(result: BridgeResult) -> Any:
             parts = [TextContent(type="text", text=p["text"]) if p["type"] == "text"
                      else ImageContent(type="image", data=p["data"], mimeType=p["mimeType"]) for p in result.content]
-            return CallToolResult(content=parts, isError=result.is_error)
+            body: dict[str, Any] = {"content": parts, "isError": result.is_error}
+            if structured_result and isinstance(result.body, dict):
+                body["structuredContent"] = result.body
+            return CallToolResult.model_validate(body)
+
+        async def skill_prompts() -> list[Any]:
+            """The app's skills as prompts: an agent's person can call one up by name."""
+            from mcp.types import Prompt
+            await core.tools()
+            return [Prompt(name=f"skill-{s['slug']}", description=str(s.get("description") or "")[:900]) for s in core.skills]
+
+        async def skill_prompt(name: str) -> Any:
+            from mcp.types import GetPromptResult, PromptMessage
+            result = await core.call("skill_read", {"slug": str(name).removeprefix("skill-")})
+            body = result.body if isinstance(result.body, dict) else {}
+            if result.is_error or not body.get("text"):
+                raise ValueError(str(body.get("error") or f"No skill called {name}."))
+            procedure = str(body["text"])
+            if procedure.startswith("---") and "\n---" in procedure[3:]:
+                procedure = procedure[procedure.index("\n---", 3) + 4:].lstrip("\n")       # the front matter is for the library
+            text = f"Follow this procedure with the tools of {core.service}.\n\n{procedure}"
+            return GetPromptResult(description=str(body.get("name") or name),
+                                   messages=[PromptMessage(role="user", content=TextContent(type="text", text=text))])
 
         if version == 1:
             class Server(Base):  # type: ignore[misc, valid-type]
+                def _setup_handlers(self) -> None:
+                    super()._setup_handlers()
+                    from mcp.types import CallToolRequest, ServerResult
+
+                    async def typed_call(request: Any) -> Any:
+                        return ServerResult(await self.call_tool(request.params.name, request.params.arguments or {}))
+
+                    # SDK1.9's call_tool decorator accepts an iterable, rebuilds
+                    # CallToolResult and forces isError=False. Its native typed
+                    # dispatcher preserves the full protocol result instead.
+                    # This same dispatcher contract is retained by SDK1.30.
+                    self._mcp_server.request_handlers[CallToolRequest] = typed_call
+
                 async def list_tools(self) -> list[Any]:
                     return [to_tool(t) for t in await core.tools()]
 
                 async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-                    try:
-                        context = self.get_context()
-                    except Exception:  # noqa: BLE001
-                        context = None
-                    return to_result(await core.call(name, arguments, _progress_of(context)))
+                    return to_result(await core.call(name, arguments, _progress_of(self.get_context())))
+
+                async def list_prompts(self) -> list[Any]:
+                    return await skill_prompts()
+
+                async def get_prompt(self, name: str, arguments: Optional[dict[str, Any]] = None) -> Any:
+                    return await skill_prompt(name)
         else:
             class Server(Base):  # type: ignore[no-redef, misc, valid-type]
                 async def list_tools(self) -> list[Any]:
@@ -554,6 +601,12 @@ class CatalogBridge:
 
                 async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
                     return to_result(await core.call(name, arguments, _progress_of(context)))
+
+                async def list_prompts(self, *args: Any, **kwargs: Any) -> list[Any]:
+                    return await skill_prompts()
+
+                async def get_prompt(self, name: str, arguments: Optional[dict[str, Any]] = None, *args: Any, **kwargs: Any) -> Any:
+                    return await skill_prompt(name)
 
         return Server(name=self.service, instructions=self.instructions or None)
 
