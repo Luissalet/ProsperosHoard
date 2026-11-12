@@ -2,6 +2,8 @@
 
 `website_walkthrough` records a real running website as a CPU job. Supply `url`, `title`, optional `project`, `hold_s` (0.5–10 seconds), and up to 24 steps: `click` with `selector`, `navigate` with `url`, `scroll` with `y`, or `wait`. Each step may carry `caption`. An omitted project creates a new one. Poll `studio_job(job_id)` for the H.264 MP4, contact sheet and actual visited page titles; inspect the saved video with `studio_show`. Captions are drawn over the real page and remain literal text. Local apps are allowed. The capture context starts without existing cookies or login; use the intended reachable preview. Failed steps fail the job and do not publish a partial video. The output recipe retains the requested steps and the actual visited URLs. Faustus calls the same operation from its turn summary and `task_walkthrough`.
 
+In the standalone workspace this operation belongs to the existing Generation module. Enable that module explicitly with the module control or `studio_module_set`; catalogue reads and the Faustus client do not enable it or undo a manual stop.
+
 The primary entry resumes a persistent, connectable Spaces canvas. MCP
 `studio_spaces` supports the `quick_video` starter and explicit video engine,
 fast/full schedule, prompts, references and durations in the same graph.
