@@ -19,8 +19,8 @@ from pathlib import Path
 import sys
 from prosperos_hoard.studio import Studio
 s = Studio(Path(sys.argv[1]))
-assert len(s.tools) == 233
-assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report'} <= s.tools.keys()
+assert len(s.tools) == 234
+assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report', 'website_walkthrough'} <= s.tools.keys()
 assert all(m.phase == 'off' for m in s.modules.values())
 assert 'prosperos_hoard.api' not in sys.modules
 assert 'prosperos_hoard.editing.main' not in sys.modules
@@ -91,7 +91,8 @@ async def test_http_discovery_and_projects_do_not_enable_modules(tmp_path):
     app = create_app(tmp_path, port=64239)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:64239') as client:
         tools = (await client.get('/api/agent/tools')).json()['tools']
-        assert len(tools) == 233
+        assert len(tools) == 234
+        assert 'website_walkthrough' in {tool['name'] for tool in tools}
         assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report'} <= {tool['name'] for tool in tools}
         assert not tmp_path.joinpath('prosperos.sqlite3').exists()
         project = (await client.post('/api/studio/projects', json={'title': 'Corte'})).json()
