@@ -143,7 +143,7 @@ def job_view(job: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in view.items() if v is not None}
 
 
-_RESULT_JOB_TYPES = ("character_identity", "character_caption", "train_lora", "character_sheet", "manim_render", "install_manim_engine", "promo_render")
+_RESULT_JOB_TYPES = ("character_identity", "character_caption", "train_lora", "character_sheet", "manim_render", "install_manim_engine", "promo_render", "website_walkthrough")
 
 
 # ---------------------------------------------------------------- prompts

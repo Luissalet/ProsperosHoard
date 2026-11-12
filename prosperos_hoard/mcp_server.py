@@ -2524,6 +2524,23 @@ def manim_engine(action: str = "status", wait_s: float = 0) -> dict[str, Any]:
 # ------------------------------------------------- promo from a web page --
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def website_walkthrough(url: str, project: Optional[str] = None, title: str = "", steps: Optional[list[dict[str, Any]]] = None,
+                        hold_s: float = 2, wait_s: float = 0) -> dict[str, Any]:
+    """Record a real website journey with captions as a video in Prospero.
+
+    A fresh browser visits url, then runs steps: {action: click, selector, caption},
+    {action: navigate, url, caption}, {action: scroll, y, caption} or {action: wait, caption}.
+    Local apps are supported. hold_s is the readable pause after each step. No text model or GPU.
+    Without project, creates one. Poll studio_job(job_id) for the MP4 and contact sheet;
+    studio_show(asset_id) displays the result. This records real interactions, not a generated promo.
+    The browser has no existing login: choose a reachable app without a login or an authorised preview.
+
+    Keywords: website walkthrough, delivery video, record app, video recorrido, grabar web, resumen de entrega
+    """
+    return _call("POST", "/api/agent/website_walkthrough", json={"url": url, "project": project, "title": title,
+                 "steps": steps or [], "hold_s": hold_s, "wait_s": wait_s})
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 def brand_scan(url: str, project: Optional[str] = None) -> dict[str, Any]:
     """Scan a web page for its brand: logo, three main colours, fonts, headline, value proposition and key phrases / escanear la marca de una web.
 

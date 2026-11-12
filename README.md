@@ -2,6 +2,8 @@
 
 # Prospero's Hoard
 
+**Website walkthrough** records a running app in a real browser, with click, navigation, scroll and pause steps and readable captions. `website_walkthrough(url, steps, title, project?, hold_s?)` queues a CPU job; poll `studio_job` for its MP4 and contact sheet, then inspect with `studio_show`. It reuses the promo video contact sheet and asset library. Local HTTP apps work; the recording browser starts with no existing login. Faustus exposes the same flow from its turn summary and `task_walkthrough` tool. No GPU or text model is involved.
+
 **QR film** creates an MP4 from timed scenes, each carrying its own text or URL and optional visible caption. Choose vertical, horizontal or square output, 1–60 fps, and still, pulse or orbit motion. Every frame of the compressed MP4 is independently decoded and checked against its scene before the video enters the library. Download the video and a JSON report containing every frame's decoded payload index, match result and image hash. Existing videos can be checked through the same screen. MCP exposes `studio_qr_video`, `studio_qr_verify` and paged `studio_qr_report`. Rendering and checking use the CPU, qrcode, zxing-cpp and local ffmpeg. Durations round to whole frames, with at least one frame per scene. Dense payloads and captions that cannot fit receive an explicit error. Verification covers the saved file's pixels. Camera scanning depends on playback size, display and camera conditions.
 
 **Continue from last frame** adds a wired successor beside a video with one included result. Keep the model and duration, describe the next action and generate in place; adding the node does not start a render.

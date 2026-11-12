@@ -9139,6 +9139,84 @@
       }
     },
     {
+      "name": "website_walkthrough",
+      "description": "Record a real website journey with captions as a video in Prospero.\n\nA fresh browser visits url, then runs steps: {action: click, selector, caption},\n{action: navigate, url, caption}, {action: scroll, y, caption} or {action: wait, caption}.\nLocal apps are supported. hold_s is the readable pause after each step. No text model or GPU.\nWithout project, creates one. Poll studio_job(job_id) for the MP4 and contact sheet;\nstudio_show(asset_id) displays the result. This records real interactions, not a generated promo.\nThe browser has no existing login: choose a reachable app without a login or an authorised preview.\n\nKeywords: website walkthrough, delivery video, record app, video recorrido, grabar web, resumen de entrega\n",
+      "inputSchema": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Project"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          },
+          "hold_s": {
+            "default": 2,
+            "title": "Hold S",
+            "type": "number"
+          },
+          "wait_s": {
+            "default": 0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "website_walkthroughArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "brand_scan",
       "description": "Scan a web page for its brand: logo, three main colours, fonts, headline, value proposition and key phrases / escanear la marca de una web.\n\nOpens the page in a real browser (Playwright) and returns the brand kit: `colors` (primary, secondary, accent, from the pixels, the buttons, the\nCSS variables and the theme colour), `palette` (background, text, dark and light ink too), `fonts` (display and body: the site's own file only when its\nlicence allows reusing it, else the closest open font that ships with Prospero, with the reason), `logo` (a trimmed transparent PNG), `headline`,\n`value_prop` and up to five `phrases`. The kit is kept (`id`, use it as `kit_id` in promo_from_url, no new scan) and, with `project`, the logo and a\nbrand board picture are saved as image assets of the project (tag brand; look at the board with studio_show). Takes 5-20 seconds.\n\nKeywords: brand kit, brand scan, logo, palette, fonts, website colors, escanear marca, kit de marca, colores de una web\n",
       "inputSchema": {

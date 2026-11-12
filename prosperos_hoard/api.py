@@ -65,6 +65,7 @@ from . import shot_review as shot_review_mod
 from . import edit_plans as edit_plans_mod
 from . import manim_scene as manim_mod
 from . import promo_web as promo_mod
+from . import website_walkthrough as walkthrough_mod
 from . import promo_brand as promo_brand_mod
 from . import promo_compose as promo_compose_mod
 from . import continuity as continuity_mod
@@ -797,6 +798,15 @@ class PromoBody(BaseModel):
     cta_text: Optional[str] = None            # its big line (the address of the site by default)
 
 
+class WalkthroughBody(BaseModel):
+    url: str
+    project: Optional[str] = None
+    title: str = ""
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    hold_s: float = 2
+    wait_s: float = 0
+
+
 class BrandScanBody(BaseModel):
     url: str
     project: Optional[str] = None
@@ -1402,6 +1412,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue.register("manim_render", lambda job, p: manim_mod.render_job(store, job, p, chat=_manim_chat()))
     queue.register("install_manim_engine", lambda job, p: manim_mod.install_job(store, job, p))
     queue.register("promo_render", lambda job, p: promo_mod.render_job(store, job, p, chat=_manim_chat()))
+    queue.register("website_walkthrough", lambda job, p: walkthrough_mod.render_job(store, job, p))
 
     def _stems_job(job: dict[str, Any], progress) -> dict[str, Any]:
         from . import stems as stems_mod
@@ -5471,6 +5482,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     # -- end Manim scenes
 
     # ---------------------------------------------------- promo from a web page (promo_web.py): brand scan, script, checks, render, sound
+
+    @app.post("/api/agent/website_walkthrough")
+    def agent_website_walkthrough(body: WalkthroughBody):
+        def run():
+            spec = walkthrough_mod.plan(body.url, body.steps, body.title, body.hold_s)
+            project = store.get_project(body.project) if body.project else store.create_project(body.title or "Website walkthrough")
+            job = queue.enqueue("website_walkthrough", "cpu", {**spec, "project_id": project["id"]}, project_id=project["id"])
+            return {"project_id": project["id"], "job": job_result(wait(job, body.wait_s))}
+        return agent("website_walkthrough", body.url[:100], run)
 
     def op_brand_scan(body: BrandScanBody) -> dict[str, Any]:
         return promo_mod.scan_for_project(store, body.url, body.project)
