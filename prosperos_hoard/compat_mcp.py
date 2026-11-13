@@ -191,6 +191,28 @@ async def call_native(module, name, arguments, *, meta=None, client_factory=None
         return CallToolResult(content=[TextContent(type='text', text=json.dumps(failure))], isError=True)
 
 
+def attach_skills(server, module):
+    """Hand out the skills of the app this module was before the merge: its shelf sits beside its data (the manifest under
+    compatibility/ says where), so an agent that still connects by the old name receives them like any other."""
+    try:
+        from prosperos_hoard.hoard_link import skills as _family_skills
+        root = Path(__file__).resolve().parent.parent
+        for manifest in sorted((root / 'compatibility').glob('*/faustus-plugin.json')):
+            data = json.loads(manifest.read_text(encoding='utf-8-sig'))
+            args = (data.get('mcp') or {}).get('args') or []
+            if '--module' not in args or args[args.index('--module') + 1:][:1] != [module]:
+                continue
+            values = dict(data.get('defaults') or {}, COMPAT_DIR=manifest.parent.as_posix())
+            folder = str(values.get('DATA_DIR') or '')
+            for _ in range(4):
+                for key, value in values.items():
+                    folder = folder.replace('{' + key + '}', str(value))
+            return _family_skills.attach(server, data['id'], root=manifest.parent, data_dir=Path(folder).resolve())
+    except Exception:  # noqa: BLE001 - a bridge without skills is still a bridge
+        return None
+    return None
+
+
 async def serve(module):
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -207,6 +229,7 @@ async def serve(module):
         if result.isError:
             raise ValueError('\n'.join(getattr(item, 'text', '') for item in result.content))
         return result.content
+    attach_skills(server, module)
     async with stdio_server() as (reader, writer):
         await server.run(reader, writer, server.create_initialization_options())
 
