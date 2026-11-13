@@ -104,6 +104,8 @@ cd frontend; npm ci; npm run build; cd ..
 .venv\Scripts\python.exe -m prosperos_hoard --demo     # demo data in .\data-demo
 ```
 
+The Hub starts the MCP server from `.venv`, where the package is installed in editable mode (`.venv\Scripts\python.exe -m pip install -e . --no-deps`; `scripts\start.ps1` repeats it when missing), so the program an agent connects to is the code in this repository and cannot fall behind it.
+
 **Linux / macOS.**
 
 ```bash

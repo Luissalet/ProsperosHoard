@@ -70,6 +70,15 @@ if ($installed -ne $LockHash) {
     Set-Content -LiteralPath $Stamp -Value $LockHash -Encoding ascii
 }
 
+# 2b) the package itself, installed from this folder (editable): the MCP server the hub starts from this venv
+# is then the code in this repository and cannot fall behind it.
+$editable = & $VenvPython -c "import importlib.metadata as m;d=m.distribution('prosperos-hoard');print(any('__editable__' in str(f) for f in (d.files or [])))" 2>$null
+if ("$editable".Trim() -ne "True") {
+    Write-Host "Linking the package to this folder..."
+    & $VenvPython -m pip install --disable-pip-version-check --no-deps -e $Root
+    if ($LASTEXITCODE -ne 0) { throw "pip install -e failed" }
+}
+
 $needBuild = $false
 foreach ($view in @(@("frontend", "frontend\dist\index.html"), @("editing_frontend", "prosperos_hoard\editing\static\index.html"))) {
     $dist = Join-Path $Root $view[1]
