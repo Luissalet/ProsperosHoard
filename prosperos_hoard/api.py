@@ -696,6 +696,24 @@ class ExplainerBody(BaseModel):
     bundle: dict[str, Any] | None = None
 
 
+class DirectorBody(BaseModel):
+    action: str = "get"                         # catalog | plan | create | get | edit | run
+    production: str | None = None
+    name: str | None = None
+    idea: str = ""
+    director: dict[str, Any] = Field(default_factory=dict)   # picks, era, move, effects, engine, takes, end_frames, sfx, cast, shots
+    shots: list[Any] | None = None              # create: the shot list (else written from the idea)
+    changes: list[dict[str, Any]] | None = None  # edit: [{id, text?, visual?, action?, framing?, move?, effects?, take?, redo?}]
+    options: dict[str, Any] = Field(default_factory=dict)    # the short's options: language, duration_s, voice, music, timeline...
+    settings: dict[str, Any] | None = None
+    project: str | None = None
+    language: str = "es"
+    duration_s: float = 30
+    shots_wanted: int = 0
+    run: bool = True
+    lang: str = "es"
+
+
 class StockSearchBody(BaseModel):
     query: str
     kind: str = "video"
@@ -6406,6 +6424,65 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             raise HTTPException(404, "Run the narration before exporting subtitles.")
         return FileResponse(path, media_type="application/x-subrip", filename=f"{slug}.srt")
 
+    # ------------------------------------------------------ director films (director.py)
+    def op_director(body: DirectorBody) -> dict[str, Any]:
+        from . import director as director_mod
+        action = body.action
+        if action == "catalog":
+            return director_mod.catalog(body.lang if body.lang in ("es", "en") else "es")
+        if action == "plan":
+            options = {**body.options}
+            language = options.get("language") or body.language
+            duration = float(options.get("duration_s") or body.duration_s)
+            out = director_mod.plan(studio.chat, body.idea, language, duration, body.director, body.shots_wanted)
+            return {"idea": body.idea, **out}
+        if action == "create":
+            if body.project:
+                store.get_project(body.project)
+            d = dict(body.director)
+            if body.shots is not None:
+                d["shots"] = body.shots
+            options = {"language": body.language, "duration_s": body.duration_s, **body.options}
+            name = (body.name or body.idea or "Película").strip()[:80] or "Película"
+            state = director_mod.create(store.data_dir, name, idea=body.idea, director=d, options=options,
+                                        settings=body.settings, project_id=body.project)
+            out: dict[str, Any] = {"director": director_mod.view(state), "production": production_view(state["slug"])}
+            if body.run:
+                out["job"] = engine.job_view(queue_production(state["slug"]))
+            return out
+        if not body.production:
+            raise engine.EngineError("production_required", "give the film's production slug (studio_productions)")
+        if action == "get":
+            return {"director": director_mod.view(productions_mod.load_state(store.data_dir, body.production))}
+        if action == "edit":
+            state = director_mod.update_shots(store.data_dir, body.production, body.changes or [], body.director or None)
+            out = {"director": director_mod.view(state)}
+            if body.run:
+                out["job"] = engine.job_view(queue_production(body.production))
+            return out
+        if action == "run":
+            director_mod.view(productions_mod.load_state(store.data_dir, body.production))
+            return {"job": engine.job_view(queue_production(body.production)), "production": production_view(body.production)}
+        raise engine.EngineError("bad_action", "action is catalog, plan, create, get, edit or run")
+
+    @app.post("/api/director")
+    def director_operation(body: DirectorBody):
+        return op_director(body)
+
+    @app.get("/api/director/catalog")
+    def director_catalog(lang: str = "es"):
+        return op_director(DirectorBody(action="catalog", lang=lang))
+
+    @app.post("/api/agent/studio_director")
+    def agent_director(body: DirectorBody):
+        return agent("studio_director", f"{body.action}:{body.production or body.idea or ''}"[:80], lambda: op_director(body))
+
+    @app.post("/api/agent/studio_director_catalog")
+    def agent_director_catalog(body: DirectorBody):
+        if body.action not in ("catalog", "get"):
+            raise engine.EngineError("bad_action", "studio_director_catalog reads: action catalog or get")
+        return agent("studio_director_catalog", body.production or "catalog", lambda: op_director(body))
+
     def op_short_create(body: ShortCreateBody) -> dict[str, Any]:
         spec = dict(body.options or {})
         if body.topic:
@@ -6436,6 +6513,24 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             previous = state["spec"]["explainer"]["scenes"]
             scenes = [{**(previous[index] if index < len(previous) else {"id": f"scene-{new_id('s')}", "title": "Scene", "source_ids": []}), "narration": seg["text"]} for index, seg in enumerate(segments)]
             explainers.update(store.data_dir, slug, scenes=scenes)
+        elif "director" in state["spec"]:
+            # a directed film keeps its shots: the new lines go to them, one per shot
+            from . import director as director_mod
+            segments = shorts_mod.normalise_script(body.script)["segments"]
+            shots = state["spec"]["director"].get("shots") or []
+            if len(segments) != len(shots):
+                raise engine.EngineError("shot_count_changed", f"this film has {len(shots)} shots and the script {len(segments)} "
+                                                               "lines: add or remove shots with studio_director(action='edit')")
+            director_mod.update_shots(store.data_dir, slug, [{"id": s["id"], "text": seg["text"]}
+                                                             for s, seg in zip(shots, segments) if seg["text"] != s["text"]])
+            title = str(body.script.get("title") or "").strip() if isinstance(body.script, dict) else ""
+            if title:
+                with productions_mod.lock_for(slug):
+                    fresh = productions_mod.load_state(store.data_dir, slug)
+                    if fresh["done"].get("script"):
+                        fresh["done"]["script"]["title"] = title[:300]
+                    fresh["spec"]["title"] = title[:300]
+                    productions_mod.save_state(store.data_dir, fresh)
         else:
             shorts_mod.replace_script(store.data_dir, slug, body.script)
         out: dict[str, Any] = {"production": production_view(slug)}

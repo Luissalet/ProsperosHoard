@@ -30,3 +30,11 @@ Methods followed (no code copied):
     the DIRECTOR.md method of lemomo-ai/lemo-opuscar, MIT. https://github.com/lemomo-ai/lemo-opuscar
   Anti-slideshow lint for HTML motion (three or more opacity-only sections are rejected): the rule of
     bangtutorial/bang-motion, MIT. https://github.com/bangtutorial/bang-motion
+
+Director catalog (prosperos_hoard/director.py)
+  The 28 motion presets (camera, epic camera, effects, mood), the direction axes (genre with the axes it sets,
+  lens, framing, light, film stock, look, grade), the decade looks from 1960 to 2020 and the forgiving reading of a
+  model's shot list are adapted from OpenField by David Wexler / Strangeloop Studios, commit
+  1c364121cd299da3959d7c8e77e12e9295a37943. https://github.com/wexloops/openfield
+  License: MIT, text kept in prosperos_hoard/LICENSE.openfield. Prompt texts kept; names, Spanish labels,
+  formats and the production pipeline are this studio's own.
