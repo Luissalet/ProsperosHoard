@@ -50,7 +50,7 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 "*" = ["_data/*.json", "ui/*.css", "LICENSE", "VENDORED.txt"]
-"prosperos_hoard" = ["studio*.json", "fonts/**/*", "workflows/*.json", "studio_ui/**/*"]
+"prosperos_hoard" = ["studio*.json", "fonts/**/*", "workflows/*.json", "studio_ui/**/*", "LICENSE.openfield"]
 "prosperos_hoard.editing" = ["static/**/*"]
 "prosperos_hoard.style_library" = ["*.json", "LICENSE.*"]
 "prosperos_hoard.editing.foley" = ["NOTICE", "LICENSE.earshot"]

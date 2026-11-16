@@ -1920,6 +1920,9 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
         if "explainer" in load_state(store.data_dir, slug).get("spec", {}):
             from .explainers import ExplainerRun
             runner = ExplainerRun
+        elif "director" in load_state(store.data_dir, slug).get("spec", {}):
+            from .director import DirectorRun  # a directed film, shot by shot (director.py)
+            runner = DirectorRun
         return runner(store, studio, slug, progress, qa_hook=None, stage_hooks=stage_hooks).run()
     return Run(store, studio, slug, progress, qa_hook=qa_hook, stage_hooks=stage_hooks).run()
 

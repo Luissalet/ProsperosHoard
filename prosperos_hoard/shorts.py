@@ -1016,6 +1016,10 @@ def compact_extras(state: dict[str, Any]) -> dict[str, Any]:
     done = state.get("done") or {}
     script = done.get("script") or {}
     out: dict[str, Any] = {"kind": KIND, "topic": (state.get("spec") or {}).get("topic") or None}
+    director = (state.get("spec") or {}).get("director")
+    if isinstance(director, dict):
+        # a directed film (director.py): studio_director_catalog(production=...) shows it shot by shot
+        out["director"] = {"shots": len(director.get("shots") or []), "engine": director.get("engine")}
     if script:
         out["title"] = script.get("title")
         out["segments"] = len(script.get("segments") or [])

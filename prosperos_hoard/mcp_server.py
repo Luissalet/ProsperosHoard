@@ -1340,6 +1340,62 @@ def studio_short_create(topic: Optional[str] = None, script: Optional[Any] = Non
                        "count": count, "project": project})
 
 
+@tool(ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_director_catalog(production: Optional[str] = None, lang: str = "es") -> dict[str, Any]:
+    """What the Director picks from, or one director film shot by shot / catálogo del director.
+
+    Without production: the 28 motion presets (camera, epic camera, effects, mood) with the English words
+    each adds to a clip, the direction axes (genre, lens, framing, light, film stock, look, grade; a genre also
+    sets other axes), the decades 1960-2020 and the video engines. With production: the film's direction and
+    every shot (id, narration line, picture description, action, framing, move, effects, still and its takes,
+    clip, place on the narration's clock) and its renders.
+
+    Keywords: director catalog, motion presets, camera moves, shot list, film direction, catalogo director,
+    movimientos de camara, efectos, planos, direccion
+    """
+    if production:
+        return _call("POST", "/api/agent/studio_director_catalog", json={"action": "get", "production": production})
+    return _call("POST", "/api/agent/studio_director_catalog", json={"action": "catalog", "lang": lang})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def studio_director(action: str = "plan", idea: str = "", production: Optional[str] = None, name: Optional[str] = None,
+                    director: Optional[dict[str, Any]] = None, shots: Optional[list[Any]] = None,
+                    changes: Optional[list[dict[str, Any]]] = None, options: Optional[dict[str, Any]] = None,
+                    settings: Optional[dict[str, Any]] = None, project: Optional[str] = None, language: str = "es",
+                    duration_s: float = 30, shots_wanted: int = 0, run: bool = True) -> dict[str, Any]:
+    """Director: an idea becomes a narrated short film, shot by shot, all local / dirigir una película corta.
+
+    action="plan": the shot list for `idea` (the family's language model writes it; nothing is made yet):
+    each shot has `text` (the narrator's line), `visual` (English first frame), `action` (what moves),
+    `framing` and `move` (ids from studio_director_catalog). Show it to the user and change it as asked.
+    action="create": makes the film from `idea` or from `shots` (the plan, edited): every narration line
+    voiced with word-timed subtitles, one generated still per shot (Qwen-Image when installed; `takes` stills
+    per shot in one batch), every shot animated (LTX 2.3, Wan 2.2 14B or 5B), music, a whoosh on every cut,
+    the cut and its render. It pauses at the animatic (stills on the voice) unless settings
+    {"animatic_autocontinue": true}; then studio_production_continue.
+    director: {"picks": {"genre": "noir", "lens": "anamorphic", "light": "neon", "film": "500t",
+    "look": "dream", "grade": "teal"}, "era": 1980, "move": "push-in" (default camera move),
+    "effects": ["fog-roll"] (on every shot), "engine": "auto"|"ltx23"|"wan14b"|"wan", "takes": 1-4,
+    "end_frames": true (each clip ends on the next shot's still), "sfx": true, "cast": ["Nombre"]
+    (@Nombre references from the project's cast)}.
+    options: the narrated short's (voice, music {"mode": "compose", "tags": ...}, captions,
+    timeline {"aspects": ["16:9"], "qualities": ["preview"]}); language and duration_s are top-level.
+    action="edit" (production): changes [{id, text|visual|action|framing|move|effects|cast|animate},
+    {id, redo: "image"|"clip"}, {id, take: asset_id}, {id, delete: true}, {after: id|null, text, ...},
+    {id, move_to: n}]; `director` here patches the shared direction. Only what changed is remade; run=true
+    queues it. action="run" resumes a film. Read it with studio_director_catalog(production=...).
+
+    Keywords: director, story to video, idea to film, short film, shot list, storyboard, camera moves,
+    director de video, historia a video, cortometraje, planos, guion, narrador, subtitulos
+    """
+    return _call("POST", "/api/agent/studio_director",
+                 json={"action": action, "idea": idea, "production": production, "name": name, "director": director or {},
+                       "shots": shots, "changes": changes, "options": options or {}, "settings": settings,
+                       "project": project, "language": language, "duration_s": duration_s,
+                       "shots_wanted": shots_wanted, "run": run})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_production_segments(production: str, text: Optional[str] = None,
                                segments: Optional[list[dict[str, Any]]] = None,
