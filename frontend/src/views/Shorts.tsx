@@ -6,6 +6,7 @@ import {
 import { useT, type MessageKey } from "../i18n";
 import { Modal, useApp } from "../components/ui";
 import { ExplainerScenes } from "./Explainer";
+import { DirectorShots } from "./Director";
 
 const SOURCES = ["auto", "stock", "generate", "mix"] as const;
 const MUSIC = ["none", "compose", "library"] as const;
@@ -191,6 +192,7 @@ export function ShortDetail({ state, onChanged }: { state: ProductionState; onCh
   return (
     <>
       {!!state.spec.explainer && <ExplainerScenes state={state} onChanged={onChanged}/>}
+      {!!state.spec.director && <DirectorShots state={state} onChanged={onChanged} />}
       {script && (
         <div className="card">
           <h2>

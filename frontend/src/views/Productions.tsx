@@ -12,6 +12,7 @@ import { errorText, jobMessage, lineageEvent, stageName, translateText } from ".
 import { LookPanel } from "../components/LookPanel";
 import { ErrorNote, Modal, timeAgo, useApp, useAsync } from "../components/ui";
 import { ShortDetail, ShortModal } from "./Shorts";
+import { DirectorModal } from "./Director";
 import { VideoModal } from "./VideoModal";
 import { StoryboardCard, liveRun } from "./Storyboard";
 import { SongTrackCard } from "./SongTrack";
@@ -931,8 +932,10 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
   const [newShort, setNewShort] = useState(false);
   const [newExplainer, setNewExplainer] = useState(false);
   const [newVideo, setNewVideo] = useState(false);
+  const [newFilm, setNewFilm] = useState(false);
   const modals = (
     <>
+      {newFilm && <DirectorModal onClose={() => setNewFilm(false)} onStarted={(s) => { setNewFilm(false); openSlug(s); }} />}
       {newVideo && <VideoModal projectId={projectId} onClose={() => setNewVideo(false)} onStarted={(s) => { setNewVideo(false); openSlug(s); }} />}
       {newShort && <ShortModal initialExplanatory={newExplainer} onClose={() => { setNewShort(false); setNewExplainer(false); }} onStarted={(s) => { setNewShort(false); setNewExplainer(false); openSlug(s); }} />}
     </>
@@ -953,7 +956,7 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
         <div><h1>{title}</h1><p>{projectId ? t("videoLeadText") : t("productionsLead")}</p></div>
         <div className="actions">
           <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
-          <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button>
+          <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button><button className="btn" onClick={() => setNewFilm(true)}><Film size={15} /> {lang === "es" ? "Nueva película dirigida" : "New directed film"}</button>
         </div>
       </div>
       {modals}
@@ -964,7 +967,7 @@ export function ProductionsView({ projectId }: { projectId?: string }) {
           <p className="muted">{t("prodStartHere")}</p>
           <div className="row" style={{ gap: 8, justifyContent: "center" }}>
             <button className="btn primary" onClick={() => setNewVideo(true)}><Clapperboard size={15} /> {t("newVideo")}</button>
-            <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button>
+            <button className="btn" onClick={() => { setNewExplainer(false); setNewShort(true); }}><Megaphone size={15} /> {t("newShort")}</button><button className="btn" onClick={() => { setNewExplainer(true); setNewShort(true); }}>{lang === "es" ? "Nuevo explicativo" : "New explainer"}</button><button className="btn" onClick={() => setNewFilm(true)}><Film size={15} /> {lang === "es" ? "Nueva película dirigida" : "New directed film"}</button>
           </div>
         </div>
       ) : (
