@@ -58,6 +58,7 @@ Typical uses:
 - Treatment-first mode (logline, structures, shot list, beat sheet) before anything renders; an animatic of the stills cut like the final before expensive clips; a QA director that checks flat or noisy stills, edge bands, exposure jumps, frozen clips and lyric coverage; a continuity bible with segment repair.
 - Recipes: turn a finished production into a template with a `{lead}` slot and recreate it with another character.
 - Narrated shorts from a topic or a script, with Pexels and Pixabay stock footage (free API key per provider) imported with its credit.
+- Director: an idea becomes a narrated short film shot by shot. The language model writes the shot list (narration line, first frame, action, framing, camera move); the shared direction (genre, lens, light, film stock, look, grade, decade from 1960 to 2020) goes into every shot; 28 motion presets (camera, epic camera, effects, mood); one or more stills per shot, every shot animated with LTX 2.3 or Wan 2.2, optional clips that end on the next shot's still, a whoosh on every cut, subtitles from the voice and music. Each shot is edited on its own and only what changed is remade.
 
 **Timeline and editing**
 - Beat-synced auto-cut into an editable timeline, ffmpeg renderer with Ken Burns moves, transitions that keep cuts on the beat, lyric captions, colour grade and finishing effects, and a Spotify Canvas loop.
@@ -136,7 +137,7 @@ Results are compact and id-first; pictures come back only with `include_image=tr
 | Audio and voice | `studio_compose`, `studio_analyze_audio`, `studio_stems`, `studio_voice`, `voice_*` (engines, create, list, speak, transcribe, audiobook, dub, retake words) |
 | Design | `studio_design`, `studio_photocard_set`, `studio_board`, `studio_style_cards` |
 | Timeline and render | `studio_timeline`, `studio_render`, `studio_export_timeline`, `studio_canvas`, `studio_style_profile_*`, `studio_production_finishing`, `production_export_lumiere` |
-| Productions | `studio_production*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_stock_search` |
+| Productions | `studio_production*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_director`, `studio_director_catalog`, `studio_stock_search` |
 | Character kit | `studio_character_sheet`, `_dataset`, `_train`, `_adapters`, `_takes`, `_pack`, `_library` |
 | Web video | `brand_scan`, `promo_from_url`, `contact_sheet`, `website_walkthrough`, `studio_qr_video`, `studio_qr_verify`, `studio_explainer`, `studio_spatial` |
 | Assets and jobs | `studio_assets`, `studio_show`, `studio_lineage`, `studio_asset_update`, `studio_import`, `studio_download_media`, `studio_delete_assets`, `studio_trash`, `studio_jobs`, `studio_job`, `studio_cancel_job`, `studio_retry_job` |
