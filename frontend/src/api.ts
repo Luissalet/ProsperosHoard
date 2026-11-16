@@ -1042,6 +1042,29 @@ export interface ExplainerSource { id: string; title: string; text: string; refe
 export interface PortableFigure { format: "vitruvius.figure/1"; document_id: string; revision: number; title?: string; page_id?: string | null; state_id?: string | null; content: Record<string, unknown>; origin?: Record<string, string>; preview: { mime: "image/png"; data: string } }
 export interface ExplainerScene { id: string; title: string; narration: string; body: string; source_ids: string[]; source_reviewed?: boolean; asset_id?: string; graphic?: Record<string, unknown>; figure?: PortableFigure | null }
 export interface ExplainerProject { production: string; revision: number; sources: ExplainerSource[]; scenes: ExplainerScene[]; review_needed?: string[] }
+export interface DirectorOption { id: string; name: string; prompt: string; sets?: Record<string, string> }
+export interface DirectorCatalog {
+  presets: { id: string; category: "camera" | "epic" | "vfx" | "mood"; name: string; prompt: string }[];
+  categories: Record<string, string>;
+  moves: string[];
+  effects: string[];
+  axes: { id: string; name: string; options: DirectorOption[] }[];
+  eras: { year: number; prompt: string }[];
+  engines: { id: string; name: string }[];
+}
+export interface DirectorShot {
+  id: string; text: string; visual: string; action: string; framing: string; move: string; effects: string[];
+  cast: string[]; animate: boolean; still?: string | null; takes?: string[]; clip?: string | null;
+  start_s?: number | null; duration_s?: number | null;
+}
+export interface DirectorDirection {
+  picks: Record<string, string>; era: number | null; move: string; effects: string[]; engine: string; takes: number;
+  end_frames: boolean; sfx: boolean; cast: string[];
+}
+export interface DirectorFilm {
+  production: string; name: string; status: string; stage?: string | null; title?: string | null; idea?: string;
+  direction: DirectorDirection; shots: DirectorShot[]; renders: Record<string, Record<string, string> | undefined>; message?: string | null;
+}
 
 export interface ShortShot { key: string; segment: number; index: number; start_s: number; duration_s: number }
 
@@ -1768,6 +1791,14 @@ export const api = {
                         settings?: Record<string, unknown>; count?: number; project?: string }) =>
     request<{ production: ProductionView; job: Job } | { items: { production: ProductionView; job: Job }[] }>("POST", "/generation/api/shorts", body),
   explainer: (body: Record<string, unknown>) => request<{ production: ProductionView; explainer: ExplainerProject; job?: Job }>("POST", "/generation/api/explainers", body),
+  directorCatalog: (lang: string) => request<DirectorCatalog>("GET", `/generation/api/director/catalog?lang=${lang}`),
+  directorPlan: (body: Record<string, unknown>) =>
+    request<{ idea: string; shots: DirectorShot[]; source: "llm" | "split"; note?: string; title?: string }>("POST", "/generation/api/director", { ...body, action: "plan" }),
+  directorCreate: (body: Record<string, unknown>) =>
+    request<{ director: DirectorFilm; production: ProductionView; job?: Job }>("POST", "/generation/api/director", { ...body, action: "create" }),
+  directorFilm: (production: string) => request<{ director: DirectorFilm }>("POST", "/generation/api/director", { action: "get", production }),
+  directorEdit: (production: string, changes: Record<string, unknown>[], director?: Record<string, unknown>) =>
+    request<{ director: DirectorFilm; job?: Job }>("POST", "/generation/api/director", { action: "edit", production, changes, director, run: true }),
   shortScript: (slug: string, script?: unknown, run = true) =>
     request<{ production?: ProductionView; job?: Job; script?: ShortScript }>("PUT", `/generation/api/productions/${slug}/script`, { production: slug, script, run }),
   stockStatus: () => request<StockStatus>("GET", "/generation/api/backend/stock"),
