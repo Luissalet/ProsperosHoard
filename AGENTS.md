@@ -258,6 +258,13 @@ Qué hacer cuando el usuario pide, con sus palabras:
   enséñale el render (`studio_show`) y dale el `publish` tal cual (título,
   descripción, hashtags y créditos): los créditos del metraje no se quitan.
 - **«Hazme tres versiones»**: `count=3` en `studio_short_create`.
+- **«Hazme una película de X» / «cuéntalo en planos» / «dirígelo tú»**: `studio_director(action="plan", idea=X)` y
+  enséñale la lista de planos (frase, imagen, movimiento); aplica sus cambios en `shots` y
+  `studio_director(action="create", shots=..., director={"picks": {"genre": ...}, "engine": ...})`.
+  Los ids de presets, ejes y motores salen de `studio_director_catalog()`. Para un plano concreto
+  («cambia el plano 2», «otra imagen del 3», «que el 4 sea un travelling»): `studio_director(action="edit",
+  production, changes=[{"id": "p2", ...}])`; solo se rehace ese plano. Mira el resultado con
+  `studio_director_catalog(production=...)` y `studio_show` antes de describirlo.
 - **«Sigue esta serie / respeta lo que decidimos en los episodios anteriores»**:
   reutiliza el mismo `project` en `studio_short_create` y añade
   `options={"use_project_memory": true, "continuity_notes": [...]}` si hay
