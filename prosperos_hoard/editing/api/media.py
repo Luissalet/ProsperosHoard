@@ -161,6 +161,28 @@ def fix_words(request: Request, media_id: str, body: WordsBody):
     return analyze.update_words(services(request), media_id, body.changes)
 
 
+class EnhanceBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    denoise: Optional[str] = None
+    upscale: Optional[float] = None
+    sharpen: Optional[float] = None
+    interpolate: Optional[str] = None
+    interpolate_fps: Optional[int] = None
+    hdr: Optional[bool] = None
+    gpu: Optional[int] = None
+
+
+@router.get("/enhance/info")
+def enhance_info(request: Request):
+    return tool(request, "enhance_info")
+
+
+@router.post("/{media_id}/enhance")
+def media_enhance(request: Request, media_id: str, body: EnhanceBody):
+    """Make an enhanced copy of the video (a background job)."""
+    return tool(request, "media_enhance", media=media_id, **body.model_dump(exclude_none=True))
+
+
 @router.post("/{media_id}/analyze")
 def run_analyze(request: Request, media_id: str, body: AnalyzeBody):
     return {"jobs": analyze.schedule(services(request), media_id, body.kinds, force=body.force, language=body.language,

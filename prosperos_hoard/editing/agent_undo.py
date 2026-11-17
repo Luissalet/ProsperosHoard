@@ -29,7 +29,7 @@ Undoable: project_create, project_from_timeline, short_from_range, template_save
 multicam_create, multicam_switch, multicam_auto, music_pick, broll_suggest, clip_freeze, timeline_nest, plan_create, plan_apply,
 media_import, media_shared, media_receive, media_tag, transcript_fix, speakers_edit, subtitles_translate (fix and delete), settings.
 
-Not undoable (no handler, reported as such): media_delete, project_delete, media_analyze, clip_stabilize, render_start, frame_snapshot,
+Not undoable (no handler, reported as such): media_delete, project_delete, media_analyze, clip_stabilize, media_enhance, clip_enhance, enhance_benchmark, render_start, frame_snapshot,
 project_contact_sheet, subtitles_export, project_export_otio, job_cancel and the creative_* tools. A few undoable tools have a part that
 cannot be taken back (a translation or a voice separation produced by a background job, a refresh of a shared original): that single call
 is reported as not undoable with the reason.
@@ -651,5 +651,5 @@ DRAFT_SAFE = {
     "project_create", "project_from_timeline", "short_from_range", "template_save",
     "timeline_edit", "timeline_apply_text", "cut_proposals", "timeline_history", "timeline_nest", "edit_command", "text_cut", "plan_create",
     "multicam_create", "multicam_switch", "multicam_auto", "music_pick", "broll_suggest", "clip_freeze", "clip_stabilize",
-    "frame_snapshot", "project_contact_sheet",
+    "media_enhance", "clip_enhance", "enhance_benchmark", "frame_snapshot", "project_contact_sheet",
 }

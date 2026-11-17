@@ -41,7 +41,7 @@ function useJobs(notify, t) {
     if (!job || emitted.current.has(job.id)) return;
     emitted.current.add(job.id);
     if (job.state === "failed") notify(`${job.label || job.kind}: ${job.error || "error"}`, "error");
-    else if (job.state === "done" && ["render", "preview_render", "copy_cut", "stabilize", "plan_apply"].includes(job.kind)) notify(`${job.label || job.kind} ✓`, "ok");
+    else if (job.state === "done" && ["render", "preview_render", "copy_cut", "stabilize", "enhance_clip", "enhance_media", "plan_apply"].includes(job.kind)) notify(`${job.label || job.kind} ✓`, "ok");
     for (const fn of listeners.current) {
       try { fn(job); } catch { /* a listener must not break the others */ }
     }

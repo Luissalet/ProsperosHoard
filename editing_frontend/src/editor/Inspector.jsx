@@ -117,6 +117,39 @@ function KeyedEqRow({ clip, prop, label, local, enabled, base, step, onStatic })
   );
 }
 
+function EnhanceSection({ actions }) {
+  const { t } = useApp();
+  const [fx, setFx] = useState({ denoise: "off", upscale: 0, sharpen: 0, interpolate: "off", hdr: false });
+  const set = (patch) => setFx((cur) => ({ ...cur, ...patch }));
+  const any = fx.denoise !== "off" || fx.upscale > 0 || fx.sharpen > 0 || fx.interpolate !== "off" || fx.hdr;
+  return (
+    <Sec title={t("enhance_title")}>
+      <div data-testid="enhance-section">
+        <Row label={t("enhance_denoise")}>
+          <select className="field" value={fx.denoise} aria-label={t("enhance_denoise")} onChange={(e) => set({ denoise: e.target.value })}>
+            {["off", "light", "medium", "strong"].map((x) => <option key={x} value={x}>{t(`enhance_denoise_${x}`)}</option>)}
+          </select>
+        </Row>
+        <Row label={t("enhance_upscale")}>
+          <select className="field" value={String(fx.upscale)} aria-label={t("enhance_upscale")} onChange={(e) => set({ upscale: Number(e.target.value) })}>
+            {[0, 1.5, 2, 3].map((x) => <option key={x} value={String(x)}>{x === 0 ? t("enhance_off") : `×${x}`}</option>)}
+          </select>
+        </Row>
+        <SliderRow label={t("enhance_sharpen")} value={fx.sharpen} min={0} max={1} step={0.05} decimals={2} defaultValue={0} onChange={(v) => set({ sharpen: v })} />
+        <Row label={t("enhance_interpolate")}>
+          <select className="field" value={fx.interpolate} aria-label={t("enhance_interpolate")} onChange={(e) => set({ interpolate: e.target.value })}>
+            {["off", "blend", "mci"].map((x) => <option key={x} value={x}>{t(`enhance_interpolate_${x}`)}</option>)}
+          </select>
+        </Row>
+        <Row label={t("enhance_hdr")}><Toggle checked={fx.hdr} onChange={(v) => set({ hdr: v })} label="" /></Row>
+        <button type="button" className="btn btn-sm" disabled={!any} onClick={() => actions.enhance({ ...fx, upscale: fx.upscale || undefined, sharpen: fx.sharpen || undefined, hdr: fx.hdr || undefined })}>
+          <Icon name="stabilize" size={14} />{t("enhance_run")}
+        </button>
+      </div>
+    </Sec>
+  );
+}
+
 function EffectsSection({ clip, ids }) {
   const { t, presets } = useApp();
   const ed = useEd();
@@ -618,6 +651,8 @@ function ClipInspector({ clip, track, media }) {
       {!isImage || isText ? null : null}
       <EffectsSection clip={clip} ids={[clip.id]} />
       <KeyframesSection clip={clip} />
+
+      {!isText && !isImage && !isAudioTrack && clip.type === "media" ? <EnhanceSection actions={actions} /> : null}
 
       <Sec title={t("insp_actions")}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>

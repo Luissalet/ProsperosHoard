@@ -155,6 +155,16 @@ revision, render, storyboard, sound preview, treatment, cues and facts. Refuses 
 export of it is queued or running and with `html_motion_in_use` while a library media still reads one of its
 renders (the library imports a render where it is). Like every editing tool it needs the editing module ON.
 
+Video enhancement (Montaje, Lumiere): a saved video or the span a timeline clip uses is enhanced on a spare GPU: noise reduction (`light` on the CPU,
+`medium` and `strong` on the GPU), upscaling ×1.5/×2/×3 (up to 3840 px wide), sharpening 0..1, frame-rate interpolation (`blend`, or `mci` motion
+compensated and slow; target `interpolate_fps`) and HDR10 (HEVC Main10, PQ, BT.2020). Tools: `enhance_info` (effects, GPU, Vulkan and NVENC on this
+machine), `media_enhance` (a library video becomes "<name> (mejorado)", the original stays), `clip_enhance` (the clip is pointed at the enhanced span
+and keeps its length), `enhance_benchmark` (ms per frame of the baseline and of each effect, and whether the chain keeps up with the frame rate);
+all three run as jobs (`job_status`) and need at least one effect. REST: `POST /editing/api/media/{id}/enhance`, `POST /editing/api/projects/{id}/enhance`,
+`GET /editing/api/media/enhance/info`; the inspector of a video clip has a "Mejorar vídeo" section. The chain is ffmpeg: Vulkan filters
+(libplacebo, `nlmeans_vulkan`) and NVENC on the GPU in `LUMIERE_ENHANCE_GPU` (default 2, the Vulkan and NVENC index), x264/x265 and CPU filters when
+Vulkan or NVENC are missing; what could not be applied is in the job result under `skipped`. Like every editing tool it needs the editing module ON.
+
 ## Biblia de continuidad, reparación de tramos y revisión de uniones (03-11-2026)
 
 Qué es: una **biblia de continuidad** por producción (`prosperos_hoard/continuity.py`, guardada en

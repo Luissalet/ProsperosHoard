@@ -364,6 +364,24 @@ def stabilize(request: Request, project_id: str, body: StabilizeBody):
     return tool(request, "clip_stabilize", project=project_id, clip=body.clip, smoothing=body.smoothing)
 
 
+class EnhanceClipBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    clip: str
+    denoise: Optional[str] = None
+    upscale: Optional[float] = None
+    sharpen: Optional[float] = None
+    interpolate: Optional[str] = None
+    interpolate_fps: Optional[int] = None
+    hdr: Optional[bool] = None
+    gpu: Optional[int] = None
+
+
+@router.post("/projects/{project_id}/enhance")
+def enhance_clip(request: Request, project_id: str, body: EnhanceClipBody):
+    """Enhance the clip's source span and point the clip at the enhanced copy (a background job)."""
+    return tool(request, "clip_enhance", project=project_id, **body.model_dump(exclude_none=True))
+
+
 @router.post("/projects/{project_id}/nest")
 def nest(request: Request, project_id: str, body: NestBody):
     """Move the selected clips into a new project and leave one sequence clip in their place."""

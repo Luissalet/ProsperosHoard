@@ -81,6 +81,18 @@ export function useActions(ed, { notify, fail, t, jobs }) {
     } catch (e) { fail(e); }
   }, [selectedClips, projectId, notify, t, jobs, reload, fail]);
 
+  const enhance = useCallback(async (effects) => {
+    const sc = selectedClips[0];
+    if (!sc) return;
+    try {
+      const job = await api.enhanceClip(projectId, { clip: sc.clip.id, ...effects });
+      notify(t("enhance_started"));
+      jobs.poke();
+      const jid = job?.job || job?.id;
+      if (jid) jobs.watch(jid).then(() => reload());
+    } catch (e) { fail(e); }
+  }, [selectedClips, projectId, notify, t, jobs, reload, fail]);
+
   const copy = useCallback(() => {
     if (!selectedClips.length) return false;
     const sorted = [...selectedClips].sort((a, b) => a.clip.start - b.clip.start);
@@ -108,5 +120,5 @@ export function useActions(ed, { notify, fail, t, jobs }) {
 
   const nudge = useCallback((frames) => pb.seek(pb.t + frames * frameMs(doc.canvas.fps)), [pb, doc.canvas.fps]);
 
-  return { selectedClips, addMedia, split, remove, duplicate, closeGaps, addMarker, detachAudio, freeze, stabilize, nudge, copy, cut, paste };
+  return { selectedClips, addMedia, split, remove, duplicate, closeGaps, addMarker, detachAudio, freeze, stabilize, enhance, nudge, copy, cut, paste };
 }
