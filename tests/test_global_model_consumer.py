@@ -74,6 +74,44 @@ def test_global_planner_rejects_partial_or_truncated_stream(ending):
         list(_stream_text(lines,'openai',strict=True))
 
 
+def test_descriptor_follows_faustus_to_the_spark(monkeypatch):
+    """With Faustus off on the PC and the Hub saying it lives on a Spark, the descriptor comes from the Spark."""
+    import socket, threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from prosperos_hoard.hoard_link import where
+
+    def serve(routes):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                body = routes.get(self.path)
+                self.send_response(200 if body is not None else 404)
+                self.send_header('Content-Type', 'application/json'); self.end_headers()
+                self.wfile.write(json.dumps(body if body is not None else {}).encode())
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    real_fetch = where.fetch
+    faustus = serve({'/api/health': {'status': 'healthy'},
+                     '/api/global-model': dict(endpoint_id='sparks-a', model='spark-model', connection_revision='r1',
+                                               chat_path='/api/global-model/v1/chat/completions', protocol='openai', vision=True)})
+    spark = f'http://127.0.0.1:{faustus.server_port}'
+    hub = serve({'/api/placement': {'location': 'sparks', 'job': {'running': False}, 'urls': {'faustus': spark}}})
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0)); dead = f'http://127.0.0.1:{sock.getsockname()[1]}'
+    try:
+        monkeypatch.setattr(where, 'fetch', real_fetch)
+        where.forget()
+        config = LinkConfig(faustus_urls=(dead,), hub_url=f'http://127.0.0.1:{hub.server_port}')
+        got = global_llm.descriptor(config)
+        assert got['url'] == spark + '/api/global-model/v1/chat/completions' and got['model'] == 'spark-model'
+    finally:
+        where.forget()
+        for server in (faustus, hub):
+            server.shutdown(); server.server_close()
+
+
 def test_global_planner_accepts_completed_content():
     lines=['data: {"choices":[{"delta":{"content":"{}"}}]}',
            'data: {"choices":[{"finish_reason":"stop","delta":{}}]}','data: [DONE]']
