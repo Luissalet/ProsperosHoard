@@ -55,7 +55,8 @@ def operation(function):
 def descriptor(config):
     if not config.faustus_urls:
         raise RuntimeError('Faustus no tiene un servicio global configurado.')
-    origin = config.faustus_urls[0].rstrip('/')
+    # Faustus may live on a Spark (the Hub's "Run on"): the first address that answers, not always the PC's.
+    origin = config.faustus_origin().rstrip('/')
     headers = {'Authorization':'Bearer '+config.faustus_token} if config.faustus_token else {}
     with httpx.Client(timeout=10, trust_env=False) as client:
         response = client.get(origin+'/api/global-model', headers=headers)
