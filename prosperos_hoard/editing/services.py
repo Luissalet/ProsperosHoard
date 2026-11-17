@@ -98,6 +98,10 @@ class Services:
         self.jobs.register("render", lambda ctx: runner.render_job(self, ctx))
         self.jobs.register("copy_cut", lambda ctx: runner.copy_cut_job(self, ctx))
         self.jobs.register("stabilize", lambda ctx: derive.stabilize_job(self, ctx))
+        from . import enhance
+        self.jobs.register("enhance_media", lambda ctx: enhance.media_job(self, ctx))
+        self.jobs.register("enhance_clip", lambda ctx: enhance.clip_job(self, ctx))
+        self.jobs.register("enhance_benchmark", lambda ctx: enhance.benchmark_job(self, ctx))
         self.jobs.register("plan_apply", lambda ctx: plan_mod.apply_job(self, ctx))
         self.jobs.register("sequence", lambda ctx: sequences.prepare_job(self, ctx))
         self.jobs.register("translate_subtitles", lambda ctx: subtitles_mod.translate_job(self, ctx))

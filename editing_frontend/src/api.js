@@ -86,6 +86,7 @@ export const api = {
   multicamFrameUrl: (id, group, angle, t, width, stamp) => `/editing/api/projects/${e(id)}/multicam/frame?group=${e(group)}&angle=${e(angle)}&t=${Math.round(t)}&width=${Math.round(width)}&v=${stamp ?? ""}`,
   freeze: (id, body) => request("POST", `/editing/api/projects/${e(id)}/freeze`, { body }),
   stabilize: (id, body) => request("POST", `/editing/api/projects/${e(id)}/stabilize`, { body }),
+  enhanceClip: (id, body) => request("POST", `/editing/api/projects/${e(id)}/enhance`, { body }),
   musicPick: (id, params) => request("GET", `/editing/api/projects/${e(id)}/music`, { params }),
   broll: (id, body) => request("POST", `/editing/api/projects/${e(id)}/broll`, { body }),
   templateSave: (id, body) => request("POST", `/editing/api/projects/${e(id)}/template`, { body }),

@@ -61,6 +61,7 @@ Usos típicos:
 
 **Línea de tiempo y edición**
 - Corte automático al compás en una línea de tiempo editable, renderizador ffmpeg con movimientos Ken Burns, transiciones que mantienen los cortes en el pulso, subtítulos de letra, etalonaje y efectos de acabado, y bucle para Spotify Canvas.
+- Mejora de vídeo de clips guardados en una GPU libre (`media_enhance`, `clip_enhance`, `enhance_benchmark`): reducción de ruido, superresolución, nitidez, más fotogramas e HDR10, con el coste por fotograma medido.
 - Planes de edición declarativos compilados a pasos exactos de ffmpeg, la línea de tiempo como texto estable con ediciones comprobadas por revisión, y exportación al editor de vídeo como FCP7 XML y EDL (Lumiere's Hoard la abre directamente).
 - Módulos nativos completos de edición de línea de tiempo y subtítulos y motores creativos, cada uno apagado hasta que lo activas. Ver [docs/STUDIO.md](docs/STUDIO.md).
 

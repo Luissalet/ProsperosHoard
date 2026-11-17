@@ -62,6 +62,7 @@ Typical uses:
 
 **Timeline and editing**
 - Beat-synced auto-cut into an editable timeline, ffmpeg renderer with Ken Burns moves, transitions that keep cuts on the beat, lyric captions, colour grade and finishing effects, and a Spotify Canvas loop.
+- Video enhancement of saved clips on a spare GPU (`media_enhance`, `clip_enhance`, `enhance_benchmark`): noise reduction, upscaling, sharpening, frame-rate interpolation and HDR10, with the cost per frame measured.
 - Declarative edit plans compiled to exact ffmpeg steps, the timeline as stable text with revision-checked edits, and export to the video editor as FCP7 XML and EDL (Lumiere's Hoard opens it directly).
 - Complete native timeline and subtitle editing modules and creative engines, each off until you enable it. See [docs/STUDIO.md](docs/STUDIO.md).
 

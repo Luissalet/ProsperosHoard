@@ -9,7 +9,7 @@ from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from . import agent_undo, analyze, commands, derive, family_events, multicam, speakers, timeline_import
+from . import agent_undo, analyze, commands, derive, enhance as enhance_mod, family_events, multicam, speakers, timeline_import
 from . import broll as broll_mod
 from . import music as music_mod
 from . import subtitles as subtitles_mod
@@ -443,6 +443,33 @@ class StabilizeArgs(BaseModel):
     project: str = ProjectId
     clip: str
     smoothing: int = Field(15, ge=1, le=60)
+
+
+class EnhanceEffects(BaseModel):
+    denoise: Optional[Literal["off", "light", "medium", "strong"]] = Field(None, description="Noise reduction; medium and strong run on the GPU.")
+    upscale: Optional[float] = Field(None, ge=0, le=3, description="0 = off, or the factor the picture grows by: 1.5, 2 or 3 (never wider than 3840 px).")
+    sharpen: Optional[float] = Field(None, ge=0, le=1, description="Sharpening strength after the upscale, 0..1.")
+    interpolate: Optional[Literal["off", "blend", "mci"]] = Field(None, description="More frames: blend is cheap; mci (motion compensated) is slow and smoother.")
+    interpolate_fps: Optional[int] = Field(None, ge=0, le=120, description="Target frame rate; 0 = double the source's.")
+    hdr: Optional[bool] = Field(None, description="SDR to HDR10 (HEVC Main10, PQ, BT.2020).")
+    gpu: Optional[int] = Field(None, ge=0, le=7, description="Vulkan and NVENC index of the GPU to run on (default LUMIERE_ENHANCE_GPU, 2).")
+
+    def effects(self) -> dict:
+        return {k: v for k, v in self.model_dump(exclude_none=True).items() if k in enhance_mod.DEFAULTS}
+
+
+class EnhanceMediaArgs(EnhanceEffects):
+    media: str = MediaId
+
+
+class EnhanceClipArgs(EnhanceEffects):
+    project: str = ProjectId
+    clip: str
+
+
+class EnhanceBenchArgs(EnhanceEffects):
+    media: Optional[str] = Field(None, max_length=40, description="A video of the library as the sample; empty = a synthetic noisy 720p video.")
+    frames: int = Field(150, ge=30, le=600, description="Frames of the longer run of each measurement (a third for the shorter).")
 
 
 class FreezeArgs(BaseModel):
@@ -947,6 +974,37 @@ def run_short(svc: Services, a: ShortArgs) -> dict:
 def run_stabilize(svc: Services, a: StabilizeArgs) -> dict:
     project_store.doc(svc, a.project).find(a.clip)
     job = svc.jobs.submit("stabilize", {"project": a.project, "clip": a.clip, "smoothing": a.smoothing}, label="Estabilizar clip", project_id=a.project)
+    return {"job": job["id"], "state": job["state"]}
+
+
+def _enhance_params(a: EnhanceEffects) -> dict:
+    """Check the effects now, so a mistake is a direct tool error and not a failed job later."""
+    fx = enhance_mod.normalize(a.effects(), a.gpu)
+    if not enhance_mod.effects_on(fx):
+        raise LumiereError("Choose at least one effect: denoise, upscale, sharpen, interpolate or hdr.", code="no_effect")
+    return {"effects": a.effects(), "gpu": a.gpu}
+
+
+def run_enhance_info(svc: Services, a: Empty) -> dict:
+    return enhance_mod.info(svc)
+
+
+def run_media_enhance(svc: Services, a: EnhanceMediaArgs) -> dict:
+    media_store.get(svc, a.media)
+    job = svc.jobs.submit("enhance_media", {"media": a.media, **_enhance_params(a)}, label="Mejorar vídeo", media_id=a.media)
+    return {"job": job["id"], "state": job["state"]}
+
+
+def run_clip_enhance(svc: Services, a: EnhanceClipArgs) -> dict:
+    project_store.doc(svc, a.project).find(a.clip)
+    job = svc.jobs.submit("enhance_clip", {"project": a.project, "clip": a.clip, **_enhance_params(a)}, label="Mejorar clip", project_id=a.project)
+    return {"job": job["id"], "state": job["state"]}
+
+
+def run_enhance_benchmark(svc: Services, a: EnhanceBenchArgs) -> dict:
+    if a.media:
+        media_store.get(svc, a.media)
+    job = svc.jobs.submit("enhance_benchmark", {"media": a.media, "effects": a.effects(), "frames": a.frames, "gpu": a.gpu}, label="Medir coste de la mejora")
     return {"job": job["id"], "state": job["state"]}
 
 
@@ -1502,6 +1560,18 @@ TOOLS: list[Tool] = [
          ProjectFromTimelineArgs, _ann(False, False, False), run_project_from_timeline),
     Tool("clip_stabilize", "Stabilize a shaky clip (background job; the clip is pointed at the stable copy). Estabilizar.\n"
          "Keywords: stabilize, shaky, gimbal.", StabilizeArgs, _ann(False), run_stabilize),
+    Tool("enhance_info", "GPU video enhancement on this machine: effects, GPU, Vulkan, NVENC. Mejora de vídeo.\n"
+         "Keywords: enhance, upscale, super resolution, denoise, interpolation, hdr, gpu.", Empty, _ann(True), run_enhance_info),
+    Tool("media_enhance", "Make an enhanced copy of a library video (job): upscale, denoise, sharpen, frames, HDR. Mejorar vídeo.\n"
+         "The copy joins the library as '<name> (mejorado)'; the original is kept. Name at least one effect. job_status says when it is done.\n"
+         "Sinónimos: mejorar vídeo, superresolución, quitar ruido, más fotogramas, HDR.\nKeywords: enhance video, upscale, denoise, frame interpolation, hdr, gpu.",
+         EnhanceMediaArgs, _ann(False), run_media_enhance),
+    Tool("clip_enhance", "Enhance a timeline clip's source and point the clip at the copy (job). Mejorar clip.\n"
+         "Same effects as media_enhance; a frame-rate change keeps the clip's times. Sinónimos: mejorar clip, subir resolución del clip.\n"
+         "Keywords: enhance clip, upscale clip, denoise clip.", EnhanceClipArgs, _ann(False), run_clip_enhance),
+    Tool("enhance_benchmark", "Measure the cost per frame of each enhancement effect (job). Coste de la mejora.\n"
+         "The result is in job_status: ms per frame of the baseline and of each effect, and whether the chain keeps up with the frame rate.\n"
+         "Keywords: benchmark, cost per frame, enhance speed.", EnhanceBenchArgs, _ann(False), run_enhance_benchmark),
     Tool("clip_freeze", "Insert a freeze frame of a clip at a time. Congelar imagen.\nKeywords: freeze frame, still.", FreezeArgs, _ann(False), run_freeze),
     Tool("timeline_nest", "Nested sequences: nest clips into a new project, un-nest, add a project as a clip, list. Anidar.\n"
          "Sinónimos: anidar, secuencia anidada, agrupar clips, desanidar, compound clip.\nKeywords: nest, nested sequence, compound, group clips.",

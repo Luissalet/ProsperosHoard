@@ -17185,6 +17185,472 @@
       }
     },
     {
+      "name": "enhance_info",
+      "description": "GPU video enhancement on this machine: effects, GPU, Vulkan, NVENC. Mejora de vídeo.\nKeywords: enhance, upscale, super resolution, denoise, interpolation, hdr, gpu.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "name": "media_enhance",
+      "description": "Make an enhanced copy of a library video (job): upscale, denoise, sharpen, frames, HDR. Mejorar vídeo.\nThe copy joins the library as '<name> (mejorado)'; the original is kept. Name at least one effect. job_status says when it is done.\nSinónimos: mejorar vídeo, superresolución, quitar ruido, más fotogramas, HDR.\nKeywords: enhance video, upscale, denoise, frame interpolation, hdr, gpu.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "draftSafeHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "denoise": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "light",
+                  "medium",
+                  "strong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Noise reduction; medium and strong run on the GPU.",
+            "title": "Denoise"
+          },
+          "upscale": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "0 = off, or the factor the picture grows by: 1.5, 2 or 3 (never wider than 3840 px).",
+            "title": "Upscale"
+          },
+          "sharpen": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sharpening strength after the upscale, 0..1.",
+            "title": "Sharpen"
+          },
+          "interpolate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "blend",
+                  "mci"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "More frames: blend is cheap; mci (motion compensated) is slow and smoother.",
+            "title": "Interpolate"
+          },
+          "interpolate_fps": {
+            "anyOf": [
+              {
+                "maximum": 120,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target frame rate; 0 = double the source's.",
+            "title": "Interpolate Fps"
+          },
+          "hdr": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "SDR to HDR10 (HEVC Main10, PQ, BT.2020).",
+            "title": "Hdr"
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "maximum": 7,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Vulkan and NVENC index of the GPU to run on (default LUMIERE_ENHANCE_GPU, 2).",
+            "title": "Gpu"
+          },
+          "media": {
+            "description": "Media id (med_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Media",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "media",
+          "reason"
+        ],
+        "title": "EnhanceMediaArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "clip_enhance",
+      "description": "Enhance a timeline clip's source and point the clip at the copy (job). Mejorar clip.\nSame effects as media_enhance; a frame-rate change keeps the clip's times. Sinónimos: mejorar clip, subir resolución del clip.\nKeywords: enhance clip, upscale clip, denoise clip.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "draftSafeHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "denoise": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "light",
+                  "medium",
+                  "strong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Noise reduction; medium and strong run on the GPU.",
+            "title": "Denoise"
+          },
+          "upscale": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "0 = off, or the factor the picture grows by: 1.5, 2 or 3 (never wider than 3840 px).",
+            "title": "Upscale"
+          },
+          "sharpen": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sharpening strength after the upscale, 0..1.",
+            "title": "Sharpen"
+          },
+          "interpolate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "blend",
+                  "mci"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "More frames: blend is cheap; mci (motion compensated) is slow and smoother.",
+            "title": "Interpolate"
+          },
+          "interpolate_fps": {
+            "anyOf": [
+              {
+                "maximum": 120,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target frame rate; 0 = double the source's.",
+            "title": "Interpolate Fps"
+          },
+          "hdr": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "SDR to HDR10 (HEVC Main10, PQ, BT.2020).",
+            "title": "Hdr"
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "maximum": 7,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Vulkan and NVENC index of the GPU to run on (default LUMIERE_ENHANCE_GPU, 2).",
+            "title": "Gpu"
+          },
+          "project": {
+            "description": "Project id (prj_...).",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Project",
+            "type": "string"
+          },
+          "clip": {
+            "title": "Clip",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "clip",
+          "reason"
+        ],
+        "title": "EnhanceClipArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "enhance_benchmark",
+      "description": "Measure the cost per frame of each enhancement effect (job). Coste de la mejora.\nThe result is in job_status: ms per frame of the baseline and of each effect, and whether the chain keeps up with the frame rate.\nKeywords: benchmark, cost per frame, enhance speed.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "draftSafeHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "denoise": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "light",
+                  "medium",
+                  "strong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Noise reduction; medium and strong run on the GPU.",
+            "title": "Denoise"
+          },
+          "upscale": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "0 = off, or the factor the picture grows by: 1.5, 2 or 3 (never wider than 3840 px).",
+            "title": "Upscale"
+          },
+          "sharpen": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sharpening strength after the upscale, 0..1.",
+            "title": "Sharpen"
+          },
+          "interpolate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "blend",
+                  "mci"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "More frames: blend is cheap; mci (motion compensated) is slow and smoother.",
+            "title": "Interpolate"
+          },
+          "interpolate_fps": {
+            "anyOf": [
+              {
+                "maximum": 120,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target frame rate; 0 = double the source's.",
+            "title": "Interpolate Fps"
+          },
+          "hdr": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "SDR to HDR10 (HEVC Main10, PQ, BT.2020).",
+            "title": "Hdr"
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "maximum": 7,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Vulkan and NVENC index of the GPU to run on (default LUMIERE_ENHANCE_GPU, 2).",
+            "title": "Gpu"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A video of the library as the sample; empty = a synthetic noisy 720p video.",
+            "title": "Media"
+          },
+          "frames": {
+            "default": 150,
+            "description": "Frames of the longer run of each measurement (a third for the shorter).",
+            "maximum": 600,
+            "minimum": 30,
+            "title": "Frames",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "title": "EnhanceBenchArgs",
+        "type": "object",
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
       "name": "clip_freeze",
       "description": "Insert a freeze frame of a clip at a time. Congelar imagen.\nKeywords: freeze frame, still.",
       "annotations": {
