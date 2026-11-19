@@ -7244,6 +7244,275 @@
       }
     },
     {
+      "name": "studio_scene",
+      "description": "Get the storyboard's scene shots, current reviews and assembled video provenance.\n\nKeywords: storyboard, shot provenance, scene, planos, procedencia, escena\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          }
+        },
+        "required": [
+          "production"
+        ],
+        "title": "studio_sceneArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_scene_suggest",
+      "description": "Suggest short shots from a scene dossier and a character sheet using the configured vision model.\n\nReturns framing, actions, durations and start/end descriptions. Does not save the draft.\n\nKeywords: divide scene, shot planning, start end, plan de planos, dividir escena\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "character_sheet_asset_id": {
+            "title": "Character Sheet Asset Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_s": {
+            "default": 12,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "count": {
+            "default": 3,
+            "title": "Count",
+            "type": "integer"
+          },
+          "language": {
+            "default": "es",
+            "title": "Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "production",
+          "character_sheet_asset_id"
+        ],
+        "title": "studio_scene_suggestArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_scene_plan",
+      "description": "Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.\n\nEach shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and either\nlast_frame_asset_id or control_asset_id (a video). Assets belong to the production's project.\nThe plan inherits the received dossier's scene and details. Saving is undoable.\n\nKeywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "character_sheet_asset_id": {
+            "title": "Character Sheet Asset Id",
+            "type": "string"
+          },
+          "shots": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Shots",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "preserve_details": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preserve Details"
+          },
+          "aspect": {
+            "default": "16:9",
+            "title": "Aspect",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "character_sheet_asset_id",
+          "shots"
+        ],
+        "title": "studio_scene_planArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_scene_revise_shot",
+      "description": "Change one scene shot's action, framing, length or control assets. The edit is undoable.\n\nCall studio_production_continue to render only this shot and rebuild the cut.\nTo switch between end frame and control video, set the previous field to null.\n\nKeywords: change shot, correct keyframe, editar plano, corregir fotograma\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "changes": {
+            "title": "Changes",
+            "type": "object"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "key",
+          "changes"
+        ],
+        "title": "studio_scene_revise_shotArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_scene_review",
+      "description": "Compare the current take's first, middle and last frames against each preserved detail.\n\nUses the configured vision model. Returns a sample-by-detail matrix to inspect and record;\nhidden or uncertain details are unclear. A missing model is reported without a verdict.\n\nKeywords: review take, continuity, evidence, revisar toma, continuidad, evidencia\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "production",
+          "key"
+        ],
+        "title": "studio_scene_reviewArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "studio_scene_record_review",
+      "description": "Save a continuity review against the exact current clip. The edit is undoable.\n\nGive samples first, middle and last in order. Each contains checks in the order of preserve_details\nwith verdict (pass, defect or unclear) and note. Keep the real reviewer in reviewer.\n\nKeywords: record defects, shot continuity, guardar revisi?n, marcar defecto, plano\n",
+      "inputSchema": {
+        "properties": {
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "clip_asset_id": {
+            "title": "Clip Asset Id",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "reviewer": {
+            "default": "agent",
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "production",
+          "key",
+          "clip_asset_id",
+          "samples"
+        ],
+        "title": "studio_scene_record_reviewArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "studio_review_clip",
       "description": "Review a video against its requested action and references, without regenerating or pausing it.\n\nReturns technical checks and, when the family vision service is available, a chronological sample\nscored for action, physical motion, anatomy, scene and secondary identity. Give the concrete action\nin prompt and the canonical character/location/secondary images in reference_asset_ids. No vision\nor incomplete scores are explicit; a technically valid MP4 is not an artistic approval. At most24\nsampled frames, so this never certifies full playback. The asset and original recipe stay unchanged.\n\nKeywords: motion quality, continuity, review clip, anatomy, physics, scene consistency, revisar video,\ncalidad del movimiento, continuidad, deformaciones, secundarios\n\nSet check_supporting_cast when secondary identities must be assessed: an\nunassessed cast then leaves the review incomplete. An observed low cast\nscore is retained even without this flag. Empty prompt uses the selected\nasset's own appearance AND motion recipe, not the node's current edits.\n",
       "inputSchema": {

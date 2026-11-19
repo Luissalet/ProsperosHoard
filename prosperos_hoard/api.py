@@ -61,7 +61,7 @@ from . import voice_pipelines as vp
 from . import voices as voices_mod
 from . import style_profiles as style_profiles_mod
 from . import style_cards
-from . import shot_review as shot_review_mod
+from . import shot_review as shot_review_mod, scene_shots
 from . import edit_plans as edit_plans_mod
 from . import manim_scene as manim_mod
 from . import promo_web as promo_mod
@@ -1146,6 +1146,32 @@ class ProductionRegenerateBody(BaseModel):
     stage: str = "clips"                        # frames (stills and their clips) | clips
     keys: Optional[list[str]] = None            # only these shots (locked ones are still kept)
     run: bool = True
+
+
+class SceneSuggestBody(BaseModel):
+    character_sheet_asset_id: str
+    description: str = Field("", max_length=16000)
+    duration_s: float = Field(12, ge=2, le=100)
+    count: int = Field(3, ge=1, le=20)
+    language: str = Field("es", pattern="^(es|en)$")
+
+
+class ScenePlanBody(BaseModel):
+    character_sheet_asset_id: str
+    shots: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    description: str = Field("", max_length=16000)
+    preserve_details: list[str] = Field(default_factory=list, max_length=20)
+    aspect: str = Field("16:9", pattern="^(16:9|9:16|1:1)$")
+
+
+class SceneReviseBody(BaseModel):
+    changes: dict[str, Any]
+
+
+class SceneRecordBody(BaseModel):
+    clip_asset_id: str
+    samples: list[dict[str, Any]] = Field(min_length=3, max_length=3)
+    reviewer: str = Field("agent", min_length=1, max_length=120)
 
 
 class ProductionPromoteBody(BaseModel):
@@ -4310,7 +4336,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             productions_mod.save_state(store.data_dir, state)
             return job
 
-    def vision_for_qa() -> tuple[Optional[Callable[[list[bytes], str], str]], str]:
+    def vision_for_qa(max_tokens: int = 512) -> tuple[Optional[Callable[[list[bytes], str], str]], str]:
         """The family's vision model through Hoard Link, or (None, "no vision
         model"): QA then runs its model-free checks only. Tests set
         app.state.qa_vision to a (fn, name) pair."""
@@ -4326,7 +4352,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
         def ask(images: list[bytes], prompt: str) -> str:
             return backend.link.sync.chat(messages=[{"role": "user", "content": prompt}], images=images,
-                                          capability="vision", max_tokens=512, temperature=0.0).text
+                                          capability="vision", max_tokens=max_tokens, temperature=0.0).text
 
         return ask, f"{res.provider or 'vision'}:{res.model or ''}".rstrip(":")
 
@@ -4362,6 +4388,61 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     @app.post("/api/agent/studio_review_clip")
     def agent_review_clip(body: ClipReviewBody):
         return agent("studio_review_clip", body.asset_id, lambda: op_review_clip(body))
+
+    @app.get("/api/productions/{slug}/scene")
+    def production_scene(slug: str):
+        return scene_shots.view(productions_mod.load_state(store.data_dir, slug))
+
+    @app.post("/api/agent/studio_scene")
+    def agent_scene(production: str):
+        return agent("studio_scene", production, lambda: production_scene(production))
+
+    @app.post("/api/productions/{slug}/scene/suggest")
+    def production_scene_suggest(slug: str, body: SceneSuggestBody):
+        return scene_shots.suggest(store, slug, body.character_sheet_asset_id, body.description, body.duration_s,
+                                   body.count, body.language, *vision_for_qa(max_tokens=3500))
+
+    @app.post("/api/agent/studio_scene_suggest")
+    def agent_scene_suggest(production: str, body: SceneSuggestBody):
+        return agent("studio_scene_suggest", production, lambda: production_scene_suggest(production, body))
+
+    @app.put("/api/productions/{slug}/scene")
+    def production_scene_plan(slug: str, body: ScenePlanBody):
+        return scene_shots.apply_plan(store, slug, body.character_sheet_asset_id, body.description,
+                                      body.preserve_details, body.shots, body.aspect)
+
+    @app.post("/api/agent/studio_scene_plan")
+    def agent_scene_plan(production: str, body: ScenePlanBody):
+        return agent("studio_scene_plan", production, lambda: production_scene_plan(production, body))
+
+    @app.patch("/api/productions/{slug}/scene/{key}")
+    def production_scene_revise(slug: str, key: str, body: SceneReviseBody):
+        return scene_shots.revise(store, slug, key, body.changes)
+
+    @app.post("/api/agent/studio_scene_revise_shot")
+    def agent_scene_revise(production: str, key: str, body: SceneReviseBody):
+        return agent("studio_scene_revise_shot", production, lambda: production_scene_revise(production, key, body))
+
+    @app.post("/api/productions/{slug}/scene/{key}/review")
+    def production_scene_review(slug: str, key: str):
+        return scene_shots.review(store, slug, key, *vision_for_qa(max_tokens=5000))
+
+    @app.post("/api/agent/studio_scene_review")
+    def agent_scene_review(production: str, key: str):
+        return agent("studio_scene_review", production, lambda: production_scene_review(production, key))
+
+    @app.put("/api/productions/{slug}/scene/{key}/review")
+    def production_scene_record(slug: str, key: str, body: SceneRecordBody):
+        return scene_shots.record(store, slug, key, body.clip_asset_id, body.samples, body.reviewer)
+
+    @app.post("/api/agent/studio_scene_record_review")
+    def agent_scene_record(production: str, key: str, body: SceneRecordBody):
+        return agent("studio_scene_record_review", production, lambda: production_scene_record(production, key, body))
+
+    @app.get("/api/productions/{slug}/scene/{key}/sample/{asset_id}/{position}.jpg")
+    def production_scene_sample(slug: str, key: str, asset_id: str, position: str):
+        image = scene_shots.evidence(store, slug, key, asset_id, position)
+        return Response(image, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
     def job_or_none(job_id: str) -> Optional[dict[str, Any]]:
         try:
