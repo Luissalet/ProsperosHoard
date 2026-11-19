@@ -28,6 +28,7 @@ Typical uses:
 ## What it does
 
 **Projects and cast**
+- Receive production dossiers as drafts with the original context, approved references and details to preserve.
 - Projects, characters (look prompt, negative, palette, canonical reference, voice), places and objects, ordered groups and style presets.
 - `@Name` mentions match multi-word names and report unknown ones; a mentioned place or object with an image goes into the render as a numbered reference on Qwen-Image 2.1.
 - Character kit: a model sheet redrawn from up to 12 set views, a captioned training dataset with a readiness report, local LoRA training through a configurable trainer, identity-scored takes, and portable `.hoardchar` packs plus a global casting library with versions.
