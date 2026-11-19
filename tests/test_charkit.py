@@ -180,7 +180,9 @@ def test_sheet_retry_keeps_imported_views_in_job_dataset_and_pack(client, monkey
         "action": "export", "character_id": character,
     })
     assert packed.status_code == 200, packed.text
-    with zipfile.ZipFile(packed.json()["path"]) as archive:
+    download = c.get(packed.json()["download"])
+    assert download.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
         manifest = json.loads(archive.read("character.json"))
     assert {image["view"] for image in manifest["images"]["sheet"]} == {"front", "profile", "back"}
 
