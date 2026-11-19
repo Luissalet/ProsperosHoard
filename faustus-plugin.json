@@ -5,7 +5,7 @@
       "handoffs": [
         {"accepts": "scene-brief", "produces": ["concept-image"], "skill": "image-composition", "check": {"en": "Open the image and check the explicit continuity details in the brief.", "es": "Abre la imagen y comprueba los detalles de continuidad indicados en el expediente."}},
         {"accepts": "concept-image", "produces": ["character-sheet"], "skill": "character-consistency-pack", "check": {"en": "Compare front, side and back; check that each intended view is in the exported package.", "es": "Compara el frente, el perfil y la espalda y comprueba que cada vista prevista esté en el paquete exportado."}},
-        {"accepts": "character-sheet", "produces": ["video-clip"], "skill": "revision-aware-media", "check": {"en": "Play the assembled cut, verify its duration and shot fingerprints, and check each continuity detail in the first, middle and last frame of each shot.", "es": "Reproduce el montaje, comprueba su duración y las huellas de los planos y revisa cada detalle de continuidad en el primer fotograma, el intermedio y el último."}}
+        {"accepts": "character-sheet", "produces": ["video-clip"], "skill": "revision-aware-media", "check": {"en": "Play the cut, verify its duration and shot fingerprints, and check that studio_scene reports review_status checked for the mounted takes.", "es": "Reproduce el montaje, comprueba su duración y las huellas de los planos y verifica que studio_scene devuelve review_status checked para las tomas del montaje."}}
       ]
     },
     "module_controls": {

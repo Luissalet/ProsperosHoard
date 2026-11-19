@@ -657,7 +657,9 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
    to get framing, action and first/last pose descriptions from the configured
    vision service. An agent can also plan the shots itself.
 2. Prepare each shot?s first image and either its last image or a control video
-   using the sheet. Call `studio_scene_plan` with the sheet and the ordered
+   using the sheet. For a fixed silhouette or set, render the approved geometry
+   from the shot camera and work from those views when generating the anchors.
+   Call `studio_scene_plan` with the sheet and the ordered
    shots. Each row needs `framing`, `action`, `duration_s` (2?5 s, aligned to
    24 fps), `first_frame_asset_id`, and exactly one of `last_frame_asset_id`
    and `control_asset_id`. The plan carries over `preserveDetails` from the
@@ -668,11 +670,15 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
    durations. `studio_scene` returns the asset ID and the shot-by-shot
    provenance of the `video-clip`.
 4. Call `studio_scene_review(production, key)` to compare the complete sheet
-   and the first, middle and last frame of the current take. Each sample
-   contains one check per detail. Inspect the footage and submit the checks
+   and the first, middle and last frame within the shot's planned cut at 24 fps.
+   Each sample contains one check per detail. Inspect the footage and submit the checks
    with `studio_scene_record_review` using the exact `clip_asset_id`. Each
    check includes `verdict` (`pass`, `defect` or `unclear`) and `note`.
-   Sampled review can expose a defect. Watch the cut for continuity in motion.
+   Watch the cut for continuity in motion. `piece.review_status` is
+   `provisional` while any mounted take lacks a passing review for the cut's
+   duration, including a defect or inconclusive check. It becomes `checked`
+   once all mounted takes pass. This records the inspection. Decisions to keep
+   or cancel a piece belong to the order's gate.
 5. To correct one shot?s controls, use `studio_scene_revise_shot` followed by
    `studio_production_continue`. For a different seed with the same controls
    use `studio_production_regenerate(stage="clips", keys=["2"])`, or use
