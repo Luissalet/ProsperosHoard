@@ -287,7 +287,9 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `studio_scene_suggest` propone los planos. Prepara las imágenes o los
   controles con la hoja y guarda con `studio_scene_plan`. Renderiza con
   `studio_production_continue`, inspecciona las tres muestras de cada toma y
-  registra cada detalle con `studio_scene_record_review`. Revisa el montaje.
+  registra cada detalle con `studio_scene_record_review`. Las muestras usan
+  la duración montada. Revisa el montaje, que queda provisional hasta que
+  todas sus tomas tengan una comprobación favorable.
   `studio_scene_revise_shot` corrige los controles de un plano, y
   `studio_production_regenerate(stage="clips", keys=[...])` repite solo
   los planos indicados. El relevo y sus huellas están en `studio_scene`.
