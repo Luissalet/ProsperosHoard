@@ -134,7 +134,7 @@ def job_view(job: dict[str, Any]) -> dict[str, Any]:
     if job["state"] == "done" and job["type"] in _RESULT_JOB_TYPES:
         # jobs whose answer is data, not assets (identity scores, captions,
         # a trained adapter): the agent needs it in the job view itself
-        result = {k: v for k, v in outputs.items() if k not in ("asset_ids", "asset_id")}
+        result = {k: v for k, v in outputs.items() if k not in ("asset_ids", "asset_id", "sheet_checkpoint")}
         if isinstance(result.get("code"), str) and len(result["code"]) > 3000:   # a long scene: the asset's recipe keeps all of it
             result["code"] = result["code"][:3000] + "\n# ... (cut; the clip's recipe keeps the whole scene)\n"
         if len(json.dumps(result, default=str)) > 4000:
@@ -977,10 +977,35 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
     thash = comfy_driver.template_hash(workflow, spec)
     assets = []
+    resumable = job.get("type") in ("generate_image", "edit_image")
+    completed = {}
+    if resumable:
+        attempts = store.retry_lineage(store.get_job(job["id"]))
+        for attempt in attempts:
+            for index, ids in ((attempt.get("outputs") or {}).get("comfy_batches") or {}).items():
+                completed.setdefault(index, ids)
+    batches = {}
+    upload_pending = True
     for i in range(count):
         progress.check_cancel() if hasattr(progress, "check_cancel") else None
         seed = base_seed + i
         run_values = {**values, "seed": seed}
+        ids = completed.get(str(i), [])
+        if ids:
+            try:
+                restored = [store.get_asset(asset_id) for asset_id in ids]
+            except NotFound:
+                restored = []
+            if restored and all(
+                (store.data_dir / asset["file_path"]).is_file()
+                and (asset["recipe"] or {}).get("template_hash") == thash
+                and asset["recipe"].get("params") == run_values
+                and asset["recipe"].get("input_asset_ids") == input_ids
+                for asset in restored
+            ):
+                assets.extend(restored)
+                batches[str(i)] = ids
+                continue
         wf = comfy_driver.apply_params(workflow, spec, run_values)
         if run_values.get("loras"):
             # character adapters (charkit.resolve_adapters): part of the
@@ -1019,7 +1044,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if source_name:
             node, _, inp = spec["source_video_node"].partition(".")
             wf[node]["inputs"][inp] = source_name
-        if i == 0 and object_info:
+        if upload_pending and object_info:
             # the whole prompt, the way ComfyUI's /prompt will check it: every
             # model file (UNet, text encoders, VAE - not only checkpoints),
             # every combo choice and number range, dynamic-combo children
@@ -1028,11 +1053,13 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 raise EngineError("comfy_validation", "ComfyUI would reject this workflow: " + "; ".join(problems[:4]))
         progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
         t0 = time.monotonic()
-        outputs = _run_comfy_workflow(backend, wf, uploads if i == 0 else [], progress,
+        outputs = _run_comfy_workflow(backend, wf, uploads if upload_pending else [], progress,
                                       timeout_s=comfy_timeout_s(spec.get("kind")),
                                       output_node=spec.get("output_node"))
+        upload_pending = False
         if not outputs:
             raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
+        before = len(assets)
         for out in outputs:
             data = _download_output(backend, out)
             recipe = {
@@ -1052,6 +1079,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             if postprocess:
                 data = postprocess(data)
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
+        if resumable:
+            batches[str(i)] = [asset["id"] for asset in assets[before:]]
+            store.update_job(job["id"], outputs={"asset_ids": [asset["id"] for asset in assets],
+                                                  "comfy_batches": batches})
     free_after(backend, spec)
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}

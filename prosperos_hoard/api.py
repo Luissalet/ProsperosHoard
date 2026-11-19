@@ -3570,6 +3570,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if new_seed and "seed" in params:
             params["seed"] = engine.random_seed()
         params["retry_of"] = job_id
+        params["retry_fresh"] = new_seed
         return queue.enqueue(old["type"], old["lane"], params, old.get("inputs"), old.get("project_id"))
 
     @app.post("/api/agent/studio_retry_job")
