@@ -3,8 +3,7 @@
 Renders, songs, clips and whole productions send the hub's canonical job events: `prospero.job.queued|started|progress|done|failed|
 cancelled`, each with `{job_id, title, kind (render|song|clip|production), progress (0..1), gpu, eta_s, url, error}`. A production
 that stops for the person finishes its job as `done` with `status: "awaiting_review"` and `awaiting` (`take`, `animatic`, `script` or
-`review`); a finished render or clip also lists its `asset_ids`. Stills, voices and the like are not announced one by one: they are
-part of a production's own progress. Progress events are throttled so a long job never floods the bus.
+`review`); a finished render or clip also lists its `asset_ids`. Image generations, edits and character sheets also send lifecycle events. Progress events are throttled so a long job never floods the bus.
 
 Notifications go through the family hub only (Prospero has no channel of its own) and only for productions, the one thing that waits
 on a person: it paused for a take or the animatic, finished, or failed (failed = high priority). `notify.via` (`family_settings`):
@@ -29,7 +28,8 @@ from .store import NotFound, Store
 log = logging.getLogger("prosperos_hoard.jobevents")
 
 APP = "prospero"
-KINDS = {"render_timeline": "render", "compose_song": "song", "animate": "clip", "production": "production"}
+KINDS = {"render_timeline": "render", "compose_song": "song", "animate": "clip", "production": "production",
+         "character_sheet": "sheet", "generate_image": "generation", "edit_image": "edit"}
 TEXT = {
     "es": {
         "take": ("{title}: elige una toma", "La canción tiene varias tomas. Escúchalas y elige una para seguir."),
@@ -86,7 +86,8 @@ class JobEvents:
                 tl = self.store.get_timeline(params["timeline_id"])
                 return f"{tl.get('name') or 'Timeline'} · {params.get('quality') or 'preview'}"[:120]
             project = self.store.get_project(job["project_id"])["name"] if job.get("project_id") else ""
-            what = "Song" if job["type"] == "compose_song" else "Clip"
+            what = {"compose_song": "Song", "animate": "Clip", "character_sheet": "Character sheet",
+                    "generate_image": "Generation", "edit_image": "Image edit"}.get(job["type"], job["type"])
             return f"{what} · {project}"[:120] if project else what
         except (NotFound, KeyError, TypeError):
             return {"render_timeline": "Render", "compose_song": "Song", "animate": "Clip"}.get(job["type"], str(job["type"]))
