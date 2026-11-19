@@ -81,4 +81,3 @@ export function SceneContinuity({ slug, scene, disabled, locked, onRedo }: {
     </section>
   );
 }
-
