@@ -9,7 +9,7 @@
       ]
     },
     "module_controls": {
-      "studio": {"list": "studio_modules", "set": "studio_module_set"}
+      "studio": {"list": "studio_modules", "set": "studio_module_set", "name_field": "id"}
     },
     "copilot": {
       "contract_version": "1.0",
