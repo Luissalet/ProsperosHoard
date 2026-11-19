@@ -974,16 +974,35 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 input_ids.append(vocals)
 
     count = max(1, min(int(count or 1), 8))
-    base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
     thash = comfy_driver.template_hash(workflow, spec)
     assets = []
     resumable = job.get("type") in ("generate_image", "edit_image")
+    base_seed = None
     completed = {}
     if resumable:
         attempts = store.retry_lineage(store.get_job(job["id"]))
         for attempt in attempts:
-            for index, ids in ((attempt.get("outputs") or {}).get("comfy_batches") or {}).items():
+            previous = attempt.get("outputs") or {}
+            for index, ids in (previous.get("comfy_batches") or {}).items():
                 completed.setdefault(index, ids)
+            if base_seed is None:
+                base_seed = previous.get("comfy_base_seed")
+        if base_seed is None:
+            # The first checkpoints recorded assets but had no separate seed field.
+            for index, ids in completed.items():
+                try:
+                    recipe = store.get_asset(ids[0]).get("recipe") or {}
+                except NotFound:
+                    continue
+                effective_seed = (recipe.get("params") or {}).get("seed")
+                if effective_seed is not None:
+                    base_seed = int(effective_seed) - int(index)
+                    break
+    if base_seed is None:
+        base_seed = int(values.get("seed") if values.get("seed") is not None else random_seed())
+    if resumable:
+        previous = attempts[0].get("outputs") or {}
+        store.update_job(job["id"], outputs={**previous, "comfy_base_seed": base_seed})
     batches = {}
     upload_pending = True
     for i in range(count):
@@ -1082,7 +1101,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if resumable:
             batches[str(i)] = [asset["id"] for asset in assets[before:]]
             store.update_job(job["id"], outputs={"asset_ids": [asset["id"] for asset in assets],
-                                                  "comfy_batches": batches})
+                                                  "comfy_batches": batches, "comfy_base_seed": base_seed})
     free_after(backend, spec)
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
