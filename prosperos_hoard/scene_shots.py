@@ -335,4 +335,3 @@ def timeline_inputs(store: Store, state: dict) -> tuple[list[dict], list[dict]]:
         provenance.append({**{k: v for k, v in shot.items() if k != "review"}, "sha256": digest,
                            "render_template": recipe.get("template"), "input_asset_ids": recipe.get("input_asset_ids", [])})
     return [{"type": "visual", "clips": clips}], provenance
-

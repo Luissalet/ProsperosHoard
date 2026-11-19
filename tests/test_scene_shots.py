@@ -167,4 +167,3 @@ def test_scene_plan_undo_restores_dossier_draft(client):
     agent.ok("studio_scene_plan", payload, session="scene-plan")
     agent.undone("scene-plan", confirm=True)
     assert prod.load_state(store.data_dir, slug)["spec"]["shots"][0]["prompt"] == "Original"
-
