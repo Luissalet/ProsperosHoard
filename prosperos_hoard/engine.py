@@ -990,6 +990,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if base_seed is None:
             # The first checkpoints recorded assets but had no separate seed field.
             for index, ids in completed.items():
+                if not ids:
+                    continue
                 try:
                     recipe = store.get_asset(ids[0]).get("recipe") or {}
                 except NotFound:
@@ -1004,6 +1006,12 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         previous = attempts[0].get("outputs") or {}
         store.update_job(job["id"], outputs={**previous, "comfy_base_seed": base_seed})
     batches = {}
+
+    def checkpoint_batch(index: int, batch: list[dict[str, Any]]) -> None:
+        batches[str(index)] = [asset["id"] for asset in batch]
+        store.update_job(job["id"], outputs={"asset_ids": [asset["id"] for asset in assets],
+                                              "comfy_batches": batches, "comfy_base_seed": base_seed})
+
     upload_pending = True
     for i in range(count):
         progress.check_cancel() if hasattr(progress, "check_cancel") else None
@@ -1023,7 +1031,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 for asset in restored
             ):
                 assets.extend(restored)
-                batches[str(i)] = ids
+                checkpoint_batch(i, restored)
                 continue
         wf = comfy_driver.apply_params(workflow, spec, run_values)
         if run_values.get("loras"):
@@ -1099,9 +1107,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 data = postprocess(data)
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
         if resumable:
-            batches[str(i)] = [asset["id"] for asset in assets[before:]]
-            store.update_job(job["id"], outputs={"asset_ids": [asset["id"] for asset in assets],
-                                                  "comfy_batches": batches, "comfy_base_seed": base_seed})
+            checkpoint_batch(i, assets[before:])
     free_after(backend, spec)
     progress(0.97, "imported outputs")
     return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
