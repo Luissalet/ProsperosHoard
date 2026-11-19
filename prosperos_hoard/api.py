@@ -1415,6 +1415,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 if card is not None or backend.cold_local_comfy():
                     held = stack.enter_context(gpu_lease.hold(
                         job, backend.vram_estimates_mb, on_gpu=assigned, gpu=card,
+                        resident_mb=backend.comfy_resident_mb(card) if card is not None else 0,
                         resolve_template_class=lambda name: comfy_driver.load_template(
                             name, store.data_dir)[1].get("vram_class"),
                         resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto"),

@@ -85,6 +85,7 @@ const EXACT_ES: Record<string, string> = {
   "cancelling...": "cancelando…",
   "requeued after restart": "puesto otra vez en cola tras reiniciar la app",
   "cancelled before it started": "cancelado antes de empezar",
+  "another render is using this GPU or render server": "hay otro trabajo en esta GPU o servidor de render",
   "cancelled while waiting for the GPU": "cancelado mientras esperaba la GPU",
   "finished before the cancel took effect": "terminó antes de que la cancelación surtiera efecto",
   "outcome_unknown: interrupted image job; not resubmitted automatically":

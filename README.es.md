@@ -67,7 +67,7 @@ Usos típicos:
 
 **Control y seguridad**
 - Linaje: cada recurso guarda plantilla, parámetros, semilla, entradas y tiempos; «Reutilizar receta» reproduce una imagen byte a byte en el mismo backend y «Variar semilla» la repite.
-- Cortesía con la GPU: estimaciones de VRAM por flujo contrastadas con la tarjeta en la que corre ComfyUI, trabajos que esperan en `waiting_gpu` con el motivo, pools de render que reservan memoria en la tarjeta física de cada motor y reparten trabajos entre varias tarjetas, y una cabecera con GPU, VRAM, temperatura, RAM y CPU.
+- Cortesía con la GPU: estimaciones de VRAM por flujo contrastadas con la tarjeta en la que corre ComfyUI, trabajos que esperan en `waiting_gpu` con el motivo, pools de render que reservan memoria en la tarjeta física de cada motor, tienen en cuenta sus modelos ya cargados y reparten trabajos entre varias tarjetas, y una cabecera con GPU, VRAM, temperatura, RAM y CPU.
 - Papelera con deshacer para los recursos borrados; pantalla Backends que muestra qué se encontró y por qué; Actividad del asistente con cada llamada de un agente.
 
 ## Modelos

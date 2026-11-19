@@ -74,6 +74,29 @@ def test_external_comfy_process_is_mapped_to_the_physical_card(data_dir, monkeyp
         backend.close()
 
 
+def test_warm_engine_reserves_only_additional_memory(monkeypatch):
+    from prosperos_hoard import gpu_lease
+
+    reservations = []
+
+    class Lease:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    def reserve(**kwargs):
+        reservations.append(kwargs["vram_mb"])
+        return Lease()
+
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    job = {"id": "warm-sheet", "type": "character_sheet", "params": {}}
+    for resident in (0, 9000, 12000):
+        with gpu_lease.hold(job, lambda: {"qwen21": 12000}, gpu=1, resident_mb=resident, lease_fn=reserve):
+            pass
+    assert reservations == [12000, 3000, 1024]
+
+
 @pytest.mark.parametrize("override,expected", [("http://127.0.0.1:8190", 3), ("http://example.invalid:8190", None)])
 def test_main_lease_and_start_follow_effective_environment_url(data_dir, monkeypatch, override, expected):
     monkeypatch.setenv("HOARD_COMFY_URL", override)
