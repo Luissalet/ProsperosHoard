@@ -55,6 +55,7 @@ Typical uses:
 - Style cards (look, technique, palette, motion, signature transition, pitfalls) with built-in and imported directions.
 
 **Productions**
+- Scene video from a dossier and character sheet, with anchored shots, first/middle/last continuity review, individual retakes and an assembled cut with per-shot provenance.
 - A whole music video as one resumable, checkpointed production: lead and reference sheet, song, stills, lyric timing, clips, photocards, album art, the cut and its renders, plus a report. Changing shots redoes only what depends on them.
 - Treatment-first mode (logline, structures, shot list, beat sheet) before anything renders; an animatic of the stills cut like the final before expensive clips; a QA director that checks flat or noisy stills, edge bands, exposure jumps, frozen clips and lyric coverage; a continuity bible with segment repair.
 - Recipes: turn a finished production into a template with a `{lead}` slot and recreate it with another character.
@@ -139,7 +140,7 @@ Results are compact and id-first; pictures come back only with `include_image=tr
 | Audio and voice | `studio_compose`, `studio_analyze_audio`, `studio_stems`, `studio_voice`, `voice_*` (engines, create, list, speak, transcribe, audiobook, dub, retake words) |
 | Design | `studio_design`, `studio_photocard_set`, `studio_board`, `studio_style_cards` |
 | Timeline and render | `studio_timeline`, `studio_render`, `studio_export_timeline`, `studio_canvas`, `studio_style_profile_*`, `studio_production_finishing`, `production_export_lumiere` |
-| Productions | `studio_production*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_director`, `studio_director_catalog`, `studio_stock_search` |
+| Productions | `studio_production*`, `studio_scene*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_director`, `studio_director_catalog`, `studio_stock_search` |
 | Character kit | `studio_character_sheet`, `_dataset`, `_train`, `_adapters`, `_takes`, `_pack`, `_library` |
 | Web video | `brand_scan`, `promo_from_url`, `contact_sheet`, `website_walkthrough`, `studio_qr_video`, `studio_qr_verify`, `studio_explainer`, `studio_spatial` |
 | Assets and jobs | `studio_assets`, `studio_show`, `studio_lineage`, `studio_asset_update`, `studio_import`, `studio_download_media`, `studio_delete_assets`, `studio_trash`, `studio_jobs`, `studio_job`, `studio_cancel_job`, `studio_retry_job` |
