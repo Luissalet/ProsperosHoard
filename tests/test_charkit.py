@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from prosperos_hoard import charkit, charpack, comfy_driver, identity
+from prosperos_hoard import charkit, charpack, comfy_driver, engine, identity
 from prosperos_hoard.workflows import convert as convert_mod
 
 
@@ -141,6 +141,48 @@ def test_adapters_attach_resolve_and_inject(client, data_dir):
     bad = c.post("/api/agent/studio_character_adapters",
                  json={"character_id": cid, "action": "settings", "settings": {"trigger": "no spaces allowed"}})
     assert bad.status_code == 400 and bad.json()["error"] == "bad_trigger"
+
+
+def test_sheet_retry_keeps_imported_views_in_job_dataset_and_pack(client, monkeypatch):
+    c, app, _ = client
+    project = _project(c)
+    character, _ = _character(c, project)
+    run = engine.run_template
+    calls = []
+
+    def interrupt_sheet(*args, **kwargs):
+        view = (kwargs.get("extra_recipe") or {}).get("view")
+        if view:
+            calls.append(view)
+            if calls == ["front", "profile"]:
+                raise RuntimeError("interrupted before profile")
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "run_template", interrupt_sheet)
+    initial = c.post("/api/agent/studio_character_sheet", json={
+        "character_id": character, "views": ["front", "profile", "back"], "seed": 42, "wait_s": 30,
+    }).json()["job"]
+    assert initial["state"] == "failed" and len(initial["asset_ids"]) == 1
+    [front] = initial["asset_ids"]
+    store = app.state.store
+    assert charkit.kit_of(store.get_character(character))["dataset"][0]["asset_id"] == front
+
+    retry = c.post("/api/agent/studio_retry_job", params={"job_id": initial["id"]}).json()
+    finished = _job(c, retry["id"])
+    assert finished["state"] == "done", finished
+    assert finished["asset_ids"][0] == front
+    assert finished["result"]["reused_asset_ids"] == [front]
+    assert calls == ["front", "profile", "profile", "back"]
+    kit = charkit.kit_of(store.get_character(character))
+    assert kit["sheet"]["asset_ids"] == finished["asset_ids"][:-1]
+    assert [entry["view"] for entry in kit["dataset"]] == ["front", "profile", "back"]
+    packed = c.post("/api/agent/studio_character_pack", json={
+        "action": "export", "character_id": character,
+    })
+    assert packed.status_code == 200, packed.text
+    with zipfile.ZipFile(packed.json()["path"]) as archive:
+        manifest = json.loads(archive.read("character.json"))
+    assert {image["view"] for image in manifest["images"]["sheet"]} == {"front", "profile", "back"}
 
 
 def test_sheet_dataset_takes_training_end_to_end(client, data_dir):

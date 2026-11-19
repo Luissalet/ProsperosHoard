@@ -14,7 +14,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 import threading
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from . import style_cards
 from .db import connect, dumps, loads, row_to_dict
@@ -782,6 +782,14 @@ class Store:
         self.conn.commit()
         return self.get_character(character_id)
 
+    def change_character_kit(self, character_id: str, change: Callable[[dict[str, Any]], None]) -> None:
+        """Read and merge one kit under the write transaction."""
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            kit = self.get_character(character_id)["kit"]
+            change(kit)
+            self.set_character_kit(character_id, kit)
+
     def _check_character_fields(self, fields: dict[str, Any]) -> None:
         allowed = {"role", "bio", "prompt", "negative", "palette", "reference_asset_ids", "canonical_asset_id", "voice", "notes", "name",
                    "element"}
@@ -1352,6 +1360,41 @@ class Store:
         d["comfy_submission"] = loads(d.pop("comfy_submission_json"), None)
         d["cancel_requested"] = bool(d.get("cancel_requested"))
         return d
+
+    def retry_lineage(self, job: dict[str, Any]) -> list[dict[str, Any]]:
+        """This attempt first, followed by compatible attempts of the same job."""
+        attempts = []
+        seen = set()
+        while job["id"] not in seen:
+            attempts.append(job)
+            seen.add(job["id"])
+            params = job["params"] or {}
+            parent_id = params.get("retry_of")
+            if not parent_id or params.get("retry_fresh"):
+                break
+            try:
+                parent = self.get_job(parent_id)
+            except NotFound:
+                break
+            if (parent["type"], parent["project_id"]) != (job["type"], job["project_id"]):
+                break
+            job = parent
+        return attempts
+
+    def job_assets(self, job: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id FROM assets WHERE project_id=? AND json_extract(recipe_json, '$.job_id')=? "
+            "ORDER BY created_at, id", (job["project_id"], job["id"]),
+        )
+        assets = []
+        for row in rows:
+            try:
+                asset = self.get_asset(row["id"])
+            except NotFound:
+                continue
+            if (self.data_dir / asset["file_path"]).is_file():
+                assets.append(asset)
+        return assets
 
     def list_jobs(self, state: str | None = None, limit: int = 10, offset: int = 0,
                   project_id: str | None = None) -> dict[str, Any]:

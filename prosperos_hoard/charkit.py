@@ -324,25 +324,90 @@ def sheet_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> 
     the view)."""
     params = job["params"]
     char = store.get_character(params["character_id"])
+    views = check_views(params.get("views"))
+    attempts = store.retry_lineage(job)
+    recovered: dict[str, list[dict[str, Any]]] = {}
+    seed = params.get("seed")
     canonical = char.get("canonical_asset_id")
+    requested_engine = params.get("engine")
+    for attempt in attempts:
+        checkpoint = (attempt.get("outputs") or {}).get("sheet_checkpoint") or {}
+        if checkpoint:
+            if seed is None:
+                seed = checkpoint["seed"]
+            canonical = checkpoint["canonical"]
+            requested_engine = checkpoint["engine"]
+            break
+    for attempt in attempts:
+        available: dict[str, list[dict[str, Any]]] = {}
+        for asset in store.job_assets(attempt):
+            recipe = asset["recipe"]
+            view = recipe.get("view")
+            if recipe.get("operation") != "character_sheet" or view not in views:
+                continue
+            if recipe.get("character_id") != char["id"] or not recipe.get("input_asset_ids"):
+                continue
+            if not recovered and not available and not checkpoint:
+                # Existing jobs have the reference and seed in their imported asset recipes.
+                canonical = recipe["input_asset_ids"][0]
+                requested_engine = recipe.get("image_engine") or requested_engine
+                if seed is None:
+                    seed = recipe["params"]["seed"] - views.index(view)
+            if recipe["input_asset_ids"][0] == canonical:
+                available.setdefault(view, []).append({"asset_id": asset["id"], "view": view})
+        for view, items in available.items():
+            recovered.setdefault(view, items)
     if not canonical:
         raise engine.EngineError("no_canonical", f"{char['name']} has no canonical image to draw the sheet from")
     object_info = engine._object_info(backend)
-    engine_name = engine.resolve_image_engine(object_info, params.get("engine"))
+    engine_name = engine.resolve_image_engine(object_info, requested_engine)
     if engine_name == "sdxl":
         raise engine.EngineError("sheet_needs_edit_engine",
                                  "the model sheet needs an edit engine that keeps identity (Qwen-Image 2.1 or Flux "
                                  "Kontext); neither is installed in ComfyUI")
     template = engine.ENGINE_TEMPLATES[engine_name]["edit"]
     _, spec = comfy_driver.load_template(template, store.data_dir)
-    views = check_views(params.get("views"))
-    seed = int(params.get("seed") or engine.random_seed())
+    seed = int(seed if seed is not None else engine.random_seed())
+    checkpoint = {"seed": seed, "canonical": canonical, "engine": engine_name}
     made: list[dict[str, Any]] = []
-    kit = kit_of(char)
+    reused: list[str] = []
+
+    def publish_views(contact_sheet_id=None):
+        ids = [m["asset_id"] for m in made]
+        store.update_job(job["id"], outputs={"asset_ids": ids, "sheet_checkpoint": checkpoint,
+                                             "reused_asset_ids": reused})
+        def merge(stored):
+            kit = kit_of({**char, "kit": stored})
+            sheet = kit["sheet"]
+            kit["sheet"] = {
+                **sheet, "asset_ids": list(dict.fromkeys([*(sheet.get("asset_ids") or []), *ids])),
+                "views": sorted(set((sheet.get("views") or []) + [m["view"] for m in made])),
+            }
+            if contact_sheet_id:
+                kit["sheet"].update(contact_sheet_id=contact_sheet_id, job_id=job["id"], engine=engine_name)
+                history = [*kit["history"], {"at": now_iso(), "event": "sheet",
+                                            "detail": f"{len(made)} views with {engine_name}"}]
+                kit["history"] = history[-HISTORY_CAP:]
+            have = {d["asset_id"] for d in kit["dataset"]}
+            for m in made:
+                if m["asset_id"] not in have and len(kit["dataset"]) < MAX_DATASET:
+                    kit["dataset"].append({"asset_id": m["asset_id"], "caption": f"{kit['trigger']}, {SHEET_VIEWS[m['view']]}",
+                                           "include": True, "view": m["view"], "source": "sheet"})
+            stored.update(kit)
+
+        store.change_character_kit(char["id"], merge)
+
+    if not (job.get("outputs") or {}).get("sheet_checkpoint"):
+        store.update_job(job["id"], outputs={"asset_ids": [], "sheet_checkpoint": checkpoint})
     arch = ENGINE_ARCH.get(engine_name)
     adapters = resolve_adapters(store, char["project_id"], [], [char["id"]], arch,
                                 comfy_driver.lora_choices(object_info) if object_info else None)
     for i, view in enumerate(views):
+        if view in recovered:
+            made.extend(recovered[view])
+            reused.extend(m["asset_id"] for m in recovered[view])
+            publish_views()
+            continue
         base = i / len(views)
 
         def sub(fraction: float, message: Optional[str] = None, _base=base, _view=view) -> None:
@@ -374,6 +439,7 @@ def sheet_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> 
         for aid in result["asset_ids"]:
             _add_tags(store, aid, [char_tag(char["id"]), "sheet", f"view:{view}"])
             made.append({"asset_id": aid, "view": view})
+        publish_views()
     progress(0.94, "contact sheet")
     paths = [store.data_dir / store.get_asset(m["asset_id"])["file_path"] for m in made]
     sheet_img = engine.contact_sheet(paths, cols=4, cell=320, labels=[m["view"] for m in made])
@@ -382,22 +448,10 @@ def sheet_job(store: Store, backend: Backend, job: dict[str, Any], progress) -> 
                                       "character_id": char["id"], "created_at": now_iso()},
                                      f"{char['name']} · model sheet")
     _add_tags(store, sheet_asset["id"], [char_tag(char["id"]), "sheet"])
-    char = store.get_character(char["id"])
-    kit = kit_of(char)
-    prev = [a for a in kit["sheet"].get("asset_ids") or []]
-    kit["sheet"] = {"asset_ids": prev + [m["asset_id"] for m in made], "contact_sheet_id": sheet_asset["id"],
-                    "views": sorted(set((kit["sheet"].get("views") or []) + views)), "job_id": job.get("id"),
-                    "engine": engine_name}
-    have = {d["asset_id"] for d in kit["dataset"]}
-    trig = kit["trigger"]
-    for m in made:
-        if m["asset_id"] not in have and len(kit["dataset"]) < MAX_DATASET:
-            kit["dataset"].append({"asset_id": m["asset_id"], "caption": f"{trig}, {SHEET_VIEWS[m['view']]}",
-                                   "include": True, "view": m["view"], "source": "sheet"})
-    save_kit(store, char["id"], kit, "sheet", f"{len(made)} views with {engine_name}")
+    publish_views(sheet_asset["id"])
     progress(0.99, "sheet ready")
     return {"asset_ids": [m["asset_id"] for m in made] + [sheet_asset["id"]], "contact_sheet_id": sheet_asset["id"],
-            "views": [m["view"] for m in made], "engine": engine_name}
+            "views": [m["view"] for m in made], "engine": engine_name, "reused_asset_ids": reused}
 
 
 # ------------------------------------------------------------- dataset --
