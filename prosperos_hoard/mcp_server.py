@@ -2482,6 +2482,29 @@ def production_from_storyboard(title: str, shots: list[dict[str, Any]], source_r
                        "lead_name": lead_name, "lead_look": lead_look, "song_asset_id": song_asset_id})
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def production_receive_dossier(dossier_json: str, reference_files: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    """Import a production dossier as a draft / importar un expediente de producción como borrador.
+
+    Pass hoard.production-dossier/1 encoded as JSON and the approved image files keyed by source image id.
+    Returns project, production, mapped asset ids and an undo receipt. An identical handoff returns its existing draft.
+    Keywords: dossier, production draft, handoff, approved references, expediente, borrador de producción, traspaso
+    """
+    return _call("POST", "/api/agent/production_receive_dossier",
+                 json={"dossier_json": dossier_json, "reference_files": reference_files or {}})
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def production_discard_dossier(project: str, production: str, receipt: str) -> dict[str, Any]:
+    """Trash an unchanged dossier draft / enviar a la papelera un borrador de expediente intacto.
+
+    Use the project_id, production and undo_receipt from production_receive_dossier. Restore it with studio_trash.
+    Keywords: dossier, undo handoff, trash draft, expediente, deshacer traspaso, papelera
+    """
+    return _call("POST", "/api/agent/production_discard_dossier",
+                 json={"project": project, "production": production, "receipt": receipt})
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def voice_tts(text: str, voice: Optional[str] = None, lang: Optional[str] = None, engine: Optional[str] = None,
               speed: Optional[float] = None) -> dict[str, Any]:

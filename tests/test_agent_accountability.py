@@ -457,3 +457,43 @@ def test_failed_writes_are_journaled_but_never_undone(agent):
     entries = agent.journal(session="s1")["entries"]
     assert entries and entries[0]["ok"] is False
     assert agent.undone("s1", confirm=True)["undone"] == []
+
+
+
+def test_dossier_handoff_is_idempotent_and_undoable(agent):
+    details = ["Tube on her left", "Missing lower-right corner"]
+    dossier = {
+        "schema": "hoard.production-dossier/1", "title": "Cartographer",
+        "subject": {"kind": "scene"}, "scene": {"title": "Stairs", "text": "Three steps in the rain."},
+        "world": {"visualStyle": "Ink on paper"}, "characters": [], "references": [], "preserveDetails": details,
+    }
+    args = {"dossier_json": json.dumps(dossier)}
+    sent = agent.ok("production_receive_dossier", args)
+    assert not sent["existing"] and not sent["queued"]
+    slug, pid = sent["production"], sent["project_id"]
+    again = agent.ok("production_receive_dossier", args, session="retry")
+    assert again["existing"] and again["production"] == slug
+    view = agent.ok("studio_production", {"production": slug})
+    assert view["dossier"] == dossier
+    assert all(detail in spec_of(agent.store, slug)["shots"][0]["prompt"] for detail in details)
+    outcome = agent.undone("s1", confirm=True)
+    assert outcome["complete"], outcome
+    assert agent.store.get_project(pid)["deleted_at"]
+    assert not (prod.production_dir(agent.store.data_dir, slug) / "state.json").exists()
+
+
+def test_dossier_undo_leaves_a_later_project_edit(agent):
+    dossier = {
+        "schema": "hoard.production-dossier/1", "title": "Draft",
+        "subject": {"kind": "scene"}, "scene": {"title": "Draft", "text": "Rain."},
+        "world": {"visualStyle": None}, "characters": [], "references": [], "preserveDetails": [],
+    }
+    sent = agent.ok("production_receive_dossier", {"dossier_json": json.dumps(dossier)})
+    agent.store.update_project(sent["project_id"], name="Revised")
+    discard = agent.call("production_discard_dossier", {
+        "project": sent["project_id"], "production": sent["production"], "receipt": sent["undo_receipt"],
+    }, session="discard")
+    assert discard.status_code != 200
+    agent.undone("s1", confirm=True)
+    assert agent.store.get_project(sent["project_id"])["name"] == "Revised"
+    assert not agent.store.get_project(sent["project_id"])["deleted_at"]
