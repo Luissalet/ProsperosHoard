@@ -143,6 +143,38 @@ def test_adapters_attach_resolve_and_inject(client, data_dir):
     assert bad.status_code == 400 and bad.json()["error"] == "bad_trigger"
 
 
+@pytest.mark.parametrize("operation", ["img2img", "vary"])
+def test_seedless_edit_retry_skips_the_completed_variant(client, monkeypatch, operation):
+    c, app, _ = client
+    project = _project(c)
+    _, source = _character(c, project)
+    run = engine._run_comfy_workflow
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("interrupted before the second variant")
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "_run_comfy_workflow", fail_second)
+    response = c.post("/api/agent/studio_edit_image", json={
+        "asset_id": source, "operation": operation, "count": 2, "wait_s": 30,
+    })
+    assert response.status_code == 200, response.text
+    initial = response.json()["job"]
+    assert initial["state"] == "failed" and len(initial["asset_ids"]) == 1
+    retry = c.post("/api/agent/studio_retry_job", params={"job_id": initial["id"]}).json()
+    result = _job(c, retry["id"])
+    assert result["state"] == "done", result
+    assert result["asset_ids"][0] == initial["asset_ids"][0]
+    assert len(result["asset_ids"]) == 2 and calls == 3
+    store = app.state.store
+    first, second = (store.get_asset(aid)["recipe"]["params"]["seed"] for aid in result["asset_ids"])
+    assert second == first + 1
+
+
 def test_sheet_retry_keeps_imported_views_in_job_dataset_and_pack(client, monkeypatch):
     c, app, _ = client
     project = _project(c)
