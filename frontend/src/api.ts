@@ -1004,6 +1004,7 @@ export type ScenePosition = "first" | "middle" | "last";
 export type SceneVerdict = "pass" | "defect" | "unclear";
 export interface SceneReview {
   status: SceneVerdict;
+  sample_window_s?: number;
   samples: { position: ScenePosition; checks: { verdict: SceneVerdict; note: string }[] }[];
 }
 export interface SceneShot {
@@ -1021,6 +1022,7 @@ export interface ProductionScene {
   character_sheet_asset_id: string;
   preserve_details: string[];
   shots: SceneShot[];
+  piece?: { review_status?: "checked" | "provisional" } | null;
 }
 
 export interface ProductionView extends Omit<ProductionSummary, "animatic"> {

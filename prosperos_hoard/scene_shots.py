@@ -11,6 +11,7 @@ from PIL import Image
 from . import director, engine, productions as prod, qa
 from .store import Store
 
+FPS = 24
 POSITIONS = ("first", "middle", "last")
 VERDICTS = ("pass", "defect", "unclear")
 
@@ -47,7 +48,7 @@ def _text(value: Any, name: str, limit: int = 1000) -> str:
 def _duration(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (float, int)) or not 2 <= value <= 5:
         raise engine.EngineError("bad_scene_plan", "each shot must last between 2 and 5 seconds")
-    return round(value * 24) / 24
+    return round(value * FPS) / FPS
 
 
 def _vision_image(path: Any) -> bytes:
@@ -169,7 +170,6 @@ def revise(store: Store, slug: str, key: str, change: dict) -> dict:
             for name in [name for name in clips if prod.split_key(name)[0] == key]:
                 clips.pop(name)
             prod._requeue(state, f"updated controls of scene shot {key}")
-            state["scene_render_keys"] = [key]
             prod.log(state, "clips", "revised_scene_shot", key=key)
             prod.save_state(store.data_dir, state)
         return view(state)
@@ -186,7 +186,7 @@ def clip_body(state: dict, shot: dict, start: str, seed: int) -> dict:
         return {**body, "template": "wan22_flf2v", "end_asset_id": control["last_frame_asset_id"],
                 "template_params": {"seconds": round(duration + 0.25, 3), "lightning": True}}
     return {**body, "template": "ltx23_control", "driving_asset_id": control["control_asset_id"],
-            "template_params": {"length": math.ceil(duration * 24 / 8) * 8 + 1}}
+            "template_params": {"length": math.ceil(duration * FPS / 8) * 8 + 1}}
 
 
 def _object(reply: str) -> dict:
@@ -201,19 +201,25 @@ def _shot_take(state: dict, key: str) -> str:
     return aid
 
 
-def _samples(store: Store, aid: str, project: str) -> tuple[list[bytes], list[dict]]:
+def _shot_duration(state: dict, key: str) -> float:
+    return next(s["scene_control"]["duration_s"] for s in state["spec"]["shots"] if s["key"] == key)
+
+
+def _sample_frames(duration: float) -> tuple[int, int, int]:
+    length = round(duration * FPS)
+    return 0, length // 2, length - 1
+
+
+def _samples(store: Store, aid: str, project: str, duration: float) -> tuple[list[bytes], list[dict]]:
     clip = _asset(store, aid, "video", project)
     path = store.data_dir / clip["file_path"]
-    duration = clip.get("duration_s")
-    if not duration:
-        raise engine.EngineError("no_scene_frames", "the clip has no measured duration")
     images, frames = [], []
-    for position, at in zip(POSITIONS, (0.0, duration / 2, None)):
-        frame = qa.video_frame(path, at)
+    for position, index in zip(POSITIONS, _sample_frames(duration)):
+        frame = qa.video_frame(path, index / FPS, output_fps=FPS)
         if frame is None:
             raise engine.EngineError("no_scene_frames", f"could not decode the {position} frame")
         images.append(qa._jpeg(frame, 768))
-        frames.append({"position": position, "at_s": at})
+        frames.append({"position": position, "at_s": index / FPS})
     return images, frames
 
 
@@ -243,7 +249,7 @@ def review(store: Store, slug: str, key: str, vision: Any, model: str) -> dict:
     state = prod.load_state(store.data_dir, slug)
     scene = _scene(state)
     aid = _shot_take(state, key)
-    images, frames = _samples(store, aid, state["project_id"])
+    images, frames = _samples(store, aid, state["project_id"], _shot_duration(state, key))
     details = scene["preserve_details"]
     out = {"production": slug, "key": key, "clip_asset_id": aid, "samples": frames, "preserve_details": details}
     if vision is None:
@@ -282,8 +288,9 @@ def record(store: Store, slug: str, key: str, aid: str, samples: list[dict], rev
             checks = _checks(samples, len(scene["preserve_details"]))
         except ValueError as exc:
             raise engine.EngineError("bad_scene_review", str(exc)) from exc
-        _, frames = _samples(store, aid, state["project_id"])
-        result = {"clip_asset_id": aid, "status": _verdict(checks), "reviewer": reviewer,
+        duration = _shot_duration(state, key)
+        _, frames = _samples(store, aid, state["project_id"], duration)
+        result = {"clip_asset_id": aid, "status": _verdict(checks), "reviewer": reviewer, "sample_window_s": duration,
                   "samples": [{**frame, **check} for frame, check in zip(frames, checks)]}
         state.setdefault("scene_reviews", {}).setdefault(key, {})[aid] = result
         prod.save_state(store.data_dir, state)
@@ -295,14 +302,19 @@ def evidence(store: Store, slug: str, key: str, aid: str, position: str) -> byte
     _scene(state)
     if position not in POSITIONS:
         raise engine.EngineError("no_scene_frames", "sample position must be first, middle or last")
-    if not (state.get("scene_reviews", {}).get(key, {}).get(aid) or _shot_take(state, key) == aid):
+    review = state.get("scene_reviews", {}).get(key, {}).get(aid)
+    current = state["done"].get("clips", {}).get("items", {}).get(key) == aid
+    if not review and not current:
         raise engine.EngineError("stale_scene_take", "the clip is not a reviewed take of this shot")
     clip = _asset(store, aid, "video", state["project_id"])
-    duration = clip.get("duration_s")
-    if not duration:
-        raise engine.EngineError("no_scene_frames", "the clip has no measured duration")
-    at = (0.0, duration / 2, None)[POSITIONS.index(position)]
-    image = qa.video_frame(store.data_dir / clip["file_path"], at)
+    path = store.data_dir / clip["file_path"]
+    index = POSITIONS.index(position)
+    if review:
+        at = review["samples"][index]["at_s"]
+        image = qa.video_frame(path, at, output_fps=FPS if "sample_window_s" in review else None)
+    else:
+        frame = _sample_frames(_shot_duration(state, key))[index]
+        image = qa.video_frame(path, frame / FPS, output_fps=FPS)
     if image is None:
         raise engine.EngineError("no_scene_frames", f"could not decode the {position} frame")
     return qa._jpeg(image, 768)
@@ -313,11 +325,23 @@ def view(state: dict) -> dict:
     clips = state["done"].get("clips", {}).get("items", {})
     reviews = state.get("scene_reviews", {})
     timeline = state["done"].get("timeline", {}).get("timelines", {}).get(scene["aspect"], {})
-    return {**scene, "production": state["slug"], "project_id": state["project_id"],
-            "shots": [{"key": shot["key"], **shot["scene_control"], "clip_asset_id": clips.get(shot["key"]),
-                       "review": reviews.get(shot["key"], {}).get(clips.get(shot["key"]))}
-                      for shot in state["spec"]["shots"] if shot.get("scene_control")],
-            "piece": timeline.get("piece")}
+    shots = []
+    for shot in state["spec"]["shots"]:
+        control = shot.get("scene_control")
+        if not control:
+            continue
+        key = shot["key"]
+        aid = clips.get(key)
+        review = reviews.get(key, {}).get(aid)
+        shots.append({"key": key, **control, "clip_asset_id": aid, "review": review})
+    piece = timeline.get("piece")
+    if piece and piece.get("asset_id"):
+        checked = [(s["key"], s["clip_asset_id"], s["duration_s"]) for s in shots
+                   if s["review"] and s["review"]["status"] == "pass"
+                   and s["review"].get("sample_window_s") == s["duration_s"]]
+        rendered = [(s["key"], s["clip_asset_id"], s["duration_s"]) for s in piece["shots"]]
+        piece = {**piece, "review_status": "checked" if checked == rendered else "provisional"}
+    return {**scene, "production": state["slug"], "project_id": state["project_id"], "shots": shots, "piece": piece}
 
 
 def timeline_inputs(store: Store, state: dict) -> tuple[list[dict], list[dict]]:

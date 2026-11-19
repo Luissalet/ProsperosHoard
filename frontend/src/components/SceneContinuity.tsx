@@ -27,13 +27,20 @@ export function SceneContinuity({ slug, scene, disabled, locked, onRedo }: {
     <section className="scene-continuity" aria-label={t("sceneContinuity")}>
       <div className="row wrap">
         <h3 className="grow">{t("sceneContinuity")}</h3>
+        {scene.piece?.review_status && (
+          <span className={scene.piece.review_status === "provisional" ? "pill warn" : "pill"}>
+            {t(scene.piece.review_status === "provisional" ? "sceneCutProvisional" : "sceneCutChecked")}
+          </span>
+        )}
         <button className="btn sm" onClick={() => app.openAsset(scene.character_sheet_asset_id)}>
           <Images size={14} /> {t("sceneSheet")}
         </button>
       </div>
       {scene.shots.map((shot) => {
         const { review, clip_asset_id: clip } = shot;
-        const status = review ? t(verdictLabels[review.status]) : t(clip ? "sceneUnreviewed" : "sceneNoClip");
+        const needsResampling = review && review.sample_window_s !== shot.duration_s;
+        const status = needsResampling ? t("sceneNeedsResampling")
+          : review ? t(verdictLabels[review.status]) : t(clip ? "sceneUnreviewed" : "sceneNoClip");
         const openEvidence = open.includes(shot.key);
         const anchors = shot.last_frame_asset_id ? [shot.first_frame_asset_id, shot.last_frame_asset_id] : [shot.first_frame_asset_id];
         return (

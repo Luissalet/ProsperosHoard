@@ -197,10 +197,18 @@ def _motion_differences(frames: np.ndarray) -> np.ndarray:
     return np.concatenate(chunks) if chunks else np.empty(0)
 
 
-def video_frame(path: Path, at_s: Optional[float]) -> Optional[Image.Image]:
-    """Decode the frame at a seek position, or the actual final frame."""
-    seeks = (["-sseof", "-1"], []) if at_s is None else (["-ss", f"{max(0.0, at_s):.3f}"],)
-    frame_filter = ["-vf", "reverse"] if at_s is None else []
+def video_frame(path: Path, at_s: Optional[float], *, output_fps: Optional[int] = None) -> Optional[Image.Image]:
+    """Decode a frame by seek time, by output time after resampling, or at EOF."""
+    if output_fps is not None and at_s is not None:
+        index = round(at_s * output_fps)
+        seeks = ([],)
+        frame_filter = ["-vf", f"fps={output_fps},trim=start_frame={index}"]
+    elif at_s is None:
+        seeks = (["-sseof", "-1"], [])
+        frame_filter = ["-vf", "reverse"]
+    else:
+        seeks = (["-ss", f"{max(0.0, at_s):.3f}"],)
+        frame_filter = []
     for seek in seeks:
         cmd = [_ffmpeg(), "-nostdin", "-v", "error", *seek, "-i", str(path), "-map", "0:v:0",
                *frame_filter, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
