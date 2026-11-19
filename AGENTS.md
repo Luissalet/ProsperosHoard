@@ -282,6 +282,15 @@ Qué hacer cuando el usuario pide, con sus palabras:
   videoclip entero, `studio_production_reframe(production, aspects,
   framing)` (solo se vuelve a renderizar el montaje). `framing`: `fill`
   recorta, `blur` encaja sobre un fondo desenfocado, `fit` pone barras.
+- **«Haz esta escena en planos que mantengan los detalles»**: usa el
+  borrador que llega por `production_receive_dossier`. Con la hoja importada,
+  `studio_scene_suggest` propone los planos. Prepara las imágenes o los
+  controles con la hoja y guarda con `studio_scene_plan`. Renderiza con
+  `studio_production_continue`, inspecciona las tres muestras de cada toma y
+  registra cada detalle con `studio_scene_record_review`. Revisa el montaje.
+  `studio_scene_revise_shot` corrige los controles de un plano, y
+  `studio_production_regenerate(stage="clips", keys=[...])` repite solo
+  los planos indicados. El relevo y sus huellas están en `studio_scene`.
 - **«Aprueba este plano» / «rehaz el resto»**: `studio_production_shots`
   con `{"key": "4", "locked": true}` y después
   `studio_production_regenerate(production, stage="clips"|"frames")`: solo

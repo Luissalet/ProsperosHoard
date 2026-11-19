@@ -649,6 +649,40 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
 | `production_storyboard_sheet(production, generate?)` | 6-9 key shots of the treatment in one image: the production's stills, else placeholders from the shot text; `generate=true` queues ComfyUI stills for the rest when ComfyUI is running. |
 | `motion_lint(composition, revision?, threshold?)` (Montaje) | Read-only. Opacity-only sections of an HTML animation; 3 or more: `verdict: reject` with `reprompt`. |
 
+### Scene video
+
+1. Open a draft received with `production_receive_dossier`. Import the
+   character sheet and reference images into that project. Call
+   `studio_scene_suggest(production, character_sheet_asset_id, duration_s, count)`
+   to get framing, action and first/last pose descriptions from the configured
+   vision service. An agent can also plan the shots itself.
+2. Prepare each shot?s first image and either its last image or a control video
+   using the sheet. Call `studio_scene_plan` with the sheet and the ordered
+   shots. Each row needs `framing`, `action`, `duration_s` (2?5 s, aligned to
+   24 fps), `first_frame_asset_id`, and exactly one of `last_frame_asset_id`
+   and `control_asset_id`. The plan carries over `preserveDetails` from the
+   dossier and can add `preserve_details`.
+3. Start or resume with `studio_production_continue`. Each shot gets its own
+   checkpointed job through the GPU queue, with first/last-frame video or
+   structure control. The timeline uses the ordered takes and planned
+   durations. `studio_scene` returns the asset ID and the shot-by-shot
+   provenance of the `video-clip`.
+4. Call `studio_scene_review(production, key)` to compare the complete sheet
+   and the first, middle and last frame of the current take. Each sample
+   contains one check per detail. Inspect the footage and submit the checks
+   with `studio_scene_record_review` using the exact `clip_asset_id`. Each
+   check includes `verdict` (`pass`, `defect` or `unclear`) and `note`.
+   Sampled review can expose a defect. Watch the cut for continuity in motion.
+5. To correct one shot?s controls, use `studio_scene_revise_shot` followed by
+   `studio_production_continue`. For a different seed with the same controls
+   use `studio_production_regenerate(stage="clips", keys=["2"])`, or use
+   **Redo shot** in the storyboard. When all takes exist the timeline renders
+   the updated cut. The other takes keep their IDs and fingerprints.
+
+Planning, shot changes and saved reviews use the normal agent session undo.
+A running render is managed through the job controls and its previous takes
+remain available in the storyboard.
+
 ### Continuity bible, segment repair and join review
 
 | Tool | What it does |

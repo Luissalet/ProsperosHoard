@@ -54,6 +54,7 @@ Usos típicos:
 - Tarjetas de estilo (aspecto, técnica, paleta, movimiento, transición de firma, trampas) con direcciones integradas e importadas.
 
 **Producciones**
+- Vídeo de escena a partir de un expediente y una hoja de personaje, con fotogramas de referencia, revisión al principio, en medio y al final de cada plano, tomas que se pueden rehacer por separado y montaje con procedencia por plano.
 - Un videoclip entero como una producción reanudable con puntos de control: protagonista y hoja de referencia, canción, imágenes, sincronía de letra, clips, photocards, portada, el corte y sus renders, más un informe. Cambiar planos rehace solo lo que depende de ellos.
 - Modo con tratamiento previo (logline, estructuras, lista de planos, hoja de pulsos) antes de renderizar nada; animatic con las imágenes cortadas como el montaje final antes de los clips caros; director de QA que revisa imágenes planas o ruidosas, bandas en los bordes, saltos de exposición, clips congelados y cobertura de la letra; biblia de continuidad con reparación de segmentos.
 - Recetas: convierte una producción terminada en plantilla con un hueco `{lead}` y recréala con otro personaje.
@@ -135,7 +136,7 @@ Los resultados son compactos y con ids primero; las imágenes solo vienen con `i
 | Audio y voz | `studio_compose`, `studio_analyze_audio`, `studio_stems`, `studio_voice`, `voice_*` (motores, crear, listar, hablar, transcribir, audiolibro, doblaje, repetir palabras) |
 | Diseño | `studio_design`, `studio_photocard_set`, `studio_board`, `studio_style_cards` |
 | Línea de tiempo y render | `studio_timeline`, `studio_render`, `studio_export_timeline`, `studio_canvas`, `studio_style_profile_*`, `studio_production_finishing`, `production_export_lumiere` |
-| Producciones | `studio_production*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_stock_search` |
+| Producciones | `studio_production*`, `studio_scene*`, `studio_video_plan`, `studio_video_from_plan`, `studio_animatic`, `studio_qa_run`, `studio_qa_report`, `studio_recipe_*`, `production_from_storyboard`, `studio_short_create`, `studio_stock_search` |
 | Kit de personaje | `studio_character_sheet`, `_dataset`, `_train`, `_adapters`, `_takes`, `_pack`, `_library` |
 | Vídeo web | `brand_scan`, `promo_from_url`, `contact_sheet`, `website_walkthrough`, `studio_qr_video`, `studio_qr_verify`, `studio_explainer`, `studio_spatial` |
 | Recursos y trabajos | `studio_assets`, `studio_show`, `studio_lineage`, `studio_asset_update`, `studio_import`, `studio_download_media`, `studio_delete_assets`, `studio_trash`, `studio_jobs`, `studio_job`, `studio_cancel_job`, `studio_retry_job` |
