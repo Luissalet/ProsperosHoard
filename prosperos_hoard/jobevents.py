@@ -3,7 +3,7 @@
 Renders, songs, clips and whole productions send the hub's canonical job events: `prospero.job.queued|started|progress|done|failed|
 cancelled`, each with `{job_id, title, kind (render|song|clip|production), progress (0..1), gpu, eta_s, url, error}`. A production
 that stops for the person finishes its job as `done` with `status: "awaiting_review"` and `awaiting` (`take`, `animatic`, `script` or
-`review`); a finished render or clip also lists its `asset_ids`. Image generations, edits and character sheets also send lifecycle events. Progress events are throttled so a long job never floods the bus.
+`review`); a finished render or clip also lists its `asset_ids`. Character sheets send lifecycle events. Standalone generations and edits emit on failure. Progress events are throttled so a long job never floods the bus.
 
 Notifications go through the family hub only (Prospero has no channel of its own) and only for productions, the one thing that waits
 on a person: it paused for a take or the animatic, finished, or failed (failed = high priority). `notify.via` (`family_settings`):
@@ -29,7 +29,8 @@ log = logging.getLogger("prosperos_hoard.jobevents")
 
 APP = "prospero"
 KINDS = {"render_timeline": "render", "compose_song": "song", "animate": "clip", "production": "production",
-         "character_sheet": "sheet", "generate_image": "generation", "edit_image": "edit"}
+         "character_sheet": "sheet"}
+FAILURE_KINDS = {"generate_image": "generation", "edit_image": "edit"}
 TEXT = {
     "es": {
         "take": ("{title}: elige una toma", "La canción tiene varias tomas. Escúchalas y elige una para seguir."),
@@ -93,7 +94,8 @@ class JobEvents:
             return {"render_timeline": "Render", "compose_song": "Song", "animate": "Clip"}.get(job["type"], str(job["type"]))
 
     def data(self, job: dict[str, Any], **extra: Any) -> dict[str, Any]:
-        out: dict[str, Any] = {"job_id": job["id"], "title": self.title(job), "kind": kind_of(job["type"]), "url": self.url(job)}
+        kind = kind_of(job["type"]) or (FAILURE_KINDS.get(job["type"]) if job["state"] == "failed" else None)
+        out: dict[str, Any] = {"job_id": job["id"], "title": self.title(job), "kind": kind, "url": self.url(job)}
         if job.get("project_id"):
             out["project_id"] = job["project_id"]
         if job["type"] == "production" and (job.get("params") or {}).get("slug"):
@@ -149,7 +151,7 @@ class JobEvents:
         with self._lock:
             for table in (self._started, self._last, self._gpu):
                 table.pop(job["id"], None)
-        if not kind_of(job["type"]):
+        if not gpu_data["kind"]:
             return
         state = job["state"]
         if state == "failed":
