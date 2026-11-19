@@ -2056,7 +2056,7 @@ def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str]
 
 @tool(_ro(readOnlyHint=True))
 def studio_scene(production: str) -> dict[str, Any]:
-    """Get the storyboard's scene shots, current reviews and assembled video provenance.
+    """Get the scene's shots, assembled video provenance and whether all mounted takes passed review.
 
     Keywords: storyboard, shot provenance, scene, planos, procedencia, escena
     """

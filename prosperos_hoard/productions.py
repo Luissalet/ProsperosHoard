@@ -1931,7 +1931,7 @@ class Run:
         timelines = entry["timelines"]
         if aspect not in timelines:
             tracks, shots = scene_shots.timeline_inputs(self.store, self.state)
-            timeline = self.store.create_timeline(self.project_id, self.state["name"], aspect, fps=24, tracks=tracks)
+            timeline = self.store.create_timeline(self.project_id, self.state["name"], aspect, fps=scene_shots.FPS, tracks=tracks)
             scene = self.spec["scene_shots"]
             dossier = self.spec.get("production_dossier") or {}
             timelines[aspect] = {"timeline_id": timeline["id"], "renders": {}, "piece": {

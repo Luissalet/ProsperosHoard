@@ -64,6 +64,8 @@ def test_native_pipeline_regenerates_one_scene_shot_and_assembles_in_order(store
     rows[0]["control_asset_id"] = _clip(store, project["id"], np.full((96, 64, 96), 42))
     plan = scene_shots.apply_plan(store, slug, sheet, "", [], rows, "16:9")
     assert plan["preserve_details"] == ["Keep the case on her left."]
+    scene_shots.revise(store, slug, "1", {"action": "Begins to climb"})
+    scene_shots.revise(store, slug, "2", {"action": "Lifts the case"})
     studio = Studio(store)
 
     def run():
@@ -72,6 +74,7 @@ def test_native_pipeline_regenerates_one_scene_shot_and_assembles_in_order(store
 
     first = run()
     assert first["type"] == "video-clip" and first["duration_s"] == 10.5
+    assert first["review_status"] == "provisional"
     assert first["dossier_ref"] == "hoard://writer/writing/example"
     assert [c["template"] for c in studio.calls] == ["ltx23_control", "wan22_flf2v", "wan22_flf2v"]
     assert studio.calls[0]["driving_asset_id"] == rows[0]["control_asset_id"]
@@ -83,9 +86,25 @@ def test_native_pipeline_regenerates_one_scene_shot_and_assembles_in_order(store
     assert [s["position"] for s in review["samples"]] == ["first", "middle", "last"]
     pixels = [Image.open(io.BytesIO(scene_shots.evidence(store, slug, "2", original, p))).getpixel((5, 5))[0]
               for p in scene_shots.POSITIONS]
-    assert pixels[0] < pixels[1] < pixels[2]
+    assert [s["at_s"] for s in review["samples"]] == [0, 1.75, 83 / 24]
+    assert pixels == pytest.approx([35, 116, 196], abs=3)
+    for shot in first["shots"]:
+        if shot["key"] != "2":
+            scene_shots.record(store, slug, shot["key"], shot["clip_asset_id"], checks(), "reviewer")
+    state = prod.load_state(store.data_dir, slug)
+    assert scene_shots.view(state)["piece"]["review_status"] == "provisional"
+    scene_shots.record(store, slug, "2", original, checks("unclear"), "reviewer")
+    assert scene_shots.view(prod.load_state(store.data_dir, slug))["piece"]["review_status"] == "provisional"
+    scene_shots.record(store, slug, "2", original, checks(), "reviewer")
+    state = prod.load_state(store.data_dir, slug)
+    assert scene_shots.view(state)["piece"]["review_status"] == "checked"
+    state["scene_reviews"]["2"][original].pop("sample_window_s")
+    legacy = scene_shots.view(state)
+    assert legacy["piece"]["review_status"] == "provisional"
+    assert legacy["shots"][1]["review"]["status"] == "pass"
     assert prod.regenerate_unlocked(store.data_dir, slug, "clips", ["2"])["regenerated"] == ["2"]
     second = run()
+    assert second["review_status"] == "provisional"
     assert len(studio.calls) == 4 and studio.calls[3]["seed"] != studio.calls[1]["seed"]
     assert [s["key"] for s in second["shots"]] == ["1", "2", "3"]
     assert second["shots"][0] == first["shots"][0] and second["shots"][2] == first["shots"][2]
@@ -143,7 +162,9 @@ def test_scene_agent_catalog_routes_and_undo(client):
     response = http.get(f"/api/productions/{slug}/scene/1/sample/{clip}/last.jpg")
     assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
     agent.undone("scene-review", confirm=True)
-    assert agent.ok("studio_scene", {"production": slug}, reason=None)["shots"][0]["review"] is None
+    scene = agent.ok("studio_scene", {"production": slug}, reason=None)
+    assert scene["shots"][0]["review"] is None
+    assert scene["piece"]["review_status"] == "provisional"
     agent.ok("studio_scene_revise_shot", {"production": slug, "key": "1", "changes": {"action": "Look ahead"}},
              session="scene-revise")
     assert agent.ok("studio_scene", {"production": slug}, reason=None)["shots"][0]["clip_asset_id"] is None
