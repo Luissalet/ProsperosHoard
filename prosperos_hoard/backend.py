@@ -215,6 +215,7 @@ class Backend:
         # main one Hoard Link resolves), one cached client per extra server
         self._bound = threading.local()
         self._pool_clients: dict[str, Any] = {}
+        self._render_locks: dict[tuple[str, Any], Any] = {}
         self._pool_health: dict[str, tuple[float, bool]] = {}
         self._pool_lock = threading.Lock()
         self._min_card_cache: dict[str, int] = {}
@@ -338,18 +339,42 @@ class Backend:
         self._bound.worker = True
 
     def comfy_gpu(self) -> Optional[int]:
-        """Physical card of this worker's local server, when the launcher knows it."""
+        """Physical card of this worker's local server, including externally started servers."""
         target = getattr(self._bound, "url", None)
         port = comfy_port_from_url(target) if target else self.main_comfy_port()
         if port is None:
             return None
         state = self.launcher.status(self.launcher.get(f"comfyui@{port}"))
         gpu = state.get("gpu")
+        if gpu is None and state.get("state") == "running":
+            from .hoard_link import launch
+
+            pid = launch._listeners().get(port)
+            if pid:
+                _, processes = launch._gpu_processes()
+                cards = {item["gpu"] for item in processes if item["pid"] == pid and item["gpu"] is not None}
+                if len(cards) == 1:
+                    gpu = cards.pop()
         if gpu is None and not target and state.get("state") in ("down", "unavailable"):
             gpu = (self.launcher.config().get("comfyui") or {}).get("gpu")
         if not isinstance(gpu, bool) and str(gpu).isdigit():
             return int(gpu)
         return None
+
+    def render_lock(self, gpu: Optional[int] = None):
+        """Serialize aliased workers on a physical GPU or a shared endpoint."""
+        target = getattr(self._bound, "url", None) or self.link.config.comfy_url
+        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        key = ("gpu", gpu) if gpu is not None else ("endpoint", port or target or "default")
+        with self._pool_lock:
+            return self._render_locks.setdefault(key, threading.Lock())
+
+    def cold_local_comfy(self) -> bool:
+        """The main worker can bind an unassigned local server when it starts."""
+        if getattr(self._bound, "url", None) or not self.autostart_comfy():
+            return False
+        port = self.main_comfy_port()
+        return port is not None and not _port_open(f"http://127.0.0.1:{port}")
 
     def bind_lease_gpu(self, gpu: Optional[int]) -> None:
         self._bound.lease_gpu = gpu
