@@ -17,6 +17,7 @@ import os
 from typing import Any, Callable, Iterator, Optional
 
 from .hoard_link import LeaseTimeout, lease as default_lease
+from .hoard_link.lease import LeaseError
 from .jobs import WaitingForResources
 
 log = logging.getLogger("prosperos_hoard.gpu_lease")
@@ -95,6 +96,8 @@ def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, l
         raise
     except Exception as error:  # noqa: BLE001
         lease_cm = None
+        if isinstance(error, LeaseError) and not isinstance(error, LeaseTimeout):
+            raise
         if isinstance(error, LeaseTimeout):
             raise WaitingForResources(f"waiting for the family hub's GPU lease ({error}); retrying every 15 s for up to 30 min.") from error
         log.info("no GPU lease for job %s (%s); it runs under its own VRAM gate", job.get("id"), error)
