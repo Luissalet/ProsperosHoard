@@ -31,6 +31,7 @@ from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from . import production_dossier
 from . import agent_undo, engine, exporters, family_tools
 from .family_settings import FamilySettings, SettingsError
 from .hoard_link import family
@@ -91,6 +92,17 @@ class StoryboardBody(BaseModel):
     lead_name: Optional[str] = None
     lead_look: Optional[str] = None
     song_asset_id: Optional[str] = Field(None, description="An existing song for the cut; without one the draft waits for it.")
+
+
+class DossierImportBody(BaseModel):
+    dossier_json: str = Field(..., description="The complete hoard.production-dossier/1 document encoded as JSON.")
+    reference_files: dict[str, str] = Field(default_factory=dict, description="Image id to importable local path for approved references.")
+
+
+class DossierDiscardBody(BaseModel):
+    project: str = Field(..., description="Project id from the handoff result.")
+    production: str = Field(..., description="Production slug from the handoff result.")
+    receipt: str = Field(..., description="The undo_receipt returned by the handoff.")
 
 
 class TtsBody(BaseModel):
@@ -291,6 +303,16 @@ def install(app: FastAPI, ctx: Context, app_id: str = "prospero") -> None:
                 project=body.project, character_id=body.character_id, lead_name=body.lead_name, lead_look=body.lead_look,
                 song_asset_id=body.song_asset_id, view=ctx.production_view)
         return ctx.agent("production_from_storyboard", body.title[:80], run)
+
+    @app.post(PREFIX + "production_receive_dossier")
+    def agent_receive_dossier(body: DossierImportBody):
+        return ctx.agent("production_receive_dossier", "", lambda: production_dossier.receive(
+            store, ctx.backend, body.dossier_json, body.reference_files))
+
+    @app.post(PREFIX + "production_discard_dossier")
+    def agent_discard_dossier(body: DossierDiscardBody):
+        return ctx.agent("production_discard_dossier", body.production, lambda: production_dossier.discard(
+            store, body.project, body.production, body.receipt))
 
     @app.post(PREFIX + "voice_tts")
     def agent_voice_tts(body: TtsBody):

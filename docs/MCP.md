@@ -32,6 +32,23 @@ database or filesystem access of its own. Every call is recorded in the app's
 Faustus reads the same information from `faustus-plugin.json`
 (Connectors -> Nearby apps -> Add).
 
+## Production dossier handoff
+
+`production_receive_dossier(dossier_json, reference_files)` receives a
+`hoard.production-dossier/1` document. The file map uses dossier image IDs and
+importable local paths. The studio copies those images into the project library
+and creates an unqueued production. A single leading character becomes a cast
+member, with their canonical image when supplied. `studio_production(production)`
+returns the original dossier and all imported image IDs. The opening shot
+includes the scene, visual direction and exact details to preserve, with up to
+six extra references. Sending identical data and image bytes reuses the draft.
+
+To undo a handoff, call `production_discard_dossier` with the returned
+`project_id`, `production` and `undo_receipt` as `project`, `production` and
+`receipt`. The unchanged project and its production go to the studio trash.
+Accountable agent calls can also undo the import by session. Use `studio_trash`
+to restore the project.
+
 ## Conventions
 
 - **Ids first.** Projects `proj_...`, assets `a_...`, characters `char_...`,

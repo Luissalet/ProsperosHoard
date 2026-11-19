@@ -963,6 +963,9 @@ def _compact_view(state: dict[str, Any]) -> dict[str, Any]:
         view["note"] = "made by the production script; export it as a recipe with studio_recipe_export"
         return view
     spec = state.get("spec") or {}
+    if "production_dossier" in spec:
+        view["dossier"] = spec["production_dossier"]
+        view["dossier_reference_assets"] = spec["dossier_reference_assets"]
     done = state.get("done", {})
     view["stages"] = {s: stage_status(state, s) for s in stages_for(state)}
     treatment = state.get("treatment")

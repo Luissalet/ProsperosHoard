@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import graphic_shots
+from . import production_dossier
 from . import productions as prod
 from .hoard_link.agentkit import AppError
 from .ids import new_id
@@ -580,6 +581,21 @@ def undo_production_create(ctx: Any, record: dict, dry_run: bool = False) -> dic
             "note": "a cast member the production copied into its project stays there"}
 
 
+def track_dossier_receive(args: dict, result: dict, ctx: Any = None) -> dict:
+    if result.get("existing"):
+        return {"objects": []}
+    pid, slug = result["project_id"], result["production"]
+    return {"objects": [f"project:{pid}", f"production:{slug}"],
+            "ids": [f"project_id={pid}", f"production={slug}"], "etag": result["undo_receipt"]}
+
+
+def undo_dossier_receive(ctx: Any, record: dict, dry_run: bool = False) -> dict:
+    if not record.get("etag") and not record.get("objects"):
+        return {"unchanged": True}
+    return production_dossier.discard(ctx.store, _id(record, "project_id"), _id(record, "production"),
+                                      record.get("etag", ""), dry_run=dry_run)
+
+
 # ------------------------------------------------------------------------------------------------ the table
 
 _PRODUCTION = {"capture": capture_production, "track": track_production, "undo": undo_production}
@@ -635,6 +651,8 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_production_script": _PRODUCTION,
     "studio_production_apply_style_profile": _PRODUCTION,
     "studio_production_regenerate_dependent": _PRODUCTION,
+    "production_receive_dossier": {"track": track_dossier_receive, "undo": undo_dossier_receive},
+    "production_discard_dossier": {"capture": capture_project_delete, "track": track_project_delete, "undo": undo_project_delete},
     "studio_production_create": {"track": track_production_create, "undo": undo_production_create},
 }
 
@@ -655,6 +673,7 @@ DRAFT_SAFE = frozenset({
     "studio_production_segments", "studio_production_settings", "studio_production_finishing", "studio_production_script",
     "studio_recipe_export", "studio_recipe_run", "studio_animatic",
     "studio_style_profile_extract", "studio_style_profile_update", "studio_production_shot_comment", "studio_production_shot_comment_resolve",
+    "production_receive_dossier",
     "voice_create", "voice_speak", "voice_tts", "voice_audiobook", "voice_dub", "production_from_storyboard",
     "edit_plan", "edit_verify", "edit_contact_sheet",
     "manim_render", "manim_check", "promo_from_url", "brand_scan", "contact_sheet",
