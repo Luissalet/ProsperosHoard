@@ -361,6 +361,42 @@ class Backend:
             return int(gpu)
         return None
 
+    def comfy_resident_mb(self, gpu: int) -> int:
+        """Reclaimable memory from this local CUDA worker, measured per process."""
+        from .hoard_link import launch
+        from . import procutil
+
+        target = getattr(self._bound, "url", None)
+        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        pid = launch._listeners().get(port) if port is not None else None
+        if not pid:
+            return 0
+        _, processes = launch._gpu_processes()
+        matches = [row for row in processes if row["pid"] == pid and row["gpu"] is not None]
+        if {row["gpu"] for row in matches} != {gpu}:
+            return 0
+        known = [int(row["used_mb"]) for row in matches if row.get("used_mb") is not None]
+        if known or os.name != "nt":
+            return max(known, default=0)
+
+        # WDDM reports no per-process usage through NVML. ComfyUI may open
+        # small contexts on the other adapters, so only credit unambiguous
+        # resident memory on its single CUDA adapter.
+        try:
+            result = procutil.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory "
+                 f"-Filter \"Name LIKE 'pid_{pid}_%'\" -ErrorAction Stop).DedicatedUsage"],
+                text=True, timeout=8,
+            )
+        except (OSError, procutil.subprocess.SubprocessError):
+            return 0
+        if result.returncode:
+            return 0
+        dedicated = [int(line) // (1024 * 1024) for line in result.stdout.splitlines() if line.strip().isdigit()]
+        active = [mb for mb in dedicated if mb >= 32]
+        return active[0] if len(active) == 1 else 0
+
     def render_lock(self, gpu: Optional[int] = None):
         """Serialize aliased workers on a physical GPU or a shared endpoint."""
         target = getattr(self._bound, "url", None) or self.link.config.comfy_url
@@ -684,7 +720,11 @@ class Backend:
             return None
         total, unused = dev.get("torch_vram_total", 0), dev.get("torch_vram_free", 0)
         reserved_in_use = max(0, total - unused) if self._memory_bytes(total) and self._memory_bytes(unused) else 0
-        return (free + reserved_in_use) // (1024 * 1024)
+        gpu = getattr(self._bound, "lease_gpu", None)
+        reclaimable = self.comfy_resident_mb(gpu) if gpu is not None else 0
+        total_bytes = dev.get("vram_total")
+        available = free + max(reserved_in_use, reclaimable * 1024 * 1024)
+        return min(available, total_bytes) // (1024 * 1024) if self._memory_bytes(total_bytes) else available // (1024 * 1024)
 
     def vram_total_mb(self) -> Optional[int]:
         """The size of the card the bound ComfyUI runs on, in MB (None when
