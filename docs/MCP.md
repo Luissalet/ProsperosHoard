@@ -34,6 +34,8 @@ Faustus reads the same information from `faustus-plugin.json`
 
 ## Production dossier handoff
 
+Enable the Generation module to receive production dossiers.
+
 `production_receive_dossier(dossier_json, reference_files)` receives a
 `hoard.production-dossier/1` document. The file map uses dossier image IDs and
 importable local paths. The studio copies those images into the project library

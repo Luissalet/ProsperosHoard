@@ -19,7 +19,8 @@ from pathlib import Path
 import sys
 from prosperos_hoard.studio import Studio
 s = Studio(Path(sys.argv[1]))
-assert len(s.tools) == 240
+assert len(s.tools) == 242
+assert {'production_receive_dossier', 'production_discard_dossier'} <= s.tools.keys()
 assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report', 'website_walkthrough'} <= s.tools.keys()
 assert all(m.phase == 'off' for m in s.modules.values())
 assert 'prosperos_hoard.api' not in sys.modules
@@ -91,9 +92,11 @@ async def test_http_discovery_and_projects_do_not_enable_modules(tmp_path):
     app = create_app(tmp_path, port=64239)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:64239') as client:
         tools = (await client.get('/api/agent/tools')).json()['tools']
-        assert len(tools) == 240
-        assert 'website_walkthrough' in {tool['name'] for tool in tools}
-        assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report'} <= {tool['name'] for tool in tools}
+        assert len(tools) == 242
+        names = {tool['name'] for tool in tools}
+        assert 'website_walkthrough' in names
+        assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report'} <= names
+        assert {'production_receive_dossier', 'production_discard_dossier'} <= names
         assert not tmp_path.joinpath('prosperos.sqlite3').exists()
         project = (await client.post('/api/studio/projects', json={'title': 'Corte'})).json()
         assert project['title'] == 'Corte'
