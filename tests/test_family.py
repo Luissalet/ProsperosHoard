@@ -212,9 +212,11 @@ def test_a_failed_job_says_why_and_a_cancelled_one_says_so(store, project):
 
     queue.register("compose_song", boom)
     queue.register("animate", slow)
+    queue.register("generate_image", boom)
     queue.start()
     try:
         _, failed = run(queue, "compose_song", "gpu", {}, project["id"])
+        image, rejected = run(queue, "generate_image", "gpu", {}, project["id"])
         job = queue.enqueue("animate", "gpu", {}, project_id=project["id"])
         while queue.store.get_job(job["id"])["state"] != "running":
             time.sleep(0.02)
@@ -224,6 +226,9 @@ def test_a_failed_job_says_why_and_a_cancelled_one_says_so(store, project):
         queue.stop()
     assert failed["state"] == "failed" and cancelled["state"] == "cancelled"
     assert rec.of("failed")[0]["error"] == "the card ran out of memory" and rec.of("failed")[0]["kind"] == "song"
+    assert rejected["state"] == "failed"
+    assert rec.of("failed")[1]["job_id"] == image["id"] and rec.of("failed")[1]["kind"] == "generation"
+    assert all(event["job_id"] != image["id"] for event in rec.of("queued"))
     assert rec.of("cancelled")[0]["kind"] == "clip" and rec.of("done") == []
 
 

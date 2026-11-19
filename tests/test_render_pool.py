@@ -53,6 +53,50 @@ def test_worker_lease_targets_the_owned_server_card_and_does_not_guess_remote_ca
     backend.close()
 
 
+def test_external_comfy_process_is_mapped_to_the_physical_card(data_dir, monkeypatch):
+    from prosperos_hoard.hoard_link import launch
+
+    backend = _pool_backend(data_dir, 8188, ["http://127.0.0.1:8190"])
+    monkeypatch.setattr(backend.launcher, "get", lambda sid: sid)
+    monkeypatch.setattr(backend.launcher, "status", lambda sid: {"state": "running", "gpu": None})
+    monkeypatch.setattr(launch, "_listeners", lambda: {8188: 123, 8190: 456})
+    monkeypatch.setattr(launch, "_gpu_processes", lambda: (
+        [], [{"pid": 123, "gpu": 1}, {"pid": 456, "gpu": 1}, {"pid": 789, "gpu": 2}],
+    ))
+    try:
+        card = backend.comfy_gpu()
+        first_lock = backend.render_lock(card)
+        backend.bind_comfy("http://127.0.0.1:8190")
+        assert card == backend.comfy_gpu() == 1
+        assert backend.render_lock(card) is first_lock
+        assert backend.render_lock(2) is not first_lock
+    finally:
+        backend.close()
+
+
+def test_warm_engine_reserves_only_additional_memory(monkeypatch):
+    from prosperos_hoard import gpu_lease
+
+    reservations = []
+
+    class Lease:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    def reserve(**kwargs):
+        reservations.append(kwargs["vram_mb"])
+        return Lease()
+
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    job = {"id": "warm-sheet", "type": "character_sheet", "params": {}}
+    for resident in (0, 9000, 12000):
+        with gpu_lease.hold(job, lambda: {"qwen21": 12000}, gpu=1, resident_mb=resident, lease_fn=reserve):
+            pass
+    assert reservations == [12000, 3000, 1024]
+
+
 @pytest.mark.parametrize("override,expected", [("http://127.0.0.1:8190", 3), ("http://example.invalid:8190", None)])
 def test_main_lease_and_start_follow_effective_environment_url(data_dir, monkeypatch, override, expected):
     monkeypatch.setenv("HOARD_COMFY_URL", override)
