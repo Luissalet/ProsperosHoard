@@ -8934,6 +8934,103 @@
       }
     },
     {
+      "name": "production_receive_dossier",
+      "description": "Import a production dossier as a draft / importar un expediente de producción como borrador.\n\nPass hoard.production-dossier/1 encoded as JSON and the approved image files keyed by source image id.\nReturns project, production, mapped asset ids and an undo receipt. An identical handoff returns its existing draft.\nKeywords: dossier, production draft, handoff, approved references, expediente, borrador de producción, traspaso\n",
+      "inputSchema": {
+        "properties": {
+          "dossier_json": {
+            "title": "Dossier Json",
+            "type": "string"
+          },
+          "reference_files": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Files"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "dossier_json"
+        ],
+        "title": "production_receive_dossierArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "production_discard_dossier",
+      "description": "Trash an unchanged dossier draft / enviar a la papelera un borrador de expediente intacto.\n\nUse the project_id, production and undo_receipt from production_receive_dossier. Restore it with studio_trash.\nKeywords: dossier, undo handoff, trash draft, expediente, deshacer traspaso, papelera\n",
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "production": {
+            "title": "Production",
+            "type": "string"
+          },
+          "receipt": {
+            "title": "Receipt",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "project",
+          "production",
+          "receipt"
+        ],
+        "title": "production_discard_dossierArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "voice_tts",
       "description": "Speak a text and get the audio file's path / leer un texto en voz alta y obtener la ruta del audio.\n\nvoice: a library voice (id or name) or an engine's own voice id; empty = the best installed engine. lang is\nthe language code (es, en...). engine: an engine id such as piper (a library voice's own engine wins; unknown_engine\nwhen it is not installed); speed: 0.5 to 2.0, 1.0 normal. The WAV is saved in the data folder: ok, path, engine_id. Use voice_speak to\nsave the audio as a project asset instead.\n\nKeywords: tts, text to speech, narrate, speak, family, narration, texto a voz, narrar, locución, audio de un texto\n",
       "inputSchema": {

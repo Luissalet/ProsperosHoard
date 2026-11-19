@@ -1457,6 +1457,45 @@
       }
     },
     {
+      "name": "production_discard_dossier",
+      "description": "Trash an unchanged dossier draft / enviar a la papelera un borrador de expediente intacto.\n\nUse the project_id, production and undo_receipt from production_receive_dossier. Restore it with studio_trash.\nKeywords: dossier, undo handoff, trash draft, expediente, deshacer traspaso, papelera",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id from the handoff result.",
+            "title": "Project",
+            "type": "string"
+          },
+          "production": {
+            "description": "Production slug from the handoff result.",
+            "title": "Production",
+            "type": "string"
+          },
+          "receipt": {
+            "description": "The undo_receipt returned by the handoff.",
+            "title": "Receipt",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "project",
+          "production",
+          "receipt",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "production_export_lumiere",
       "description": "Send a production's cut to Lumiere's Hoard (video editor) as a project / enviar el montaje a Lumiere.\n\nWrites the cut as FCP7 XML + EDL (lyrics as markers) in the data folder and asks Lumiere, through the family\nhub, to open it as a project: ok, project_id, url. aspect picks the cut when a production has several\n(16:9, 9:16...); timeline_id exports a timeline instead. When Lumiere is not running or may not read this\nfolder, ok is false with the reason and the two files are still there (files.xml, files.edl).\n\nKeywords: lumiere, video editor, export cut, send to editor, family, hub, enviar a lumiere, editar en lumiere, montaje",
       "inputSchema": {
@@ -1645,6 +1684,42 @@
             "type": "object"
           }
         }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "production_receive_dossier",
+      "description": "Import a production dossier as a draft / importar un expediente de producción como borrador.\n\nPass hoard.production-dossier/1 encoded as JSON and the approved image files keyed by source image id.\nReturns project, production, mapped asset ids and an undo receipt. An identical handoff returns its existing draft.\nKeywords: dossier, production draft, handoff, approved references, expediente, borrador de producción, traspaso",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dossier_json": {
+            "description": "The complete hoard.production-dossier/1 document encoded as JSON.",
+            "title": "Dossier Json",
+            "type": "string"
+          },
+          "reference_files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Image id to importable local path for approved references.",
+            "title": "Reference Files",
+            "type": "object"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "dossier_json",
+          "reason"
+        ]
       },
       "annotations": {
         "readOnlyHint": false,
