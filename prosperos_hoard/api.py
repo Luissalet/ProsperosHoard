@@ -81,7 +81,7 @@ from .hoard_link.waiting import MAX_WAIT_S
 from .hoard_link.errors import BackendError, HoardLinkError, Unavailable
 from .family_settings import FamilySettings
 from .ids import new_id
-from .jobs import ORCHESTRATOR_TYPES, JobQueue
+from .jobs import ORCHESTRATOR_TYPES, JobQueue, WaitingForResources
 from .store import AssetInUse, NotFound, ProjectBusy, Store
 from .voice_lab import VoiceLabError
 
@@ -1399,14 +1399,33 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         def assigned(job_id, gpu):
             backend.bind_lease_gpu(gpu)
             job_events.set_gpu(job_id, gpu)
-        try:
-            with gpu_lease.hold(job, backend.vram_estimates_mb, on_gpu=assigned,
-                                gpu=backend.comfy_gpu() if gpu_lease.enabled() else None,
-                                resolve_template_class=lambda name: comfy_driver.load_template(name, store.data_dir)[1].get("vram_class"),
-                                resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto")) as held:
+
+        card = backend.comfy_gpu()
+        with contextlib.ExitStack() as stack:
+            def take(lock):
+                if not lock.acquire(blocking=False):
+                    raise WaitingForResources("another render is using this GPU or render server")
+                stack.callback(lock.release)
+
+            take(backend.render_lock())
+            if card is not None:
+                take(backend.render_lock(card))
+            try:
+                held = None
+                if card is not None or backend.cold_local_comfy():
+                    held = stack.enter_context(gpu_lease.hold(
+                        job, backend.vram_estimates_mb, on_gpu=assigned, gpu=card,
+                        resident_mb=backend.comfy_resident_mb(card) if card is not None else 0,
+                        resolve_template_class=lambda name: comfy_driver.load_template(
+                            name, store.data_dir)[1].get("vram_class"),
+                        resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto"),
+                    ))
+                    granted = getattr(held, "gpu", None)
+                    if granted is not None and card is None:
+                        take(backend.render_lock(granted))
                 yield held
-        finally:
-            backend.bind_lease_gpu(None)
+            finally:
+                backend.bind_lease_gpu(None)
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
                      target_ready=backend.pool_server_ready, accepts=backend.accepts_job, events=job_events,
                      gpu_guard=None if demo else gpu_guard)
@@ -3552,6 +3571,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if new_seed and "seed" in params:
             params["seed"] = engine.random_seed()
         params["retry_of"] = job_id
+        params["retry_fresh"] = new_seed
         return queue.enqueue(old["type"], old["lane"], params, old.get("inputs"), old.get("project_id"))
 
     @app.post("/api/agent/studio_retry_job")

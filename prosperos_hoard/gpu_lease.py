@@ -2,7 +2,7 @@
 
 While a GPU-lane job runs, the hub knows it holds the card, so the language models, the editor's transcription and the image engine
 queue behind one another instead of loading at the same moment. The lease is a hint with a fallback: with no hub the library checks the
-card locally and lets the job go; any other failure only logs. `PROSPERO_GPU_LEASE=0` (also `off`, `false`, `no`) turns it off
+card locally and lets the job go. An invalid Hub request stops the job so it cannot use another card. `PROSPERO_GPU_LEASE=0` (also `off`, `false`, `no`) turns it off
 completely and the job runs exactly as before. When the hub keeps the lease queued past `WAIT_S`, the job goes to `waiting_gpu`
 (its own retry loop, up to 30 minutes) instead of blocking the worker.
 
@@ -17,6 +17,7 @@ import os
 from typing import Any, Callable, Iterator, Optional
 
 from .hoard_link import LeaseTimeout, lease as default_lease
+from .hoard_link.lease import LeaseError
 from .jobs import WaitingForResources
 
 log = logging.getLogger("prosperos_hoard.gpu_lease")
@@ -80,14 +81,16 @@ def _purpose(job: dict[str, Any]) -> str:
 @contextlib.contextmanager
 def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, lease_fn: Optional[Callable[..., Any]] = None,
          resolve_image_engine: Optional[Callable[[], str]] = None, on_gpu: Optional[Callable[[str, Optional[int]], None]] = None,
-         gpu: Optional[int] = None, resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> Iterator[Any]:
+         gpu: Optional[int] = None, resident_mb: int = 0, resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> Iterator[Any]:
     """Hold the hub's lease while the body runs (nothing when it is off or cannot be had). ``on_gpu(job_id, gpu)`` hears which card."""
     if not enabled():
         yield None
         return
     lease_cm: Any = None
     try:
-        mb = estimate_mb(job, vram_estimates(), resolve_image_engine, resolve_template_class)
+        estimate = estimate_mb(job, vram_estimates(), resolve_image_engine, resolve_template_class)
+        # The driver's device total already includes this worker's resident memory.
+        mb = max(min(estimate, 1024), estimate - max(0, resident_mb))
         lease_cm = (lease_fn or default_lease)(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S,
                                               **({"gpu": gpu} if gpu is not None else {}))
         lease_cm.__enter__()
@@ -95,6 +98,8 @@ def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, l
         raise
     except Exception as error:  # noqa: BLE001
         lease_cm = None
+        if isinstance(error, LeaseError) and not isinstance(error, LeaseTimeout):
+            raise
         if isinstance(error, LeaseTimeout):
             raise WaitingForResources(f"waiting for the family hub's GPU lease ({error}); retrying every 15 s for up to 30 min.") from error
         log.info("no GPU lease for job %s (%s); it runs under its own VRAM gate", job.get("id"), error)

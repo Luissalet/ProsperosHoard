@@ -30,7 +30,7 @@ Usos típicos:
 **Proyectos y reparto**
 - Proyectos, personajes (prompt de aspecto, negativo, paleta, referencia canónica, voz), lugares y objetos, grupos ordenados y estilos predefinidos.
 - Las menciones `@Nombre` reconocen nombres de varias palabras y avisan de los desconocidos; un lugar u objeto mencionado con imagen entra en el render como referencia numerada en Qwen-Image 2.1.
-- Kit de personaje: hoja de modelo redibujada desde hasta 12 vistas, dataset con pies de foto e informe de preparación, entrenamiento local de LoRA con un entrenador configurable, tomas con puntuación de identidad, paquetes `.hoardchar` portables y biblioteca global de reparto con versiones.
+- Kit de personaje: hoja de modelo redibujada desde hasta 12 vistas con reanudación de las vistas pendientes, dataset con pies de foto e informe de preparación, entrenamiento local de LoRA con un entrenador configurable, tomas con puntuación de identidad, paquetes `.hoardchar` portables y biblioteca global de reparto con versiones.
 
 **Imágenes**
 - Motores: Qwen-Image 2.1 (txt2img y edición multirreferencia de 1 a 10 referencias), FLUX.1 schnell, ediciones FLUX.1 Kontext, SDXL (img2img, inpaint, hires fix en dos pasadas) y SD 1.5. `auto` elige el mejor motor instalado y cada resultado dice cuál usó.
@@ -67,7 +67,7 @@ Usos típicos:
 
 **Control y seguridad**
 - Linaje: cada recurso guarda plantilla, parámetros, semilla, entradas y tiempos; «Reutilizar receta» reproduce una imagen byte a byte en el mismo backend y «Variar semilla» la repite.
-- Cortesía con la GPU: estimaciones de VRAM por flujo contrastadas con la tarjeta en la que corre ComfyUI, trabajos que esperan en `waiting_gpu` con el motivo, pools de render que reparten trabajos entre varias tarjetas, y una cabecera con GPU, VRAM, temperatura, RAM y CPU.
+- Cortesía con la GPU: estimaciones de VRAM por flujo contrastadas con la tarjeta en la que corre ComfyUI, trabajos que esperan en `waiting_gpu` con el motivo, pools de render que reservan memoria en la tarjeta física de cada motor, tienen en cuenta sus modelos ya cargados y reparten trabajos entre varias tarjetas, y una cabecera con GPU, VRAM, temperatura, RAM y CPU.
 - Papelera con deshacer para los recursos borrados; pantalla Backends que muestra qué se encontró y por qué; Actividad del asistente con cada llamada de un agente.
 
 ## Modelos
