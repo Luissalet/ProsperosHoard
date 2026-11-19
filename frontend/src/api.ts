@@ -926,7 +926,7 @@ export interface ProductionSummary {
   message?: string | null;
   legacy?: boolean;
   animatic?: boolean;
-  kind?: "music_video" | "short";
+  kind?: "music_video" | "short" | "scene";
   cover?: { asset_id: string; kind: "image" | "video" } | null;
   progress?: { done: number; total: number };
   shot_count?: number;
@@ -1000,7 +1000,31 @@ export interface ProductionAnimaticView {
   approved?: boolean;
 }
 
+export type ScenePosition = "first" | "middle" | "last";
+export type SceneVerdict = "pass" | "defect" | "unclear";
+export interface SceneReview {
+  status: SceneVerdict;
+  samples: { position: ScenePosition; checks: { verdict: SceneVerdict; note: string }[] }[];
+}
+export interface SceneShot {
+  key: string;
+  framing: string;
+  action: string;
+  duration_s: number;
+  first_frame_asset_id: string;
+  last_frame_asset_id?: string;
+  control_asset_id?: string;
+  clip_asset_id: string | null;
+  review: SceneReview | null;
+}
+export interface ProductionScene {
+  character_sheet_asset_id: string;
+  preserve_details: string[];
+  shots: SceneShot[];
+}
+
 export interface ProductionView extends Omit<ProductionSummary, "animatic"> {
+  scene?: ProductionScene;
   explainer?: ExplainerProject;
   stages?: Record<string, "done" | "partial" | "pending">;
   title?: string;
@@ -1092,7 +1116,7 @@ export interface AnimaticPlan {
 
 export interface ProductionState {
   style_profile?: { id: string; name: string; target_duration_s: number };
-  kind?: "short";
+  kind?: "short" | "scene";
   slug: string;
   name: string;
   status: ProductionStatus;

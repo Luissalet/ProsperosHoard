@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { shotGenerationStatus } from "../shotGeneration";
 import { AssetPicker, Modal, useApp, useAsync } from "../components/ui";
 import { LinkDownload } from "../components/LinkDownload";
+import { SceneContinuity } from "../components/SceneContinuity";
 import { useSlashMenu } from "../components/Slash";
 import { Enhance } from "../components/Enhance";
 import { GraphicShotEditor } from "./GraphicShot";
@@ -188,6 +189,9 @@ export function StoryboardCard({ state, onChanged, onNodeEditor }: { state: Prod
           );
         })}
       </div>
+      {state.view.scene && <SceneContinuity slug={state.slug} scene={state.view.scene}
+        disabled={running || acting} locked={shots.filter((shot) => shot.locked).map((shot) => shot.key)}
+        onRedo={(key) => act(() => api.regenerateUnlocked(state.slug, "clips", [key]), t("sceneQueued", { n: key }))} />}
       {editing && (
         <ShotEditor state={state} shot={editing.shot} after={editing.after} running={running}
           onPause={pause} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged(); }} />
