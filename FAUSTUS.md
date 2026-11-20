@@ -1,5 +1,28 @@
 # Prospero video workspace
 
+## Structure-guided draft keys
+
+For each key, use the blocking's same-camera depth PNG as the structure input,
+and a concept image or a single view of the character sheet as the identity.
+Call `studio_generate_image` with `template="qwen21_depth"`,
+`reference_asset_id` for identity and `template_params.depth_asset_id` for
+depth. In the prompt, refer to identity as `<image1>` and describe the new
+gesture, the scene and any visible props. The template derives the draft
+canvas from the guide unless dimensions are supplied at the same aspect ratio.
+Optional `control_strength` and `control_end` in `template_params` tune
+how strongly and for how long the depth follows the blocking.
+
+The engine applies the depth to the model patch while sampling a new image.
+The cue's source pose, the character's appearance and all props still need
+visual review on the generated key. The recipe keeps the separate input IDs
+for `studio_edit_image` reuse and seed variation. The ordinary edit template
+remains available for work without a structure guide.
+
+This draft needs a Qwen-Image 2.1-capable ComfyUI with native Union ControlNet
+support and `qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors` in
+`models/model_patches` alongside the Qwen 2.1 models. Inspect the template's
+readiness before queuing. See the [ComfyUI model package](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/model_patches).
+
 Una hoja de personaje guarda cada vista terminada en su trabajo, kit y dataset. `studio_retry_job` reanuda un intento fallido con las vistas ya guardadas y reconstruye la hoja de contactos al terminar. El reintento con una semilla nueva genera una nueva variante. Las tandas de generación y edición guardan los resultados completos de cada semilla. Los servidores de render locales se asocian a su GPU física y solicitan su reserva de memoria; los que comparten tarjeta o servidor esperan su turno. Los fallos de generación, edición y hoja se publican como eventos de trabajo y se pueden vincular a una tarea del Ágora.
 
 `website_walkthrough` records a real running website as a CPU job. Supply `url`, `title`, optional `project`, `hold_s` (0.5–10 seconds), and up to 24 steps: `click` with `selector`, `navigate` with `url`, `scroll` with `y`, or `wait`. Each step may carry `caption`. An omitted project creates a new one. Poll `studio_job(job_id)` for the H.264 MP4, contact sheet and actual visited page titles; inspect the saved video with `studio_show`. Captions are drawn over the real page and remain literal text. Local apps are allowed. The capture context starts without existing cookies or login; use the intended reachable preview. Failed steps fail the job and do not publish a partial video. The output recipe retains the requested steps and the actual visited URLs. Faustus calls the same operation from its turn summary and `task_walkthrough`.

@@ -90,6 +90,8 @@ def template_hash(workflow: dict[str, Any], spec: dict[str, Any]) -> str:
     node)."""
     payload = {"workflow": workflow, "map": spec.get("map", {}), "linked_seeds": spec.get("linked_seeds", []),
                "v": 2, **{k: spec.get(k) for k in _HASHED_SPEC_KEYS}}
+    if spec.get("depth_image_node"):
+        payload["depth_image_node"] = spec["depth_image_node"]
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -798,7 +800,7 @@ MODEL_LOADERS = ("UNETLoader", "CheckpointLoaderSimple", "CheckpointLoader", "Un
 # adapter trained for one architecture is only injected into templates of
 # the same one (a Qwen-Image LoRA does nothing useful on Flux).
 TEMPLATE_ARCH = {
-    "qwen21_txt2img": "qwen_image", "qwen21_edit": "qwen_image",
+    "qwen21_txt2img": "qwen_image", "qwen21_edit": "qwen_image", "qwen21_depth": "qwen_image",
     "flux_schnell_txt2img": "flux1", "flux_kontext_edit": "flux1",
     "sdxl_txt2img": "sdxl", "sdxl_img2img": "sdxl", "sdxl_inpaint": "sdxl", "sdxl_hires": "sdxl",
     "sd15_txt2img": "sd15", "wan22_ti2v": "wan22_5b",
