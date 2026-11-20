@@ -539,6 +539,14 @@ def studio_generate_image(
     Para retocar el agarre, usa el color, las partes visibles y las máscaras completas de los accesorios.
     Con grip_ids indica antebrazo, mano y dedos. paint_props repinta el interior de los accesorios.
     Con preserve_ids protege otras partes, como la cara.
+    draft_grip.paper projects a paper reference by asset_id, zero-based layer and quad in source-corner order.
+    contacts declare each hand's layer, target, part_ids and projected pixel from that key.
+    cylinder_layers shade tube layers by index. continuity_asset_id keeps fixed regions from an earlier guided key.
+    identity scores the crop of part_ids against reference_asset_ids and retries below threshold up to max_attempts.
+    The job reports the score and tested seeds. The existing trash tools can withdraw or restore each accepted render.
+    Proyecta el dibujo con paper, usa contacts para cada mano y comprueba la identidad con identity.
+    Usa cylinder_layers para dar volumen al tubo y continuity_asset_id para conservar las zonas fijas.
+    La tarea devuelve la nota y las semillas probadas. La papelera retira y recupera los resultados.
     Lip sync: template "auto_sing" (or "wan22_s2v" / "wan21_infinitetalk") with reference_asset_id = the
     singer, audio_asset_id = the song, audio_start_s and audio_seconds = the line (S2V up to 20 s,
     InfiniteTalk up to 90 s; auto picks InfiniteTalk past 10 s when installed); the clip is trimmed to the line.
