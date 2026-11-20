@@ -1761,6 +1761,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             # the ones its map names, never the core keys set above
             _, tspec = comfy_driver.load_template(template, store.data_dir)
             allowed = set(tspec.get("map") or {}) - {"positive_prompt", "negative_prompt", "seed", "width", "height"}
+            if tspec.get("depth_image_node"):
+                allowed.add("object_asset_ids")
             unknown = sorted(set(body.template_params) - allowed)
             if unknown:
                 raise engine.EngineError("bad_parameter", f"template '{template}' has no {', '.join(unknown)} "

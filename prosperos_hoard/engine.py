@@ -106,7 +106,8 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
     summary = {k: v for k, v in {
         "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
         "prompt": _clip(prompt, 120), "inputs": (recipe.get("input_asset_ids") or [])[:4] or None,
-        "depth_asset_id": recipe.get("depth_asset_id"), "hub_piece": recipe.get("hub_piece"),
+        "depth_asset_id": recipe.get("depth_asset_id"), "object_asset_ids": recipe.get("object_asset_ids"),
+        "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
     view = {
         "id": asset["id"], "kind": asset["kind"], "name": name, "source": asset["source"],
@@ -858,6 +859,34 @@ def _depth_guide(store: Store, asset_id: str, values: dict[str, Any]) -> bytes:
         return output.getvalue()
 
 
+def _draft_layers(store: Store, ids: list[str], size: tuple[int, int]) -> list[Image.Image]:
+    """Read full-canvas object renders whose alpha already accounts for occlusion."""
+    if not isinstance(ids, list) or len(ids) > 8 or any(not isinstance(aid, str) or not aid for aid in ids):
+        raise EngineError("bad_draft_layers", "object_asset_ids must be a list of up to eight image asset IDs")
+    layers = []
+    for aid in ids:
+        asset = store.get_asset(aid)
+        if asset["kind"] != "image":
+            raise EngineError("bad_draft_layer", f"object layer {aid} must be an image")
+        with Image.open(store.data_dir / asset["file_path"]) as layer:
+            if layer.size != size or ("A" not in layer.getbands() and "transparency" not in layer.info):
+                raise EngineError("bad_draft_layer", f"object layer {aid} needs alpha and the draft canvas size {size}")
+            layers.append(layer.convert("RGBA"))
+    return layers
+
+
+def _apply_draft_layers(data: bytes, layers: list[Image.Image]) -> bytes:
+    with Image.open(io.BytesIO(data)) as rendered:
+        image = rendered.convert("RGBA")
+    if image.size != layers[0].size:
+        raise EngineError("bad_draft_output_size", "the render and its object layers have different sizes")
+    for layer in layers:
+        image.alpha_composite(layer)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
@@ -867,6 +896,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
                  use_vocals: bool = True, control_video: Optional[tuple[bytes, bytes]] = None,
                  source_video: Optional[bytes] = None, depth_asset_id: Optional[str] = None,
+                 object_asset_ids: Optional[list[str]] = None,
                  postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -875,6 +905,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         workflow, spec = comfy_driver.load_template(template_name, store.data_dir)
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
+    layers = []
+    if object_asset_ids is not None:
+        if not spec.get("depth_image_node"):
+            raise EngineError("bad_draft_layers", f"template '{template_name}' does not take object layers")
+        layers = _draft_layers(store, object_asset_ids, (values["width"], values["height"]))
     started = time.monotonic()
     progress(0.02, "checking free VRAM")
     check_vram_or_wait(backend, spec)
@@ -1007,6 +1042,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 uploads.append((_audio_clip(store, store.get_asset(vocals), float(audio_start_s or 0), seconds), vocals_name))
                 input_ids.append(vocals)
 
+    if layers:
+        input_ids.extend(object_asset_ids)
     count = max(1, min(int(count or 1), 8))
     thash = comfy_driver.template_hash(workflow, spec)
     assets = []
@@ -1131,6 +1168,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
                 **({"depth_asset_id": depth_asset_id} if depth_name else {}),
+                **({"object_asset_ids": object_asset_ids} if layers else {}),
                 **(extra_recipe or {}),
             }
             if template_name == "ltx23_i2v_hq":
@@ -1143,6 +1181,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 data = _trim_video_bytes(data, float(audio_seconds))
             if postprocess:
                 data = postprocess(data)
+            if layers:
+                data = _apply_draft_layers(data, layers)
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
         if resumable:
             checkpoint_batch(i, assets[before:])
@@ -2267,6 +2307,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         reference_asset_ids=params.get("reference_asset_ids"), depth_asset_id=depth_id,
+        object_asset_ids=params.get("object_asset_ids"),
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
@@ -2516,7 +2557,12 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     if vary:
         values["seed"] = seed if seed is not None else random_seed()
     depth_id = recipe.get("depth_asset_id")
-    inputs = [aid for aid in recipe.get("input_asset_ids") or [] if aid != depth_id]
+    object_ids = recipe.get("object_asset_ids")
+    inputs = list(recipe.get("input_asset_ids") or [])
+    if object_ids:
+        # These inputs were composited after rendering and were never Comfy references.
+        inputs = inputs[:-len(object_ids)]
+    inputs = [aid for aid in inputs if aid != depth_id]
     unchanged = True
     spec: dict[str, Any] = {}
     try:
@@ -2535,6 +2581,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         store, backend, job, progress, template_name=recipe["template"], values=values,
         operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
         reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask, depth_asset_id=depth_id,
+        object_asset_ids=object_ids,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",
