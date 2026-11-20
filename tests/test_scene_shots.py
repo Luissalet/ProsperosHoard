@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from prosperos_hoard import engine, productions as prod, scene_shots
+from prosperos_hoard import comfy_driver, engine, productions as prod, scene_shots
 from test_agent_accountability import Agent
 from test_qa import _clip, _production, _save
 
@@ -98,6 +98,7 @@ def test_native_pipeline_regenerates_one_scene_shot_and_assembles_in_order(store
     scene_shots.record(store, slug, "2", original, checks(), "reviewer")
     state = prod.load_state(store.data_dir, slug)
     assert scene_shots.view(state)["piece"]["review_status"] == "checked"
+
     state["scene_reviews"]["2"][original].pop("sample_window_s")
     legacy = scene_shots.view(state)
     assert legacy["piece"]["review_status"] == "provisional"
@@ -116,6 +117,25 @@ def test_native_pipeline_regenerates_one_scene_shot_and_assembles_in_order(store
     for shot in second["shots"]:
         clip = store.get_asset(shot["clip_asset_id"])
         assert shot["sha256"] == hashlib.sha256((store.data_dir / clip["file_path"]).read_bytes()).hexdigest()
+
+
+
+def test_scene_can_render_between_two_images_under_motion_control(store, project, draft):
+    slug, sheet, rows = draft
+    shot = rows[0]
+    shot["control_asset_id"] = _clip(store, project["id"], np.full((96, 64, 96), 42))
+    scene_shots.apply_plan(store, slug, sheet, "", [], [shot], "1:1")
+    state = prod.load_state(store.data_dir, slug)
+    body = scene_shots.clip_body(state, state["spec"]["shots"][0], shot["first_frame_asset_id"], 42)
+    assert body["template"] == "ltx23_control"
+    assert body["end_asset_id"] == shot["last_frame_asset_id"]
+    assert body["driving_asset_id"] == shot["control_asset_id"]
+    assert (body["width"], body["height"]) == (512, 512)
+    workflow, spec = comfy_driver.load_template(body["template"], store.data_dir)
+    engine._ltx_end_guide(workflow, *spec["end_image_node"].split("."), "last.png")
+    assert workflow["end_frame"]["inputs"]["image"] == "last.png"
+    assert workflow["end_condition"]["inputs"]["latent"] == ["129:115", 2]
+    assert workflow["129:119"]["inputs"]["video_latent"] == ["end_condition", 2]
 
 
 def test_reviews_use_the_sheet_and_distinguish_missing_evidence(store, project, draft):
@@ -146,7 +166,7 @@ def test_scene_mounts_supplied_take_and_revises_only_that_shot(store, project, d
     original = _clip(store, pid, np.full((96, 64, 96), 42))
     replacement = _clip(store, pid, np.full((96, 64, 96), 99))
     rows[0]["rendered_clip_asset_id"] = original
-    with pytest.raises(engine.EngineError, match="one of a last image"):
+    with pytest.raises(engine.EngineError, match="rendered clip on its own"):
         scene_shots.apply_plan(store, slug, sheet, "", [], rows, "16:9")
     rows[0].pop("last_frame_asset_id")
     with pytest.raises(engine.EngineError, match="cover the full"):
