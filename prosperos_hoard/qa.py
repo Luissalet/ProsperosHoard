@@ -197,13 +197,25 @@ def _motion_differences(frames: np.ndarray) -> np.ndarray:
     return np.concatenate(chunks) if chunks else np.empty(0)
 
 
-def video_frame(path: Path, at_s: float) -> Optional[Image.Image]:
-    cmd = [_ffmpeg(), "-nostdin", "-v", "error", "-ss", f"{max(0.0, at_s):.3f}", "-i", str(path), "-frames:v", "1",
-           "-f", "image2pipe", "-vcodec", "png", "-"]
-    proc = procutil.run(cmd, timeout=60)
-    if proc.returncode != 0 or not proc.stdout:
-        return None
-    return Image.open(io.BytesIO(proc.stdout)).convert("RGB")
+def video_frame(path: Path, at_s: Optional[float], *, output_fps: Optional[int] = None) -> Optional[Image.Image]:
+    """Decode a frame by seek time, by output time after resampling, or at EOF."""
+    if output_fps is not None and at_s is not None:
+        index = round(at_s * output_fps)
+        seeks = ([],)
+        frame_filter = ["-vf", f"fps={output_fps},trim=start_frame={index}"]
+    elif at_s is None:
+        seeks = (["-sseof", "-1"], [])
+        frame_filter = ["-vf", "reverse"]
+    else:
+        seeks = (["-ss", f"{max(0.0, at_s):.3f}"],)
+        frame_filter = []
+    for seek in seeks:
+        cmd = [_ffmpeg(), "-nostdin", "-v", "error", *seek, "-i", str(path), "-map", "0:v:0",
+               *frame_filter, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
+        proc = procutil.run(cmd, timeout=60)
+        if proc.returncode == 0 and proc.stdout:
+            return Image.open(io.BytesIO(proc.stdout)).convert("RGB")
+    return None
 
 
 def clip_motion(frames: np.ndarray) -> dict[str, Any]:

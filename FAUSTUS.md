@@ -74,6 +74,18 @@ four-second walking/waving scene took 250.60 s at four-step 14B versus 951.09 s
 at the full schedule, with both subject continuity and the action observed.
 These single runs do not establish universal quality or speed.
 
+## Scene shots
+
+`studio_scene_suggest` uses the configured vision service to plan from a
+scene dossier and a character sheet. Save the plan with `studio_scene_plan`
+using a first and last image or a structure guide. The production checkpoints
+individual GPU jobs and assembles the cut with a fingerprint for each take.
+`studio_scene_review` checks the first, middle and last frames within the
+mounted shot duration. `studio_scene_record_review` stores the observations
+against the exact take. `studio_scene` marks the cut provisional until every
+mounted take passes this review. Use the storyboard’s per-shot redo or revise its controls with
+`studio_scene_revise_shot`. See [scene production](docs/MCP.md#scene-video).
+
 ## Existing project and shot tools
 
 The dashboard remains available from Project. Its inline character/group editors use the existing native cast APIs; MCP keeps the same `studio_cast` contract. Clip creation uses the existing animation/generation APIs, direct job polling and actual output IDs. Native `studio_animate`, `studio_job` and `studio_video_from_plan` were exercised through stdio MCP on isolated synthetic data.

@@ -5,7 +5,7 @@
       "handoffs": [
         {"accepts": "scene-brief", "produces": ["concept-image"], "skill": "image-composition", "check": {"en": "Open the image and check the explicit continuity details in the brief.", "es": "Abre la imagen y comprueba los detalles de continuidad indicados en el expediente."}},
         {"accepts": "concept-image", "produces": ["character-sheet"], "skill": "character-consistency-pack", "check": {"en": "Compare front, side and back; check that each intended view is in the exported package.", "es": "Compara el frente, el perfil y la espalda y comprueba que cada vista prevista esté en el paquete exportado."}},
-        {"accepts": "character-sheet", "produces": ["video-clip"], "skill": "revision-aware-media", "check": {"en": "Play the clip, check its duration and compare props, costume and face across shots.", "es": "Reproduce el clip, comprueba su duración y coteja los objetos, el vestuario y la cara entre planos."}}
+        {"accepts": "character-sheet", "produces": ["video-clip"], "skill": "revision-aware-media", "check": {"en": "Play the cut, verify its duration and shot fingerprints, and check that studio_scene reports review_status checked for the mounted takes.", "es": "Reproduce el montaje, comprueba su duración y las huellas de los planos y verifica que studio_scene devuelve review_status checked para las tomas del montaje."}}
       ]
     },
     "module_controls": {
@@ -23,6 +23,7 @@
   "purpose": "Directs a media studio (ComfyUI, ffmpeg, TTS) to produce consistent characters (model sheets, local LoRA training, portable character packs), photocards, album art, beat-cut music videos as resumable productions and reusable recipes, narrated vertical shorts from a topic or a script (voice-over, word-by-word captions, stock or generated pictures, ducked music), cloned voices, audiobooks and dubbed video. Owns complete native timeline editing, subtitle and text editing, creative engines and revisioned audiovisual project transfer, with independent demand-start modules.",
   "capabilities": [
     "image generation",
+    "scene video with anchored shots, continuity reviews and targeted retakes",
     "video editing",
     "QR films with exhaustive decoding of every encoded frame",
     "manim scenes (2D maths and 3D animation drawn by code)",
