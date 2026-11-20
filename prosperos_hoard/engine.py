@@ -28,7 +28,9 @@ from PIL import Image, ImageDraw, ImageOps
 from . import audio as audio_mod
 from . import comfy_driver
 from . import design
+from . import draft_art
 from . import draft_grip as grip_mod
+from . import identity as identity_mod
 from . import procutil
 from . import style_cards
 from . import templates as design_templates
@@ -110,6 +112,7 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
         "depth_asset_id": recipe.get("depth_asset_id"), "object_asset_ids": recipe.get("object_asset_ids"),
         "engine_service": recipe.get("engine_service"),
         "draft_grip": recipe.get("draft_grip"),
+        "draft_identity": recipe.get("draft_identity"),
         "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
     view = {
@@ -136,6 +139,8 @@ def job_view(job: dict[str, Any]) -> dict[str, Any]:
         view["hint"] = "poll with studio_job(job_id, wait_s=30)"
     if job["state"] == "failed":
         view["error"] = job.get("message")
+    if outputs.get("draft_identity"):
+        view["draft_identity"] = outputs["draft_identity"]
     if job["state"] == "done" and job["type"] in _RESULT_JOB_TYPES:
         # jobs whose answer is data, not assets (identity scores, captions,
         # a trained adapter): the agent needs it in the job view itself
@@ -895,16 +900,115 @@ def _apply_draft_layers(data: bytes, layers: list[Image.Image]) -> bytes:
 _GRIP_GUIDES = ("color_asset_id", "part_ids_asset_id")
 
 
+def _draft_extra_inputs(settings: dict) -> list[str]:
+    ids = []
+    if settings.get("paper"):
+        ids.append(settings["paper"]["asset_id"])
+    if settings.get("identity"):
+        ids.extend(settings["identity"].get("reference_asset_ids", []))
+    if settings.get("continuity_asset_id"):
+        ids.append(settings["continuity_asset_id"])
+    return ids
+
+
+def _draft_paper(store: Store, paper: dict, layer_count: int, source_size: tuple[int, int],
+                 output_size: tuple[int, int]) -> tuple[int, Image.Image]:
+    if (not isinstance(paper, dict) or set(paper) != {"asset_id", "layer", "quad"}
+            or not isinstance(paper["asset_id"], str) or type(paper["layer"]) is not int
+            or not 0 <= paper["layer"] < layer_count):
+        raise ValueError("paper needs an image asset_id, object layer index and projected quad")
+    asset = store.get_asset(paper["asset_id"])
+    if asset["kind"] != "image":
+        raise ValueError("paper needs an image reference")
+    with Image.open(store.data_dir / asset["file_path"]) as image:
+        projected = draft_art.project_paper(image, source_size, paper["quad"])
+    return paper["layer"], projected.resize(output_size, Image.Resampling.LANCZOS)
+
+
+def _draft_part_ids(ids: object) -> bool:
+    return isinstance(ids, list) and all(type(part) is int and 1 <= part <= 255 for part in ids)
+
+
+def _draft_identity_check(store: Store, settings: dict, position_id: str, reference_ids: list[str], vision_provider):
+    if (not isinstance(settings, dict) or set(settings) - {"threshold", "max_attempts", "part_ids",
+                                                           "reference_asset_ids", "notes"}):
+        raise EngineError("bad_draft_identity", "identity needs a threshold and the character part_ids")
+    threshold = settings.get("threshold", 6.5)
+    attempts = settings.get("max_attempts", 3)
+    parts = settings.get("part_ids")
+    ids = settings.get("reference_asset_ids", reference_ids)
+    notes = settings.get("notes", "")
+    if (type(threshold) not in (int, float) or not 0 <= threshold <= 10
+            or type(attempts) is not int or not 1 <= attempts <= 4 or not _draft_part_ids(parts) or not parts
+            or not isinstance(ids, list) or not 1 <= len(ids) <= identity_mod.MAX_REFS
+            or any(not isinstance(aid, str) or not aid for aid in ids)
+            or not isinstance(notes, str) or len(notes) > 400):
+        raise EngineError("bad_draft_identity", "identity takes threshold 0-10, max_attempts 1-4, character part_ids "
+                          "and up to three reference image IDs")
+    ref_images = [identity_mod.asset_image(store, aid, side=640) for aid in ids]
+    if any(image is None for image in ref_images):
+        raise EngineError("bad_draft_identity", "all identity references must be available images")
+    position = store.get_asset(position_id)
+    with Image.open(store.data_dir / position["file_path"]) as labels:
+        if labels.mode != "L":
+            raise EngineError("bad_draft_identity", "part IDs must be an 8-bit grayscale PNG")
+        area = Image.fromarray(np.isin(np.asarray(labels), parts).astype(np.uint8))
+    box = area.getbbox()
+    if box is None:
+        raise EngineError("bad_draft_identity", "none of the identity part_ids are visible in the blocking")
+    margin = max(2, round(min(area.size) * 0.026))
+    crop = (max(0, box[0] - margin), max(0, box[1] - margin),
+            min(area.width, box[2] + margin), min(area.height, box[3] + margin))
+    vision, model = vision_provider() if vision_provider else (None, None)
+    if vision is None:
+        raise EngineError("draft_identity_unavailable", "the configured family vision model is needed to score identity")
+    refs = [identity_mod._jpeg(image) for image in ref_images]
+    prompt = identity_mod.vision_prompt("the draft key character", notes, len(refs))
+    prompt += (
+        "\nIgnore the held objects and any details cropped out. Compare the visible face, hair, sleeve colours, "
+        "clothing and belt directly. Give at most 6 when one of these visible details clearly contradicts the reference."
+    )
+
+    def check(data: bytes) -> tuple[float, str]:
+        with Image.open(io.BytesIO(data)) as image:
+            scale = (image.width / area.width, image.height / area.height)
+            box = tuple(round(p * scale[i % 2]) for i, p in enumerate(crop))
+            sample = identity_mod._jpeg(image.crop(box).convert("RGB"))
+        try:
+            score, why = identity_mod.parse_identity(vision([*refs, sample], prompt))
+        except Exception as exc:
+            raise EngineError("draft_identity_unavailable", f"identity model could not score the key: {exc}") from exc
+        if score is None:
+            raise EngineError("draft_identity_unavailable", "the identity model returned no identity score")
+        return score, why
+
+    return check, threshold, attempts, model
+
+
+def _draft_continuity(store: Store, asset_id: str, guide: dict) -> tuple[Image.Image, Image.Image]:
+    if not isinstance(asset_id, str) or not asset_id:
+        raise ValueError("continuity_asset_id needs an earlier draft key")
+    key = store.get_asset(asset_id)
+    previous_id = ((key.get("recipe") or {}).get("draft_grip") or {}).get("part_ids_asset_id")
+    if key["kind"] != "image" or not previous_id or key["project_id"] != guide["project_id"]:
+        raise ValueError("the continuity key must be a guided draft from the same project")
+    previous = store.get_asset(previous_id)
+    with Image.open(store.data_dir / key["file_path"]) as frame, Image.open(
+        store.data_dir / previous["file_path"]
+    ) as labels:
+        return frame.convert("RGBA"), labels.copy()
+
+
 def _draft_grip(store: Store, settings: dict, object_ids: list[str], depth_id: str,
                 size: tuple[int, int]) -> grip_mod.GripRegion:
     required = {*_GRIP_GUIDES, "grip_ids", "prop_mask_asset_ids"}
-    optional = {"paint_props", "finish_prompt", "preserve_ids"}
+    optional = {"paint_props", "finish_prompt", "preserve_ids", "paper", "contacts", "identity",
+                "cylinder_layers", "continuity_asset_id"}
     if not isinstance(settings, dict) or not required <= settings.keys() <= required | optional:
         raise EngineError("bad_draft_grip", "draft_grip needs color_asset_id, part_ids_asset_id, grip_ids and prop_mask_asset_ids")
     grip_ids = settings["grip_ids"]
     preserve_ids = settings.get("preserve_ids", [])
-    if (not isinstance(grip_ids, list) or not grip_ids or not isinstance(preserve_ids, list)
-            or any(type(part) is not int or not 1 <= part <= 255 for part in grip_ids + preserve_ids)):
+    if not _draft_part_ids(grip_ids) or not grip_ids or not _draft_part_ids(preserve_ids):
         raise EngineError("bad_draft_grip", "grip_ids and preserve_ids take nonzero part labels from the blocking key")
     if not depth_id or not isinstance(object_ids, list) or not object_ids:
         raise EngineError("bad_draft_grip", "draft_grip requires depth_asset_id and object_asset_ids")
@@ -934,9 +1038,19 @@ def _draft_grip(store: Store, settings: dict, object_ids: list[str], depth_id: s
                     raise EngineError("bad_draft_grip", "the full prop masks must be grayscale")
                 full_masks.append(image.copy())
         try:
+            paper = _draft_paper(store, settings["paper"], len(layers), label_image.size, size) if "paper" in settings else None
+            cylinders = settings.get("cylinder_layers", [])
+            if (not isinstance(cylinders, list)
+                    or any(type(index) is not int or not 0 <= index < len(layers) for index in cylinders)
+                    or len(set(cylinders)) != len(cylinders)
+                    or (paper and paper[0] in cylinders)):
+                raise ValueError("cylinder_layers must be distinct object indices outside the paper layer")
+            continuity = (_draft_continuity(store, settings["continuity_asset_id"], labels)
+                          if "continuity_asset_id" in settings else None)
             return grip_mod.GripRegion(color_image, label_image, grip_ids, layers, full_masks, size, paint_props,
-                                       preserve_ids)
-        except ValueError as exc:
+                                       preserve_ids, paper=paper, contacts=settings.get("contacts"),
+                                       cylinder_layers=cylinders, continuity=continuity)
+        except (ValueError, np.linalg.LinAlgError) as exc:
             raise EngineError("bad_draft_grip", str(exc)) from exc
 
 
@@ -988,6 +1102,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  source_video: Optional[bytes] = None, depth_asset_id: Optional[str] = None,
                  object_asset_ids: Optional[list[str]] = None,
                  draft_grip: Optional[dict] = None, grip_values: Optional[dict] = None,
+                 vision_provider=None, exact_seed: bool = False,
                  postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -998,6 +1113,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         raise EngineError("unknown_template", str(exc)) from exc
     layers = []
     grip = None
+    identity_check = None
+    identity_reports = {}
     use_grip = draft_grip is not None
     if use_grip:
         if template_name != "qwen21_depth":
@@ -1071,9 +1188,15 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         input_ids.append(depth_asset_id)
         if use_grip:
             grip = _draft_grip(store, draft_grip, object_asset_ids, depth_asset_id, (values["width"], values["height"]))
+            if "identity" in draft_grip:
+                identity_check, threshold, identity_attempts, identity_model = _draft_identity_check(
+                    store, draft_grip["identity"], draft_grip["part_ids_asset_id"], input_ids[:-1], vision_provider)
+                if exact_seed:
+                    identity_attempts = 1
             if grip_values is None:
+                finish = " ".join(filter(None, [_GRIP_PROMPT, draft_grip.get("finish_prompt"), grip.contact_prompt]))
                 grip_values = {**grip_spec["defaults"], "custom_size": True, "resolution": 512, "steps": 12,
-                               "positive_prompt": (_GRIP_PROMPT + " " + draft_grip.get("finish_prompt", "")).strip(),
+                               "positive_prompt": finish,
                                **{key: values[key] for key in ("unet_name", "clip_name", "vae_name") if key in values}}
             try:
                 grip_values = comfy_driver.validate_against_object_info(grip_spec, grip_values, object_info, grip_graph)
@@ -1153,6 +1276,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     if grip:
         input_ids.extend(draft_grip[key] for key in _GRIP_GUIDES)
         input_ids.extend(draft_grip["prop_mask_asset_ids"])
+        input_ids.extend(_draft_extra_inputs(draft_grip))
     if layers or grip:
         input_ids.extend(object_asset_ids)
     count = max(1, min(int(count or 1), 8))
@@ -1193,13 +1317,15 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     def checkpoint_batch(index: int, batch: list[dict[str, Any]]) -> None:
         batches[str(index)] = [asset["id"] for asset in batch]
         store.update_job(job["id"], outputs={"asset_ids": [asset["id"] for asset in assets],
-                                              "comfy_batches": batches, "comfy_base_seed": base_seed})
+                                              "comfy_batches": batches, "comfy_base_seed": base_seed,
+                                              **({"draft_identity": identity_reports} if identity_reports else {})})
 
     upload_pending = True
     for i in range(count):
         progress.check_cancel() if hasattr(progress, "check_cancel") else None
         seed = base_seed + i
-        run_values = {**values, "seed": seed}
+        seeds = [(seed + count * attempt) % (2**64) for attempt in range(identity_attempts)] if identity_check else [seed]
+        run_values = {**values, "seed": seeds[0]}
         ids = completed.get(str(i), [])
         if ids:
             try:
@@ -1209,7 +1335,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             if restored and all(
                 (store.data_dir / asset["file_path"]).is_file()
                 and (asset["recipe"] or {}).get("template_hash") == thash
-                and asset["recipe"].get("params") == run_values
+                and (asset["recipe"].get("params") or {}).get("seed") in seeds
+                and asset["recipe"].get("params") == {**run_values, "seed": asset["recipe"]["params"]["seed"]}
+                and (not identity_check or asset["recipe"].get("draft_identity", {}).get("status") == "accepted")
                 and asset["recipe"].get("input_asset_ids") == input_ids
                 and asset["recipe"].get("draft_grip") == draft_grip
                 and asset["recipe"].get("grip_template_hash") == grip_hash
@@ -1217,6 +1345,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 for asset in restored
             ):
                 assets.extend(restored)
+                if identity_check:
+                    identity_reports[str(i)] = restored[0]["recipe"]["draft_identity"]
                 checkpoint_batch(i, restored)
                 continue
         wf = comfy_driver.apply_params(workflow, spec, run_values)
@@ -1267,49 +1397,71 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             problems = convert_mod.validate_values(wf, object_info)
             if problems:
                 raise EngineError("comfy_validation", "ComfyUI would reject this workflow: " + "; ".join(problems[:4]))
-        progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
-        t0 = time.monotonic()
-        outputs = _run_comfy_workflow(backend, wf, uploads if upload_pending else [], progress,
-                                      timeout_s=comfy_timeout_s(spec.get("kind")),
-                                      output_node=spec.get("output_node"))
-        upload_pending = False
-        if not outputs:
-            raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
         before = len(assets)
-        for out in outputs:
-            data = _download_output(backend, out)
-            recipe = {
-                "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
-                "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
-                "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
-                **({"depth_asset_id": depth_asset_id} if depth_name else {}),
-                **({"object_asset_ids": object_asset_ids} if layers or grip else {}),
-                **({"draft_grip": draft_grip, "grip_params": grip_values, "grip_template_hash": grip_hash}
-                   if grip else {}),
-                **(extra_recipe or {}),
-                **({"engine_service": {"id": profile["id"], "version": profile["version"]}} if profile else {}),
-            }
-            if template_name == "ltx23_i2v_hq":
-                recipe["video_refinement"] = {
-                    "scale": 2, "steps": 3, "cfg": 1, "sigmas": [0.85, 0.725, 0.4219, 0],
-                    "sampler": run_values["sampler"], "seed": run_values["seed"],
+        if identity_check:
+            review = {"status": "below_threshold", "threshold": threshold, "model": identity_model, "attempts": []}
+            identity_reports[str(i)] = review
+        for candidate_seed in seeds:
+            if candidate_seed != run_values["seed"]:
+                if hasattr(progress, "check_cancel"):
+                    progress.check_cancel()
+                run_values = {**run_values, "seed": candidate_seed}
+                wf = comfy_driver.apply_params(wf, spec, {"seed": candidate_seed})
+            progress(0.1 + 0.8 * i / count, f"rendering {i + 1}/{count} on ComfyUI")
+            t0 = time.monotonic()
+            outputs = _run_comfy_workflow(backend, wf, uploads if upload_pending else [], progress,
+                                          timeout_s=comfy_timeout_s(spec.get("kind")),
+                                          output_node=spec.get("output_node"))
+            upload_pending = False
+            if not outputs:
+                raise EngineError("no_outputs", "ComfyUI finished but saved no output; check the workflow's Save node")
+            for out in outputs:
+                data = _download_output(backend, out)
+                recipe = {
+                    "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
+                    "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
+                    "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
+                    **({"depth_asset_id": depth_asset_id} if depth_name else {}),
+                    **({"object_asset_ids": object_asset_ids} if layers or grip else {}),
+                    **({"draft_grip": draft_grip, "grip_params": grip_values, "grip_template_hash": grip_hash}
+                       if grip else {}),
+                    **(extra_recipe or {}),
+                    **({"engine_service": {"id": profile["id"], "version": profile["version"]}} if profile else {}),
                 }
-            if audio_name and audio_seconds and spec.get("kind") == "video":
-                # a lip-sync render is made in whole generations: keep exactly the line
-                data = _trim_video_bytes(data, float(audio_seconds))
-            if postprocess:
-                data = postprocess(data)
-            if layers:
-                data = _apply_draft_layers(data, layers)
-            if grip:
-                progress(0.1 + 0.8 * (i + 0.65) / count, f"painting grip {i + 1}/{count} on ComfyUI")
-                data = _paint_grip(backend, progress, grip, data, grip_graph, grip_spec, recipe, object_info)
-            assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
+                if template_name == "ltx23_i2v_hq":
+                    recipe["video_refinement"] = {
+                        "scale": 2, "steps": 3, "cfg": 1, "sigmas": [0.85, 0.725, 0.4219, 0],
+                        "sampler": run_values["sampler"], "seed": run_values["seed"],
+                    }
+                if audio_name and audio_seconds and spec.get("kind") == "video":
+                    # a lip-sync render is made in whole generations: keep exactly the line
+                    data = _trim_video_bytes(data, float(audio_seconds))
+                if postprocess:
+                    data = postprocess(data)
+                if layers:
+                    data = _apply_draft_layers(data, layers)
+                if grip:
+                    progress(0.1 + 0.8 * (i + 0.65) / count, f"painting grip {i + 1}/{count} on ComfyUI")
+                    data = _paint_grip(backend, progress, grip, data, grip_graph, grip_spec, recipe, object_info)
+                if identity_check:
+                    progress(0.1 + 0.8 * (i + 0.85) / count, "scoring draft identity")
+                    score, why = identity_check(data)
+                    review["attempts"].append({"seed": candidate_seed, "score": score})
+                    if score > review.get("score", -1):
+                        review.update(score=score, why=_clip(why, 130))
+                    if score < threshold:
+                        continue
+                    review["status"] = "accepted"
+                    recipe["draft_identity"] = review
+                assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
+            if len(assets) > before:
+                break
         if resumable:
             checkpoint_batch(i, assets[before:])
     free_after(backend, spec)
     progress(0.97, "imported outputs")
-    return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2)}
+    return {"asset_ids": [a["id"] for a in assets], "elapsed_s": round(time.monotonic() - started, 2),
+            **({"draft_identity": identity_reports} if identity_reports else {})}
 
 
 def _trim_video_bytes(data: bytes, seconds: float) -> bytes:
@@ -2332,7 +2484,8 @@ def _has_text_encoder(template: str, store: Store) -> bool:
     return any(comfy_driver._is_text_encoder(str(n.get("class_type"))) for n in workflow.values())
 
 
-def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
+def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress, *,
+                   vision_provider=None) -> dict[str, Any]:
     params = job["params"]
     template = params.get("template")
     engine_name = TEMPLATE_TO_ENGINE.get(template)
@@ -2429,7 +2582,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         reference_asset_ids=params.get("reference_asset_ids"), depth_asset_id=depth_id,
         object_asset_ids=params.get("object_asset_ids"),
-        draft_grip=params.get("draft_grip"),
+        draft_grip=params.get("draft_grip"), vision_provider=vision_provider,
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
@@ -2607,13 +2760,14 @@ def _is_sd_family(store: Store, recipe: dict[str, Any]) -> bool:
     return False
 
 
-def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) -> dict[str, Any]:
+def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress, *,
+               vision_provider=None) -> dict[str, Any]:
     params = job["params"]
     operation = params["operation"]
     src = store.get_asset(params["asset_id"])
     if operation in ("reuse", "vary"):
         return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
-                            count=params.get("count", 1))
+                            count=params.get("count", 1), vision_provider=vision_provider)
     if operation in MODEL_EDIT_OPERATIONS:
         return _edit_with_model(store, backend, job, progress, src, operation)
     template = _EDIT_TEMPLATES[operation]
@@ -2668,7 +2822,7 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress) ->
 
 
 def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, src: dict[str, Any], vary: bool,
-                 seed: Optional[int] = None, count: int = 1) -> dict[str, Any]:
+                 seed: Optional[int] = None, count: int = 1, *, vision_provider=None) -> dict[str, Any]:
     """"Reuse recipe" (same seed: reproduces the asset on the same backend)
     or "vary seed" (same recipe, new seed)."""
     recipe = src.get("recipe") or {}
@@ -2685,7 +2839,8 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     if object_ids:
         inputs = inputs[:-len(object_ids)]
     if draft_grip:
-        inputs = inputs[:-(len(_GRIP_GUIDES) + len(draft_grip["prop_mask_asset_ids"]))]
+        inputs = inputs[:-(len(_GRIP_GUIDES) + len(draft_grip["prop_mask_asset_ids"])
+                           + len(_draft_extra_inputs(draft_grip)))]
     inputs = [aid for aid in inputs if aid != depth_id]
     unchanged = True
     spec: dict[str, Any] = {}
@@ -2710,6 +2865,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask, depth_asset_id=depth_id,
         object_asset_ids=object_ids,
         draft_grip=draft_grip, grip_values=recipe.get("grip_params"),
+        vision_provider=vision_provider, exact_seed=not vary,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",

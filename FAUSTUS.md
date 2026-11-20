@@ -37,6 +37,42 @@ outline and the rear occlusion. Set `paint_props=true` to paint the interior
 of the accessory silhouettes, use `finish_prompt` for the desired finish,
 and pass the head label in `preserve_ids` if the grip crop reaches the face.
 
+For an illustrated sheet, import its reference piece into the same project.
+Pass `paper={"asset_id": ..., "layer": 0, "quad": [[x,y], ...]}` in
+`draft_grip`. The quad uses blocking pixels in reference corner order
+(top-left, top-right, bottom-right, bottom-left). Preserve the corner order
+of the source even when its projection is upside down. The visible alpha
+preserves the cuts and fingers. The local paint supplies the paper lighting.
+
+Pass the blocking's declared `contacts` as a list of
+`{"hand": "left"|"right", "layer": 0, "target": ..., "part_ids": [...], "pixel": [x,y]}`.
+`layer` indexes the same object list from zero. Use the blocking's visible
+hand and digit labels and the projected contact pixel. If the pose has two
+contacts, pass both. A free hand has no contact entry.
+
+Use `cylinder_layers` for the zero-based indices of tube layers. Each is
+lit using its full mask, while the visible mask keeps hands in front. To
+keep the head and set from an earlier key with the same framing, pass its
+asset ID as `continuity_asset_id` and the fixed part labels in `preserve_ids`.
+The earlier render and its blocking labels determine which regions stay
+fixed. The result records the earlier key as an input.
+
+For identity review, set `identity={"part_ids": [...], "reference_asset_ids": [...],
+"threshold": 6.5, "max_attempts": 3}` in `draft_grip`. Use visible
+head, cape and outfit labels to crop away the set. The optional references
+default to the render identity. `notes` describes the features to compare.
+The family vision check discards below-threshold candidates before asset import,
+trying new seeds up to the requested total (1–4). The job shows the tested seeds,
+scores and model. If every candidate fails, the job returns the best score with
+an empty asset list. A replay uses the selected seed.
+
+En el bloqueo, usa el dibujo registrado como pieza y pasa sus cuatro esquinas
+proyectadas en el orden de la referencia. `contacts` enlaza cada mano con la
+capa que agarra. `identity` compara cara y ropa con la hoja. El trabajo devuelve
+las notas y semillas, y solo se guardan las imágenes que alcanzan el umbral.
+`cylinder_layers` da volumen al tubo con su máscara completa.
+`continuity_asset_id` conserva las zonas fijas de una clave con el mismo encuadre.
+
 Use `studio_import(piece_id=..., preview=...)` on the order's concept or
 character sheet view, or use the imported sheet as the cast's canonical
 asset with `canonical_crop` when the sheet shows several views. Reuse the
