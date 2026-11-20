@@ -1763,6 +1763,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             allowed = set(tspec.get("map") or {}) - {"positive_prompt", "negative_prompt", "seed", "width", "height"}
             if tspec.get("depth_image_node"):
                 allowed.add("object_asset_ids")
+            if template == "qwen21_depth":
+                allowed.add("draft_grip")
             unknown = sorted(set(body.template_params) - allowed)
             if unknown:
                 raise engine.EngineError("bad_parameter", f"template '{template}' has no {', '.join(unknown)} "
