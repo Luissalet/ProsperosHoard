@@ -12,9 +12,10 @@ Run `python -m prosperos_hoard --no-browser` or the normal launcher. `--data-dir
 
 ## Projects, scenes and results
 
-With the local Hub available, Prospero routes ComfyUI start and stop requests through it. The service and its
-generation jobs reserve memory with the same GPU arbiter. `studio_service_start` accepts a numeric GPU index
-or `"auto"`. The response to a newly started Hub service includes an undo for that process. Standalone
+With the local Hub available, Prospero routes ComfyUI start and stop requests through it. A local service and its
+generation jobs share one GPU reservation. `studio_service_start` accepts a numeric GPU index or `"auto"`.
+Pass a granted `lease_id` to attach a manual reservation to a new local CUDA service. The response to a newly
+started Hub service includes an undo for that process. Standalone
 installations use their local launcher when the Hub is unavailable.
 
 The common project selector lists native generation projects/cuts only from enabled modules. Create/select an audiovisual project and choose an existing generated timeline; activate editing before transferring. The transfer calls the owned timeline importer directly and produces a real editing project, not a link-only placeholder. Production export uses that same internal handoff. Native project and timeline identifiers, exact source snapshots, target document revisions and transfer receipts are persisted in `studio-projects.sqlite3`. Existing revisions are retained; transferring a changed cut records a further revision. Editing can then use the complete native timeline, effects, subtitles, text editing, plans, preview/export and creative engines.

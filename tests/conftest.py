@@ -100,6 +100,7 @@ def _no_family_hub(monkeypatch):
 
     monkeypatch.setenv("HOARD_EVENTS", "0")
     monkeypatch.setenv("HOARD_HUB_AUTOSTART", "0")
+    monkeypatch.setenv("HOARD_HUB_URL", "http://127.0.0.1:1")
     monkeypatch.setenv("PROSPERO_GPU_LEASE", "0")
     monkeypatch.setattr(fam_notify, "hub_available", lambda timeout=1.0: False)
     monkeypatch.setattr(fam_notify, "notify", lambda *a, **k: {"ok": False, "error": "hub unreachable"})
