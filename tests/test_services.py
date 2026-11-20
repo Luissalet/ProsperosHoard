@@ -73,6 +73,29 @@ def test_services_list_main_pool_and_ollama(data_dir):
     assert svc["autostart_comfy"] is True
 
 
+def test_running_comfy_does_not_report_a_missing_install(data_dir, monkeypatch):
+    from prosperos_hoard.hoard_link import launch
+
+    backend = Backend(data_dir)
+    main = backend.main_comfy_port()
+    sid = f"comfyui@{main}"
+    monkeypatch.setattr(backend.launcher, "comfy_install", lambda: (None, None, "no local install"))
+    monkeypatch.setattr(launch, "_port_open", lambda url: False)
+    monkeypatch.setattr(launch, "_http_status", lambda url: 200 if f":{main}/" in url else None)
+
+    services = backend.services()
+    row = next(item for item in services["items"] if item["id"] == sid)
+    assert row["state"] == "running"
+    assert row["problem"] is None
+    assert services["comfyui"]["problem"] is None
+
+    monkeypatch.setattr(launch, "_http_status", lambda url: None)
+    services = backend.services()
+    row = next(item for item in services["items"] if item["id"] == sid)
+    assert row["state"] == "unavailable"
+    assert row["problem"] == services["comfyui"]["problem"] == "no local install"
+
+
 def test_remote_main_comfy_cannot_be_started(data_dir):
     (data_dir / "backend.json").write_text(json.dumps({"comfy": {"url": "http://192.168.1.9:8188"}}), encoding="utf-8")
     b = Backend(data_dir)

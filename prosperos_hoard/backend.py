@@ -869,10 +869,16 @@ class Backend:
         main = self.main_comfy_port()
         pool = [p for p in ports if p != main]
         items = self.launcher.statuses(ports)
+        comfy_running = False
         for item in items:
             if item["kind"] == "comfyui":
                 port = int(item["id"].split("@", 1)[1])
                 item["role"] = "main" if port == main else ("render_pool" if port in pool else "other")
+                if item["state"] in ("running", "starting"):
+                    # A reachable or starting server is usable independently
+                    # of this launcher's ability to start a fresh process.
+                    comfy_running = True
+                    item["problem"] = None
         folder, python, problem = self.launcher.comfy_install()
         cfg = self.launcher.config()
         return {
@@ -882,7 +888,8 @@ class Backend:
             "autostart_comfy": self.autostart_comfy(),
             "main_comfy": f"comfyui@{main}" if main is not None else None,
             "comfyui": {"dir": str(folder) if folder else None, "python": str(python) if python else None,
-                        "problem": problem, "gpu": (cfg.get("comfyui") or {}).get("gpu", "auto"),
+                        "problem": None if comfy_running else problem,
+                        "gpu": (cfg.get("comfyui") or {}).get("gpu", "auto"),
                         "args": (cfg.get("comfyui") or {}).get("args") or []},
             "ollama": {"exe": self.launcher.ollama_exe()},
             "config_path": str(self.launcher.config_path),
