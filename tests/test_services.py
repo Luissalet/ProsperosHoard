@@ -216,3 +216,38 @@ def test_autostart_off_fails_with_the_reason(standalone):
                json={"prompt": "x", "template": "sdxl_txt2img", "wait_s": 30})
     assert r.status_code == 409, r.text
     assert r.json()["error"] == "image_unavailable" and "Local services" in r.json()["message"]
+
+
+def test_depth_profile_reports_missing_patch_and_control_then_routes(monkeypatch, data_dir):
+    from prosperos_hoard import template_engines as te
+
+    endpoint = "http://127.0.0.1:65512"
+    row = {"id": "comfyui:depth", "url": endpoint, "state": "down", "gpu": 1, "pid": 123,
+           "problem": None, "profile": {"version": "0.46.0", "templates": [te.DEPTH_TEMPLATE],
+                                        "models": [{"name": te.DEPTH_PATCH, "available": True}]}}
+    nodes = {"ModelPatchLoader": {"input": {"required": {"name": [[]]}}},
+             te.DEPTH_CONTROL: {"input": {"optional": {}}}}
+
+    def fetch(url, **kwargs):
+        if url.endswith("/api/services/comfy-profiles"):
+            return 200, {"items": [row]}
+        node = url.rsplit("/", 1)[-1]
+        return 200, {node: nodes[node]}
+
+    monkeypatch.setattr(te._hubclient, "fetch", fetch)
+    assert te.template_status()[te.DEPTH_TEMPLATE]["next"] == {"tool": "hub_service_start", "arguments": {"id": row["id"], "wait_s": 60}}
+    row["state"] = "running"
+    blocked = te.template_status()[te.DEPTH_TEMPLATE]
+    assert blocked["state"] == "incompatible" and len(blocked["missing"]) == 2
+    nodes["ModelPatchLoader"]["input"]["required"]["name"] = [[te.DEPTH_PATCH]]
+    nodes[te.DEPTH_CONTROL]["input"]["optional"]["end_percent"] = ["FLOAT"]
+    profile = te.template_profile(te.DEPTH_TEMPLATE)
+    assert profile["state"] == "ready" and profile["missing"] == []
+    backend = Backend(data_dir)
+    backend.bind_comfy("http://127.0.0.1:65513")
+    with te.bind_profile(backend, profile):
+        assert backend.worker_comfy_port() == 65512 and backend.comfy_gpu() == 1
+    assert backend.worker_comfy_port() == 65513
+    row["profile"]["templates"].append("qwen21_txt2img")
+    assert te.template_profile("qwen21_txt2img")["url"] == endpoint
+    assert te.template_profile("qwen21_edit") is None

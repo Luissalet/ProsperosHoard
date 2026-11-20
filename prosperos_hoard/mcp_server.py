@@ -715,6 +715,21 @@ def studio_import(project: str, path: Optional[str] = None, kind: Optional[str] 
     return _call("POST", "/api/agent/studio_import", params={"project": project}, json=body)
 
 
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def studio_register_piece(asset_id: str, space: str, order_id: int, title: str, kind: Optional[str] = None,
+                          task_id: Optional[int] = None, derives_from: Optional[list[int | dict[str, Any]]] = None,
+                          agent: str = "prospero") -> dict[str, Any]:
+    """Register this asset as a piece of an existing Hub order. Returns the piece ID, hash and undo.
+    Use your Agora agent ID. Optional task and source piece IDs link the work to its origin.
+    Registra un recurso en una orden del Hub y devuelve el identificador, la huella y cómo deshacer.
+    Keywords: register output, order piece, handoff, registrar pieza, orden de producción, relevo
+    """
+    return _call("POST", "/api/agent/studio_register_piece", json={
+        "asset_id": asset_id, "space": space, "order_id": order_id, "title": title, "kind": kind,
+        "task_id": task_id, "derives_from": derives_from, "agent": agent,
+    })
+
+
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_time_lyrics(project: str, song_asset_id: str, lyrics: str, name: Optional[str] = None,
                        method: str = 'estimate', lines: Optional[list[dict[str, Any]]] = None,

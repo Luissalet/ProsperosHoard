@@ -108,6 +108,7 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
         "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
         "prompt": _clip(prompt, 120), "inputs": (recipe.get("input_asset_ids") or [])[:4] or None,
         "depth_asset_id": recipe.get("depth_asset_id"), "object_asset_ids": recipe.get("object_asset_ids"),
+        "engine_service": recipe.get("engine_service"),
         "draft_grip": recipe.get("draft_grip"),
         "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
@@ -785,13 +786,16 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
     whenever it changes, so UI-format workflows can still be converted while
     ComfyUI is off (see `cached_object_info`)."""
     comfy = _comfy(backend, autostart)
+    path = object_info_cache_path(backend.data_dir)
+    profile = getattr(getattr(backend, "_bound", None), "profile", None)
+    if profile:
+        path = path.with_name(f"object_info-{profile['id'].partition(':')[2]}.json")
     try:
         info = backend.run_async(comfy.object_info())
     except httpx.TimeoutException as exc:
         # up but too busy to answer (a long render holds it): the node list
         # does not change while it runs, so the last saved copy is as good
         # and the job just waits its turn in ComfyUI's queue
-        path = object_info_cache_path(backend.data_dir)
         if path.is_file():
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
@@ -808,7 +812,6 @@ def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str
             # combo children that have no separate input_order metadata.
             blob = json.dumps(info)
             digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
-            path = object_info_cache_path(backend.data_dir)
             if _object_info_cache_hash.get(str(path)) != digest:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 write_text_atomic(path, blob)
@@ -1009,6 +1012,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     check_vram_or_wait(backend, spec)
     progress(0.05, "validating against ComfyUI")
     object_info = _object_info(backend)
+    profile = getattr(getattr(backend, "_bound", None), "profile", None)
     try:
         values = comfy_driver.validate_against_object_info(spec, values, object_info, workflow)
     except comfy_driver.ValidationError as exc:
@@ -1283,6 +1287,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 **({"draft_grip": draft_grip, "grip_params": grip_values, "grip_template_hash": grip_hash}
                    if grip else {}),
                 **(extra_recipe or {}),
+                **({"engine_service": {"id": profile["id"], "version": profile["version"]}} if profile else {}),
             }
             if template_name == "ltx23_i2v_hq":
                 recipe["video_refinement"] = {
