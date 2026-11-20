@@ -3977,7 +3977,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     studio = AppStudio()
     app.state.studio = studio
-    production_hooks: dict[str, Any] = {"qa_hook": None, "stage_hooks": {}}
+    production_hooks: dict[str, Any] = {"qa_hook": None, "stage_hooks": {}, "guide_hook": None}
     app.state.production_hooks = production_hooks
 
     def _log_workflow_preflight(slug: str) -> None:
@@ -4002,7 +4002,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         slug = job["params"]["slug"]
         _log_workflow_preflight(slug)
         return productions_mod.run_production(store, studio, slug, progress, qa_hook=production_hooks["qa_hook"],
-                                              stage_hooks=production_hooks["stage_hooks"])
+                                              stage_hooks=production_hooks["stage_hooks"],
+                                              guide_hook=production_hooks["guide_hook"])
 
     queue.register("production", _production_job)
 
@@ -4407,6 +4408,12 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return ask, f"{res.provider or 'vision'}:{res.model or ''}".rstrip(":")
 
     production_hooks["qa_hook"] = lambda run, stage: qa_mod.inline_hook(run, stage, *vision_for_qa())
+
+    def review_guided_takes(run: productions_mod.Run) -> None:
+        from . import scene_control_review
+        scene_control_review.record(run, lambda: vision_for_qa(max_tokens=1800))
+
+    production_hooks["guide_hook"] = review_guided_takes
 
     def op_review_clip(body: ClipReviewBody) -> dict[str, Any]:
         asset = store.get_asset(body.asset_id)

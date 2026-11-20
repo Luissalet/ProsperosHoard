@@ -1131,12 +1131,14 @@ class Run:
 
     def __init__(self, store: Store, studio: Studio, slug: str, progress: Callable[..., None],
                  qa_hook: Optional[Callable[["Run", str], None]] = None,
-                 stage_hooks: Optional[dict[str, Callable[["Run"], Any]]] = None):
+                 stage_hooks: Optional[dict[str, Callable[["Run"], Any]]] = None,
+                 guide_hook: Optional[Callable[["Run"], None]] = None):
         self.store = store
         self.studio = studio
         self.slug = slug
         self.progress = progress
         self.qa_hook = qa_hook
+        self.guide_hook = guide_hook
         self.stage_hooks = stage_hooks or {}
         self.state = load_state(store.data_dir, slug)
         if is_legacy(self.state):
@@ -1270,11 +1272,14 @@ class Run:
             for stage in stages_for(state):
                 self.stage = stage
                 state["stage"] = stage
+                guided = stage == "clips" and self.guide_hook and self.spec.get("scene_shots")
                 if stage_status(state, stage) == "done":
                     if stage == "animatic" and animatic_review_pending(state):
                         # an animatic made outside this run (studio_animatic)
                         # or never approved: the review gate holds all the same
                         return self._pause(stage)
+                    if guided:
+                        self.guide_hook(self)
                     continue
                 fn = self.stage_hooks.get(stage) or getattr(self, f"stage_{stage}", None)
                 if fn is None:
@@ -1287,6 +1292,8 @@ class Run:
                 self.save()
                 if self.qa_hook and (state.get("settings", {}).get("qa") or {}).get("enabled"):
                     self.qa_hook(self, stage)
+                if guided:
+                    self.guide_hook(self)
                 if outcome == "pause":
                     return self._pause(stage)
                 self.save()
@@ -1978,7 +1985,8 @@ def _asset_ids(job: dict[str, Any]) -> list[str]:
 
 def run_production(store: Store, studio: Studio, slug: str, progress: Callable[..., None],
                    qa_hook: Optional[Callable[[Run, str], None]] = None,
-                   stage_hooks: Optional[dict[str, Callable[[Run], Any]]] = None) -> dict[str, Any]:
+                   stage_hooks: Optional[dict[str, Callable[[Run], Any]]] = None,
+                   guide_hook: Optional[Callable[[Run], None]] = None) -> dict[str, Any]:
     if load_state(store.data_dir, slug).get("kind") == "short":
         from .shorts import ShortRun  # a narrated short (shorts.py)
         runner = ShortRun
@@ -1989,7 +1997,7 @@ def run_production(store: Store, studio: Studio, slug: str, progress: Callable[.
             from .director import DirectorRun  # a directed film, shot by shot (director.py)
             runner = DirectorRun
         return runner(store, studio, slug, progress, qa_hook=None, stage_hooks=stage_hooks).run()
-    return Run(store, studio, slug, progress, qa_hook=qa_hook, stage_hooks=stage_hooks).run()
+    return Run(store, studio, slug, progress, qa_hook=qa_hook, stage_hooks=stage_hooks, guide_hook=guide_hook).run()
 
 
 # ----------------------------------------------------------- change shots
