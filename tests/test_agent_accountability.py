@@ -204,6 +204,39 @@ def test_an_import_is_undone_by_moving_the_asset_to_the_trash(agent, client):
     assert len(done["undone"]) == 1 and agent.store.list_assets(p["id"])["items"] == [] and [t["id"] for t in agent.store.list_trash()] == [made["id"]]
 
 
+def test_order_piece_import_is_undoable_without_a_local_path(agent, client, monkeypatch):
+    import httpx
+    import io
+    from PIL import Image
+    from prosperos_hoard import hub_piece
+
+    _, _, allowed = client
+    project = agent.store.create_project("Order imports")
+    image = io.BytesIO()
+    Image.new("RGB", (16, 16), (1, 2, 3)).save(image, format="PNG")
+    blob = image.getvalue()
+    monkeypatch.setenv("HOARD_HUB_URL", "http://127.0.0.1:65501")
+
+    def reply(request):
+        assert request.url.path == "/api/agora/piece_file/9"
+        assert request.url.params["preview"] == "0"
+        return httpx.Response(200, content=blob, headers={"content-type": "image/png"})
+
+    with httpx.Client(transport=httpx.MockTransport(reply)) as http:
+        def stream(method, url, **kwargs):
+            return http.stream(method, url, params=kwargs["params"], headers=kwargs["headers"])
+
+        monkeypatch.setattr(hub_piece.httpx, "stream", stream)
+        made = agent.ok("studio_import", {"project": project["id"], "piece_id": 9, "preview": 0})
+    assert made["recipe"]["hub_piece"]["id"] == 9
+    assert made["recipe"]["hub_piece"]["preview"] == 0
+    assert not list(allowed.iterdir())
+    assert [x["id"] for x in agent.store.list_assets(project["id"])["items"]] == [made["id"]]
+    assert len(agent.undone("s1", confirm=True)["undone"]) == 1
+    assert agent.store.list_assets(project["id"])["items"] == []
+    assert [t["id"] for t in agent.store.list_trash()] == [made["id"]]
+
+
 # ---------------------------------------------------------------- cast and style cards
 
 

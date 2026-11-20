@@ -18,10 +18,27 @@ visual review on the generated key. The recipe keeps the separate input IDs
 for `studio_edit_image` reuse and seed variation. The ordinary edit template
 remains available for work without a structure guide.
 
-This draft needs a Qwen-Image 2.1-capable ComfyUI with native Union ControlNet
-support and `qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors` in
-`models/model_patches` alongside the Qwen 2.1 models. Inspect the template's
-readiness before queuing. See the [ComfyUI model package](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/model_patches).
+Import the registered depth guide or identity from an order with
+`studio_import(project=..., piece_id=...)`. For a numbered view attached
+to a piece, add `preview` (starting at zero). The import records the piece
+ID and the source file's SHA-256. It accepts media supported by the studio
+importer. Local-file imports still use `path` and the configured import roots.
+Undo the import with the usual agent-session undo.
+
+The ComfyUI launch profile needs native Qwen-Image 2.1 Union ControlNet
+support, including the `end_percent` input on `QwenImageDiffsynthControlnet`.
+The tested release is 0.46.0. Put
+`qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors` in
+`models/model_patches` and make the base models available to that profile.
+The Hub finds the engine through `comfyui.dir` and `comfyui.python` in its
+`backends.json`; point Prospero's ComfyUI URL at the listening instance.
+Check the workflow's node and model readiness before starting a job.
+See the [ComfyUI model package](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/model_patches).
+
+When the guide hides the hand or the tube, check the same camera's colour
+and depth views. Make the grip, tube outline and clipped corner legible
+in the blocking before regenerating that key. Review the painted finger
+contact, map corner, tube side and step count in the resulting image.
 
 Una hoja de personaje guarda cada vista terminada en su trabajo, kit y dataset. `studio_retry_job` reanuda un intento fallido con las vistas ya guardadas y reconstruye la hoja de contactos al terminar. El reintento con una semilla nueva genera una nueva variante. Las tandas de generación y edición guardan los resultados completos de cada semilla. Los servidores de render locales se asocian a su GPU física y solicitan su reserva de memoria; los que comparten tarjeta o servidor esperan su turno. Los fallos de generación, edición y hoja se publican como eventos de trabajo y se pueden vincular a una tarea del Ágora.
 
