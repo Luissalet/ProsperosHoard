@@ -12,6 +12,16 @@ canvas from the guide unless dimensions are supplied at the same aspect ratio.
 Optional `control_strength` and `control_end` in `template_params` tune
 how strongly and for how long the depth follows the blocking.
 
+For a prop with an exact shape, render its named blocking part from the same
+camera and frame. Supply the full-canvas transparent render in
+`template_params.object_asset_ids` (up to eight, in compositing order).
+The alpha channel should already reserve pixels where the fingers or another
+foreground part occlude it. Prepare depth for the figure and set with that prop
+omitted, and describe the position of the hand in the prompt so the renderer
+leaves room for the prop. Prospero applies the layers after sampling at native
+pixel coordinates and records them as recipe inputs. Across the keys of an order,
+reuse the same identity view, style wording and base seed.
+
 The engine applies the depth to the model patch while sampling a new image.
 The cue's source pose, the character's appearance and all props still need
 visual review on the generated key. The recipe keeps the separate input IDs
@@ -39,6 +49,9 @@ When the guide hides the hand or the tube, check the same camera's colour
 and depth views. Make the grip, tube outline and clipped corner legible
 in the blocking before regenerating that key. Review the painted finger
 contact, map corner, tube side and step count in the resulting image.
+Score identity against the same reference with `studio_character_takes` and
+review each full key and the hand/prop crop with common Eyes. Set a limit on
+candidate seeds, and record the chosen take, score and unresolved details.
 
 Una hoja de personaje guarda cada vista terminada en su trabajo, kit y dataset. `studio_retry_job` reanuda un intento fallido con las vistas ya guardadas y reconstruye la hoja de contactos al terminar. El reintento con una semilla nueva genera una nueva variante. Las tandas de generación y edición guardan los resultados completos de cada semilla. Los servidores de render locales se asocian a su GPU física y solicitan su reserva de memoria; los que comparten tarjeta o servidor esperan su turno. Los fallos de generación, edición y hoja se publican como eventos de trabajo y se pueden vincular a una tarea del Ágora.
 

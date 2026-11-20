@@ -5,8 +5,8 @@
       "handoffs": [
         {"accepts": "scene-brief", "produces": ["concept-image"], "skill": "image-composition", "check": {"en": "Open the image and check the explicit continuity details in the brief.", "es": "Abre la imagen y comprueba los detalles de continuidad indicados en el expediente."},
          "draft": {
-           "how": {"es": "Genera la clave con la profundidad del bloqueo para la pose, la cámara y los escalones. Usa la lámina o una vista de la hoja para la identidad.",
-                   "en": "Generate the key with the blocking depth for pose, camera and stairs. Use the concept image or a sheet view for identity."},
+           "how": {"es": "Usa la profundidad del bloqueo para pose, cámara y escalones, y la misma lámina o vista de la hoja para la identidad. Para objetos con silueta exacta, añade sus capas transparentes de la misma cámara y fotograma con template_params.object_asset_ids.",
+                   "en": "Use blocking depth for pose, camera and stairs and the same concept image or sheet view for identity. For exact prop silhouettes, supply transparent layers from the same camera and frame in template_params.object_asset_ids."},
            "seconds": 100, "gpu": true, "tool": "studio_generate_image",
            "settings": {"template": "qwen21_depth", "count": 1},
            "produces": "draft-image", "anchors": ["composition"]

@@ -529,6 +529,9 @@ def studio_generate_image(
     the reference supplies appearance and the guide supplies structure/camera/action through Canny IC-LoRA.
     driving_start_s chooses the guide offset; template_params carries the template's declared knobs such as
     length(8*n+1 frames at24fps) and control_strength(default1). Neither runs a local prompt-generating LLM.
+    For qwen21_depth, pass depth_asset_id in template_params and the identity in reference_asset_id.
+    Optional object_asset_ids in template_params are transparent layers at the output size, applied in order
+    after generation. Capas de objetos con transparencia y el tamaño exacto de la clave.
     Lip sync: template "auto_sing" (or "wan22_s2v" / "wan21_infinitetalk") with reference_asset_id = the
     singer, audio_asset_id = the song, audio_start_s and audio_seconds = the line (S2V up to 20 s,
     InfiniteTalk up to 90 s; auto picks InfiniteTalk past 10 s when installed); the clip is trimmed to the line.
