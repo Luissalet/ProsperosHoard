@@ -8,7 +8,7 @@ web
 
 ## Users
 
-Luis uses this local creative studio to generate and assemble images, videos,
+This local creative studio is for creating and assembling images, videos,
 music and voice. The October 5 brief delegates the redesign and model choices
 for an unattended improvement pass. A successful interface supports ordinary
 visual inspection, including opening a small picture at full size with one click.

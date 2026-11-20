@@ -43,8 +43,8 @@ def test_synthesize_passes_design_reference_and_gpu(tmp_path, monkeypatch):
         return {"ok": True, "seconds": 1.5, "first_audio_s": 0.4, "audio_s": 0.1, "sample_rate": 48000}
 
     monkeypatch.setattr(vx, "run_worker", fake_worker)
-    assert engine.synthesize("Hola, Luis.", voice_ref="(una mujer serena)")[:4] == b"RIFF"
-    assert seen["text"] == "(una mujer serena)Hola, Luis." and seen["gpu"] == "3" and seen["reference"] == ""
+    assert engine.synthesize("Hola, equipo.", voice_ref="(una mujer serena)")[:4] == b"RIFF"
+    assert seen["text"] == "(una mujer serena)Hola, equipo." and seen["gpu"] == "3" and seen["reference"] == ""
     ref = tmp_path / "ref.wav"
     ref.write_bytes(b"RIFF")
     engine.synthesize("Hola", sample_path=ref, prompt_text="transcript", stream=True)
