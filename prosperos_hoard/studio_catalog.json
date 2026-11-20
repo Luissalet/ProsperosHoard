@@ -7510,7 +7510,7 @@
     },
     {
       "name": "studio_service_start",
-      "description": "Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.\n\nid: \"comfyui\" (the main one), \"comfyui@<port>\", \"render_pool\" (main + every pool server, one GPU\neach), \"ollama\" or \"cmd:<id>\" from studio_services. gpu: \"auto\" (most free memory, default) or a\nGPU index, ComfyUI only. Already running = ok with already=true. The Hub reserves startup memory\nwhile it runs. Use studio_service_stop to undo a new start.\n\nKeywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend",
+      "description": "Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.\n\nid: \"comfyui\" (the main one), \"comfyui@<port>\", \"render_pool\" (main + every pool server, one GPU\neach), \"ollama\" or \"cmd:<id>\" from studio_services. gpu: \"auto\" (most free memory, default) or a\nGPU index, ComfyUI only. Already running = ok with already=true. Pass lease_id to attach an existing\nGPU reservation to one local render server. Its jobs share the reservation. Use studio_service_stop to undo.\n\nKeywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -7537,6 +7537,18 @@
             "default": 0.0,
             "title": "Wait S",
             "type": "number"
+          },
+          "lease_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lease Id"
           },
           "reason": {
             "type": "string",

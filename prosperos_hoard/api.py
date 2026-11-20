@@ -198,6 +198,10 @@ class ServiceBody(BaseModel):
     wait_s: float = 0.0
 
 
+class ServiceStartBody(ServiceBody):
+    lease_id: Optional[str] = None
+
+
 class LaunchBody(BaseModel):
     comfyui_dir: Optional[str] = None
     comfyui_python: Optional[str] = None
@@ -1422,10 +1426,6 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                      notifier=jobevents.Notifier(store, family_settings))
     @contextlib.contextmanager
     def gpu_guard(job):
-        def assigned(job_id, gpu):
-            backend.bind_lease_gpu(gpu)
-            job_events.set_gpu(job_id, gpu)
-
         card = backend.comfy_gpu()
         with contextlib.ExitStack() as stack:
             def take(lock):
@@ -1439,14 +1439,17 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             try:
                 held = None
                 if card is not None or backend.cold_local_comfy():
+                    service_port = backend.worker_comfy_port()
                     held = stack.enter_context(gpu_lease.hold(
-                        job, backend.vram_estimates_mb, on_gpu=assigned, gpu=card,
+                        job, backend.vram_estimates_mb, on_gpu=job_events.set_gpu, gpu=card,
+                        service=f"comfyui@{service_port}" if service_port is not None else None,
                         resident_mb=backend.comfy_resident_mb(card) if card is not None else 0,
                         resolve_template_class=lambda name: comfy_driver.load_template(
                             name, store.data_dir)[1].get("vram_class"),
                         resolve_image_engine=lambda: engine.resolve_image_engine(engine._object_info(backend), "auto"),
                     ))
                     granted = getattr(held, "gpu", None)
+                    backend.bind_lease_gpu(granted, getattr(held, "lease_id", None))
                     if granted is not None and card is None:
                         take(backend.render_lock(granted))
                 yield held
@@ -2056,8 +2059,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return backend.services()
 
     @app.post("/api/backend/services/start")
-    def start_service(body: ServiceBody):
-        return backend.start_service(body.id, gpu=_gpu_arg(body.gpu), wait_s=min(max(body.wait_s, 0.0), MAX_WAIT_S))
+    def start_service(body: ServiceStartBody):
+        return backend.start_service(body.id, gpu=_gpu_arg(body.gpu), lease_id=body.lease_id,
+                                     wait_s=min(max(body.wait_s, 0.0), MAX_WAIT_S))
 
     @app.post("/api/backend/services/stop")
     def stop_service(body: ServiceBody):
@@ -6787,10 +6791,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("studio_gpu_memory", "", run)
 
     @app.post("/api/agent/studio_service_start")
-    def agent_service_start(body: ServiceBody):
+    def agent_service_start(body: ServiceStartBody):
         wait_s = min(max(body.wait_s, 0.0), MAX_WAIT_S)
         return agent("studio_service_start", body.id,
-                     lambda: backend.start_service(body.id, gpu=_gpu_arg(body.gpu), wait_s=wait_s))
+                     lambda: backend.start_service(body.id, gpu=_gpu_arg(body.gpu), wait_s=wait_s,
+                                                   lease_id=body.lease_id))
 
     @app.post("/api/agent/studio_service_stop")
     def agent_service_stop(body: ServiceBody):

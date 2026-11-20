@@ -339,10 +339,14 @@ class Backend:
         self._bound.url = url.rstrip("/") if url else None
         self._bound.worker = True
 
+    def worker_comfy_port(self) -> Optional[int]:
+        target = getattr(self._bound, "url", None)
+        return comfy_port_from_url(target) if target else self.main_comfy_port()
+
     def comfy_gpu(self) -> Optional[int]:
         """Physical card of this worker's local server, including externally started servers."""
         target = getattr(self._bound, "url", None)
-        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        port = self.worker_comfy_port()
         if port is None:
             return None
         state = self.launcher.status(self.launcher.get(f"comfyui@{port}"))
@@ -413,8 +417,9 @@ class Backend:
         port = self.main_comfy_port()
         return port is not None and not _port_open(f"http://127.0.0.1:{port}")
 
-    def bind_lease_gpu(self, gpu: Optional[int]) -> None:
+    def bind_lease_gpu(self, gpu: Optional[int], lease_id: Optional[str] = None) -> None:
         self._bound.lease_gpu = gpu
+        self._bound.lease_id = lease_id
 
     def _pool_client(self, url: str):
         # A client's connections belong to the event loop it was created on.
@@ -909,17 +914,24 @@ class Backend:
             if isinstance(result, dict):
                 return result
             return {"ok": False, "service": sid, "error": "The Hub did not answer / El Hub no ha respondido"}
+        if options.get("lease_id"):
+            return {"ok": False, "service": sid, "error": "The lease needs the Hub / La reserva requiere el Hub"}
         if action == "stop":
             return self.launcher.stop(sid)
+        options.pop("work_lease_id", None)
         return self.launcher.start(sid, **options)
 
-    def start_service(self, service_id: str, gpu: Any = None, wait_s: float = 0.0) -> dict[str, Any]:
+    def start_service(self, service_id: str, gpu: Any = None, wait_s: float = 0.0, *,
+                      lease_id: Optional[str] = None) -> dict[str, Any]:
         if self.demo:
             raise ValueError("demo mode has no real backends to start")
         sid = self._service_id(service_id)
+        if lease_id and not sid.startswith("comfyui@"):
+            raise ValueError("A lease can only be attached to one local render server")
         if sid == "render_pool":
             return self.start_render_pool(gpu_auto=True, wait_s=wait_s)
-        res = (self._comfy_service("start", sid, gpu=gpu, wait_s=wait_s) if sid.startswith("comfyui@")
+        options = {"lease_id": lease_id} if lease_id else {}
+        res = (self._comfy_service("start", sid, gpu=gpu, wait_s=wait_s, **options) if sid.startswith("comfyui@")
                else self.launcher.start(sid, gpu=gpu, wait_s=wait_s))
         if res.get("ready") or res.get("already"):
             self._after_service_change()
@@ -1013,8 +1025,10 @@ class Backend:
         if port is None:
             return False
         with self._autostart_lock:
+            lease_id = getattr(self._bound, "lease_id", None)
+            options = {"work_lease_id": lease_id} if lease_id else {}
             res = self._comfy_service("start", f"comfyui@{port}", gpu=getattr(self._bound, "lease_gpu", None),
-                                      wait_s=timeout_s)
+                                      wait_s=timeout_s, **options)
         ok = bool(res.get("ok") and (res.get("ready") or res.get("state") == "running"))
         if ok:
             self._after_service_change()
