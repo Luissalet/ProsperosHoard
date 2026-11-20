@@ -16,8 +16,8 @@ import logging
 import os
 from typing import Any, Callable, Iterator, Optional
 
-from .hoard_link import LeaseTimeout, lease as default_lease
-from .hoard_link.lease import LeaseError
+from .hoard_link import LeaseTimeout, lease as family_lease
+from .hoard_link.lease import Lease, LeaseError
 from .jobs import WaitingForResources
 
 log = logging.getLogger("prosperos_hoard.gpu_lease")
@@ -78,10 +78,24 @@ def _purpose(job: dict[str, Any]) -> str:
     return f"{job['type']} {job['id']}"[:80]
 
 
+class RenderLease(Lease):
+    def __init__(self, service: str, **options: Any):
+        super().__init__(**options)
+        self.service = service
+
+    def _body(self) -> dict[str, Any]:
+        return {**super()._body(), "service": self.service}
+
+
+def default_lease(*, service: Optional[str] = None, **options: Any) -> Lease:
+    return RenderLease(service, **options) if service else family_lease(**options)
+
+
 @contextlib.contextmanager
 def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, lease_fn: Optional[Callable[..., Any]] = None,
          resolve_image_engine: Optional[Callable[[], str]] = None, on_gpu: Optional[Callable[[str, Optional[int]], None]] = None,
-         gpu: Optional[int] = None, resident_mb: int = 0, resolve_template_class: Optional[Callable[[str], Optional[str]]] = None) -> Iterator[Any]:
+         gpu: Optional[int] = None, resident_mb: int = 0, resolve_template_class: Optional[Callable[[str], Optional[str]]] = None,
+         service: Optional[str] = None) -> Iterator[Any]:
     """Hold the hub's lease while the body runs (nothing when it is off or cannot be had). ``on_gpu(job_id, gpu)`` hears which card."""
     if not enabled():
         yield None
@@ -91,8 +105,12 @@ def hold(job: dict[str, Any], vram_estimates: Callable[[], dict[str, int]], *, l
         estimate = estimate_mb(job, vram_estimates(), resolve_image_engine, resolve_template_class)
         # The driver's device total already includes this worker's resident memory.
         mb = max(min(estimate, 1024), estimate - max(0, resident_mb))
-        lease_cm = (lease_fn or default_lease)(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S,
-                                              **({"gpu": gpu} if gpu is not None else {}))
+        options = dict(vram_mb=mb, purpose=_purpose(job), owner=OWNER, timeout_s=WAIT_S)
+        if gpu is not None:
+            options["gpu"] = gpu
+        if service:
+            options["service"] = service
+        lease_cm = (lease_fn or default_lease)(**options)
         lease_cm.__enter__()
     except WaitingForResources:
         raise

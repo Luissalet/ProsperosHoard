@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from prosperos_hoard.api import create_app
 from prosperos_hoard.backend import Backend
+from prosperos_hoard.hoard_link import _hubclient
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -80,11 +81,56 @@ def test_remote_main_comfy_cannot_be_started(data_dir):
         b.start_service("comfyui")
 
 
+def test_start_with_integer_gpu_uses_hub_and_does_not_retry_a_refusal(client, monkeypatch):
+    c, _, _ = client
+    monkeypatch.setattr(_hubclient, "hub_up", lambda url: True)
+    monkeypatch.setattr(_hubclient, "hub_url", lambda: "http://hub.test")
+    calls = []
+
+    def fetch(url, body, **options):
+        calls.append((url, body))
+        return 409, {"ok": False, "error": "GPU memory is unavailable"}
+
+    monkeypatch.setattr(_hubclient, "fetch", fetch)
+    r = c.post("/api/agent/studio_service_start", json={"id": "comfyui@62829", "gpu": 1, "wait_s": 10})
+    assert r.status_code == 200 and r.json()["ok"] is False
+    assert "GPU memory is unavailable" in r.json()["error"]
+    assert calls == [("http://hub.test/api/services/start", {"id": "comfyui@62829", "gpu": 1, "wait_s": 10})]
+
+
 def test_demo_never_starts_anything(data_dir):
     b = Backend(data_dir, demo=True)
     assert b.autostart_comfy() is False
     with pytest.raises(ValueError, match="demo"):
         b.start_service("comfyui")
+
+
+def test_start_passes_manual_reservation_and_gpu_job_names_the_local_service(client, monkeypatch):
+    from prosperos_hoard import gpu_lease
+
+    c, app, _ = client
+    backend = app.state.backend
+    monkeypatch.setattr(backend, "_comfy_service", lambda action, sid, **options: {
+        "ok": True, "service": sid, **options,
+    })
+    r = c.post("/api/agent/studio_service_start", json={"id": "comfyui@62829", "lease_id": "manual"})
+    assert r.json()["lease_id"] == "manual"
+    monkeypatch.setenv("PROSPERO_GPU_LEASE", "1")
+    monkeypatch.setattr(backend, "comfy_gpu", lambda: 2)
+    monkeypatch.setattr(backend, "comfy_resident_mb", lambda gpu: 0)
+    backend.bind_comfy("http://127.0.0.1:62829")
+    lease = gpu_lease.RenderLease("comfyui@62829", vram_mb=11887, gpu=2)
+    monkeypatch.setattr(lease, "acquire", lambda: lease)
+    monkeypatch.setattr(lease, "release", lambda: None)
+    captured = []
+    monkeypatch.setattr(gpu_lease, "default_lease", lambda **args: captured.append(args) or lease)
+    try:
+        with app.state.queue._guard({"id": "render", "lane": "gpu", "type": "generate_image",
+                                     "params": {"engine": "qwen21"}}):
+            assert captured[0]["service"] == lease._body()["service"] == "comfyui@62829"
+            assert captured[0]["gpu"] == 2
+    finally:
+        backend.bind_comfy(None)
 
 
 def test_launch_settings_are_validated_and_shared(client, tmp_path):

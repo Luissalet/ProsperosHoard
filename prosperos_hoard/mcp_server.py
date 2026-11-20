@@ -384,17 +384,19 @@ def studio_gpu_memory() -> dict[str, Any]:
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
-def studio_service_start(id: str = "comfyui", gpu: Optional[str] = None, wait_s: float = 120) -> dict[str, Any]:
+def studio_service_start(id: str = "comfyui", gpu: str | int | None = None, wait_s: float = 120,
+                         lease_id: str | None = None) -> dict[str, Any]:
     """Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.
 
     id: "comfyui" (the main one), "comfyui@<port>", "render_pool" (main + every pool server, one GPU
     each), "ollama" or "cmd:<id>" from studio_services. gpu: "auto" (most free memory, default) or a
-    GPU index, ComfyUI only. Already running = ok with already=true. Starting ComfyUI loads no model:
-    memory is used when a job runs.
+    GPU index, ComfyUI only. Already running = ok with already=true. Pass lease_id to attach an existing
+    GPU reservation to one local render server. Its jobs share the reservation. Use studio_service_stop to undo.
 
     Keywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend
     """
-    return _call("POST", "/api/agent/studio_service_start", json={"id": id, "gpu": gpu, "wait_s": wait_s})
+    return _call("POST", "/api/agent/studio_service_start",
+                 json={"id": id, "gpu": gpu, "wait_s": wait_s, **({"lease_id": lease_id} if lease_id else {})})
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
