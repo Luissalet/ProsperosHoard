@@ -177,7 +177,7 @@ def _next_id(t: dict[str, Any]) -> str:
 
 
 def rename(svc: "Services", media_id: str, names: dict[str, str]) -> dict[str, Any]:
-    """Give speakers real names: {"S1": "Ana", "S2": "Luis"} (a name or an id as the key). Two speakers cannot share a name."""
+    """Give speakers display names: {"S1": "Ponente A", "S2": "Ponente B"} (a name or an id as the key). Two speakers cannot share a name."""
     t = _transcript(svc, media_id)
     if not _speaker_table(t):
         raise LumiereError("This transcript has no speakers yet: run media_analyze with kinds=['speakers'].", code="no_speakers")
