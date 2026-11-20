@@ -35,6 +35,7 @@ Typical uses:
 
 **Images**
 - Engines: Qwen-Image 2.1 (txt2img, multi-reference edit with 1-10 references, and draft keys guided by a depth map and an identity image), FLUX.1 schnell, FLUX.1 Kontext edits, SDXL (img2img, inpaint, two-pass hires fix) and SD 1.5. `auto` picks the best installed engine and every result says which one it used.
+- Depth-guided draft keys can preserve exact prop silhouettes with aligned transparent object layers.
 - Model upscale (x2 or x4), background removal to a transparent PNG, pose and depth maps, outpainting onto a larger canvas, reframing any picture or clip to 9:16, 16:9, 1:1, 4:5, 2:3, 3:2 or 21:9 without regenerating.
 - Import your own ComfyUI workflows with preflight: node classes and model files are checked and missing ones are listed with the folder they belong in.
 
