@@ -2055,6 +2055,85 @@ def studio_prompt_enhance(text: str, kind: str = "image", project: Optional[str]
 
 
 @tool(_ro(readOnlyHint=True))
+def studio_scene(production: str) -> dict[str, Any]:
+    """Get the scene's shots, assembled video provenance and whether all mounted takes passed review.
+
+    Keywords: storyboard, shot provenance, scene, planos, procedencia, escena
+    """
+    return _call("POST", "/api/agent/studio_scene", params={"production": production})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_scene_suggest(production: str, character_sheet_asset_id: str, description: str = "",
+                         duration_s: float = 12, count: int = 3, language: str = "es") -> dict[str, Any]:
+    """Suggest short shots from a scene dossier and a character sheet using the configured vision model.
+
+    Returns framing, actions, durations and start/end descriptions. Does not save the draft.
+
+    Keywords: divide scene, shot planning, start end, plan de planos, dividir escena
+    """
+    return _call("POST", "/api/agent/studio_scene_suggest", params={"production": production},
+                 json={"character_sheet_asset_id": character_sheet_asset_id, "description": description,
+                       "duration_s": duration_s, "count": count, "language": language})
+
+
+@tool(_ro())
+def studio_scene_plan(production: str, character_sheet_asset_id: str, shots: list[dict[str, Any]],
+                      description: str = "", preserve_details: Optional[list[str]] = None,
+                      aspect: str = "16:9") -> dict[str, Any]:
+    """Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.
+
+    Each shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and either
+    last_frame_asset_id or control_asset_id (a video). Assets belong to the production's project.
+    The plan inherits the received dossier's scene and details. Saving is undoable.
+
+    Keywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura
+    """
+    return _call("POST", "/api/agent/studio_scene_plan", params={"production": production},
+                 json={"character_sheet_asset_id": character_sheet_asset_id, "shots": shots, "description": description,
+                       "preserve_details": preserve_details or [], "aspect": aspect})
+
+
+@tool(_ro())
+def studio_scene_revise_shot(production: str, key: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Change one scene shot's action, framing, length or control assets. The edit is undoable.
+
+    Call studio_production_continue to render only this shot and rebuild the cut.
+    To switch between end frame and control video, set the previous field to null.
+
+    Keywords: change shot, correct keyframe, editar plano, corregir fotograma
+    """
+    return _call("POST", "/api/agent/studio_scene_revise_shot", params={"production": production, "key": key},
+                 json={"changes": changes})
+
+
+@tool(_ro(readOnlyHint=True))
+def studio_scene_review(production: str, key: str) -> dict[str, Any]:
+    """Compare the current take's first, middle and last frames against each preserved detail.
+
+    Uses the configured vision model. Returns a sample-by-detail matrix to inspect and record;
+    hidden or uncertain details are unclear. A missing model is reported without a verdict.
+
+    Keywords: review take, continuity, evidence, revisar toma, continuidad, evidencia
+    """
+    return _call("POST", "/api/agent/studio_scene_review", params={"production": production, "key": key})
+
+
+@tool(_ro())
+def studio_scene_record_review(production: str, key: str, clip_asset_id: str,
+                               samples: list[dict[str, Any]], reviewer: str = "agent") -> dict[str, Any]:
+    """Save a continuity review against the exact current clip. The edit is undoable.
+
+    Give samples first, middle and last in order. Each contains checks in the order of preserve_details
+    with verdict (pass, defect or unclear) and note. Keep the real reviewer in reviewer.
+
+    Keywords: record defects, shot continuity, guardar revisi?n, marcar defecto, plano
+    """
+    return _call("POST", "/api/agent/studio_scene_record_review", params={"production": production, "key": key},
+                 json={"clip_asset_id": clip_asset_id, "samples": samples, "reviewer": reviewer})
+
+
+@tool(_ro(readOnlyHint=True))
 def studio_review_clip(asset_id: str, prompt: str = "", reference_asset_ids: Optional[list[str]] = None,
                        check_supporting_cast: bool = False) -> dict[str, Any]:
     """Review a video against its requested action and references, without regenerating or pausing it.

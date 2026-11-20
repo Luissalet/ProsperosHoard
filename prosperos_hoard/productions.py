@@ -967,6 +967,9 @@ def _compact_view(state: dict[str, Any]) -> dict[str, Any]:
         view["dossier"] = spec["production_dossier"]
         view["dossier_reference_assets"] = spec["dossier_reference_assets"]
     done = state.get("done", {})
+    if spec.get("scene_shots"):
+        from . import scene_shots
+        view["scene"] = scene_shots.view(state)
     view["stages"] = {s: stage_status(state, s) for s in stages_for(state)}
     treatment = state.get("treatment")
     if treatment:
@@ -1587,6 +1590,9 @@ class Run:
         """The generate body of one clip. `start` (the last frame of the clip
         this shot continues) replaces the still as the first frame; the still
         then becomes the frame it ends on, when the end-frame model is in."""
+        if shot.get("scene_control"):
+            from . import scene_shots
+            return scene_shots.clip_body(self.state, shot, self.still_for(shot["key"]), shot["clip_seed"])
         body = self._clip_body(shot, variant)
         draft = (self.state.get("settings") or {}).get("clip_quality") == "draft"
         plain = body["template"] == "auto_clip" and not body.get("driving_asset_id")
@@ -1698,7 +1704,7 @@ class Run:
             return {"width": 640, "height": 640}
         return {"width": 832, "height": 480} if w > h else {"width": 480, "height": 832}
 
-    def stage_clips(self) -> None:
+    def stage_clips(self) -> Optional[str]:
         """Every shot's clips. A shot that continues another (`continue_from`)
         waits for that clip and starts on its last frame; one whose source
         clip never comes falls back to its own still."""
@@ -1713,10 +1719,13 @@ class Run:
         shots = {s["key"]: s for s in self.spec.get("shots") or []}
         tried: set[str] = set()
         made = self.made.setdefault("clips", set())
+        targets = self.state.get("scene_render_keys")
 
         def submit(fallback: bool) -> bool:
             sent = False
             for shot in self.spec.get("shots") or []:
+                if targets and shot["key"] not in targets:
+                    continue
                 for variant in shot.get("clips") or []:
                     key = shot_key(shot["key"], variant)
                     if key in items or key in pending or key in tried:
@@ -1770,7 +1779,13 @@ class Run:
                 break
             if pending:
                 self.wait_jobs("clips", done, "clips")
-        self.state["done"]["clips"]["complete"] = True
+        if self.spec.get("scene_shots"):
+            self.state.pop("scene_render_keys", None)
+            entry["complete"] = all(s["key"] in items for s in self.spec["shots"] if s.get("scene_control"))
+            if not entry["complete"]:
+                return "pause"
+        else:
+            entry["complete"] = True
 
     def stage_photocards(self) -> None:
         cards_spec = self.spec.get("photocards") or {}
@@ -1861,6 +1876,9 @@ class Run:
         return motion_pacing(self.spec, options)
 
     def stage_timeline(self) -> None:
+        if self.spec.get("scene_shots"):
+            self.stage_scene_timeline()
+            return
         tl = self.spec.get("timeline") or {}
         lyrics_id = (self.state["done"].get("lyrics") or {}).get("lyrics_asset_id")
         song_id = self.state["done"]["song"]["song_asset_id"]
@@ -1900,6 +1918,39 @@ class Run:
             if ids:
                 timelines[aspect]["renders"][quality] = ids[0]
                 self.log("render", aspect=aspect, quality=quality, asset_id=ids[0])
+
+        self.wait_jobs("timeline", done, "renders")
+        entry["complete"] = True
+
+    def stage_scene_timeline(self) -> None:
+        from . import scene_shots
+
+        aspect = self.spec["scene_shots"]["aspect"]
+        entry = self.state["done"].setdefault("timeline", {"complete": False, "timelines": {}})
+        pending = self.pending("timeline")
+        timelines = entry["timelines"]
+        if aspect not in timelines:
+            tracks, shots = scene_shots.timeline_inputs(self.store, self.state)
+            timeline = self.store.create_timeline(self.project_id, self.state["name"], aspect, fps=scene_shots.FPS, tracks=tracks)
+            scene = self.spec["scene_shots"]
+            dossier = self.spec.get("production_dossier") or {}
+            timelines[aspect] = {"timeline_id": timeline["id"], "renders": {}, "piece": {
+                "type": "video-clip", "character_sheet_asset_id": scene["character_sheet_asset_id"],
+                "dossier_ref": (dossier.get("subject") or {}).get("ref"),
+                "preserve_details": scene["preserve_details"], "shots": shots,
+                "duration_s": sum(shot["duration_s"] for shot in shots),
+            }}
+            self.save()
+        info = timelines[aspect]
+        if "final" not in info["renders"] and aspect not in pending:
+            pending[aspect] = self.studio.render(info["timeline_id"], "final")["id"]
+            self.save()
+
+        def done(key: str, job: dict[str, Any]) -> None:
+            asset_id = _asset_ids(job)[0]
+            info["renders"]["final"] = asset_id
+            info["piece"]["asset_id"] = asset_id
+            self.log("render", aspect=key, quality="final", asset_id=asset_id)
 
         self.wait_jobs("timeline", done, "renders")
         entry["complete"] = True
@@ -2046,6 +2097,7 @@ def _requeue(state: dict[str, Any], message: str) -> None:
     for stage in ("animatic", "album", "timeline", "report"):
         state["done"].pop(stage, None)
     state.get("partial", {}).pop("timeline", None)
+    state.pop("scene_render_keys", None)
     state["review"] = {}
     state["status"] = "queued"
     state["message"] = message
@@ -2088,8 +2140,9 @@ def regenerate_unlocked(data_dir: Path, slug: str, stage: str = "clips", keys: O
             if stage == "frames":
                 if key not in frames and not mine:
                     continue
-                shot["seed"] = int(shot["seed"]) + 1000
-                frames.pop(key, None)
+                if not shot.get("scene_control"):
+                    shot["seed"] = int(shot["seed"]) + 1000
+                    frames.pop(key, None)
             elif not mine:
                 continue
             shot["clip_seed"] = int(shot["clip_seed"]) + 1000
@@ -2099,6 +2152,8 @@ def regenerate_unlocked(data_dir: Path, slug: str, stage: str = "clips", keys: O
         chain = drop_stale_chains(state)
         if redone or chain:
             _requeue(state, f"regenerating {stage} of shot(s) {', '.join(redone)}")
+            if state["spec"].get("scene_shots") and wanted:
+                state["scene_render_keys"] = redone
             log(state, "review", "regenerated_unlocked", what=stage, keys=redone, kept=kept, chained=chain)
         save_state(data_dir, state)
         return {"slug": slug, "stage": stage, "regenerated": redone, "kept": kept, "chained": chain,

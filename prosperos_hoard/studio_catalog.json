@@ -7272,6 +7272,243 @@
       }
     },
     {
+      "name": "studio_scene",
+      "description": "Get the storyboard's scene shots, current reviews and assembled video provenance.\n\nKeywords: storyboard, shot provenance, scene, planos, procedencia, escena",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "production"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_scene_plan",
+      "description": "Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.\n\nEach shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and either\nlast_frame_asset_id or control_asset_id (a video). Assets belong to the production's project.\nThe plan inherits the received dossier's scene and details. Saving is undoable.\n\nKeywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "character_sheet_asset_id": {
+            "title": "Character Sheet Asset Id",
+            "type": "string"
+          },
+          "shots": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Shots",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 16000,
+            "title": "Description",
+            "type": "string"
+          },
+          "preserve_details": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Preserve Details",
+            "type": "array"
+          },
+          "aspect": {
+            "default": "16:9",
+            "pattern": "^(16:9|9:16|1:1)$",
+            "title": "Aspect",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "character_sheet_asset_id",
+          "shots",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_scene_record_review",
+      "description": "Save a continuity review against the exact current clip. The edit is undoable.\n\nGive samples first, middle and last in order. Each contains checks in the order of preserve_details\nwith verdict (pass, defect or unclear) and note. Keep the real reviewer in reviewer.\n\nKeywords: record defects, shot continuity, guardar revisi?n, marcar defecto, plano",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "clip_asset_id": {
+            "title": "Clip Asset Id",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Samples",
+            "type": "array"
+          },
+          "reviewer": {
+            "default": "agent",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "key",
+          "clip_asset_id",
+          "samples",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_scene_review",
+      "description": "Compare the current take's first, middle and last frames against each preserved detail.\n\nUses the configured vision model. Returns a sample-by-detail matrix to inspect and record;\nhidden or uncertain details are unclear. A missing model is reported without a verdict.\n\nKeywords: review take, continuity, evidence, revisar toma, continuidad, evidencia",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "production",
+          "key"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "studio_scene_revise_shot",
+      "description": "Change one scene shot's action, framing, length or control assets. The edit is undoable.\n\nCall studio_production_continue to render only this shot and rebuild the cut.\nTo switch between end frame and control video, set the previous field to null.\n\nKeywords: change shot, correct keyframe, editar plano, corregir fotograma",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "changes": {
+            "title": "Changes",
+            "type": "object"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "production",
+          "key",
+          "changes",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
+      "name": "studio_scene_suggest",
+      "description": "Suggest short shots from a scene dossier and a character sheet using the configured vision model.\n\nReturns framing, actions, durations and start/end descriptions. Does not save the draft.\n\nKeywords: divide scene, shot planning, start end, plan de planos, dividir escena",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "production": {
+            "type": "string"
+          },
+          "character_sheet_asset_id": {
+            "title": "Character Sheet Asset Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 16000,
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_s": {
+            "default": 12,
+            "maximum": 100.0,
+            "minimum": 2.0,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "count": {
+            "default": 3,
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "language": {
+            "default": "es",
+            "pattern": "^(es|en)$",
+            "title": "Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "production",
+          "character_sheet_asset_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
       "name": "studio_service_start",
       "description": "Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.\n\nid: \"comfyui\" (the main one), \"comfyui@<port>\", \"render_pool\" (main + every pool server, one GPU\neach), \"ollama\" or \"cmd:<id>\" from studio_services. gpu: \"auto\" (most free memory, default) or a\nGPU index, ComfyUI only. Already running = ok with already=true. Starting ComfyUI loads no model:\nmemory is used when a job runs.\n\nKeywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend",
       "inputSchema": {
