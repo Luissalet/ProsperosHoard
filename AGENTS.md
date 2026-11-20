@@ -293,6 +293,10 @@ Qué hacer cuando el usuario pide, con sus palabras:
   `studio_scene_revise_shot` corrige los controles de un plano, y
   `studio_production_regenerate(stage="clips", keys=[...])` repite solo
   los planos indicados. El relevo y sus huellas están en `studio_scene`.
+  Para conservar la geometría exacta del decorado o de una pieza, importa la
+  toma renderizada y pásala como `rendered_clip_asset_id`, junto al primer
+  fotograma. Para una retoma, sustituye ese recurso con `studio_scene_revise_shot`
+  y vuelve a montar. Compara la procedencia de los planos vecinos.
 - **«Aprueba este plano» / «rehaz el resto»**: `studio_production_shots`
   con `{"key": "4", "locked": true}` y después
   `studio_production_regenerate(production, stage="clips"|"frames")`: solo
