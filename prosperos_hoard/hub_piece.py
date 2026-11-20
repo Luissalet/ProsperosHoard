@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import httpx
 
 from . import engine
-from .hoard_link._hubclient import hub_url
+from .hoard_link._hubclient import fetch, hub_url
 from .store import Store
 
 
@@ -24,6 +24,47 @@ _EXTENSIONS = {
     "text/plain": ".txt", "font/ttf": ".ttf", "font/otf": ".otf",
     "application/x-font-ttf": ".ttf", "application/x-font-opentype": ".otf",
 }
+
+
+def _hub_write(store: Store, op: str, arguments: dict) -> dict:
+    try:
+        token = (store.data_dir / "mcp-token").read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        token = ""
+    if not token:
+        raise engine.EngineError("hub_token_missing", "Prospero needs its family token to write order pieces")
+    code, result = fetch(f"{hub_url()}/api/agora/{op}", arguments,
+                         headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    if code != 200 or not isinstance(result, dict) or not result.get("ok"):
+        detail = result.get("error") if isinstance(result, dict) else None
+        raise engine.EngineError("hub_piece_write_failed", detail or f"The Hub could not complete {op} (HTTP {code})")
+    return result
+
+
+def register_piece(store: Store, asset_id: str, *, space: str, order_id: int, title: str,
+                   kind: str | None = None, task_id: int | None = None,
+                   derives_from: list | None = None, agent: str = "prospero") -> dict:
+    asset = store.get_asset(asset_id)
+    path = (store.data_dir / asset["file_path"]).resolve()
+    if not path.is_relative_to(store.data_dir.resolve()) or not path.is_file():
+        raise engine.EngineError("asset_file_missing", "The asset file is unavailable / Falta el archivo del recurso")
+    recipe = asset.get("recipe") or {}
+    model = (recipe.get("params") or {}).get("unet_name") or recipe.get("template") or ""
+    result = _hub_write(store, "piece_add", {
+        "space_id": space, "agent": agent, "order_id": order_id, "task_id": task_id,
+        "title": title, "kind": kind or asset["kind"], "path": str(path),
+        "app": "prospero", "object": asset_id, "place": asset["project_id"],
+        "model": model, "derives_from": derives_from or [],
+    })
+    piece = result["piece"]
+    undo = result.get("undo")
+    return {"piece_id": piece["id"], "order_id": order_id, "asset_id": asset_id, "sha256": piece["sha256"],
+            "existing": bool(result.get("existing")), "undo": {"tool": "hub_agora_order_undo",
+            "arguments": {"space_id": space, "agent": agent, "token": undo}} if undo else None}
+
+
+def undo_registration(store: Store, arguments: dict) -> dict:
+    return _hub_write(store, "order_undo", arguments)
 
 
 def import_piece(store: Store, project_id: str, piece_id: int, *, preview: int | None = None,
