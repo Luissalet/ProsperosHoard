@@ -21,6 +21,7 @@ from . import comfy_driver, procutil
 from .hoard_link.atomic import write_text_atomic
 from .hoard_link.media import bins
 from .hoard_link import Link, LinkConfig, Unavailable
+from .hoard_link import _hubclient
 from .hoard_link.launch import Launcher, _port_open, comfy_port_from_url, list_gpus
 
 # SDXL/SD1.5/SVD/Flux/Kontext/Wan/ACE-Step/Qwen-Image 2.1 figures from the
@@ -338,10 +339,14 @@ class Backend:
         self._bound.url = url.rstrip("/") if url else None
         self._bound.worker = True
 
+    def worker_comfy_port(self) -> Optional[int]:
+        target = getattr(self._bound, "url", None)
+        return comfy_port_from_url(target) if target else self.main_comfy_port()
+
     def comfy_gpu(self) -> Optional[int]:
         """Physical card of this worker's local server, including externally started servers."""
         target = getattr(self._bound, "url", None)
-        port = comfy_port_from_url(target) if target else self.main_comfy_port()
+        port = self.worker_comfy_port()
         if port is None:
             return None
         state = self.launcher.status(self.launcher.get(f"comfyui@{port}"))
@@ -412,8 +417,9 @@ class Backend:
         port = self.main_comfy_port()
         return port is not None and not _port_open(f"http://127.0.0.1:{port}")
 
-    def bind_lease_gpu(self, gpu: Optional[int]) -> None:
+    def bind_lease_gpu(self, gpu: Optional[int], lease_id: Optional[str] = None) -> None:
         self._bound.lease_gpu = gpu
+        self._bound.lease_id = lease_id
 
     def _pool_client(self, url: str):
         # A client's connections belong to the event loop it was created on.
@@ -899,13 +905,34 @@ class Backend:
         self._pool_health.clear()
         self.reload()
 
-    def start_service(self, service_id: str, gpu: Any = None, wait_s: float = 0.0) -> dict[str, Any]:
+    def _comfy_service(self, action: str, sid: str, **options: Any) -> dict[str, Any]:
+        url = _hubclient.hub_url()
+        if _hubclient.hub_up(url):
+            _, result = _hubclient.fetch(url + "/api/services/" + action, {"id": sid, **options},
+                                         timeout=max(15.0, float(options.get("wait_s") or 0) + 15))
+            # A timeout or an arbiter rejection must never start a second, unleased process.
+            if isinstance(result, dict):
+                return result
+            return {"ok": False, "service": sid, "error": "The Hub did not answer / El Hub no ha respondido"}
+        if options.get("lease_id"):
+            return {"ok": False, "service": sid, "error": "The lease needs the Hub / La reserva requiere el Hub"}
+        if action == "stop":
+            return self.launcher.stop(sid)
+        options.pop("work_lease_id", None)
+        return self.launcher.start(sid, **options)
+
+    def start_service(self, service_id: str, gpu: Any = None, wait_s: float = 0.0, *,
+                      lease_id: Optional[str] = None) -> dict[str, Any]:
         if self.demo:
             raise ValueError("demo mode has no real backends to start")
         sid = self._service_id(service_id)
+        if lease_id and not sid.startswith("comfyui@"):
+            raise ValueError("A lease can only be attached to one local render server")
         if sid == "render_pool":
             return self.start_render_pool(gpu_auto=True, wait_s=wait_s)
-        res = self.launcher.start(sid, gpu=gpu, wait_s=wait_s)
+        options = {"lease_id": lease_id} if lease_id else {}
+        res = (self._comfy_service("start", sid, gpu=gpu, wait_s=wait_s, **options) if sid.startswith("comfyui@")
+               else self.launcher.start(sid, gpu=gpu, wait_s=wait_s))
         if res.get("ready") or res.get("already"):
             self._after_service_change()
         return res
@@ -915,7 +942,7 @@ class Backend:
         (the launcher skips GPUs another ComfyUI already uses)."""
         results = []
         for port in self.comfy_ports():
-            results.append(self.launcher.start(f"comfyui@{port}", gpu="auto" if gpu_auto else None, wait_s=0))
+            results.append(self._comfy_service("start", f"comfyui@{port}", gpu="auto" if gpu_auto else None, wait_s=0))
         if wait_s > 0:
             deadline = time.monotonic() + wait_s
             for r in results:
@@ -926,7 +953,7 @@ class Backend:
 
     def stop_service(self, service_id: str) -> dict[str, Any]:
         sid = self._service_id(service_id)
-        res = self.launcher.stop(sid)
+        res = self._comfy_service("stop", sid) if sid.startswith("comfyui@") else self.launcher.stop(sid)
         self._after_service_change()
         return res
 
@@ -998,7 +1025,10 @@ class Backend:
         if port is None:
             return False
         with self._autostart_lock:
-            res = self.launcher.start(f"comfyui@{port}", gpu=getattr(self._bound, "lease_gpu", None), wait_s=timeout_s)
+            lease_id = getattr(self._bound, "lease_id", None)
+            options = {"work_lease_id": lease_id} if lease_id else {}
+            res = self._comfy_service("start", f"comfyui@{port}", gpu=getattr(self._bound, "lease_gpu", None),
+                                      wait_s=timeout_s, **options)
         ok = bool(res.get("ok") and (res.get("ready") or res.get("state") == "running"))
         if ok:
             self._after_service_change()
