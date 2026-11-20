@@ -125,7 +125,9 @@ class GripRegion:
             # The paint model can overshoot the paper outline with a light
             # rim. Keep the first pass outside it, except at the visible hand.
             outer = ImageChops.subtract(full_paper.filter(ImageFilter.MaxFilter(2 * margin + 1)), full_paper)
-            self.mask = ImageChops.subtract(self.mask, ImageChops.subtract(outer, self.guide))
+            near_outline = ImageChops.subtract(full_paper.filter(ImageFilter.MaxFilter(2 * fringe + 1)), full_paper)
+            rim_blend = ImageChops.lighter(near_outline, outer.filter(ImageFilter.GaussianBlur(max(1, margin / 3))))
+            self.mask = ImageChops.subtract(self.mask, ImageChops.subtract(rim_blend, self.guide))
             outside = ImageChops.multiply(outer, self.background)
             self.paper_cleanup = ImageChops.subtract(outside, self.guide.filter(ImageFilter.MaxFilter(2 * fringe + 1)))
             props_alpha = ImageChops.subtract(props_alpha, paper_alpha)
