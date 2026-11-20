@@ -491,7 +491,7 @@
     },
     {
       "name": "studio_service_start",
-      "description": "Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.\n\nid: \"comfyui\" (the main one), \"comfyui@<port>\", \"render_pool\" (main + every pool server, one GPU\neach), \"ollama\" or \"cmd:<id>\" from studio_services. gpu: \"auto\" (most free memory, default) or a\nGPU index, ComfyUI only. Already running = ok with already=true. Starting ComfyUI loads no model:\nmemory is used when a job runs.\n\nKeywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend\n",
+      "description": "Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.\n\nid: \"comfyui\" (the main one), \"comfyui@<port>\", \"render_pool\" (main + every pool server, one GPU\neach), \"ollama\" or \"cmd:<id>\" from studio_services. gpu: \"auto\" (most free memory, default) or a\nGPU index, ComfyUI only. Already running = ok with already=true. The Hub reserves startup memory\nwhile it runs. Use studio_service_stop to undo a new start.\n\nKeywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend\n",
       "inputSchema": {
         "properties": {
           "id": {
@@ -503,6 +503,9 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -7245,7 +7248,7 @@
     },
     {
       "name": "studio_scene",
-      "description": "Get the storyboard's scene shots, current reviews and assembled video provenance.\n\nKeywords: storyboard, shot provenance, scene, planos, procedencia, escena\n",
+      "description": "Get the scene's shots, assembled video provenance and whether all mounted takes passed review.\n\nKeywords: storyboard, shot provenance, scene, planos, procedencia, escena\n",
       "inputSchema": {
         "properties": {
           "production": {
@@ -7314,7 +7317,7 @@
     },
     {
       "name": "studio_scene_plan",
-      "description": "Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.\n\nEach shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and either\nlast_frame_asset_id or control_asset_id (a video). Assets belong to the production's project.\nThe plan inherits the received dossier's scene and details. Saving is undoable.\n\nKeywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura\n",
+      "description": "Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.\n\nEach shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and one of\nlast_frame_asset_id, control_asset_id (a guide video), or rendered_clip_asset_id (the exact take\nto mount). Assets belong to the production's project. The supplied take must cover the full shot.\nThe plan inherits the received dossier's scene and details. Saving is undoable.\n\nKeywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura\n",
       "inputSchema": {
         "properties": {
           "production": {
@@ -7386,7 +7389,7 @@
     },
     {
       "name": "studio_scene_revise_shot",
-      "description": "Change one scene shot's action, framing, length or control assets. The edit is undoable.\n\nCall studio_production_continue to render only this shot and rebuild the cut.\nTo switch between end frame and control video, set the previous field to null.\n\nKeywords: change shot, correct keyframe, editar plano, corregir fotograma\n",
+      "description": "Change one scene shot's action, framing, length or control assets. The edit is undoable.\n\nCall studio_production_continue to render only this shot and rebuild the cut.\nReplace a rendered_clip_asset_id to retake a supplied clip. When switching source types,\nset the old source field to null.\n\nKeywords: change shot, correct keyframe, editar plano, corregir fotograma\n",
       "inputSchema": {
         "properties": {
           "production": {
