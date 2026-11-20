@@ -384,13 +384,13 @@ def studio_gpu_memory() -> dict[str, Any]:
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
-def studio_service_start(id: str = "comfyui", gpu: Optional[str] = None, wait_s: float = 120) -> dict[str, Any]:
+def studio_service_start(id: str = "comfyui", gpu: str | int | None = None, wait_s: float = 120) -> dict[str, Any]:
     """Start a local backend server (ComfyUI, the render pool, Ollama) without Faustus; waits until it answers.
 
     id: "comfyui" (the main one), "comfyui@<port>", "render_pool" (main + every pool server, one GPU
     each), "ollama" or "cmd:<id>" from studio_services. gpu: "auto" (most free memory, default) or a
-    GPU index, ComfyUI only. Already running = ok with already=true. Starting ComfyUI loads no model:
-    memory is used when a job runs.
+    GPU index, ComfyUI only. Already running = ok with already=true. The Hub reserves startup memory
+    while it runs. Use studio_service_stop to undo a new start.
 
     Keywords: start comfyui, launch backend, turn on, arrancar comfyui, iniciar servidor, encender backend
     """

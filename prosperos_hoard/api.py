@@ -194,7 +194,7 @@ class BackendOverrides(BaseModel):
 
 class ServiceBody(BaseModel):
     id: str  # "comfyui" (the main one), "comfyui@8189", "render_pool", "ollama", "cmd:<id>"
-    gpu: Optional[str] = None  # "auto" or a GPU index, ComfyUI only
+    gpu: str | int | None = None  # "auto" or a GPU index, ComfyUI only
     wait_s: float = 0.0
 
 
@@ -207,7 +207,7 @@ class LaunchBody(BaseModel):
     autostart_comfy: Optional[bool] = None
 
 
-def _gpu_arg(value: Optional[str]) -> Any:
+def _gpu_arg(value: str | int | None) -> Any:
     if value is None or str(value).strip() in ("", "auto"):
         return None if value is None else "auto"
     try:
