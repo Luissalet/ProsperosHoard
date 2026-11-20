@@ -140,6 +140,43 @@ def test_reviews_use_the_sheet_and_distinguish_missing_evidence(store, project, 
                            [{"position": p, "checks": []} for p in scene_shots.POSITIONS], "reviewer")
 
 
+def test_scene_mounts_supplied_take_and_revises_only_that_shot(store, project, draft):
+    slug, sheet, rows = draft
+    pid = project["id"]
+    original = _clip(store, pid, np.full((96, 64, 96), 42))
+    replacement = _clip(store, pid, np.full((96, 64, 96), 99))
+    rows[0]["rendered_clip_asset_id"] = original
+    with pytest.raises(engine.EngineError, match="one of a last image"):
+        scene_shots.apply_plan(store, slug, sheet, "", [], rows, "16:9")
+    rows[0].pop("last_frame_asset_id")
+    with pytest.raises(engine.EngineError, match="cover the full"):
+        scene_shots.apply_plan(store, slug, sheet, "", [], [{**rows[0], "duration_s": 5}], "16:9")
+
+    scene_shots.apply_plan(store, slug, sheet, "", [], rows, "16:9")
+    studio = Studio(store)
+
+    def run():
+        assert prod.run_production(store, studio, slug, lambda *_: None)["status"] == "done"
+        return scene_shots.view(prod.load_state(store.data_dir, slug))["piece"]
+
+    first = run()
+    assert first["shots"][0]["clip_asset_id"] == first["shots"][0]["rendered_clip_asset_id"] == original
+    assert len(studio.calls) == 2
+    assert prod.regenerate_unlocked(store.data_dir, slug, "clips", ["1"])["kept"] == ["1"]
+    for shot in first["shots"]:
+        scene_shots.record(store, slug, shot["key"], shot["clip_asset_id"], checks(), "reviewer")
+
+    scene_shots.revise(store, slug, "1", {"rendered_clip_asset_id": replacement})
+    second = run()
+    assert len(studio.calls) == 2
+    assert second["shots"][1:] == first["shots"][1:]
+    assert second["shots"][0]["clip_asset_id"] == replacement
+    assert second["review_status"] == "provisional"
+    assert scene_shots.evidence(store, slug, "1", original, "middle")
+    takes = prod.shot_takes(prod.load_state(store.data_dir, slug), "1")["clips"]["1"]
+    assert [(t["asset_id"], t["current"]) for t in takes] == [(original, False), (replacement, True)]
+
+
 def test_scene_agent_catalog_routes_and_undo(client):
     http, app, _ = client
     agent = Agent(http, app)
