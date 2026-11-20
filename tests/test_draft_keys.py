@@ -109,6 +109,7 @@ def test_grip_pass_uses_visible_parts_and_replays_both_graphs(store, project, mo
     color = media("color", Image.new("RGB", size, "orange"))
     labels = Image.new("L", size)
     ImageDraw.Draw(labels).rectangle((30, 50, 55, 60), fill=8)
+    ImageDraw.Draw(labels).rectangle((36, 38, 43, 45), fill=9)
     label_id = media("parts", labels)
     prop = Image.new("RGBA", size)
     ImageDraw.Draw(prop).rectangle((53, 42, 88, 72), fill="tan")
@@ -136,7 +137,7 @@ def test_grip_pass_uses_visible_parts_and_replays_both_graphs(store, project, mo
     monkeypatch.setattr(engine, "_run_comfy_workflow", execute)
     monkeypatch.setattr(engine, "_download_output", lambda _, output: output)
     grip = {"color_asset_id": color, "part_ids_asset_id": label_id, "grip_ids": [8],
-            "prop_mask_asset_ids": [full_mask]}
+            "prop_mask_asset_ids": [full_mask], "preserve_ids": [9]}
     params = {"template": "qwen21_depth", "positive_prompt": "Draw the figure from <image1>",
               "reference_asset_id": identity, "depth_asset_id": depth, "object_asset_ids": [object_id],
               "draft_grip": grip, "width": 256, "height": 256, "seed": 55}
@@ -157,6 +158,7 @@ def test_grip_pass_uses_visible_parts_and_replays_both_graphs(store, project, mo
             assert result.getpixel((112, 110))[0] > 245
             assert result.getpixel((122, 110)) == (210, 180, 140, 255)
             assert result.getpixel((10, 150)) == (128, 128, 128, 255)
+            assert result.getpixel((80, 90)) == (128, 128, 128, 255)
     assert requests[:2] == requests[2:]
 
     params["draft_grip"] = {**grip, "paint_props": True}

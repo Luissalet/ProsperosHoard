@@ -34,7 +34,8 @@ the accessories and the visible part geometry. The retake affects only the
 region around the selected arm and hand. The full masks and visible parts
 identify where the fingers can pass over an accessory; the layers preserve the
 outline and the rear occlusion. Set `paint_props=true` to paint the interior
-of the accessory silhouettes and use `finish_prompt` for the desired finish.
+of the accessory silhouettes, use `finish_prompt` for the desired finish,
+and pass the head label in `preserve_ids` if the grip crop reaches the face.
 
 Use `studio_import(piece_id=..., preview=...)` on the order's concept or
 character sheet view, or use the imported sheet as the cast's canonical
@@ -53,6 +54,7 @@ identidad. Usa la profundidad sin accesorios y las capas visibles del mismo
 bloqueo. En `draft_grip`, pasa el color, el mapa de partes visibles, las máscaras
 completas y los identificadores de antebrazo, mano y dedos. Comprueba que
 se lea la pinza y que el canto oculte los dedos que quedan detrás.
+`preserve_ids` permite conservar la cara cuando queda cerca del agarre.
 
 The engine applies the depth to the model patch while sampling a new image.
 The cue's source pose, the character's appearance and all props still need
