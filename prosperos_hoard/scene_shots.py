@@ -360,7 +360,12 @@ def view(state: dict) -> dict:
         key = shot["key"]
         aid = clips.get(key)
         review = reviews.get(key, {}).get(aid)
-        shots.append({"key": key, **control, "clip_asset_id": aid, "review": review})
+        row = {"key": key, **control, "clip_asset_id": aid, "review": review}
+        check = state.get("scene_control_reviews", {}).get(key)
+        if (check and check["clip_asset_id"] == aid and check["control_asset_id"] == control.get("control_asset_id")
+                and check["sample_window_s"] == control["duration_s"]):
+            row["control_review"] = check
+        shots.append(row)
     piece = timeline.get("piece")
     if piece and piece.get("asset_id"):
         checked = [(s["key"], s["clip_asset_id"], s["duration_s"]) for s in shots
@@ -383,6 +388,6 @@ def timeline_inputs(store: Store, state: dict) -> tuple[list[dict], list[dict]]:
         clips.append({"asset_id": aid, "duration_s": duration, "kind": "video", "trim_start_s": 0,
                       "source_fit": "error"})
         recipe = clip.get("recipe") or {}
-        provenance.append({**{k: v for k, v in shot.items() if k != "review"}, "sha256": digest,
+        provenance.append({**{k: v for k, v in shot.items() if k not in {"review", "control_review"}}, "sha256": digest,
                            "render_template": recipe.get("template"), "input_asset_ids": recipe.get("input_asset_ids", [])})
     return [{"type": "visual", "clips": clips}], provenance
