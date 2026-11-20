@@ -8,12 +8,13 @@ from typing import Any
 
 from PIL import Image
 
-from . import director, engine, productions as prod, qa
+from . import audio, director, engine, productions as prod, qa
 from .store import Store
 
 FPS = 24
 POSITIONS = ("first", "middle", "last")
 VERDICTS = ("pass", "defect", "unclear")
+SHOT_SOURCES = {"last_frame_asset_id": "image", "control_asset_id": "video", "rendered_clip_asset_id": "video"}
 
 
 def _scene(state: dict) -> dict:
@@ -132,15 +133,28 @@ def _control(store: Store, pid: str, key: str, row: dict) -> dict:
     action = _text(row.get("action"), "action")
     duration = _duration(row.get("duration_s"))
     start = row.get("first_frame_asset_id")
-    end = row.get("last_frame_asset_id")
-    guide = row.get("control_asset_id")
-    if (not isinstance(start, str) or not start or bool(end) == bool(guide)
-            or not isinstance(end or guide, str)):
-        raise engine.EngineError("bad_scene_plan", f"shot {key} needs a first image and either a last image or a control video")
+    sources = {field: row[field] for field in SHOT_SOURCES if row.get(field)}
+    if (not isinstance(start, str) or not start or len(sources) != 1
+            or not all(isinstance(aid, str) for aid in sources.values())):
+        raise engine.EngineError("bad_scene_plan", f"shot {key} needs a first image and one of a last image, "
+                                 "a control video or a rendered clip")
     _asset(store, start, "image", pid)
-    _asset(store, end or guide, "image" if end else "video", pid)
-    return {"framing": framing, "action": action, "duration_s": duration, "first_frame_asset_id": start,
-            **({"last_frame_asset_id": end} if end else {"control_asset_id": guide})}
+    field, aid = next(iter(sources.items()))
+    if field == "rendered_clip_asset_id":
+        rendered_clip(store, pid, aid, duration)
+    else:
+        _asset(store, aid, SHOT_SOURCES[field], pid)
+    return {"framing": framing, "action": action, "duration_s": duration, "first_frame_asset_id": start, field: aid}
+
+
+def rendered_clip(store: Store, project: str, aid: str, duration: float) -> dict:
+    """Resolve a supplied take and verify it covers the entire cut."""
+    clip = _asset(store, aid, "video", project)
+    path = store.data_dir / clip["file_path"]
+    seconds = (clip.get("duration_s") or audio.probe_duration_s(path)) if path.is_file() else None
+    if seconds is None or seconds + 0.001 < duration:
+        raise engine.EngineError("bad_scene_asset", f"{aid} must cover the full {duration:g} s cut")
+    return clip
 
 
 def _frame_entry(aid: str) -> dict:
@@ -158,7 +172,7 @@ def revise(store: Store, slug: str, key: str, change: dict) -> dict:
         if shot.get("locked"):
             raise engine.EngineError("shot_locked", f"shot {key} is approved; unlock it to change the controls")
         old = shot["scene_control"]
-        if set(change) - (set(old) | {"last_frame_asset_id", "control_asset_id"}):
+        if set(change) - (set(old) | SHOT_SOURCES.keys()):
             raise engine.EngineError("bad_scene_plan", "give only framing, action, duration or control assets")
         control = _control(store, state["project_id"], key, {**old, **change})
         if control != old:

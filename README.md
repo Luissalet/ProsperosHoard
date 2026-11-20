@@ -55,7 +55,7 @@ Typical uses:
 - Style cards (look, technique, palette, motion, signature transition, pitfalls) with built-in and imported directions.
 
 **Productions**
-- Scene video from a dossier and character sheet, with anchored shots, first/middle/last continuity review, individual retakes and an assembled cut with per-shot provenance.
+- Scene video from a dossier and character sheet, with generated or supplied shots, first/middle/last continuity review, individual retakes and an assembled cut with per-shot provenance.
 - A whole music video as one resumable, checkpointed production: lead and reference sheet, song, stills, lyric timing, clips, photocards, album art, the cut and its renders, plus a report. Changing shots redoes only what depends on them.
 - Treatment-first mode (logline, structures, shot list, beat sheet) before anything renders; an animatic of the stills cut like the final before expensive clips; a QA director that checks flat or noisy stills, edge bands, exposure jumps, frozen clips and lyric coverage; a continuity bible with segment repair.
 - Recipes: turn a finished production into a template with a `{lead}` slot and recreate it with another character.

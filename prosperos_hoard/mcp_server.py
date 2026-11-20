@@ -2083,8 +2083,9 @@ def studio_scene_plan(production: str, character_sheet_asset_id: str, shots: lis
                       aspect: str = "16:9") -> dict[str, Any]:
     """Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.
 
-    Each shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and either
-    last_frame_asset_id or control_asset_id (a video). Assets belong to the production's project.
+    Each shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and one of
+    last_frame_asset_id, control_asset_id (a guide video), or rendered_clip_asset_id (the exact take
+    to mount). Assets belong to the production's project. The supplied take must cover the full shot.
     The plan inherits the received dossier's scene and details. Saving is undoable.
 
     Keywords: shot plan, keyframes, structure control, plan de planos, fotogramas, estructura
@@ -2099,7 +2100,8 @@ def studio_scene_revise_shot(production: str, key: str, changes: dict[str, Any])
     """Change one scene shot's action, framing, length or control assets. The edit is undoable.
 
     Call studio_production_continue to render only this shot and rebuild the cut.
-    To switch between end frame and control video, set the previous field to null.
+    Replace a rendered_clip_asset_id to retake a supplied clip. When switching source types,
+    set the old source field to null.
 
     Keywords: change shot, correct keyframe, editar plano, corregir fotograma
     """
