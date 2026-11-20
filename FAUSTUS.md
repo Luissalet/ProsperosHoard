@@ -22,6 +22,40 @@ leaves room for the prop. Prospero applies the layers after sampling at native
 pixel coordinates and records them as recipe inputs. Across the keys of an order,
 reuse the same identity view, style wording and base seed.
 
+For a visible grip, use the depth without accessories and add
+`template_params.draft_grip={"color_asset_id": ..., "part_ids_asset_id": ..., "grip_ids": [...], "prop_mask_asset_ids": [...]}`.
+Import the blocking color and visible part-ID raster from the same key as
+the depth. Read the ID values for the gripping forearm, hand and digits from
+the key's geometry. Supply the visible RGBA accessory layers in
+`object_asset_ids` and their full silhouette masks in the same order. All
+blocking inputs share their source pixel grid. The
+operation renders the figure first, then paints the grip in a crop showing
+the accessories and the visible part geometry. The retake affects only the
+region around the selected arm and hand. The full masks and visible parts
+identify where the fingers can pass over an accessory; the layers preserve the
+outline and the rear occlusion. Set `paint_props=true` to paint the interior
+of the accessory silhouettes, use `finish_prompt` for the desired finish,
+and pass the head label in `preserve_ids` if the grip crop reaches the face.
+
+Use `studio_import(piece_id=..., preview=...)` on the order's concept or
+character sheet view, or use the imported sheet as the cast's canonical
+asset with `canonical_crop` when the sheet shows several views. Reuse the
+resulting identity asset for all keys. A prompt that names that cast member
+with `@Name` can use `use_character_reference=true` to pick its canonical view.
+After rendering, the asset recipe
+keeps both workflow hashes, the seed, guide IDs and ordered accessory layers for
+`studio_edit_image(operation="reuse")`. The same replay settings travel
+with the PNG in its `prospero.draft_recipe` metadata. Agent imports and cast
+entries use session undo. To withdraw a rendered key, use
+`studio_delete_assets`; `studio_trash` can restore it.
+
+Para retocar el agarre, importa la lámina o una vista de la hoja como
+identidad. Usa la profundidad sin accesorios y las capas visibles del mismo
+bloqueo. En `draft_grip`, pasa el color, el mapa de partes visibles, las máscaras
+completas y los identificadores de antebrazo, mano y dedos. Comprueba que
+se lea la pinza y que el canto oculte los dedos que quedan detrás.
+`preserve_ids` permite conservar la cara cuando queda cerca del agarre.
+
 The engine applies the depth to the model patch while sampling a new image.
 The cue's source pose, the character's appearance and all props still need
 visual review on the generated key. The recipe keeps the separate input IDs
