@@ -33,7 +33,7 @@ Usos típicos:
 - Kit de personaje: hoja de modelo redibujada desde hasta 12 vistas con reanudación de las vistas pendientes, dataset con pies de foto e informe de preparación, entrenamiento local de LoRA con un entrenador configurable, tomas con puntuación de identidad, paquetes `.hoardchar` portables y biblioteca global de reparto con versiones.
 
 **Imágenes**
-- Motores: Qwen-Image 2.1 (txt2img y edición multirreferencia de 1 a 10 referencias), FLUX.1 schnell, ediciones FLUX.1 Kontext, SDXL (img2img, inpaint, hires fix en dos pasadas) y SD 1.5. `auto` elige el mejor motor instalado y cada resultado dice cuál usó.
+- Motores: Qwen-Image 2.1 (txt2img, edición multirreferencia de 1 a 10 referencias y claves de borrador guiadas por profundidad y una imagen de identidad), FLUX.1 schnell, ediciones FLUX.1 Kontext, SDXL (img2img, inpaint, hires fix en dos pasadas) y SD 1.5. `auto` elige el mejor motor instalado y cada resultado dice cuál usó.
 - Ampliación con modelo (x2 o x4), eliminación de fondo a PNG transparente, mapas de pose y profundidad, outpainting sobre un lienzo mayor, y reencuadre de cualquier imagen o clip a 9:16, 16:9, 1:1, 4:5, 2:3, 3:2 o 21:9 sin regenerar.
 - Importación de tus flujos de ComfyUI con comprobación previa: se verifican clases de nodo y archivos de modelo, y los que faltan se listan con su carpeta.
 

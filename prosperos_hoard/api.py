@@ -37,7 +37,7 @@ from . import charkit
 from . import charpack
 from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
-from . import comfy_driver, engine, procutil
+from . import comfy_driver, engine, hub_piece, procutil
 from . import qr_video
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
@@ -567,8 +567,10 @@ class VoiceBody(BaseModel):
 
 
 class ImportBody(BaseModel):
-    path: str
+    path: Optional[str] = None
     kind: Optional[str] = None
+    piece_id: Optional[int] = Field(default=None, gt=0)
+    preview: Optional[int] = Field(default=None, ge=0)
 
 
 class LyricsBody(BaseModel):
@@ -3305,17 +3307,24 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         return agent("voice_job", job_id, run)
 
     # ------------------------------------------------------------------ import
+    def op_import(project: str, body: ImportBody):
+        if (body.path is None) == (body.piece_id is None):
+            raise engine.EngineError("import_source_required", "supply exactly one of path or piece_id")
+        if body.piece_id is not None:
+            return hub_piece.import_piece(store, project, body.piece_id, preview=body.preview, kind_hint=body.kind)
+        if body.preview is not None:
+            raise engine.EngineError("preview_requires_piece", "preview requires piece_id")
+        path = engine.resolve_import_path(backend, store, body.path)
+        return engine.import_asset(store, project, path, body.kind)
+
     @app.post("/api/agent/studio_import")
     def agent_import(project: str, body: ImportBody):
-        def run():
-            path = engine.resolve_import_path(backend, store, body.path)
-            return engine.asset_view(engine.import_asset(store, project, path, body.kind))
-        return agent("studio_import", body.path[:200], run)
+        target = (body.path or "")[:200] if body.piece_id is None else f"piece:{body.piece_id}"
+        return agent("studio_import", target, lambda: engine.asset_view(op_import(project, body)))
 
     @app.post("/api/projects/{project_id}/import-path")
     def ui_import_path(project_id: str, body: ImportBody):
-        path = engine.resolve_import_path(backend, store, body.path)
-        return engine.import_asset(store, project_id, path, body.kind)
+        return op_import(project_id, body)
 
     @app.post("/api/projects/{project_id}/import-upload")
     async def import_upload(project_id: str, file: UploadFile, kind: Optional[str] = None):
