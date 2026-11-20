@@ -7106,6 +7106,105 @@
       }
     },
     {
+      "name": "studio_register_piece",
+      "description": "Register this asset as a piece of an existing Hub order. Returns the piece ID, hash and undo.\nUse your Agora agent ID. Optional task and source piece IDs link the work to its origin.\nRegistra un recurso en una orden del Hub y devuelve el identificador, la huella y cómo deshacer.\nKeywords: register output, order piece, handoff, registrar pieza, orden de producción, relevo",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "space": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Space",
+            "type": "string"
+          },
+          "order_id": {
+            "exclusiveMinimum": 0,
+            "title": "Order Id",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Task Id"
+          },
+          "derives_from": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Derives From"
+          },
+          "agent": {
+            "default": "prospero",
+            "title": "Agent",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Required. Why you are making this change, in one sentence the person can read in the history (3-300 characters)."
+          }
+        },
+        "required": [
+          "asset_id",
+          "space",
+          "order_id",
+          "title",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "draftSafeHint": true
+      }
+    },
+    {
       "name": "studio_render",
       "description": "Render a timeline to an mp4 with ffmpeg (Ken Burns moves, transitions, burned-in lyrics, the\nsong as audio). quality \"preview\" (540p, fast) or \"final\" (1080p, CRF 18, AAC 192k, slower).\nrange=[start_s, end_s] renders only that stretch of the edit (e.g. just the chorus: the clips\noverlapping it, trimmed, with the lyrics and the song from that point). CPU job: returns the job;\npoll studio_job, whose finished result holds the video asset id.\n\nKeywords: render video, export mp4, final render, make the video, render a section, render the chorus, renderizar video, exportar video, hacer el video, renderizar un fragmento, renderizar el estribillo",
       "inputSchema": {

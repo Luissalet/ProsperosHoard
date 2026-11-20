@@ -37,7 +37,7 @@ from . import charkit
 from . import charpack
 from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
-from . import comfy_driver, engine, hub_piece, procutil
+from . import comfy_driver, engine, hub_piece, procutil, template_engines
 from . import qr_video
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
@@ -571,6 +571,17 @@ class ImportBody(BaseModel):
     kind: Optional[str] = None
     piece_id: Optional[int] = Field(default=None, gt=0)
     preview: Optional[int] = Field(default=None, ge=0)
+
+
+class RegisterPieceBody(BaseModel):
+    asset_id: str
+    space: str = Field(min_length=1, max_length=60)
+    order_id: int = Field(gt=0)
+    title: str = Field(min_length=1, max_length=200)
+    kind: Optional[str] = None
+    task_id: Optional[int] = Field(default=None, gt=0)
+    derives_from: Optional[list[int | dict[str, Any]]] = None
+    agent: str = "prospero"
 
 
 class LyricsBody(BaseModel):
@@ -1428,8 +1439,18 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                      notifier=jobevents.Notifier(store, family_settings))
     @contextlib.contextmanager
     def gpu_guard(job):
-        card = backend.comfy_gpu()
         with contextlib.ExitStack() as stack:
+            params = job["params"]
+            template = params.get("template")
+            if job["type"] == "edit_image" and params.get("operation") in ("reuse", "vary"):
+                template = (store.get_asset(params["asset_id"]).get("recipe") or {}).get("template")
+            profile = template_engines.template_profile(template) if template else None
+            if profile:
+                if profile["state"] != "ready":
+                    raise template_engines.unavailable(template, profile)
+                stack.enter_context(template_engines.bind_profile(backend, profile))
+            card = backend.comfy_gpu()
+
             def take(lock):
                 if not lock.acquire(blocking=False):
                     raise WaitingForResources("another render is using this GPU or render server")
@@ -1444,7 +1465,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     service_port = backend.worker_comfy_port()
                     held = stack.enter_context(gpu_lease.hold(
                         job, backend.vram_estimates_mb, on_gpu=job_events.set_gpu, gpu=card,
-                        service=f"comfyui@{service_port}" if service_port is not None else None,
+                        service=profile["id"] if profile else (f"comfyui@{service_port}" if service_port is not None else None),
                         resident_mb=backend.comfy_resident_mb(card) if card is not None else 0,
                         resolve_template_class=lambda name: comfy_driver.load_template(
                             name, store.data_dir)[1].get("vram_class"),
@@ -1595,7 +1616,14 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             terms = cinema.camera_prompt(body.camera, video=is_clip)
             if terms:
                 body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})
-        object_info = engine._object_info(backend, autostart=True)  # queuing a render: start ComfyUI if it is off
+        profile = template_engines.template_profile(body.template) if body.template and not demo else None
+        if profile:
+            if profile["state"] != "ready":
+                raise template_engines.unavailable(body.template, profile)
+            with template_engines.bind_profile(backend, profile):
+                object_info = engine._object_info(backend, autostart=False)
+        else:
+            object_info = engine._object_info(backend, autostart=True)  # legacy backend autostart
         # an edit needs the engine's edit model (Kontext for Flux), not only its txt2img one
         is_edit_call = bool(body.consistent or body.reference_asset_id or any(body.reference_asset_ids or []))
         engine_name = engine.resolve_image_engine(object_info, body.engine or proj.get("image_engine"),
@@ -3325,6 +3353,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_import(project: str, body: ImportBody):
         target = (body.path or "")[:200] if body.piece_id is None else f"piece:{body.piece_id}"
         return agent("studio_import", target, lambda: engine.asset_view(op_import(project, body)))
+
+    @app.post("/api/agent/studio_register_piece")
+    def agent_register_piece(body: RegisterPieceBody):
+        return agent("studio_register_piece", body.asset_id,
+                     lambda: hub_piece.register_piece(store, **body.model_dump()))
 
     @app.post("/api/projects/{project_id}/import-path")
     def ui_import_path(project_id: str, body: ImportBody):
@@ -6829,6 +6862,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                                 "templates") if k != "templates" or status["comfy"].get(k)},
                 "services": [{"id": i["id"], "state": i["state"], "startable": i["startable"]}
                              for i in status["services"]["items"]],
+                "image_template_services": template_engines.template_status(
+                    status["comfy"].get("url") if status["comfy"].get("reachable") else None),
                 "autostart_comfy": status["services"]["autostart_comfy"],
                 "image_engine": {"available": list(engine.IMAGE_ENGINES), "auto_resolves_to": _auto_image_engine()},
                 "ffmpeg": status["ffmpeg"]["found"],

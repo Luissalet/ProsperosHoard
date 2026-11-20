@@ -40,7 +40,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import graphic_shots
+from . import graphic_shots, hub_piece
 from . import production_dossier
 from . import productions as prod
 from .hoard_link.agentkit import AppError
@@ -596,6 +596,23 @@ def undo_dossier_receive(ctx: Any, record: dict, dry_run: bool = False) -> dict:
                                       record.get("etag", ""), dry_run=dry_run)
 
 
+def track_piece_register(args: dict, result: dict) -> dict:
+    undo = result.get("undo")
+    if not undo:
+        return {"objects": []}
+    return {"objects": [f"order:{args['space']}:{args['order_id']}/piece:{result['piece_id']}"],
+            "etag": json.dumps(undo["arguments"])}
+
+
+def undo_piece_register(ctx: Any, record: dict, dry_run: bool = False) -> dict:
+    token = record.get("etag")
+    if not token:
+        return {"unchanged": True}
+    if dry_run:
+        return {"would_remove_registration": True}
+    return hub_piece.undo_registration(ctx.store, json.loads(token))
+
+
 # ------------------------------------------------------------------------------------------------ the table
 
 _PRODUCTION = {"capture": capture_production, "track": track_production, "undo": undo_production}
@@ -637,6 +654,7 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_delete_project": {"capture": capture_project_delete, "track": track_project_delete, "undo": undo_project_delete},
     "studio_delete_assets": {"capture": capture_asset_delete, "track": track_asset_delete, "undo": undo_asset_delete},
     "studio_import": {"track": track_asset_create, "undo": undo_asset_create},
+    "studio_register_piece": {"track": track_piece_register, "undo": undo_piece_register},
     "studio_time_lyrics": {"capture": capture_lyric_timing, "track": track_lyric_timing, "undo": undo_lyric_timing},
     "studio_trash": {"capture": capture_trash, "track": track_trash, "undo": undo_trash},
     "studio_cast": {"capture": capture_cast, "track": track_cast, "undo": undo_cast},
@@ -669,7 +687,7 @@ DRAFT_SAFE = frozenset({
     "studio_qr_video", "studio_qr_verify",
     "studio_spatial",
     "studio_explainer",
-    "studio_create_project", "studio_import", "studio_generate_image", "studio_edit_image", "studio_outpaint", "studio_animate",
+    "studio_create_project", "studio_import", "studio_register_piece", "studio_generate_image", "studio_edit_image", "studio_outpaint", "studio_animate",
     "studio_compose", "studio_voice", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_render",
     "studio_canvas", "studio_interpolate", "studio_stems", "studio_reframe", "studio_retake", "studio_clip_edit",
     "studio_video_frames", "studio_video_plan", "studio_video_from_plan", "studio_short_create", "studio_download_media",
