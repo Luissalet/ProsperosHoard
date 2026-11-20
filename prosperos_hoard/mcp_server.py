@@ -2121,7 +2121,7 @@ def studio_scene_plan(production: str, character_sheet_asset_id: str, shots: lis
     """Save an anchored shot list in an unrendered storyboard. Start it with studio_production_continue.
 
     Each shot has framing, action, duration_s (2 to 5 seconds), first_frame_asset_id and one of
-    last_frame_asset_id, control_asset_id (a guide video), or rendered_clip_asset_id (the exact take
+    last_frame_asset_id, control_asset_id (a guide video), both, or rendered_clip_asset_id (the exact take
     to mount). Assets belong to the production's project. The supplied take must cover the full shot.
     The plan inherits the received dossier's scene and details. Saving is undoable.
 

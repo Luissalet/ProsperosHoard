@@ -43,6 +43,7 @@ def test_without_object_info_everything_is_unknown():
     r = wp.check(WORKFLOW, {}, "none")
     assert r["ok"] is None and all(n["ok"] is None for n in r["nodes"]) and all(m["ok"] is None for m in r["models"])
     assert wp.summary([r], "none")["ok"] is None
+    assert "could not be checked" in r["copy_text"]
 
 
 def test_all_present_is_ok():

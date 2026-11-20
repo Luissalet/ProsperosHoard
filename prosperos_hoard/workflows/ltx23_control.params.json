@@ -4,6 +4,8 @@
   "vram_class": "wan14b",
   "requires_reference": true,
   "reference_node": "200.image",
+  "end_image_node": "end_frame.image",
+  "end_image_guide": true,
   "driving_video_node": "199.file",
   "checkpoint_node": "CheckpointLoaderSimple",
   "output_node": "68",

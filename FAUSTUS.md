@@ -175,6 +175,12 @@ controls, not guarantees of choreography, anatomy or identity continuity.
 MCP `studio_generate_image` exposes the same `driving_asset_id`,
 `driving_start_s` and declared `template_params`; references and guide IDs remain
 in the resulting recipe. LTX weights use the LTX-2 Community License.
+`studio_scene_plan` accepts both `last_frame_asset_id` and `control_asset_id`
+for a shot. Union Control reads the blocking video, the start image conditions
+appearance and the end image conditions the closing pose. Keep identity and
+prop details in `preserve_details` so they reach the render prompt and
+`studio_scene_review`, which compares the sampled take with the character sheet.
+A scene can also use only endpoint images or just a guide.
 Image-only dimensions must be multiples of32; ref0.5 structure control requires
 multiples of64 (896x512 default). Invalid sizes/frame counts fail before rendering.
 The image-only graph records its effective eight-step `manual_sigmas` schedule
@@ -286,6 +292,9 @@ text encoders, upscalers, audio encoders...) against the loader's list, with the
 missing node and the `models/<folder>` for each missing file, plus a copyable list. Never starts ComfyUI: off, it
 uses the last saved node list (`source=cache`) or says nothing was checked. The production preflight shows the same
 checklist (a warning at most) and every production run records it in its lineage before starting.
+For a template registered with the Hub, the check reports that engine and uses its own node list and cache. A render
+starts the registered service on the physical GPU of its job reservation and records the service ID and version in
+the resulting recipe.
 
 Treatment-first productions (`treatment.py`, tab Tratamiento, MCP `production_treatment_draft` with
 `draft|get|update|approve`): logline, three structures and the pick, benchmark learn/avoid, shot list (framing,
