@@ -228,16 +228,16 @@ def test_auto_switching_can_use_the_speakers_of_the_transcript(svc):
             t += 380
     fake_transcript(svc, svc.cam_a, words)
     t = media_store.get_analysis(svc, svc.cam_a, "transcript")
-    t["speakers"] = {"S1": {"name": "Ana", "color": "#4FC3F7"}, "S2": {"name": "Luis", "color": "#FFB74D"}}
+    t["speakers"] = {"S1": {"name": "Ponente A", "color": "#4FC3F7"}, "S2": {"name": "Ponente B", "color": "#FFB74D"}}
     spans = [(int(a * 1000), int(b * 1000), "S1" if w == "A" else "S2") for a, b, w in PLAN]
     for w in t["words"]:
         w["speaker"] = next(s for a, b, s in spans if a <= w["t0"] < b)
     media_store.put_analysis(svc, svc.cam_a, "transcript", t)
     res = commands.run(svc, pid, "multicam_auto", {"mode": "speakers"})
-    assert res["summary"]["speaker_angles"] == {"Ana": "Cámara A", "Luis": "Cámara B"}
+    assert res["summary"]["speaker_angles"] == {"Ponente A": "Cámara A", "Ponente B": "Cámara B"}
     assert [a for _s, _e, a in _shots(svc, pid)] == [1, 2, 1, 2, 1]
-    # the mapping can be given instead of measured: Ana filmed by camera B
-    commands.run(svc, pid, "multicam_auto", {"mode": "speakers", "speaker_map": {"Ana": "Cámara B", "Luis": "Cámara A"}})
+    # the mapping can be given instead of measured: Speaker A filmed by camera B
+    commands.run(svc, pid, "multicam_auto", {"mode": "speakers", "speaker_map": {"Ponente A": "Cámara B", "Ponente B": "Cámara A"}})
     assert [a for _s, _e, a in _shots(svc, pid)] == [2, 1, 2, 1, 2]
     with pytest.raises(LumiereError):
         commands.run(svc, pid, "multicam_auto", {"mode": "nonsense"})
