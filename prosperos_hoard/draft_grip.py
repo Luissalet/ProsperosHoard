@@ -18,7 +18,7 @@ def png_bytes(image: Image.Image) -> bytes:
 class GripRegion:
     def __init__(self, color: Image.Image, labels: Image.Image, part_ids: list[int],
                  layers: list[Image.Image], prop_masks: list[Image.Image], size: tuple[int, int],
-                 paint_props: bool):
+                 paint_props: bool, preserve_ids: list[int]):
         if color.size != labels.size or any(layer.size != labels.size for layer in layers + prop_masks):
             raise ValueError("the blocking color, part IDs and accessory layers must share a pixel grid")
         if labels.mode != "L":
@@ -44,12 +44,15 @@ class GripRegion:
         # open hand. Only feather the perimeter where it rejoins that pass.
         envelope = Image.new("L", size)
         ImageDraw.Draw(envelope).rounded_rectangle(
-            (left - 2 * margin, top - margin, right + 2 * margin, bottom + 4 * margin),
+            (left - 2 * margin, top - 2 * margin, right + 2 * margin, bottom + 4 * margin),
             radius=2 * margin, fill=255,
         )
+        preserved = Image.fromarray(np.isin(ids, preserve_ids).astype(np.uint8) * 255)
+        preserved = preserved.filter(ImageFilter.MaxFilter(2 * max(2, margin // 2) + 1))
         self.clean = ImageChops.multiply(envelope, self.background).filter(ImageFilter.GaussianBlur(2))
-        arm = self.guide.filter(ImageFilter.MaxFilter(7)).filter(ImageFilter.GaussianBlur(1))
-        self.mask = ImageChops.lighter(arm, self.clean)
+        self.clean = ImageChops.subtract(self.clean, preserved)
+        self.mask = envelope.filter(ImageFilter.GaussianBlur(max(1, margin / 3)))
+        self.mask = ImageChops.subtract(self.mask, preserved)
         props_alpha = self.props.getchannel("A")
         full = np.logical_or.reduce([np.asarray(mask.resize(size, Image.Resampling.NEAREST)) > 0
                                      for mask in prop_masks])

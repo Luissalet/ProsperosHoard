@@ -535,9 +535,10 @@ def studio_generate_image(
     With qwen21_depth, draft_grip adds a local paint pass: color_asset_id, part_ids_asset_id, grip_ids
     (forearm, hand and digit labels) and prop_mask_asset_ids (full prop masks in object_asset_ids order).
     Use the matching visible RGBA layers as object_asset_ids. Optional paint_props=true repaints their
-    interior; finish_prompt adds instructions for the local pass.
+    interior; finish_prompt adds instructions for the local pass. preserve_ids keeps other parts, such as the face.
     Para retocar el agarre, usa el color, las partes visibles y las máscaras completas de los accesorios.
     Con grip_ids indica antebrazo, mano y dedos. paint_props repinta el interior de los accesorios.
+    Con preserve_ids protege otras partes, como la cara.
     Lip sync: template "auto_sing" (or "wan22_s2v" / "wan21_infinitetalk") with reference_asset_id = the
     singer, audio_asset_id = the song, audio_start_s and audio_seconds = the line (S2V up to 20 s,
     InfiniteTalk up to 90 s; auto picks InfiniteTalk past 10 s when installed); the clip is trimmed to the line.

@@ -895,12 +895,14 @@ _GRIP_GUIDES = ("color_asset_id", "part_ids_asset_id")
 def _draft_grip(store: Store, settings: dict, object_ids: list[str], depth_id: str,
                 size: tuple[int, int]) -> grip_mod.GripRegion:
     required = {*_GRIP_GUIDES, "grip_ids", "prop_mask_asset_ids"}
-    if not isinstance(settings, dict) or not required <= settings.keys() <= required | {"paint_props", "finish_prompt"}:
+    optional = {"paint_props", "finish_prompt", "preserve_ids"}
+    if not isinstance(settings, dict) or not required <= settings.keys() <= required | optional:
         raise EngineError("bad_draft_grip", "draft_grip needs color_asset_id, part_ids_asset_id, grip_ids and prop_mask_asset_ids")
     grip_ids = settings["grip_ids"]
-    if (not isinstance(grip_ids, list) or not grip_ids or
-            any(type(part) is not int or not 1 <= part <= 255 for part in grip_ids)):
-        raise EngineError("bad_draft_grip", "grip_ids must list nonzero part labels from the blocking key")
+    preserve_ids = settings.get("preserve_ids", [])
+    if (not isinstance(grip_ids, list) or not grip_ids or not isinstance(preserve_ids, list)
+            or any(type(part) is not int or not 1 <= part <= 255 for part in grip_ids + preserve_ids)):
+        raise EngineError("bad_draft_grip", "grip_ids and preserve_ids take nonzero part labels from the blocking key")
     if not depth_id or not isinstance(object_ids, list) or not object_ids:
         raise EngineError("bad_draft_grip", "draft_grip requires depth_asset_id and object_asset_ids")
     mask_ids = settings["prop_mask_asset_ids"]
@@ -929,7 +931,8 @@ def _draft_grip(store: Store, settings: dict, object_ids: list[str], depth_id: s
                     raise EngineError("bad_draft_grip", "the full prop masks must be grayscale")
                 full_masks.append(image.copy())
         try:
-            return grip_mod.GripRegion(color_image, label_image, grip_ids, layers, full_masks, size, paint_props)
+            return grip_mod.GripRegion(color_image, label_image, grip_ids, layers, full_masks, size, paint_props,
+                                       preserve_ids)
         except ValueError as exc:
             raise EngineError("bad_draft_grip", str(exc)) from exc
 
