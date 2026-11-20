@@ -1015,6 +1015,7 @@ export interface SceneShot {
   first_frame_asset_id: string;
   last_frame_asset_id?: string;
   control_asset_id?: string;
+  rendered_clip_asset_id?: string;
   clip_asset_id: string | null;
   review: SceneReview | null;
 }

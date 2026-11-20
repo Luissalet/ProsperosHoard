@@ -48,7 +48,7 @@ export function SceneContinuity({ slug, scene, disabled, locked, onRedo }: {
             <div className="row wrap">
               <strong className="grow">{t("sbShotN", { n: shot.key })} · {shot.framing} · {seconds.format(shot.duration_s)} s</strong>
               <span className={`pill ${review?.status === "defect" || review?.status === "unclear" ? "warn" : ""}`}>{status}</span>
-              {clip && <button className="btn sm" disabled={disabled || locked.includes(shot.key)} onClick={() => onRedo(shot.key)}>
+              {clip && !shot.rendered_clip_asset_id && <button className="btn sm" disabled={disabled || locked.includes(shot.key)} onClick={() => onRedo(shot.key)}>
                 <RefreshCw size={14} /> {t("sceneRedo", { n: shot.key })}
               </button>}
             </div>
@@ -59,6 +59,9 @@ export function SceneContinuity({ slug, scene, disabled, locked, onRedo }: {
               </button>
               {shot.control_asset_id && <button className="btn sm ghost" onClick={() => app.openAsset(shot.control_asset_id!)}>
                 {t("sceneStructure")}
+              </button>}
+              {shot.rendered_clip_asset_id && <button className="btn sm ghost" onClick={() => app.openAsset(shot.rendered_clip_asset_id!)}>
+                {t("sceneSuppliedTake")}
               </button>}
             </div>
             {clip && <details className="scene-evidence" onToggle={(event) => {
