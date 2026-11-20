@@ -656,16 +656,18 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
    `studio_scene_suggest(production, character_sheet_asset_id, duration_s, count)`
    to get framing, action and first/last pose descriptions from the configured
    vision service. An agent can also plan the shots itself.
-2. Prepare each shot's first image. Generate the take from a last image or
-   a control video, or supply a take already rendered from an editable set.
+2. Prepare each shot's first image. Generate the take from a last image,
+   a control video, or both. You can also supply a take rendered from an editable set.
    For geometry that must stay exact, use the same set and prop revision
    for every camera. Keep matching keyframes, depth and normals with their
    camera and pose when handing off the source.
    Call `studio_scene_plan` with the sheet and ordered shots. Each row needs
    `framing`, `action`, `duration_s` (2 to 5 s, aligned to 24 fps),
-   `first_frame_asset_id` and exactly one of `last_frame_asset_id`,
-   `control_asset_id` or `rendered_clip_asset_id`. A supplied take must be a
-   video asset in the production's project and cover the entire cut.
+   `first_frame_asset_id`. For a generated take, give `last_frame_asset_id`,
+   `control_asset_id`, or both. With both, the control video guides motion and
+   the last image conditions the closing frame. For a supplied take, give
+   `rendered_clip_asset_id` as the sole source alongside the first image.
+   It must be a video asset in the production's project and cover the entire cut.
    The plan carries over `preserveDetails` from the dossier and can add
    `preserve_details`.
 3. Start or resume with `studio_production_continue`. Generated shots use
@@ -685,7 +687,9 @@ studio_stock_search("glowing waves night", project=p, take=2)    # b-roll by han
    or cancel a piece belong to the order's gate.
 5. To correct one shot's controls or replace its supplied take, call
    `studio_scene_revise_shot` followed by `studio_production_continue`.
-   When switching source types, clear the previous field with `null`.
+   Add a last image to a control video by setting `last_frame_asset_id` and
+   leaving `control_asset_id` in place. When switching between a generated
+   and a supplied take, clear the previous source fields with `null`.
    For generated shots, use `studio_production_regenerate(stage="clips",
    keys=["2"])` or **Redo shot** for a new seed with the same controls.
    The other takes keep their IDs and fingerprints.
