@@ -782,26 +782,25 @@ def _download_output(backend: Backend, output) -> bytes:
 _object_info_cache_hash: dict[str, str] = {}
 
 
-def object_info_cache_path(data_dir: Path) -> Path:
-    return Path(data_dir) / "comfy" / "object_info.json"
+def object_info_cache_path(data_dir: Path, profile=None) -> Path:
+    name = f"object_info-{profile['id'].partition(':')[2]}.json" if profile else "object_info.json"
+    return Path(data_dir) / "comfy" / name
 
 
-def _object_info(backend: Backend, autostart: Optional[bool] = None) -> dict[str, Any]:
+def _object_info(backend: Backend, autostart: Optional[bool] = None, *, use_cache: bool = True) -> dict[str, Any]:
     """The live `/object_info`, also saved to `data/comfy/object_info.json`
     whenever it changes, so UI-format workflows can still be converted while
     ComfyUI is off (see `cached_object_info`)."""
     comfy = _comfy(backend, autostart)
-    path = object_info_cache_path(backend.data_dir)
     profile = getattr(getattr(backend, "_bound", None), "profile", None)
-    if profile:
-        path = path.with_name(f"object_info-{profile['id'].partition(':')[2]}.json")
+    path = object_info_cache_path(backend.data_dir, profile)
     try:
         info = backend.run_async(comfy.object_info())
     except httpx.TimeoutException as exc:
         # up but too busy to answer (a long render holds it): the node list
         # does not change while it runs, so the last saved copy is as good
         # and the job just waits its turn in ComfyUI's queue
-        if path.is_file():
+        if use_cache and path.is_file():
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -1382,7 +1381,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
             comfy_driver.expand_talk_chunks(wf, spec, int(run_values.get("chunks") or 1), seed)
         if end_name:
             node, _, inp = spec["end_image_node"].partition(".")
-            wf[node]["inputs"][inp] = end_name
+            if spec.get("end_image_guide"):
+                _ltx_end_guide(wf, node, inp, end_name)
+            else:
+                wf[node]["inputs"][inp] = end_name
         if control_names:
             for key, fname in zip(("control_video_node", "control_mask_node"), control_names):
                 node, _, inp = spec[key].partition(".")
@@ -1500,6 +1502,19 @@ def free_after(backend: Any, spec: dict[str, Any]) -> bool:
         return True
     except Exception:  # noqa: BLE001 - the render is done either way
         return False
+
+
+def _ltx_end_guide(workflow: dict, image_node: str, image_input: str, filename: str) -> None:
+    motion = "129:115"
+    condition = "end_condition"
+    workflow[image_node] = {"class_type": "LoadImage", "inputs": {image_input: filename}}
+    workflow[condition] = {"class_type": "LTXVAddGuide", "inputs": {
+        "positive": [motion, 0], "negative": [motion, 1], "latent": [motion, 2],
+        "vae": workflow[motion]["inputs"]["vae"], "image": [image_node, 0], "frame_idx": -2, "strength": 1,
+    }}
+    for node in ("129:704", "129:106"):
+        workflow[node]["inputs"].update(positive=[condition, 0], negative=[condition, 1])
+    workflow["129:119"]["inputs"]["video_latent"] = [condition, 2]
 
 
 def _driving_clip(store: Store, asset: dict[str, Any], start_s: float, seconds: float, fps: float,

@@ -1,4 +1,4 @@
-"""Resolve named image engines without starting a backend during discovery."""
+"""Resolve registered render engines without starting them during discovery."""
 
 from __future__ import annotations
 
@@ -99,7 +99,24 @@ def unavailable(template, profile):
     from .hoard_link.errors import Unavailable
     detail = ", ".join(profile.get("missing", [])) or profile.get("problem") or profile["state"]
     call = profile["next"]
-    return Unavailable("image", [f"{template}: {detail}. {call['tool']}({call['arguments']})"])
+    next_step = f". {call['tool']}({call['arguments']})" if call else ""
+    return Unavailable("image", [f"{template}: {detail}{next_step}"])
+
+
+def start_profile(template, profile, gpu, lease_id):
+    """Start the selected endpoint on the GPU reserved for this render."""
+    if gpu is None or not lease_id:
+        raise unavailable(template, {**profile, "problem": "A GPU lease is required / Hace falta una reserva de GPU"})
+    _, result = _hubclient.fetch(_hubclient.hub_url() + "/api/services/start", {
+        "id": profile["id"], "gpu": gpu, "work_lease_id": lease_id, "wait_s": 90,
+    }, timeout=105)
+    if isinstance(result, dict) and result.get("ok"):
+        current = template_profile(template)
+        if current and current["id"] == profile["id"] and current["state"] == "ready" and current["gpu"] == gpu:
+            return current
+    problem = result.get("error") if isinstance(result, dict) else None
+    problem = problem or "Service did not become ready / El servicio no ha quedado listo"
+    raise unavailable(template, {**profile, "problem": problem})
 
 
 @contextmanager

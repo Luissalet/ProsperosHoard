@@ -134,17 +134,18 @@ def _control(store: Store, pid: str, key: str, row: dict) -> dict:
     duration = _duration(row.get("duration_s"))
     start = row.get("first_frame_asset_id")
     sources = {field: row[field] for field in SHOT_SOURCES if row.get(field)}
-    if (not isinstance(start, str) or not start or len(sources) != 1
+    if (not isinstance(start, str) or not start or not sources
+            or ("rendered_clip_asset_id" in sources and len(sources) != 1)
             or not all(isinstance(aid, str) for aid in sources.values())):
-        raise engine.EngineError("bad_scene_plan", f"shot {key} needs a first image and one of a last image, "
-                                 "a control video or a rendered clip")
+        raise engine.EngineError("bad_scene_plan", f"shot {key} needs a first image and a last image, "
+                                 "a control video, both, or a rendered clip on its own")
     _asset(store, start, "image", pid)
-    field, aid = next(iter(sources.items()))
-    if field == "rendered_clip_asset_id":
-        rendered_clip(store, pid, aid, duration)
-    else:
-        _asset(store, aid, SHOT_SOURCES[field], pid)
-    return {"framing": framing, "action": action, "duration_s": duration, "first_frame_asset_id": start, field: aid}
+    for field, aid in sources.items():
+        if field == "rendered_clip_asset_id":
+            rendered_clip(store, pid, aid, duration)
+        else:
+            _asset(store, aid, SHOT_SOURCES[field], pid)
+    return {"framing": framing, "action": action, "duration_s": duration, "first_frame_asset_id": start, **sources}
 
 
 def rendered_clip(store: Store, project: str, aid: str, duration: float) -> dict:
@@ -189,6 +190,12 @@ def revise(store: Store, slug: str, key: str, change: dict) -> dict:
         return view(state)
 
 
+def clip_template(control: dict) -> str | None:
+    if control.get("control_asset_id"):
+        return "ltx23_control"
+    return "wan22_flf2v" if control.get("last_frame_asset_id") else None
+
+
 def clip_body(state: dict, shot: dict, start: str, seed: int) -> dict:
     control = shot["scene_control"]
     details = state["spec"]["scene_shots"]["preserve_details"]
@@ -196,11 +203,17 @@ def clip_body(state: dict, shot: dict, start: str, seed: int) -> dict:
     prompt = (f"{control['framing']}. {shot['motion_prompt']}\n"
               + "Preserve throughout: " + "; ".join(details))[:4000]
     body = {"reference_asset_id": start, "prompt": prompt, "seed": seed}
-    if control.get("last_frame_asset_id"):
-        return {**body, "template": "wan22_flf2v", "end_asset_id": control["last_frame_asset_id"],
-                "template_params": {"seconds": round(duration + 0.25, 3), "lightning": True}}
-    return {**body, "template": "ltx23_control", "driving_asset_id": control["control_asset_id"],
-            "template_params": {"length": math.ceil(duration * FPS / 8) * 8 + 1}}
+    end = control.get("last_frame_asset_id")
+    template = clip_template(control)
+    body["template"] = template
+    if end:
+        body["end_asset_id"] = end
+    if template == "ltx23_control":
+        width, height = {"16:9": (896, 512), "9:16": (512, 896), "1:1": (512, 512)}[state["spec"]["scene_shots"]["aspect"]]
+        return {**body, "driving_asset_id": control["control_asset_id"],
+                "width": width, "height": height,
+                "template_params": {"length": math.ceil(duration * FPS / 8) * 8 + 1}}
+    return {**body, "template_params": {"seconds": round(duration + 0.25, 3), "lightning": True}}
 
 
 def _object(reply: str) -> dict:
