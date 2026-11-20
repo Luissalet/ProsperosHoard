@@ -692,15 +692,17 @@ def studio_voice(project: str, text: str, character_id: Optional[str] = None, vo
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def studio_import(project: str, path: str, kind: Optional[str] = None) -> dict[str, Any]:
-    """Import a local file as an asset: image (png/jpg/webp/bmp), audio (mp3/wav/flac/ogg/m4a),
-    video (mp4/mov/webm/mkv), lyrics (lrc/txt) or font (ttf/otf). `path` is an absolute path on the PC
-    running the app, inside the user's home folder or a folder allowed in Settings; the content is
-    checked (a renamed file is refused). Returns the asset (id first).
+def studio_import(project: str, path: Optional[str] = None, kind: Optional[str] = None,
+                  piece_id: Optional[int] = None, preview: Optional[int] = None) -> dict[str, Any]:
+    """Import an image, audio, video, lyrics or font as an asset. Supply piece_id for a registered Hub
+    order file, with optional zero-based preview, or path for a local file in an allowed folder.
+    The file's content is checked. Returns the asset ID and records the Hub piece and hash when supplied.
+    Importa un archivo local o una pieza de una orden del Hub por su identificador.
 
-    Keywords: import file, add asset, add a song, use this photo, importar archivo, agregar recurso, subir cancion
+    Keywords: import file, order piece, add asset, use this photo, importar archivo, pieza de una orden
     """
-    return _call("POST", "/api/agent/studio_import", params={"project": project}, json={"path": path, "kind": kind})
+    body = {"path": path, "kind": kind, "piece_id": piece_id, "preview": preview}
+    return _call("POST", "/api/agent/studio_import", params={"project": project}, json=body)
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

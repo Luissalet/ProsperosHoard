@@ -1776,7 +1776,7 @@
     },
     {
       "name": "studio_import",
-      "description": "Import a local file as an asset: image (png/jpg/webp/bmp), audio (mp3/wav/flac/ogg/m4a),\nvideo (mp4/mov/webm/mkv), lyrics (lrc/txt) or font (ttf/otf). `path` is an absolute path on the PC\nrunning the app, inside the user's home folder or a folder allowed in Settings; the content is\nchecked (a renamed file is refused). Returns the asset (id first).\n\nKeywords: import file, add asset, add a song, use this photo, importar archivo, agregar recurso, subir cancion\n",
+      "description": "Import an image, audio, video, lyrics or font as an asset. Supply piece_id for a registered Hub\norder file, with optional zero-based preview, or path for a local file in an allowed folder.\nThe file's content is checked. Returns the asset ID and records the Hub piece and hash when supplied.\nImporta un archivo local o una pieza de una orden del Hub por su identificador.\n\nKeywords: import file, order piece, add asset, use this photo, importar archivo, pieza de una orden\n",
       "inputSchema": {
         "properties": {
           "project": {
@@ -1784,8 +1784,16 @@
             "type": "string"
           },
           "path": {
-            "title": "Path",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
           },
           "kind": {
             "anyOf": [
@@ -1798,6 +1806,30 @@
             ],
             "default": null,
             "title": "Kind"
+          },
+          "piece_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Piece Id"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preview"
           },
           "reason": {
             "anyOf": [
@@ -1814,8 +1846,7 @@
           }
         },
         "required": [
-          "project",
-          "path"
+          "project"
         ],
         "title": "studio_importArguments",
         "type": "object"
