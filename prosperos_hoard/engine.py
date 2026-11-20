@@ -28,6 +28,7 @@ from PIL import Image, ImageDraw, ImageOps
 from . import audio as audio_mod
 from . import comfy_driver
 from . import design
+from . import draft_grip as grip_mod
 from . import procutil
 from . import style_cards
 from . import templates as design_templates
@@ -107,6 +108,7 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
         "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
         "prompt": _clip(prompt, 120), "inputs": (recipe.get("input_asset_ids") or [])[:4] or None,
         "depth_asset_id": recipe.get("depth_asset_id"), "object_asset_ids": recipe.get("object_asset_ids"),
+        "draft_grip": recipe.get("draft_grip"),
         "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
     view = {
@@ -887,6 +889,88 @@ def _apply_draft_layers(data: bytes, layers: list[Image.Image]) -> bytes:
     return output.getvalue()
 
 
+_GRIP_GUIDES = ("color_asset_id", "part_ids_asset_id")
+
+
+def _draft_grip(store: Store, settings: dict, object_ids: list[str], depth_id: str,
+                size: tuple[int, int]) -> grip_mod.GripRegion:
+    required = {*_GRIP_GUIDES, "grip_ids", "prop_mask_asset_ids"}
+    if not isinstance(settings, dict) or not required <= settings.keys() <= required | {"paint_props", "finish_prompt"}:
+        raise EngineError("bad_draft_grip", "draft_grip needs color_asset_id, part_ids_asset_id, grip_ids and prop_mask_asset_ids")
+    grip_ids = settings["grip_ids"]
+    if (not isinstance(grip_ids, list) or not grip_ids or
+            any(type(part) is not int or not 1 <= part <= 255 for part in grip_ids)):
+        raise EngineError("bad_draft_grip", "grip_ids must list nonzero part labels from the blocking key")
+    if not depth_id or not isinstance(object_ids, list) or not object_ids:
+        raise EngineError("bad_draft_grip", "draft_grip requires depth_asset_id and object_asset_ids")
+    mask_ids = settings["prop_mask_asset_ids"]
+    if not isinstance(mask_ids, list) or len(mask_ids) != len(object_ids):
+        raise EngineError("bad_draft_grip", "supply the full prop masks in object_asset_ids order")
+    paint_props = settings.get("paint_props", False)
+    finish_prompt = settings.get("finish_prompt", "")
+    if not isinstance(paint_props, bool) or not isinstance(finish_prompt, str) or len(finish_prompt) > 1000:
+        raise EngineError("bad_draft_grip", "paint_props must be a boolean and finish_prompt at most 1000 characters")
+    guides = [settings[key] for key in _GRIP_GUIDES]
+    if any(not isinstance(aid, str) or not aid for aid in [*guides, *mask_ids]):
+        raise EngineError("bad_draft_grip", "the blocking guides and prop masks must be image asset IDs")
+    color, labels, *masks = [store.get_asset(aid) for aid in [*guides, *mask_ids]]
+    if any(asset["kind"] != "image" for asset in (color, labels, *masks)):
+        raise EngineError("bad_draft_grip", "the blocking guides and prop masks must be images")
+    with (Image.open(store.data_dir / color["file_path"]) as color_image,
+          Image.open(store.data_dir / labels["file_path"]) as label_image,
+          Image.open(store.data_dir / store.get_asset(depth_id)["file_path"]) as depth_image):
+        if label_image.size != depth_image.size:
+            raise EngineError("bad_draft_grip", "part IDs and depth must share the blocking pixel grid")
+        layers = _draft_layers(store, object_ids, label_image.size)
+        full_masks = []
+        for mask in masks:
+            with Image.open(store.data_dir / mask["file_path"]) as image:
+                if image.mode != "L":
+                    raise EngineError("bad_draft_grip", "the full prop masks must be grayscale")
+                full_masks.append(image.copy())
+        try:
+            return grip_mod.GripRegion(color_image, label_image, grip_ids, layers, full_masks, size, paint_props)
+        except ValueError as exc:
+            raise EngineError("bad_draft_grip", str(exc)) from exc
+
+
+_GRIP_PROMPT = (
+    "Finish the blocked region of <image1> as a continuous painting, borrowing the colors, costume, "
+    "skin tones and brushwork from <image2>. Follow the pose, hand placement and object outlines in <image1>. "
+    "Replace the temporary block colors with matching skin and clothing. Paint exactly one hand per wrist. "
+    "Connect the shoulder through the sleeve and wrist to its hand. Where a hand touches a held object, "
+    "wrap the fingers around its edge in a natural grip, with the near fingers in front "
+    "and the far fingers hidden by the object. Keep the accessory's position and outline, layout, camera and lighting."
+)
+
+
+def _paint_grip(backend: Backend, progress, grip: grip_mod.GripRegion, data: bytes,
+                graph: dict, spec: dict, recipe: dict, object_info: dict) -> bytes:
+    base, guide = grip.prepare(data)
+    longest = max(guide.size)
+    width, height = (max(256, round(512 * side / longest / 16) * 16) for side in guide.size)
+    settings = {**recipe["grip_params"], "seed": recipe["params"]["seed"], "width": width, "height": height}
+    workflow = comfy_driver.apply_params(graph, spec, settings)
+    guide_bytes = grip_mod.png_bytes(guide.resize((width, height), Image.Resampling.LANCZOS))
+    guide_name = f"prospero_grip_{hashlib.sha256(guide_bytes).hexdigest()[:24]}.png"
+    style_bytes = grip_mod.png_bytes(base.crop(grip.box).convert("RGB").resize((width, height), Image.Resampling.LANCZOS))
+    style_name = f"prospero_grip_style_{hashlib.sha256(style_bytes).hexdigest()[:24]}.png"
+    comfy_driver.wire_reference_group(workflow, spec, [guide_name, style_name])
+    problems = convert_mod.validate_values(workflow, object_info) if object_info else []
+    if problems:
+        raise EngineError("comfy_validation", "the grip pass workflow is invalid: " + "; ".join(problems[:4]))
+    outputs = _run_comfy_workflow(backend, workflow, [(guide_bytes, guide_name), (style_bytes, style_name)], progress,
+                                  timeout_s=comfy_timeout_s("image"), output_node=spec["output_node"])
+    if not outputs:
+        raise EngineError("no_outputs", "the grip pass saved no image")
+    replay = {key: recipe[key] for key in (
+        "template", "template_hash", "params", "input_asset_ids", "depth_asset_id",
+        "object_asset_ids", "draft_grip", "grip_params", "grip_template_hash",
+    )}
+    with Image.open(io.BytesIO(_download_output(backend, outputs[0]))) as painted:
+        return grip.finish(base, painted, replay)
+
+
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
@@ -897,6 +981,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  use_vocals: bool = True, control_video: Optional[tuple[bytes, bytes]] = None,
                  source_video: Optional[bytes] = None, depth_asset_id: Optional[str] = None,
                  object_asset_ids: Optional[list[str]] = None,
+                 draft_grip: Optional[dict] = None, grip_values: Optional[dict] = None,
                  postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -906,7 +991,13 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
     layers = []
-    if object_asset_ids is not None:
+    grip = None
+    use_grip = draft_grip is not None
+    if use_grip:
+        if template_name != "qwen21_depth":
+            raise EngineError("bad_draft_grip", "draft_grip is supported by qwen21_depth")
+        grip_graph, grip_spec = comfy_driver.load_template("qwen21_edit", store.data_dir)
+    elif object_asset_ids is not None:
         if not spec.get("depth_image_node"):
             raise EngineError("bad_draft_layers", f"template '{template_name}' does not take object layers")
         layers = _draft_layers(store, object_asset_ids, (values["width"], values["height"]))
@@ -971,6 +1062,16 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         depth_name = f"prospero_{depth_asset_id}_depth_{values['width']}x{values['height']}.png"
         uploads.append((_depth_guide(store, depth_asset_id, values), depth_name))
         input_ids.append(depth_asset_id)
+        if use_grip:
+            grip = _draft_grip(store, draft_grip, object_asset_ids, depth_asset_id, (values["width"], values["height"]))
+            if grip_values is None:
+                grip_values = {**grip_spec["defaults"], "custom_size": True, "resolution": 512, "steps": 12,
+                               "positive_prompt": (_GRIP_PROMPT + " " + draft_grip.get("finish_prompt", "")).strip(),
+                               **{key: values[key] for key in ("unet_name", "clip_name", "vae_name") if key in values}}
+            try:
+                grip_values = comfy_driver.validate_against_object_info(grip_spec, grip_values, object_info, grip_graph)
+            except comfy_driver.ValidationError as exc:
+                raise EngineError("comfy_validation", str(exc)) from exc
 
     end_name: Optional[str] = None
     if spec.get("end_image_node"):
@@ -1042,10 +1143,14 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 uploads.append((_audio_clip(store, store.get_asset(vocals), float(audio_start_s or 0), seconds), vocals_name))
                 input_ids.append(vocals)
 
-    if layers:
+    if grip:
+        input_ids.extend(draft_grip[key] for key in _GRIP_GUIDES)
+        input_ids.extend(draft_grip["prop_mask_asset_ids"])
+    if layers or grip:
         input_ids.extend(object_asset_ids)
     count = max(1, min(int(count or 1), 8))
     thash = comfy_driver.template_hash(workflow, spec)
+    grip_hash = comfy_driver.template_hash(grip_graph, grip_spec) if grip else None
     assets = []
     resumable = job.get("type") in ("generate_image", "edit_image")
     base_seed = None
@@ -1099,6 +1204,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 and (asset["recipe"] or {}).get("template_hash") == thash
                 and asset["recipe"].get("params") == run_values
                 and asset["recipe"].get("input_asset_ids") == input_ids
+                and asset["recipe"].get("draft_grip") == draft_grip
+                and asset["recipe"].get("grip_template_hash") == grip_hash
+                and asset["recipe"].get("grip_params") == grip_values
                 for asset in restored
             ):
                 assets.extend(restored)
@@ -1168,7 +1276,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
                 **({"depth_asset_id": depth_asset_id} if depth_name else {}),
-                **({"object_asset_ids": object_asset_ids} if layers else {}),
+                **({"object_asset_ids": object_asset_ids} if layers or grip else {}),
+                **({"draft_grip": draft_grip, "grip_params": grip_values, "grip_template_hash": grip_hash}
+                   if grip else {}),
                 **(extra_recipe or {}),
             }
             if template_name == "ltx23_i2v_hq":
@@ -1183,6 +1293,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 data = postprocess(data)
             if layers:
                 data = _apply_draft_layers(data, layers)
+            if grip:
+                progress(0.1 + 0.8 * (i + 0.65) / count, f"painting grip {i + 1}/{count} on ComfyUI")
+                data = _paint_grip(backend, progress, grip, data, grip_graph, grip_spec, recipe, object_info)
             assets.append(_import_comfy_output(store, project_id, data, spec.get("kind", "image"), recipe, run_values, name))
         if resumable:
             checkpoint_batch(i, assets[before:])
@@ -2308,6 +2421,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
         reference_asset_ids=params.get("reference_asset_ids"), depth_asset_id=depth_id,
         object_asset_ids=params.get("object_asset_ids"),
+        draft_grip=params.get("draft_grip"),
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
@@ -2558,16 +2672,21 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         values["seed"] = seed if seed is not None else random_seed()
     depth_id = recipe.get("depth_asset_id")
     object_ids = recipe.get("object_asset_ids")
+    draft_grip = recipe.get("draft_grip")
     inputs = list(recipe.get("input_asset_ids") or [])
     if object_ids:
-        # These inputs were composited after rendering and were never Comfy references.
         inputs = inputs[:-len(object_ids)]
+    if draft_grip:
+        inputs = inputs[:-(len(_GRIP_GUIDES) + len(draft_grip["prop_mask_asset_ids"]))]
     inputs = [aid for aid in inputs if aid != depth_id]
     unchanged = True
     spec: dict[str, Any] = {}
     try:
         workflow, spec = comfy_driver.load_template(recipe["template"], store.data_dir)
         unchanged = comfy_driver.template_hash_matches(recipe.get("template_hash"), workflow, spec)
+        if draft_grip:
+            grip_graph, grip_spec = comfy_driver.load_template("qwen21_edit", store.data_dir)
+            unchanged = unchanged and comfy_driver.template_hash_matches(recipe.get("grip_template_hash"), grip_graph, grip_spec)
     except comfy_driver.WorkflowError:
         pass
     ref_ids: Optional[list[str]] = None
@@ -2582,6 +2701,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
         reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask, depth_asset_id=depth_id,
         object_asset_ids=object_ids,
+        draft_grip=draft_grip, grip_values=recipe.get("grip_params"),
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",

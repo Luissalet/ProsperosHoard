@@ -5,8 +5,8 @@
       "handoffs": [
         {"accepts": "scene-brief", "produces": ["concept-image"], "skill": "image-composition", "check": {"en": "Open the image and check the explicit continuity details in the brief.", "es": "Abre la imagen y comprueba los detalles de continuidad indicados en el expediente."},
          "draft": {
-           "how": {"es": "Usa la profundidad del bloqueo para pose, cámara y escalones, y la misma lámina o vista de la hoja para la identidad. Para objetos con silueta exacta, añade sus capas transparentes de la misma cámara y fotograma con template_params.object_asset_ids.",
-                   "en": "Use blocking depth for pose, camera and stairs and the same concept image or sheet view for identity. For exact prop silhouettes, supply transparent layers from the same camera and frame in template_params.object_asset_ids."},
+           "how": {"es": "Usa la profundidad del bloqueo para pose, cámara y escalones, y la misma lámina o vista de la hoja para la identidad. Para objetos con silueta exacta, añade sus capas visibles con template_params.object_asset_ids. Con draft_grip, usa profundidad sin accesorios y pasa el color y las partes visibles del mismo fotograma para repintar el agarre.",
+                   "en": "Use blocking depth for pose, camera and stairs and the same concept image or sheet view for identity. Supply visible layers in template_params.object_asset_ids to preserve prop silhouettes. With draft_grip, use depth without accessories and supply the blocking color and visible parts from the same frame to repaint the grip."},
            "seconds": 100, "gpu": true, "tool": "studio_generate_image",
            "settings": {"template": "qwen21_depth", "count": 1},
            "produces": "draft-image", "anchors": ["composition"]
