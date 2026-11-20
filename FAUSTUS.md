@@ -181,6 +181,10 @@ appearance and the end image conditions the closing pose. Keep identity and
 prop details in `preserve_details` so they reach the render prompt and
 `studio_scene_review`, which compares the sampled take with the character sheet.
 A scene can also use only endpoint images or just a guide.
+Guided takes compare four corresponding frames with the character sheet and
+the guide. `studio_scene` reports identity scores, both hand-to-arm checks,
+prop checks and any warnings against the exact take. See
+[guided takes](docs/scene-control-review.md).
 Image-only dimensions must be multiples of32; ref0.5 structure control requires
 multiples of64 (896x512 default). Invalid sizes/frame counts fail before rendering.
 The image-only graph records its effective eight-step `manual_sigmas` schedule
