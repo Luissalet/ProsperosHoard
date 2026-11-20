@@ -345,6 +345,9 @@ class Backend:
 
     def comfy_gpu(self) -> Optional[int]:
         """Physical card of this worker's local server, including externally started servers."""
+        profile = getattr(self._bound, "profile", None)
+        if profile is not None:
+            return profile["gpu"]
         target = getattr(self._bound, "url", None)
         port = self.worker_comfy_port()
         if port is None:

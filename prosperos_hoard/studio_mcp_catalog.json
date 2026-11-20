@@ -1859,6 +1859,108 @@
       }
     },
     {
+      "name": "studio_register_piece",
+      "description": "Register this asset as a piece of an existing Hub order. Returns the piece ID, hash and undo.\nUse your Agora agent ID. Optional task and source piece IDs link the work to its origin.\nRegistra un recurso en una orden del Hub y devuelve el identificador, la huella y cómo deshacer.\nKeywords: register output, order piece, handoff, registrar pieza, orden de producción, relevo\n",
+      "inputSchema": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "space": {
+            "title": "Space",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Task Id"
+          },
+          "derives_from": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Derives From"
+          },
+          "agent": {
+            "default": "prospero",
+            "title": "Agent",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "asset_id",
+          "space",
+          "order_id",
+          "title"
+        ],
+        "title": "studio_register_pieceArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "studio_time_lyrics",
       "description": "Link supplied lyrics or script to audio. method=\"align\" recognizes heard words on the CPU\n(Whisper large-v3-turbo by default); preview=true returns candidate lines without saving.\nOriginal text is retained, repeated choruses keep their order, and unheard lines remain untimed.\nReview uncertain lines. method=\"manual\" saves lines [{text,time_s,end_s}] in original order,\nincluding {time_s:null,end_s:null} for unfinished lines. Explicit ends retain instrumental gaps.\nGive production=<slug> to link the result to its current song and lyrics, without generating or\nstarting a render. song_asset_id and lyrics must still match that production's current sources.\nAlignment/manual return {id?,lines,timed_lines,total_lines,complete,method,note}.\n\nLegacy default method=\"estimate\": lyrics with [Section] tags (the same text given to studio_compose)\nare timed to the song's bars - a line per bar in rap verses, two per bar in hooks, intros and\nbridges, each section sized to its lines and snapped to the analysis' own boundaries. Saved as a\nlyrics asset (LRC with timed [Section] markers) for studio_timeline action=\"auto\"\nlyrics_asset_id=..., whose cut density then follows verse/chorus. An estimate from the structure,\nnot vocal detection: re-time by ear in Audio > Lyrics timing before a final render.\nReturns {id, lines, sections: [{label, energy, start_s, end_s}], note}.\n\nKeywords: time lyrics, sync lyrics, karaoke timing, lrc, align lyrics to song, sincronizar letra, karaoke, cronometrar letra\n",
       "inputSchema": {

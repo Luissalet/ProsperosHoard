@@ -69,15 +69,30 @@ ID and the source file's SHA-256. It accepts media supported by the studio
 importer. Local-file imports still use `path` and the configured import roots.
 Undo the import with the usual agent-session undo.
 
-The ComfyUI launch profile needs native Qwen-Image 2.1 Union ControlNet
-support, including the `end_percent` input on `QwenImageDiffsynthControlnet`.
-The tested release is 0.46.0. Put
-`qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors` in
-`models/model_patches` and make the base models available to that profile.
-The Hub finds the engine through `comfyui.dir` and `comfyui.python` in its
-`backends.json`; point Prospero's ComfyUI URL at the listening instance.
-Check the workflow's node and model readiness before starting a job.
-See the [ComfyUI model package](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/model_patches).
+Register the installed engine with `hub_comfy_profile_register`. Supply its
+`directory`, `python`, a dedicated `port`, `templates=["qwen21_depth"]`, and
+its model files in `models`. Shared files can use absolute paths and the
+existing extra paths YAML goes in `model_paths_config`. The profile needs
+the Qwen-Image 2.1 diffusion model, Qwen3-VL text encoder, Qwen-Image 2.1 VAE,
+and `models/model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors`.
+Use a release that exposes `QwenImageDiffsynthControlnet.end_percent` (0.46.0
+supports it). `studio_status.image_template_services` gives the next tool call.
+Start the profile with `hub_service_start(id="comfyui:<name>")`. Prospero
+uses that service for the templates it declares and their replays, and records
+the service and version in each recipe. Templates without a profile use their
+existing backend.
+
+Registra el motor instalado con `hub_comfy_profile_register` y arráncalo
+con `hub_service_start`. `studio_status.image_template_services` indica el
+perfil, los requisitos que faltan y la llamada siguiente. Para entregar el
+resultado, `studio_register_piece(asset_id, space, order_id, title)` guarda
+una copia con su huella y devuelve el ID de pieza. Puedes indicar el trabajo
+con `task_id` y las piezas de origen con `derives_from`. Deshaz el registro
+con el recibo de `hub_agora_order_undo` o con el deshacer de la sesión de Prospero.
+
+Register the output with `studio_register_piece`. The Hub retains the media
+and its hash, links the asset and optional upstream pieces, and returns the
+piece ID and an undo receipt.
 
 When the guide hides the hand or the tube, check the same camera's colour
 and depth views. Make the grip, tube outline and clipped corner legible
