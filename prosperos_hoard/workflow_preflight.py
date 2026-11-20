@@ -23,6 +23,7 @@ FOLDER_BY_CLASS_INPUT = {
     ("CLIPLoaderGGUF", "clip_name"): "text_encoders",
     ("ModelPatchLoader", "name"): "model_patches",
     ("LoadBackgroundRemovalModel", "bg_removal_name"): "background_removal",
+    ("LTXAVTextEncoderLoader", "text_encoder"): "text_encoders",
 }
 FOLDER_BY_INPUT = {
     "ckpt_name": "checkpoints", "lora_name": "loras", "unet_name": "diffusion_models", "vae_name": "vae",
@@ -145,9 +146,16 @@ def copy_text(reports: list[dict[str, Any]]) -> str:
         for m in r.get("models") or []:
             if m.get("ok") is False:
                 files.setdefault(m["file"], m)
-    if not nodes and not files:
-        return "Nothing missing."
     lines = []
+    sources = {r.get("source") for r in reports}
+    if "none" in sources:
+        lines.append("ComfyUI unavailable. Requirements could not be checked for every workflow. / "
+                     "ComfyUI no está disponible. No se han podido comprobar todos los flujos.")
+    if "cache" in sources:
+        lines.append("Cached node list. Current engine availability is unverified. / "
+                     "Lista de nodos guardada. La disponibilidad actual está sin verificar.")
+    if not nodes and not files:
+        return "\n".join(lines) or ("Nothing missing." if reports else "No workflows to check. / No hay flujos que comprobar.")
     if nodes:
         lines.append("Missing nodes:")
         lines += [f"- {c} -> " + (f"install {p['name']} ({p['url']})" if p else "search it in ComfyUI Manager")
@@ -166,7 +174,13 @@ def check_template(name: str, data_dir: Any, object_info: Optional[dict[str, Any
 
 
 def summary(reports: list[dict[str, Any]], source: str) -> dict[str, Any]:
-    known = [r["ok"] for r in reports if r["ok"] is not None]
-    return {"ok": (all(known) if known else None), "source": source, "workflows": reports,
+    verdicts = [r["ok"] for r in reports]
+    ok = False if False in verdicts else (True if verdicts and all(verdicts) else None)
+    return {"ok": ok, "source": source, "workflows": reports,
             "missing_nodes": sum(r["missing_nodes"] for r in reports), "missing_models": sum(r["missing_models"] for r in reports),
             "copy_text": copy_text(reports)}
+
+
+def report_source(reports: list[dict[str, Any]], default: str) -> str:
+    sources = {report["source"] for report in reports}
+    return "mixed" if len(sources) > 1 else next(iter(sources), default)

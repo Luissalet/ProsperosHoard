@@ -1445,8 +1445,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if job["type"] == "edit_image" and params.get("operation") in ("reuse", "vary"):
                 template = (store.get_asset(params["asset_id"]).get("recipe") or {}).get("template")
             profile = template_engines.template_profile(template) if template else None
+            cold_profile = profile and profile["state"] in ("down", "starting")
             if profile:
-                if profile["state"] != "ready":
+                if not cold_profile and profile["state"] != "ready":
                     raise template_engines.unavailable(template, profile)
                 stack.enter_context(template_engines.bind_profile(backend, profile))
             card = backend.comfy_gpu()
@@ -1461,7 +1462,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 take(backend.render_lock(card))
             try:
                 held = None
-                if card is not None or backend.cold_local_comfy():
+                if cold_profile or card is not None or backend.cold_local_comfy():
                     service_port = backend.worker_comfy_port()
                     held = stack.enter_context(gpu_lease.hold(
                         job, backend.vram_estimates_mb, on_gpu=job_events.set_gpu, gpu=card,
@@ -1475,6 +1476,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                     backend.bind_lease_gpu(granted, getattr(held, "lease_id", None))
                     if granted is not None and card is None:
                         take(backend.render_lock(granted))
+                    if cold_profile:
+                        current = template_engines.start_profile(template, profile, granted, getattr(held, "lease_id", None))
+                        stack.enter_context(template_engines.bind_profile(backend, current))
                 yield held
             finally:
                 backend.bind_lease_gpu(None)
@@ -1618,10 +1622,9 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})
         profile = template_engines.template_profile(body.template) if body.template and not demo else None
         if profile:
-            if profile["state"] != "ready":
+            if profile["state"] not in ("ready", "down", "starting"):
                 raise template_engines.unavailable(body.template, profile)
-            with template_engines.bind_profile(backend, profile):
-                object_info = engine._object_info(backend, autostart=False)
+            object_info = _preflight_object_info(profile)[0]
         else:
             object_info = engine._object_info(backend, autostart=True)  # legacy backend autostart
         # an edit needs the engine's edit model (Kontext for Flux), not only its txt2img one
@@ -3981,13 +3984,10 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         """Informational step of the run: what the workflows of this run miss in ComfyUI, kept in the production's
         lineage (and REPORT.md) and in state["workflow_preflight"]. It never stops the run."""
         try:
-            info, source = _preflight_object_info()
-            if not info:
-                return
+            summary = _production_workflow_preflight(productions_mod.load_fresh(store.data_dir, slug))
+            source = summary["source"]
             with productions_mod.lock_for(slug):
                 state = productions_mod.load_state(store.data_dir, slug)
-                summary = wf_preflight.summary([wf_preflight.check_template(n, store.data_dir, info, source)
-                                                for n in production_workflows(state, info)], source)
                 state["workflow_preflight"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": summary["ok"], "source": source,
                                                "missing_nodes": summary["missing_nodes"],
                                                "missing_models": summary["missing_models"],
@@ -5479,9 +5479,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             pass
         workflows = None
         try:  # the workflow checklist: informational (a warning at most), never a new blocker
-            info, source = _preflight_object_info()
-            workflows = wf_preflight.summary([wf_preflight.check_template(n, store.data_dir, info, source)
-                                              for n in production_workflows(state, info)], source)
+            workflows = _production_workflow_preflight(state)
             hard = sum(1 for r in workflows["workflows"] for m in r["models"] if m.get("ok") is False and not m.get("fallback"))
             if workflows["missing_nodes"] or hard:
                 items.append({"level": "warn", "code": "workflow_missing",
@@ -5497,18 +5495,35 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
 
     # ------------------------------------------- workflow preflight (nodes and model files against /object_info)
 
-    def _preflight_object_info() -> tuple[dict[str, Any], str]:
+    def _preflight_object_info(profile=None) -> tuple[dict[str, Any], str]:
         """Live /object_info without starting ComfyUI, else the last saved copy, else nothing (every item unknown)."""
+        path = engine.object_info_cache_path(backend.data_dir, profile)
         try:
-            return engine._object_info(backend, autostart=False) or {}, "live"
+            if profile:
+                if profile["state"] == "ready":
+                    with template_engines.bind_profile(backend, profile):
+                        info = engine._object_info(backend, autostart=False, use_cache=False)
+                else:
+                    info = {}
+            else:
+                info = engine._object_info(backend, autostart=False, use_cache=False)
+            if info:
+                return info, "live"
         except Exception:  # noqa: BLE001 - ComfyUI off: fall back to the cache, then to "unknown"
-            path = engine.object_info_cache_path(backend.data_dir)
-            if path.is_file():
-                try:
-                    return json.loads(path.read_text(encoding="utf-8")), "cache"
-                except (OSError, ValueError):
-                    pass
-            return {}, "none"
+            pass
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict) and cached:
+                return cached, "cache"
+        except (OSError, ValueError):
+            pass
+        return {}, "none"
+
+    def _check_template(name: str, default_info: dict[str, Any], default_source: str | None) -> dict[str, Any]:
+        profile = template_engines.template_profile(name) if not demo else None
+        info, source = _preflight_object_info(profile) if profile or default_source is None else (default_info, default_source)
+        report = wf_preflight.check_template(name, store.data_dir, info, source)
+        return {**report, "engine_service": profile} if profile else report
 
     def production_workflows(state: dict[str, Any], info: dict[str, Any]) -> list[str]:
         """The ComfyUI templates the production's pending stages will use, resolved like the run resolves them."""
@@ -5522,20 +5537,34 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if "song" in pending and state.get("kind") != "short" and song and not song.get("asset_id"):
             names.append("ace15_song")
         if "clips" in pending:
-            tmpl = (spec.get("clip_settings") or {}).get("template") or "auto_clip"
-            names.append(engine.clip_template(info) if tmpl in ("auto_clip", "auto") else tmpl)
-            if any(sh.get("sing") for sh in spec.get("shots") or []):
-                names.append(engine.sing_template(info, 5.0))
+            scene_controls = [shot["scene_control"] for shot in spec.get("shots") or [] if shot.get("scene_control")]
+            if scene_controls:
+                names.extend(scene_shots.clip_template(control) for control in scene_controls)
+            else:
+                tmpl = (spec.get("clip_settings") or {}).get("template") or "auto_clip"
+                names.append(engine.clip_template(info) if tmpl in ("auto_clip", "auto") else tmpl)
+                if any(sh.get("sing") for sh in spec.get("shots") or []):
+                    names.append(engine.sing_template(info, 5.0))
         return [n for n in dict.fromkeys(names) if n]
 
+    def _production_workflow_preflight(state: dict[str, Any]) -> dict[str, Any]:
+        # An anchored scene spells out its video templates without probing the legacy endpoint.
+        info, source = ({}, None) if state.get("kind") == "scene" else _preflight_object_info()
+        reports = [_check_template(name, info, source) for name in production_workflows(state, info)]
+        return wf_preflight.summary(reports, wf_preflight.report_source(reports, source or "none"))
+
     def op_workflow_preflight(body: WorkflowPreflightBody) -> dict[str, Any]:
-        info, source = _preflight_object_info()
-        if body.production:
+        if body.template and not body.production:
+            profile = template_engines.template_profile(body.template) if not demo else None
+            info, source = _preflight_object_info(profile)
+            report = wf_preflight.check_template(body.template, store.data_dir, info, source)
+            reports = [{**report, "engine_service": profile} if profile else report]
+        elif body.production:
             state = productions_mod.load_fresh(store.data_dir, body.production)
-            reports = [wf_preflight.check_template(n, store.data_dir, info, source) for n in production_workflows(state, info)]
-        elif body.template:
-            reports = [wf_preflight.check_template(body.template, store.data_dir, info, source)]
+            out = _production_workflow_preflight(state)
+            return {**out, "production": body.production}
         elif body.workflow:
+            info, source = _preflight_object_info()
             workflow = body.workflow
             if comfy_driver._looks_like_ui_format(workflow):
                 if not info:
@@ -5546,11 +5575,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         else:
             raise engine.EngineError("missing_argument", "give a production, a template or a workflow")
         out = wf_preflight.summary(reports, source)
-        if body.production:
-            out["production"] = body.production
         if source != "live":
-            out["note"] = ("ComfyUI is not running: checked against its last saved node list" if source == "cache" else
-                           "ComfyUI is not running and no node list was saved yet: nothing could be checked")
+            out["note"] = out["copy_text"] if source in ("none", "cache") else "See the source for each workflow."
         return out
 
     @app.post("/api/workflows/preflight")
