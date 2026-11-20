@@ -106,6 +106,7 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
     summary = {k: v for k, v in {
         "operation": recipe.get("operation"), "template": recipe.get("template"), "seed": params.get("seed"),
         "prompt": _clip(prompt, 120), "inputs": (recipe.get("input_asset_ids") or [])[:4] or None,
+        "depth_asset_id": recipe.get("depth_asset_id"), "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
     view = {
         "id": asset["id"], "kind": asset["kind"], "name": name, "source": asset["source"],
@@ -834,6 +835,29 @@ def _svd_size(width: int, height: int) -> tuple[int, int]:
     return 768, 768
 
 
+def _depth_guide(store: Store, asset_id: str, values: dict[str, Any]) -> bytes:
+    asset = store.get_asset(asset_id)
+    if asset["kind"] != "image":
+        raise EngineError("depth_not_image", "the depth guide must be an image")
+    with Image.open(store.data_dir / asset["file_path"]) as guide:
+        width, height = values["width"], values["height"]
+        if any(isinstance(side, bool) or not isinstance(side, int) or side < 256 or side > 2048 or side % 16
+               for side in (width, height)):
+            raise EngineError("bad_depth_size", "guided images need width and height from 256 to 2048 in multiples of 16")
+        if abs(guide.width * height - guide.height * width) > 8 * max(guide.size):
+            raise EngineError("bad_depth_aspect", "the canvas must match the aspect ratio of the depth guide")
+        if guide.mode.startswith("I;16") or (guide.format == "PNG" and guide.mode == "I"):
+            # Keep the take's fixed near/far mapping and the zero background.
+            # Converting I;16 directly to RGB clips all values over 255.
+            pixels = np.asarray(guide, dtype=np.uint32)
+            guide = Image.fromarray(((pixels + 128) // 257).astype(np.uint8))
+        else:
+            guide = guide.convert("L")
+        output = io.BytesIO()
+        guide.resize((width, height), Image.Resampling.BILINEAR).convert("RGB").save(output, format="PNG")
+        return output.getvalue()
+
+
 def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: Callable[..., None], *,
                  template_name: str, values: dict[str, Any], operation: str, count: int = 1,
                  reference_asset_id: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
@@ -842,7 +866,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  audio_seconds: Optional[float] = None, end_asset_id: Optional[str] = None,
                  extra_recipe: Optional[dict[str, Any]] = None, name: Optional[str] = None,
                  use_vocals: bool = True, control_video: Optional[tuple[bytes, bytes]] = None,
-                 source_video: Optional[bytes] = None,
+                 source_video: Optional[bytes] = None, depth_asset_id: Optional[str] = None,
                  postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
@@ -902,6 +926,16 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         mask_name = f"prospero_{mask['id']}_mask{mask_path.suffix}"
         uploads.append((mask_path.read_bytes(), mask_name))
         input_ids.append(mask["id"])
+
+    depth_name = None
+    if spec.get("depth_image_node"):
+        if not depth_asset_id:
+            raise EngineError("depth_required", f"template '{template_name}' needs depth_asset_id")
+        if depth_asset_id in input_ids:
+            raise EngineError("depth_is_reference", "the depth guide and identity must be separate assets")
+        depth_name = f"prospero_{depth_asset_id}_depth_{values['width']}x{values['height']}.png"
+        uploads.append((_depth_guide(store, depth_asset_id, values), depth_name))
+        input_ids.append(depth_asset_id)
 
     end_name: Optional[str] = None
     if spec.get("end_image_node"):
@@ -1046,6 +1080,9 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         if spec.get("requires_mask"):
             node, _, inp = spec["mask_node"].partition(".")
             wf[node]["inputs"][inp] = next(n for _, n in uploads if n.endswith(f"_mask{Path(n).suffix}"))
+        if depth_name:
+            node, _, inp = spec["depth_image_node"].partition(".")
+            wf[node]["inputs"][inp] = depth_name
         if driving_name:
             node, _, inp = spec["driving_video_node"].partition(".")
             wf[node]["inputs"][inp] = driving_name
@@ -1093,6 +1130,7 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 "operation": operation, "backend": "comfyui", "template": template_name, "template_hash": thash,
                 "checkpoint": run_values.get("checkpoint"), "params": run_values, "input_asset_ids": input_ids,
                 "elapsed_s": round(time.monotonic() - t0, 2), "job_id": job.get("id"), "created_at": now_iso(),
+                **({"depth_asset_id": depth_asset_id} if depth_name else {}),
                 **(extra_recipe or {}),
             }
             if template_name == "ltx23_i2v_hq":
@@ -1988,6 +2026,7 @@ ENGINE_TEMPLATES = {
     "sdxl": {"txt2img": "sdxl_txt2img", "edit": "sdxl_img2img"},
 }
 TEMPLATE_TO_ENGINE = {tmpl: engine for engine, ops in ENGINE_TEMPLATES.items() for tmpl in ops.values()}
+TEMPLATE_TO_ENGINE["qwen21_depth"] = "qwen21"
 # Generic per-call overrides for template-specific knobs that are not part
 # of every template's shape (resolution/custom_size, QwenImage21Cache's
 # device/dtype, the separate UNet/CLIP/VAE loader filenames, Kontext's
@@ -2154,7 +2193,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
     mapping = spec.get("map", {})
     for key in mapping:
         # "prompt" is the job's raw request (with @mentions), never a node value
-        if key not in _CORE_GENERATION_KEYS and key != "prompt" and params.get(key) is not None:
+        if key not in _CORE_GENERATION_KEYS and key not in ("prompt", "depth_asset_id") and params.get(key) is not None:
             values[key] = params[key]
     if "positive_prompt" not in mapping and comfy_driver.CUSTOM_ID_RE.match(template):
         if "prompt" in mapping:
@@ -2201,10 +2240,33 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         length = values["length"]
         if isinstance(length, bool) or not isinstance(length, int) or length < 9 or (length - 1) % 8:
             raise EngineError("bad_video_length", "LTX2.3 needs 8*n+1 frames (for example 73 or 121)")
+    depth_id = params.get("depth_asset_id")
+    if depth_id and not spec.get("depth_image_node"):
+        raise EngineError("depth_unsupported", f"template '{template}' does not take a depth guide")
+    if spec.get("depth_image_node"):
+        if not depth_id:
+            raise EngineError("depth_required", f"template '{template}' needs depth_asset_id")
+        depth = store.get_asset(depth_id)
+        size = _source_size(store, depth) if depth["kind"] == "image" else None
+        if not size:
+            raise EngineError("depth_not_image", "the depth guide must be an image")
+        guide_width, guide_height = size
+        if params.get("width") is None and params.get("height") is None:
+            scale = max(512 / max(size), 256 / min(size))
+            values["width"] = round(guide_width * scale / 16) * 16
+            values["height"] = round(guide_height * scale / 16) * 16
+        elif params.get("width") is None:
+            values["width"] = round(values["height"] * guide_width / guide_height / 16) * 16
+        elif params.get("height") is None:
+            values["height"] = round(values["width"] * guide_height / guide_width / 16) * 16
+        for key, maximum in (("control_strength", 10), ("control_end", 1)):
+            value = values[key]
+            if isinstance(value, bool) or not isinstance(value, (float, int)) or not 0 < value <= maximum:
+                raise EngineError("bad_depth_control", f"{key} must be above 0 and at most {maximum}")
     return run_template(
         store, backend, job, progress, template_name=template, values=values,
         operation="generate_image", count=params.get("count", 1), reference_asset_id=params.get("reference_asset_id"),
-        reference_asset_ids=params.get("reference_asset_ids"),
+        reference_asset_ids=params.get("reference_asset_ids"), depth_asset_id=depth_id,
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
@@ -2362,7 +2424,7 @@ def _opaque_share(store: Store, asset_id: str) -> Optional[float]:
 
 
 _SD_TEMPLATES = {"sdxl_txt2img", "sdxl_img2img", "sdxl_inpaint", "sdxl_hires", "sd15_txt2img"}
-_INSTRUCTION_TEMPLATES = {"flux_kontext_edit", "qwen21_edit"}
+_INSTRUCTION_TEMPLATES = {"flux_kontext_edit", "qwen21_edit", "qwen21_depth"}
 
 
 def _is_sd_family(store: Store, recipe: dict[str, Any]) -> bool:
@@ -2453,7 +2515,8 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     values = dict(recipe.get("params") or {})
     if vary:
         values["seed"] = seed if seed is not None else random_seed()
-    inputs = list(recipe.get("input_asset_ids") or [])
+    depth_id = recipe.get("depth_asset_id")
+    inputs = [aid for aid in recipe.get("input_asset_ids") or [] if aid != depth_id]
     unchanged = True
     spec: dict[str, Any] = {}
     try:
@@ -2471,7 +2534,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
     result = run_template(
         store, backend, job, progress, template_name=recipe["template"], values=values,
         operation=recipe.get("operation") or "generate_image", count=count if vary else 1,
-        reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask,
+        reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask, depth_asset_id=depth_id,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},
         name=f"{'vary' if vary else 'reuse'}: {src.get('name') or src['id']}",

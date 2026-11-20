@@ -1,0 +1,54 @@
+{
+  "template": "qwen21_depth",
+  "kind": "image",
+  "vram_class": "qwen21",
+  "output_node": "save",
+  "map": {
+    "positive_prompt": "encode.prompt",
+    "negative_prompt": "encode.negative_prompt",
+    "resolution": "encode.resolution",
+    "width": "canvas.width",
+    "height": "canvas.height",
+    "seed": "sample.seed",
+    "steps": "sample.steps",
+    "cfg": "sample.cfg",
+    "sampler": "sample.sampler_name",
+    "scheduler": "sample.scheduler",
+    "unet_name": "model.unet_name",
+    "clip_name": "clip.clip_name",
+    "vae_name": "vae.vae_name",
+    "control_model": "patch.name",
+    "control_strength": "control.strength",
+    "control_end": "control.end_percent",
+    "depth_asset_id": "depth.image"
+  },
+  "model_params": [
+    "unet_name",
+    "clip_name",
+    "vae_name",
+    "control_model"
+  ],
+  "requires_reference": true,
+  "reference_group": {
+    "encode_node": "encode",
+    "prefix": "images.image_",
+    "nodes": [
+      "identity"
+    ],
+    "min": 1,
+    "max": 1
+  },
+  "depth_image_node": "depth.image",
+  "notes": "Qwen-Image 2.1 with a native Union ControlNet model patch. Image 1 supplies identity; the depth guide goes only to the model patch. The output is sampled from a fresh latent. En español: usa una referencia para la identidad y una guía de profundidad para la pose, la cámara y el decorado.",
+  "defaults": {
+    "width": 512,
+    "height": 512,
+    "steps": 12,
+    "cfg": 1.5,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "resolution": 768,
+    "control_strength": 0.85,
+    "control_end": 0.8
+  }
+}
