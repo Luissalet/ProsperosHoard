@@ -168,7 +168,7 @@ assets were added; QA screenshots are evidence outside the packaged application.
 
 Scope: Designer → Image composition. Operate mode. Extension of the existing
 plum workbench; no replacement world, comp round or unrelated metadata repair.
-Luis requested editable boxes/text/references before image generation, alongside
+The brief calls for editable boxes/text/references before image generation, alongside
 the diagram editor in Vitruvius. Pixel composition is not a semantic diagram.
 
 ## Direction contract

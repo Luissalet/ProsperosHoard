@@ -175,25 +175,25 @@ def test_diarize_job_labels_words_and_segments(svc):
 def test_rename_assign_merge_and_clear(svc):
     _put_transcript(svc)
     analyze.schedule(svc, svc.mid, ["speakers"], num_speakers=2)
-    first = speakers.rename(svc, svc.mid, {"S1": "Ana", "S2": "Luis"})
-    assert [s["name"] for s in first["speakers"]] == ["Ana", "Luis"]
-    speakers.rename(svc, svc.mid, {"luis": "Luis M."})  # by current name, any case
-    assert speakers.name_of(analyze.transcript(svc, svc.mid), "S2") == "Luis M."
+    first = speakers.rename(svc, svc.mid, {"S1": "Ponente A", "S2": "Ponente B"})
+    assert [s["name"] for s in first["speakers"]] == ["Ponente A", "Ponente B"]
+    speakers.rename(svc, svc.mid, {"ponente b": "Ponente invitado"})  # by current name, any case
+    assert speakers.name_of(analyze.transcript(svc, svc.mid), "S2") == "Ponente invitado"
     with pytest.raises(LumiereError):
-        speakers.rename(svc, svc.mid, {"S1": "luis m."})
+        speakers.rename(svc, svc.mid, {"S1": "ponente invitado"})
     t = analyze.transcript(svc, svc.mid)
     ids = [w["id"] for w in t["words"][:3]]
     res = speakers.assign(svc, svc.mid, "Nuria", word_ids=ids)        # a new name makes a new speaker
     assert res["changed"] == 3 and len(res["speakers"]) == 3
     assert all(w["speaker"] == res["speaker"] for w in analyze.transcript(svc, svc.mid)["words"][:3])
-    res = speakers.merge(svc, svc.mid, "Luis M.", "Ana")
-    assert {s["name"] for s in res["speakers"]} == {"Ana", "Nuria"}
-    res = speakers.assign(svc, svc.mid, "Ana", from_ms=0, to_ms=100000)
-    assert len(res["speakers"]) == 1 and res["speakers"][0]["name"] == "Ana"
+    res = speakers.merge(svc, svc.mid, "Ponente invitado", "Ponente A")
+    assert {s["name"] for s in res["speakers"]} == {"Ponente A", "Nuria"}
+    res = speakers.assign(svc, svc.mid, "Ponente A", from_ms=0, to_ms=100000)
+    assert len(res["speakers"]) == 1 and res["speakers"][0]["name"] == "Ponente A"
     with pytest.raises(LumiereError):
-        speakers.assign(svc, svc.mid, "Ana")
+        speakers.assign(svc, svc.mid, "Ponente A")
     with pytest.raises(Exception):
-        speakers.assign(svc, svc.mid, "Ana", word_ids=["w9999"])
+        speakers.assign(svc, svc.mid, "Ponente A", word_ids=["w9999"])
     speakers.clear(svc, svc.mid)
     t = analyze.transcript(svc, svc.mid)
     assert "speakers" not in t and all("speaker" not in w for w in t["words"])
@@ -208,10 +208,10 @@ def test_timeline_transcript_shows_speakers_and_old_transcripts_do_not(svc):
     plain = commands.timeline_transcript(svc, store.doc(svc, pid))
     assert len(plain["words"]) == len(svc.truth) and plain["speakers"] == [] and all("speaker" not in w for w in plain["words"])
     analyze.schedule(svc, svc.mid, ["speakers"], num_speakers=2)
-    speakers.rename(svc, svc.mid, {"S1": "Ana", "S2": "Luis"})
+    speakers.rename(svc, svc.mid, {"S1": "Ponente A", "S2": "Ponente B"})
     tt = commands.timeline_transcript(svc, store.doc(svc, pid))
-    assert {s["name"] for s in tt["speakers"]} == {"Ana", "Luis"}
-    assert all(w["speaker"] in ("S1", "S2") and w["speaker_name"] in ("Ana", "Luis") and w["speaker_color"].startswith("#") for w in tt["words"])
+    assert {s["name"] for s in tt["speakers"]} == {"Ponente A", "Ponente B"}
+    assert all(w["speaker"] in ("S1", "S2") and w["speaker_name"] in ("Ponente A", "Ponente B") and w["speaker_color"].startswith("#") for w in tt["words"])
     assert [w["text"] for w in tt["words"]] == [w["text"] for w in plain["words"]]
 
 
@@ -219,40 +219,40 @@ def test_timeline_transcript_shows_speakers_and_old_transcripts_do_not(svc):
 def test_captions_prefix_and_colour_by_speaker(svc):
     _put_transcript(svc)
     analyze.schedule(svc, svc.mid, ["speakers"], num_speakers=2)
-    speakers.rename(svc, svc.mid, {"S1": "Ana", "S2": "Luis"})
+    speakers.rename(svc, svc.mid, {"S1": "Ponente A", "S2": "Ponente B"})
     pid = _project(svc)
     words_for = _words_for(svc, pid)
     store.edit(svc, pid, [{"op": "captions", "enabled": True, "style": "clean"}])
     off = ass.caption_cues(store.doc(svc, pid), words_for)
-    assert not any(c[2].startswith(("Ana:", "Luis:")) for c in off) and not any(c[3] for c in off)
+    assert not any(c[2].startswith(("Ponente A:", "Ponente B:")) for c in off) and not any(c[3] for c in off)
     store.edit(svc, pid, [{"op": "captions", "props": {"speaker_labels": "both"}}])
     p = store.doc(svc, pid)
     cues = ass.caption_cues(p, words_for)
-    assert any(c[2].startswith("Ana: ") for c in cues) and any(c[2].startswith("Luis: ") for c in cues)
+    assert any(c[2].startswith("Ponente A: ") for c in cues) and any(c[2].startswith("Ponente B: ") for c in cues)
     assert {c[3] for c in cues} == {s["color"] for s in speakers.summary(svc, svc.mid)["speakers"]}
     srt, _ = runner.subtitles_export(svc, pid, "srt")
-    assert '<font color="#' in srt and "Ana: " in srt
+    assert '<font color="#' in srt and "Ponente A: " in srt
     doc, _ = runner.subtitles_export(svc, pid, "ass")
-    assert "\\1c&H" in doc and "Ana: " in doc
+    assert "\\1c&H" in doc and "Ponente A: " in doc
     store.edit(svc, pid, [{"op": "captions", "props": {"speaker_labels": "color"}}])
     colour_only = runner.subtitles_export(svc, pid, "srt")[0]
-    assert '<font color="#' in colour_only and "Ana: " not in colour_only
+    assert '<font color="#' in colour_only and "Ponente A: " not in colour_only
     for _a, _b, text, _c in cues:  # a line never mixes two speakers
-        assert not ("Ana: " in text[1:] or "Luis: " in text[1:])
+        assert not ("Ponente A: " in text[1:] or "Ponente B: " in text[1:])
 
 
 @needs_ffmpeg
 def test_cut_and_keep_one_speakers_parts(svc):
     _put_transcript(svc)
     analyze.schedule(svc, svc.mid, ["speakers"], num_speakers=2)
-    speakers.rename(svc, svc.mid, {"S1": "Ana", "S2": "Luis"})
+    speakers.rename(svc, svc.mid, {"S1": "Ponente A", "S2": "Ponente B"})
     t = analyze.transcript(svc, svc.mid)
     ana = [w for w in t["words"] if w["speaker"] == "S1"]
-    luis = [w for w in t["words"] if w["speaker"] == "S2"]
+    words_b = [w for w in t["words"] if w["speaker"] == "S2"]
     pid = _project(svc)
     before = store.doc(svc, pid).duration
-    res = commands.run(svc, pid, "speaker_cut", {"speakers": ["Luis"]})
-    assert res["summary"]["words"] == len(luis) and res["summary"]["mode"] == "cut"
+    res = commands.run(svc, pid, "speaker_cut", {"speakers": ["Ponente B"]})
+    assert res["summary"]["words"] == len(words_b) and res["summary"]["mode"] == "cut"
     left = [w["speaker"] for w in commands.timeline_transcript(svc, store.doc(svc, pid))["words"]]
     assert set(left) == {"S1"} and len(left) == len(ana)
     assert store.doc(svc, pid).duration < before - 2000
@@ -297,20 +297,20 @@ def test_speakers_are_reachable_through_the_tools(svc):
     call = lambda tool, **args: agent_tools.call_tool(svc, tool, args)  # noqa: E731
     _put_transcript(svc)
     with pytest.raises(LumiereError):
-        call("speakers_edit", media=svc.mid, action="rename", names={"S1": "Ana"})
+        call("speakers_edit", media=svc.mid, action="rename", names={"S1": "Ponente A"})
     jobs = call("media_analyze", media=svc.mid, kinds=["speakers"], num_speakers=2)["jobs"]
     assert jobs[0]["kind"] == "speakers"
     got = call("speakers_get", media=svc.mid)
     assert got["diarized"] and len(got["speakers"]) == 2 and got["status"]["engine"]
-    call("speakers_edit", media=svc.mid, action="rename", names={"S1": "Ana", "S2": "Luis"})
+    call("speakers_edit", media=svc.mid, action="rename", names={"S1": "Ponente A", "S2": "Ponente B"})
     pid = _project(svc)
     words = call("timeline_transcript", project=pid)["words"]
-    assert {w["speaker"] for w in words} == {"Ana", "Luis"}
-    res = call("edit_command", project=pid, command="speaker_cut", args={"speakers": ["Luis"]})
+    assert {w["speaker"] for w in words} == {"Ponente A", "Ponente B"}
+    res = call("edit_command", project=pid, command="speaker_cut", args={"speakers": ["Ponente B"]})
     assert res["summary"]["mode"] == "cut"
-    assert {w["speaker"] for w in call("timeline_transcript", project=pid)["words"]} == {"Ana"}
-    call("speakers_edit", media=svc.mid, action="assign", speaker="Luis", from_ms=0, to_ms=1000)
-    call("speakers_edit", media=svc.mid, action="merge", source="Luis", into="Ana")
+    assert {w["speaker"] for w in call("timeline_transcript", project=pid)["words"]} == {"Ponente A"}
+    call("speakers_edit", media=svc.mid, action="assign", speaker="Ponente B", from_ms=0, to_ms=1000)
+    call("speakers_edit", media=svc.mid, action="merge", source="Ponente B", into="Ponente A")
     call("speakers_edit", media=svc.mid, action="clear")
     assert not call("timeline_transcript", project=pid)["speakers"]
     again = call("speakers_edit", media=svc.mid, action="diarize", num_speakers=2)
