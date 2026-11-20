@@ -1481,8 +1481,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     queue = JobQueue(store, gpu_targets=[None, *backend.render_pool()], bind=backend.bind_comfy,
                      target_ready=backend.pool_server_ready, accepts=backend.accepts_job, events=job_events,
                      gpu_guard=None if demo else gpu_guard)
-    queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p))
-    queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p))
+    queue.register("generate_image", lambda job, p: engine.generate_image(store, backend, job, p, vision_provider=vision_for_qa))
+    queue.register("edit_image", lambda job, p: engine.edit_image(store, backend, job, p, vision_provider=vision_for_qa))
     queue.register("animate", lambda job, p: engine.animate_image(store, backend, job, p))
     queue.register("compose_song", lambda job, p: engine.compose_song(store, backend, job, p))
     queue.register("render_timeline", lambda job, p: engine.render_timeline_job(store, backend, job, p))
