@@ -1730,6 +1730,17 @@ class Run:
                     key = shot_key(shot["key"], variant)
                     if key in items or key in pending or key in tried:
                         continue
+                    control = shot.get("scene_control") or {}
+                    rendered = control.get("rendered_clip_asset_id")
+                    if rendered:
+                        from . import scene_shots
+                        scene_shots.rendered_clip(self.store, pid, rendered, control["duration_s"])
+                        items[key] = rendered
+                        quality[key] = "final"
+                        remember_take(self.state, "clips", key, {"asset_id": rendered, "quality": "final"})
+                        self.log("supplied_clip", key=key, asset_id=rendered)
+                        self.save()
+                        continue
                     reuse = (shot.get("reuse_clips") or {}).get(key)
                     if reuse and _asset_ok(self.store, reuse):
                         items[key] = copy_asset(self.store, reuse, pid)["id"]
@@ -2133,7 +2144,7 @@ def regenerate_unlocked(data_dir: Path, slug: str, stage: str = "clips", keys: O
             key = shot["key"]
             if wanted is not None and key not in wanted:
                 continue
-            if shot.get("locked"):
+            if shot.get("locked") or (shot.get("scene_control") or {}).get("rendered_clip_asset_id"):
                 kept.append(key)
                 continue
             mine = [k for k in clips if split_key(k)[0] == key]
