@@ -729,7 +729,9 @@ def studio_register_piece(asset_id: str, space: str, order_id: int, title: str, 
                           agent: str = "prospero") -> dict[str, Any]:
     """Register this asset as a piece of an existing Hub order. Returns the piece ID, hash and undo.
     Use your Agora agent ID. Optional task and source piece IDs link the work to its origin.
+    Takes and extracted frames inherit registered material from their recipe inputs in this order.
     Registra un recurso en una orden del Hub y devuelve el identificador, la huella y cómo deshacer.
+    Las tomas y sus fotogramas conservan los materiales registrados en esa orden.
     Keywords: register output, order piece, handoff, registrar pieza, orden de producción, relevo
     """
     return _call("POST", "/api/agent/studio_register_piece", json={
