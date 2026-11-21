@@ -37,7 +37,7 @@ from . import charkit
 from . import charpack
 from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
-from . import comfy_driver, engine, hub_piece, procutil, template_engines
+from . import character_keys, comfy_driver, engine, hub_piece, procutil, template_engines
 from . import qr_video
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
@@ -1445,6 +1445,7 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             if job["type"] == "edit_image" and params.get("operation") in ("reuse", "vary"):
                 template = (store.get_asset(params["asset_id"]).get("recipe") or {}).get("template")
             profile = template_engines.template_profile(template) if template else None
+            template_engines.require_character_profile(template, profile)
             cold_profile = profile and profile["state"] in ("down", "starting")
             if profile:
                 if not cold_profile and profile["state"] != "ready":
@@ -1620,7 +1621,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
             terms = cinema.camera_prompt(body.camera, video=is_clip)
             if terms:
                 body = body.model_copy(update={"prompt": f"{body.prompt.rstrip(' .,')}, {terms}", "camera": None})
+        if body.template == character_keys.TEMPLATE:
+            character_keys.validate(store, project, body.template_params or {}, body.reference_asset_ids or [])
         profile = template_engines.template_profile(body.template) if body.template and not demo else None
+        if not demo:
+            template_engines.require_character_profile(body.template, profile)
         if profile:
             if profile["state"] not in ("ready", "down", "starting"):
                 raise template_engines.unavailable(body.template, profile)
@@ -1715,6 +1720,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                                                   body.use_element_references)
             all_refs = all_refs + [r["asset_id"] for r in added]
             template = body.template or engine.ENGINE_TEMPLATES[engine_name]["edit" if all_refs else "txt2img"]
+        if template == character_keys.TEMPLATE:
+            character_keys.validate(store, project, body.template_params or {}, all_refs)
         reference = all_refs[0] if all_refs else None
         strength = body.strength
         if template in ("qwen21_edit", "flux_kontext_edit"):
@@ -1796,6 +1803,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
                 allowed.add("object_asset_ids")
             if template == "qwen21_depth":
                 allowed.add("draft_grip")
+            if tspec.get("character_sheet_anchor"):
+                allowed.update(character_keys.PARAMS)
             unknown = sorted(set(body.template_params) - allowed)
             if unknown:
                 raise engine.EngineError("bad_parameter", f"template '{template}' has no {', '.join(unknown)} "
@@ -4436,6 +4445,11 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         item = qa_mod.QA(store, state, fn, name).check_clip("1", body.asset_id)
         return {"asset_id": body.asset_id, "vision": name, "item": item,
                 "notice": "Technical checks and a sampled visual review; not full-playback approval."}
+
+    @app.get("/api/agent/studio_review_character_key")
+    def agent_review_character_key(asset_id: str):
+        return agent("studio_review_character_key", asset_id,
+                     lambda: character_keys.review_asset(store, asset_id, lambda: vision_for_qa(max_tokens=2000)))
 
     @app.post("/api/assets/{asset_id}/review")
     def review_clip(asset_id: str, body: ClipReviewBody):

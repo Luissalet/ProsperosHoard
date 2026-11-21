@@ -1,0 +1,58 @@
+{
+  "template": "qwen21_character_key",
+  "kind": "image",
+  "vram_class": "qwen21",
+  "output_node": "save",
+  "map": {
+    "positive_prompt": "encode.prompt",
+    "negative_prompt": "encode.negative_prompt",
+    "resolution": "encode.resolution",
+    "width": "canvas.width",
+    "height": "canvas.height",
+    "seed": "sample.seed",
+    "steps": "sample.steps",
+    "cfg": "sample.cfg",
+    "sampler": "sample.sampler_name",
+    "scheduler": "sample.scheduler",
+    "unet_name": "model.unet_name",
+    "clip_name": "clip.clip_name",
+    "vae_name": "vae.vae_name",
+    "control_model": "patch.name",
+    "control_strength": "control.strength",
+    "control_end": "control.end_percent",
+    "depth_asset_id": "depth.image",
+    "denoise": "sample.denoise"
+  },
+  "model_params": [
+    "unet_name",
+    "clip_name",
+    "vae_name",
+    "control_model"
+  ],
+  "requires_reference": true,
+  "reference_group": {
+    "encode_node": "encode",
+    "prefix": "images.image_",
+    "nodes": [
+      "identity",
+      "pose"
+    ],
+    "min": 2,
+    "max": 2
+  },
+  "depth_image_node": "depth.image",
+  "notes": "Edit a single character view cropped from the declared sheet. The source is image_1 and the initial latent. The pose plate is image_2, and native depth control uses its own input. / Edita una vista recortada de la hoja declarada. La vista es image_1 y el latente inicial. El bloqueo de pose es image_2 y la guía de profundidad tiene su propia entrada.",
+  "defaults": {
+    "width": 768,
+    "height": 768,
+    "steps": 20,
+    "cfg": 1.3,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "resolution": 640,
+    "control_strength": 0.7,
+    "control_end": 0.65,
+    "denoise": 0.9
+  },
+  "character_sheet_anchor": true
+}

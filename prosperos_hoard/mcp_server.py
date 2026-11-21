@@ -530,6 +530,12 @@ def studio_generate_image(
     driving_start_s chooses the guide offset; template_params carries the template's declared knobs such as
     length(8*n+1 frames at24fps) and control_strength(default1). Neither runs a local prompt-generating LLM.
     For qwen21_depth, pass depth_asset_id in template_params and the identity in reference_asset_id.
+    For qwen21_character_key, pass reference_asset_ids=[kept_sheet, pose_image] and template_params
+    with sheet_asset_id, anchor_box=[left,top,right,bottom] in sheet pixels, and depth_asset_id.
+    The crop is the edit source. Inspect recipe.character_key.comparison and the key with studio_show.
+    Optional identity_checks maps names to details. Use the existing trash to undo.
+    Para una clave anclada, pasa la hoja conservada, el color de pose y la profundidad. Selecciona una
+    vista con anchor_box. El recibo da el cotejo por detalle cuando hay un modelo de visión.
     Optional object_asset_ids in template_params are transparent layers at the output size, applied in order
     after generation. Capas de objetos con transparencia y el tamaño exacto de la clave.
     With qwen21_depth, draft_grip adds a local paint pass: color_asset_id, part_ids_asset_id, grip_ids
@@ -972,6 +978,18 @@ def studio_assets(project: str, kind: Optional[str] = None, query: Optional[str]
     return _call("GET", "/api/agent/studio_assets", params={
         "project": project, "kind": kind, "query": query, "tag": tag, "favourite": favourite, "limit": limit, "offset": offset,
     })
+
+
+@tool(_ro(readOnlyHint=True, idempotentHint=True))
+def studio_review_character_key(asset_id: str) -> dict[str, Any]:
+    """Compare an existing key to its recorded sheet, detail by detail, without rendering again.
+
+    Returns the sheet and asset fingerprints, criterion findings and vision model. The generation
+    receipt stays with the asset. / Vuelve a cotejar una clave con su hoja sin volver a renderizar.
+
+    Keywords: character key review, kept sheet, identity check, cotejo de personaje, hoja conservada
+    """
+    return _call("GET", "/api/agent/studio_review_character_key", params={"asset_id": asset_id})
 
 
 @tool(_ro(readOnlyHint=True, idempotentHint=True))

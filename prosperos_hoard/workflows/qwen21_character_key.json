@@ -1,0 +1,170 @@
+{
+  "model": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "clip": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "identity": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "identity.png"
+    }
+  },
+  "encode": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "clip": [
+        "clip",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "prompt": "",
+      "negative_prompt": "",
+      "resolution": 768,
+      "images.image_1": [
+        "identity",
+        0
+      ],
+      "images.image_2": [
+        "pose",
+        0
+      ]
+    }
+  },
+  "depth": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "depth.png"
+    }
+  },
+  "patch": {
+    "class_type": "ModelPatchLoader",
+    "inputs": {
+      "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+    }
+  },
+  "control": {
+    "class_type": "QwenImageDiffsynthControlnet",
+    "inputs": {
+      "model": [
+        "model",
+        0
+      ],
+      "model_patch": [
+        "patch",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "image": [
+        "depth",
+        0
+      ],
+      "strength": 0.85,
+      "end_percent": 0.8
+    }
+  },
+  "canvas": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "identity",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 768,
+      "height": 768,
+      "crop": "disabled"
+    }
+  },
+  "sample": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "control",
+        0
+      ],
+      "seed": 0,
+      "steps": 12,
+      "cfg": 1.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "encode",
+        0
+      ],
+      "negative": [
+        "encode",
+        1
+      ],
+      "latent_image": [
+        "latent",
+        0
+      ],
+      "denoise": 0.9
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sample",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ]
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "filename_prefix": "prospero_character_key"
+    }
+  },
+  "pose": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "pose.png"
+    }
+  },
+  "latent": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "canvas",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ]
+    }
+  }
+}

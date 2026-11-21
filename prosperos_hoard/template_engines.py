@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+from . import character_keys
 from .hoard_link import _hubclient
 
 
 DEPTH_TEMPLATE = "qwen21_depth"
+DEPTH_TEMPLATES = {DEPTH_TEMPLATE, character_keys.TEMPLATE}
 DEPTH_PATCH = "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
 DEPTH_CONTROL = "QwenImageDiffsynthControlnet"
 
@@ -15,7 +17,11 @@ DEPTH_CONTROL = "QwenImageDiffsynthControlnet"
 def _registration(template, *, replacement=False):
     args = {"templates": [template]}
     required = ["directory", "python", "port"]
-    if template == DEPTH_TEMPLATE:
+    if template == character_keys.TEMPLATE:
+        args["templates"].append("qwen21_edit")
+        args["disable_custom_nodes"] = True
+        required.extend(("models", "model_paths_config"))
+    elif template == DEPTH_TEMPLATE:
         args["models"] = [f"models/model_patches/{DEPTH_PATCH}"]
     else:
         required.append("models")
@@ -69,12 +75,12 @@ def template_profile(template, profiles=None):
         result["version"] = profile["version"]
         names = {model["name"] for model in profile["models"]}
         missing = [entry["name"] for entry in profile["models"] if not entry["available"]]
-        if template == DEPTH_TEMPLATE and DEPTH_PATCH not in names:
+        if template in DEPTH_TEMPLATES and DEPTH_PATCH not in names:
             missing.append(DEPTH_PATCH)
         if row["problem"] or missing:
             result.update(state="incompatible", missing=missing, next=_registration(template, replacement=True))
         elif row["state"] == "running" and row["pid"]:
-            missing = _requirements_at(row["url"]) if template == DEPTH_TEMPLATE else []
+            missing = _requirements_at(row["url"]) if template in DEPTH_TEMPLATES else []
             result.update(state="incompatible" if missing else "ready", missing=missing,
                           next=_registration(template, replacement=True) if missing else None)
         else:
@@ -92,7 +98,13 @@ def template_status(default_url=None):
         missing = _requirements_at(default_url) if default_url else depth_requirements({})
         result[DEPTH_TEMPLATE] = {"state": "unregistered" if missing else "ready", "url": default_url,
                                   "missing": missing, "next": _registration(DEPTH_TEMPLATE) if missing else None}
+    result.setdefault(character_keys.TEMPLATE, {"state": "unregistered", "next": _registration(character_keys.TEMPLATE)})
     return result
+
+
+def require_character_profile(template, profile):
+    if template == character_keys.TEMPLATE and profile is None:
+        raise unavailable(template, {"state": "unregistered", "next": _registration(template)})
 
 
 def unavailable(template, profile):

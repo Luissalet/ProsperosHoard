@@ -801,6 +801,7 @@ MODEL_LOADERS = ("UNETLoader", "CheckpointLoaderSimple", "CheckpointLoader", "Un
 # the same one (a Qwen-Image LoRA does nothing useful on Flux).
 TEMPLATE_ARCH = {
     "qwen21_txt2img": "qwen_image", "qwen21_edit": "qwen_image", "qwen21_depth": "qwen_image",
+    "qwen21_character_key": "qwen_image",
     "flux_schnell_txt2img": "flux1", "flux_kontext_edit": "flux1",
     "sdxl_txt2img": "sdxl", "sdxl_img2img": "sdxl", "sdxl_inpaint": "sdxl", "sdxl_hires": "sdxl",
     "sd15_txt2img": "sd15", "wan22_ti2v": "wan22_5b",
