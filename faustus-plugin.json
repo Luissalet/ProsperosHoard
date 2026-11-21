@@ -1,6 +1,20 @@
 {
   "schema": 1,
   "x-family": {
+    "isolated_instance": {
+      "argv": [
+        "-I",
+        "-m",
+        "prosperos_hoard",
+        "--no-browser",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--port",
+        "{PORT}"
+      ],
+      "data_env": "PROSPERO_DATA_DIR",
+      "token_env": "PROSPERO_TOKEN_FILE"
+    },
     "production": {
       "handoffs": [
         {"accepts": "scene-brief", "produces": ["concept-image"], "skill": "image-composition", "check": {"en": "Open the image and check the explicit continuity details in the brief.", "es": "Abre la imagen y comprueba los detalles de continuidad indicados en el expediente."},
