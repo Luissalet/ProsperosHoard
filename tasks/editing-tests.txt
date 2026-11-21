@@ -35,7 +35,7 @@ E   FileNotFoundError: [Errno 2] No such file or directory: 'D:\\LocalAI\\worktr
 _________ test_incorporated_discovery_ignores_external_configuration __________
 editing_tests\test_creative_engines.py:30: in test_incorporated_discovery_ignores_external_configuration
     assert engines.executable("motion")==binary
-E   AssertionError: assert None == WindowsPath('C:/Users/user/AppData/Local/Temp/pytest-of-user/pytest-11634/test_incorporated_discovery_ig0/product/native/bin/lumiere-compositor.exe')
+E   AssertionError: assert None == WindowsPath('C:/Users/example-user/AppData/Local/Temp/pytest-of-example-user/pytest-11634/test_incorporated_discovery_ig0/product/native/bin/lumiere-compositor.exe')
 E    +  where None = executable('motion')
 E    +    where executable = <prosperos_hoard.editing.creative_engines.CreativeEngines object at 0x000001518C1D6F90>.executable
 _ test_every_event_the_code_sends_is_in_the_contract_and_in_the_instructions __
