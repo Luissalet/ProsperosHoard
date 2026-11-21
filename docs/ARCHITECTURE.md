@@ -433,7 +433,9 @@ regression fixture.
 (dynamic-combo children included), links to existing output slots, combo
 choices, number ranges - and `run_template` calls it on every workflow
 before queueing; the fake ComfyUI rejects the same prompts the real server
-would. A combo mismatch on a **model-file input** (`MODEL_FILE_INPUTS`:
+would. Its catalog includes the Qwen-Image depth template's Union ControlNet
+patch in `ModelPatchLoader.name` alongside the diffusion model, encoder and
+VAE. A combo mismatch on a **model-file input** (`MODEL_FILE_INPUTS`:
 `CheckpointLoaderSimple.ckpt_name`, `UNETLoader.unet_name`,
 `CLIPLoader.clip_name`, `DualCLIPLoader.clip_name1`/`clip_name2`,
 `VAELoader.vae_name`) gets its own `"model not installed: ... download it,
