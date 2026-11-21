@@ -61,3 +61,46 @@ def test_register_asset_as_piece_and_undo(store, project, monkeypatch, tmp_path)
                            "model": "qwen21_depth", "derives_from": [10]}
     assert hub_piece.undo_registration(store, registered["undo"]["arguments"])["undone"] == "piece_add"
     assert calls[1][1] == {"space_id": "estudio", "agent": "artist", "token": "receipt"}
+
+
+def test_register_take_and_frame_preserve_order_materials(store, project, monkeypatch, tmp_path):
+    png = tmp_path / "guide.png"
+    Image.new("RGB", (32, 32)).save(png)
+    digest = hashlib.sha256(png.read_bytes()).hexdigest()
+    pid = project["id"]
+    guide = engine.import_asset(store, pid, png, "image", recipe={"hub_piece": {"id": 21, "sha256": digest}})
+    external = engine.import_asset(store, pid, png, "image", recipe={"hub_piece": {"id": 99, "sha256": digest}})
+    frame = engine.import_asset(store, pid, png, "image", recipe={"operation": "frame", "derived_from": "take"})
+    take = {"id": "take", "kind": "video", "file_path": frame["file_path"], "project_id": pid,
+            "recipe": {"input_asset_ids": [guide["id"], external["id"], "deleted"]}}
+    retake = {**take, "id": "retake", "recipe": {"retake_of": "take"}}
+    media = {asset["id"]: asset for asset in (take, retake)}
+    get_asset = store.get_asset
+    monkeypatch.setattr(store, "get_asset", lambda aid: media[aid] if aid in media else get_asset(aid))
+    (store.data_dir / "mcp-token").write_text("prospero-family-token", encoding="utf-8")
+    pieces = [{"id": 21, "app": "vulcan", "object": "render", "status": "checked", "sha256": digest},
+              {"id": 99, "app": "vulcan", "object": "different", "status": "checked", "sha256": "other-digest"}]
+    writes = []
+
+    def fetch(url, args=None, *, headers, timeout):
+        if url.endswith("order?space_id=estudio&order_id=4"):
+            return 200, {"ok": True, "order": {"piece_list": pieces}}
+        assert url.endswith("/piece_add")
+        writes.append(args)
+        piece = {"id": 30 + len(writes), "app": "prospero", "object": args["object"],
+                 "status": "provisional", "sha256": "hash"}
+        pieces.append(piece)
+        return 200, {"ok": True, "piece": piece, "undo": "receipt"}
+
+    monkeypatch.setattr(hub_piece, "fetch", fetch)
+    args = {"space": "estudio", "order_id": 4, "agent": "artist"}
+    hub_piece.register_piece(store, "take", title="Take", **args)
+    hub_piece.register_piece(store, frame["id"], title="Frame", **args)
+    hub_piece.register_piece(store, "retake", title="Retake", **args)
+    hub_piece.register_piece(store, "take", title="Reference only",
+                             derives_from=[{"piece": 21, "role": "reference"}], **args)
+    assert [write["derives_from"] for write in writes] == [
+        [{"piece": 21, "role": "material"}], [{"piece": 31, "role": "material"}],
+        [{"piece": 31, "role": "material"}],
+        [{"piece": 21, "role": "reference"}],
+    ]

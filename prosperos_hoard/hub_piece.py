@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlencode
 
 import httpx
 
 from . import engine
 from .hoard_link._hubclient import fetch, hub_url
-from .store import Store
+from .store import NotFound, Store
 
 
 # The route supplies the MIME type of the stored file. Pick a suffix the normal
@@ -24,21 +25,93 @@ _EXTENSIONS = {
     "text/plain": ".txt", "font/ttf": ".ttf", "font/otf": ".otf",
     "application/x-font-ttf": ".ttf", "application/x-font-opentype": ".otf",
 }
+_MAX_ORDER_MATERIALS = 200
 
 
-def _hub_write(store: Store, op: str, arguments: dict) -> dict:
+def _hub_headers(store: Store) -> dict:
     try:
         token = (store.data_dir / "mcp-token").read_text(encoding="utf-8-sig").strip()
     except OSError:
         token = ""
     if not token:
         raise engine.EngineError("hub_token_missing", "Prospero needs its family token to write order pieces")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _hub_write(store: Store, op: str, arguments: dict) -> dict:
     code, result = fetch(f"{hub_url()}/api/agora/{op}", arguments,
-                         headers={"Authorization": f"Bearer {token}"}, timeout=30)
+                         headers=_hub_headers(store), timeout=30)
     if code != 200 or not isinstance(result, dict) or not result.get("ok"):
         detail = result.get("error") if isinstance(result, dict) else None
         raise engine.EngineError("hub_piece_write_failed", detail or f"The Hub could not complete {op} (HTTP {code})")
     return result
+
+
+def _recipe_inputs(recipe: dict) -> tuple:
+    return (*(recipe.get("input_asset_ids") or ()), recipe.get("derived_from"), recipe.get("retake_of"),
+            recipe.get("edit_of"))
+
+
+def _imported_piece_id(pieces: dict, receipt: dict) -> int | None:
+    piece = pieces.get(receipt.get("id"))
+    if not piece or not receipt.get("sha256"):
+        return None
+    preview = receipt.get("preview")
+    digest = piece.get("sha256")
+    if preview is not None:
+        copies = piece.get("previews_stored") or []
+        digest = Path(copies[preview]).stem if 0 <= preview < len(copies) else None
+    return piece["id"] if digest == receipt["sha256"] else None
+
+
+def _media_sources(store: Store, asset: dict, space: str, order_id: int, declared: list) -> list:
+    """Resolve recipe inputs against registered pieces of this order."""
+    recipe = asset.get("recipe") or {}
+    if asset["kind"] != "video" and recipe.get("operation") not in ("frame", "extract_frame"):
+        return declared
+    if not (recipe.get("hub_piece") or any(_recipe_inputs(recipe))):
+        return declared
+    query = urlencode({"space_id": space, "order_id": order_id})
+    code, result = fetch(f"{hub_url()}/api/agora/order?{query}", headers=_hub_headers(store), timeout=30)
+    if code != 200 or not isinstance(result, dict) or not result.get("ok"):
+        raise engine.EngineError("hub_piece_read_failed", f"The Hub could not read order #{order_id} (HTTP {code})")
+    pieces = result["order"]["piece_list"]
+    by_id = {p["id"]: p for p in pieces}
+    superseded = {p.get("supersedes") for p in pieces}
+    by_asset: dict[str, list[int]] = {}
+    for piece in pieces:
+        if piece["app"] == "prospero" and piece["id"] not in superseded:
+            by_asset.setdefault(piece["object"], []).append(piece["id"])
+    known = {(d.get("piece") or d.get("piece_id")) if isinstance(d, dict) else d for d in declared}
+    sources = list(declared)
+    seen = set()
+
+    def visit(current: dict, *, output: bool = False) -> None:
+        if (len(sources) >= _MAX_ORDER_MATERIALS
+                or current["id"] in seen or current["kind"] not in ("image", "video")):
+            return
+        seen.add(current["id"])
+        data = current.get("recipe") or {}
+        imported = _imported_piece_id(by_id, data.get("hub_piece") or {})
+        matches = [] if output else by_asset.get(current["id"], [])
+        piece_id = imported if imported is not None else matches[0] if len(matches) == 1 else None
+        if piece_id is not None:
+            if piece_id not in known:
+                sources.append({"piece": piece_id, "role": "material"})
+                known.add(piece_id)
+            return
+        if matches:  # The order contains several pieces for the same input asset.
+            return
+        for source_id in _recipe_inputs(data):
+            if source_id:
+                try:
+                    source = store.get_asset(source_id)
+                except NotFound:
+                    continue
+                visit(source)
+
+    visit(asset, output=True)
+    return sources
 
 
 def register_piece(store: Store, asset_id: str, *, space: str, order_id: int, title: str,
@@ -54,7 +127,7 @@ def register_piece(store: Store, asset_id: str, *, space: str, order_id: int, ti
         "space_id": space, "agent": agent, "order_id": order_id, "task_id": task_id,
         "title": title, "kind": kind or asset["kind"], "path": str(path),
         "app": "prospero", "object": asset_id, "place": asset["project_id"],
-        "model": model, "derives_from": derives_from or [],
+        "model": model, "derives_from": _media_sources(store, asset, space, order_id, derives_from or []),
     })
     piece = result["piece"]
     undo = result.get("undo")

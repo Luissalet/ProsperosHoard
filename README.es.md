@@ -55,7 +55,7 @@ Usos típicos:
 - Tarjetas de estilo (aspecto, técnica, paleta, movimiento, transición de firma, trampas) con direcciones integradas e importadas.
 
 **Producciones**
-- Vídeo de escena a partir de un expediente y una hoja de personaje, con fotogramas de referencia, revisión al principio, en medio y al final de cada plano, tomas que se pueden rehacer por separado y montaje con procedencia por plano.
+- Vídeo de escena a partir de un expediente y una hoja de personaje, con fotogramas de referencia, revisión al principio, en medio y al final de cada plano, tomas que se pueden rehacer por separado y montaje con procedencia por plano. Al registrar una toma o un fotograma extraído, se enlazan los materiales de su receta que ya estén registrados en la orden.
 - Un videoclip entero como una producción reanudable con puntos de control: protagonista y hoja de referencia, canción, imágenes, sincronía de letra, clips, photocards, portada, el corte y sus renders, más un informe. Cambiar planos rehace solo lo que depende de ellos.
 - Modo con tratamiento previo (logline, estructuras, lista de planos, hoja de pulsos) antes de renderizar nada; animatic con las imágenes cortadas como el montaje final antes de los clips caros; director de QA que revisa imágenes planas o ruidosas, bandas en los bordes, saltos de exposición, clips congelados y cobertura de la letra; biblia de continuidad con reparación de segmentos.
 - Recetas: convierte una producción terminada en plantilla con un hueco `{lead}` y recréala con otro personaje.
