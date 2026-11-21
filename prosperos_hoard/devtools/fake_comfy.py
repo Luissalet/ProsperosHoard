@@ -45,6 +45,7 @@ UNET_FILES = ["flux1-dev-kontext_fp8_scaled.safetensors", "wan2.2_ti2v_5B_fp16.s
 CLIP_FILES = ["umt5_xxl_fp8_e4m3fn_scaled.safetensors", "qwen3vl_8b_int8_convrot.safetensors"]
 DUAL_CLIP_FILES = ["clip_l.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors"]
 VAE_FILES = ["ae.safetensors", "wan2.2_vae.safetensors", "qwen_image_2.1_vae_bf16.safetensors"]
+MODEL_PATCH_FILES = ["qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"]
 QWEN_UNET_NAME = UNET_FILES[-1]
 QWEN_CLIP_NAME = CLIP_FILES[-1]
 QWEN_VAE_NAME = VAE_FILES[-1]
@@ -105,6 +106,7 @@ def real_object_info() -> dict[str, Any]:
         _set_choices(data, "DualCLIPLoader", "clip_name1", DUAL_CLIP_FILES)
         _set_choices(data, "DualCLIPLoader", "clip_name2", DUAL_CLIP_FILES)
         _set_choices(data, "VAELoader", "vae_name", VAE_FILES)
+        _set_choices(data, "ModelPatchLoader", "name", MODEL_PATCH_FILES)
         _set_choices(data, "UpscaleModelLoader", "model_name", UPSCALE_MODEL_FILES)
         _set_choices(data, "LoadBackgroundRemovalModel", "bg_removal_name", BG_REMOVAL_FILES)
         _real_object_info_cache = data
