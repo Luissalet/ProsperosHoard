@@ -50,7 +50,7 @@ def test_the_catalogue_lists_every_per_tool_route_with_query_and_body_arguments(
     shared = ("tools", "call", "journal", "undo", "tokens")           # the router of the shared contract, not tools
     routes = {r.path[len("/api/agent/"):] for r in app.router.routes if getattr(r, "path", "").startswith("/api/agent/")
               and "/" not in r.path[len("/api/agent/"):] and r.path[len("/api/agent/"):] not in shared}
-    assert routes <= set(tools) and len(tools) > 60                      # GET tools and query-parameter tools are in, not only the POST ones
+    assert sorted(t["name"] for t in body["tools"]) == sorted(routes)  # GET and POST tools are both advertised
     cast = tools["studio_cast"]["inputSchema"]
     assert "project" in cast["required"] and {"action", "kind", "id", "name", "fields"} <= set(cast["properties"])
     assert tools["studio_projects"]["inputSchema"]["properties"]["limit"]["type"] == "integer"
