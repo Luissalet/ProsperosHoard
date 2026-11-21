@@ -157,7 +157,7 @@ tests\test_studio_fusion.py:28: in test_cold_import_has_no_native_engines_or_sto
     subprocess.run([sys.executable, '-c', code, str(tmp_path / 'cold')], check=True)
 C:\Python313\Lib\subprocess.py:577: in run
     raise CalledProcessError(retcode, process.args,
-E   subprocess.CalledProcessError: Command '['D:\\LocalAI\\worktrees\\prospero-fisiones929\\.venv\\Scripts\\python.exe', '-c', "\nfrom pathlib import Path\nimport sys\nfrom prosperos_hoard.studio import Studio\ns = Studio(Path(sys.argv[1]))\nassert len(s.tools) == 165\nassert all(m.phase == 'off' for m in s.modules.values())\nassert 'prosperos_hoard.api' not in sys.modules\nassert 'prosperos_hoard.editing.main' not in sys.modules\nassert not Path(sys.argv[1]).exists()\n", 'C:\\Users\\user\\AppData\\Local\\Temp\\pytest-of-user\\pytest-11635\\test_cold_import_has_no_native0\\cold']' returned non-zero exit status 1.
+E   subprocess.CalledProcessError: Command '['D:\\LocalAI\\worktrees\\prospero-fisiones929\\.venv\\Scripts\\python.exe', '-c', "\nfrom pathlib import Path\nimport sys\nfrom prosperos_hoard.studio import Studio\ns = Studio(Path(sys.argv[1]))\nassert len(s.tools) == 165\nassert all(m.phase == 'off' for m in s.modules.values())\nassert 'prosperos_hoard.api' not in sys.modules\nassert 'prosperos_hoard.editing.main' not in sys.modules\nassert not Path(sys.argv[1]).exists()\n", 'C:\\Users\\example-user\\AppData\\Local\\Temp\\pytest-of-example-user\\pytest-11635\\test_cold_import_has_no_native0\\cold']' returned non-zero exit status 1.
 ---------------------------- Captured stderr call -----------------------------
 Traceback (most recent call last):
 
