@@ -26,6 +26,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 
 from . import audio as audio_mod
+from . import character_keys
 from . import comfy_driver
 from . import design
 from . import draft_art
@@ -113,6 +114,7 @@ def asset_view(asset: dict[str, Any]) -> dict[str, Any]:
         "engine_service": recipe.get("engine_service"),
         "draft_grip": recipe.get("draft_grip"),
         "draft_identity": recipe.get("draft_identity"),
+        "character_key": recipe.get("character_key"),
         "hub_piece": recipe.get("hub_piece"),
     }.items() if v is not None}
     view = {
@@ -1102,7 +1104,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                  object_asset_ids: Optional[list[str]] = None,
                  draft_grip: Optional[dict] = None, grip_values: Optional[dict] = None,
                  vision_provider=None, exact_seed: bool = False,
-                 postprocess: Optional[Callable[[bytes], bytes]] = None) -> dict[str, Any]:
+                 postprocess: Optional[Callable[[bytes], bytes]] = None,
+                 character_key: Optional[dict] = None) -> dict[str, Any]:
     """Run one workflow template `count` times (seed, seed+1, ...) and import
     each output as an asset whose recipe can re-run it exactly."""
     project_id = job["project_id"]
@@ -1110,6 +1113,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
         workflow, spec = comfy_driver.load_template(template_name, store.data_dir)
     except comfy_driver.WorkflowError as exc:
         raise EngineError("unknown_template", str(exc)) from exc
+    anchor = None
+    if spec.get("character_sheet_anchor"):
+        anchor = character_keys.prepare(store, project_id, {**(character_key or {}), "depth_asset_id": depth_asset_id},
+                                        reference_asset_ids or [], (values["width"], values["height"]))
     layers = []
     grip = None
     identity_check = None
@@ -1154,7 +1161,11 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 raise EngineError("reference_not_image", f"reference {ref['id']} is {ref['kind']}, not an image")
             ref_path = store.data_dir / ref["file_path"]
             ref_name = f"prospero_{ref['id']}{ref_path.suffix}"
-            uploads.append((ref_path.read_bytes(), ref_name))
+            if anchor and not group_names:
+                ref_name = f"prospero_anchor_{anchor[2]['anchor_sha256']}.png"
+                uploads.append((anchor[0], ref_name))
+            else:
+                uploads.append((ref_path.read_bytes(), ref_name))
             group_names.append(ref_name)
             input_ids.append(ref["id"])
     elif spec.get("requires_reference"):
@@ -1338,6 +1349,8 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 and asset["recipe"].get("params") == {**run_values, "seed": asset["recipe"]["params"]["seed"]}
                 and (not identity_check or asset["recipe"].get("draft_identity", {}).get("status") == "accepted")
                 and asset["recipe"].get("input_asset_ids") == input_ids
+                and (not anchor or all(asset["recipe"].get("character_key", {}).get(key) == value
+                                       for key, value in anchor[2].items()))
                 and asset["recipe"].get("draft_grip") == draft_grip
                 and asset["recipe"].get("grip_template_hash") == grip_hash
                 and asset["recipe"].get("grip_params") == grip_values
@@ -1445,6 +1458,10 @@ def run_template(store: Store, backend: Backend, job: dict[str, Any], progress: 
                 if grip:
                     progress(0.1 + 0.8 * (i + 0.65) / count, f"painting grip {i + 1}/{count} on ComfyUI")
                     data = _paint_grip(backend, progress, grip, data, grip_graph, grip_spec, recipe, object_info)
+                if anchor:
+                    progress(0.1 + 0.8 * (i + 0.85) / count, "comparing the key with the character sheet")
+                    recipe["character_key"] = {**anchor[2], "comparison": character_keys.compare(
+                        anchor[1], data, anchor[2]["checks"], vision_provider)}
                 if identity_check:
                     progress(0.1 + 0.8 * (i + 0.85) / count, "scoring draft identity")
                     score, why = identity_check(data)
@@ -2354,7 +2371,7 @@ ENGINE_TEMPLATES = {
     "sdxl": {"txt2img": "sdxl_txt2img", "edit": "sdxl_img2img"},
 }
 TEMPLATE_TO_ENGINE = {tmpl: engine for engine, ops in ENGINE_TEMPLATES.items() for tmpl in ops.values()}
-TEMPLATE_TO_ENGINE["qwen21_depth"] = "qwen21"
+TEMPLATE_TO_ENGINE.update({"qwen21_depth": "qwen21", character_keys.TEMPLATE: "qwen21"})
 # Generic per-call overrides for template-specific knobs that are not part
 # of every template's shape (resolution/custom_size, QwenImage21Cache's
 # device/dtype, the separate UNet/CLIP/VAE loader filenames, Kontext's
@@ -2598,6 +2615,7 @@ def generate_image(store: Store, backend: Backend, job: dict[str, Any], progress
         reference_asset_ids=params.get("reference_asset_ids"), depth_asset_id=depth_id,
         object_asset_ids=params.get("object_asset_ids"),
         draft_grip=params.get("draft_grip"), vision_provider=vision_provider,
+        character_key={key: params[key] for key in character_keys.PARAMS if key in params},
         driving_asset_id=params.get("driving_asset_id"), driving_start_s=float(params.get("driving_start_s") or 0),
         audio_asset_id=params.get("audio_asset_id"), audio_start_s=float(params.get("audio_start_s") or 0),
         audio_seconds=float(params["audio_seconds"]) if params.get("audio_seconds") else None,
@@ -2867,6 +2885,7 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
             unchanged = unchanged and comfy_driver.template_hash_matches(recipe.get("grip_template_hash"), grip_graph, grip_spec)
     except comfy_driver.WorkflowError:
         pass
+    anchor = recipe.get("character_key") or {}
     ref_ids: Optional[list[str]] = None
     if spec.get("reference_group"):
         # a multi-reference edit (Qwen-Image 2.1): every input is a reference
@@ -2880,6 +2899,8 @@ def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, 
         reference_asset_id=ref, reference_asset_ids=ref_ids, mask_asset_id=mask, depth_asset_id=depth_id,
         object_asset_ids=object_ids,
         draft_grip=draft_grip, grip_values=recipe.get("grip_params"),
+        character_key={"sheet_asset_id": anchor.get("sheet_asset_id"), "anchor_box": anchor.get("anchor_box"),
+                       "identity_checks": anchor.get("checks", {})} if anchor else None,
         vision_provider=vision_provider, exact_seed=not vary,
         extra_recipe={"derived_from": src["id"], "rerun": "vary" if vary else "reuse",
                       **({k: recipe[k] for k in ("prompt", "style", "matched_characters") if k in recipe})},

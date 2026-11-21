@@ -1,5 +1,36 @@
 # Prospero video workspace
 
+## Character keys from a kept sheet
+
+Import the kept character sheet into the project with `studio_import(piece_id=...)`.
+In `studio_generate_image`, choose `template="qwen21_character_key"` and pass
+`reference_asset_ids=[sheet_id, pose_image_id]`. Set `template_params` to
+`{"sheet_asset_id": sheet_id, "anchor_box": [left, top, right, bottom],
+"depth_asset_id": depth_id}`. The box selects one view in the sheet's pixels.
+Use the colour blocking image and depth guide from the same camera and frame.
+Describe the character with `<image1>` and the new staging with `<image2>`.
+
+The crop supplies the main image reference and starting latent. The depth
+guide controls the pose independently. The receipt records the sheet and crop
+hashes, pose and depth IDs, engine version and the comparison of face,
+silhouette and props. Add or refine criteria through `template_params.identity_checks`
+(a map of names to criteria). Inspect `recipe.character_key.comparison` and open
+each key next to the sheet. To repeat the comparison without rendering, call
+`studio_review_character_key(asset_id)`. A failed, unclear or unavailable comparison keeps
+the key provisional. Withdraw with `studio_delete_assets` and restore with
+`studio_trash`. Replay with `studio_edit_image(operation="reuse")`.
+
+Register a dedicated depth-capable profile with the installed engine and the
+four model files listed below. Include `qwen21_character_key` in its
+`templates`; include `qwen21_edit` to send ordinary edits there too. Prospero
+reserves GPU memory and starts the selected endpoint on demand.
+
+En una clave de personaje, importa la hoja conservada y recorta una sola
+vista con `anchor_box`. Pasa la hoja primero, el bloqueo de pose en color
+después y la profundidad por separado. Abre las claves junto a la hoja.
+El recibo conserva la procedencia y el cotejo de cara, silueta y accesorios.
+Un cotejo fallido, dudoso o sin modelo deja la clave pendiente de comprobar.
+
 ## Structure-guided draft keys
 
 For each key, use the blocking's same-camera depth PNG as the structure input,

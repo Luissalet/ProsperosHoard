@@ -4,7 +4,14 @@ image engine choice (spec item 3 of prospero-qwen21.md)."""
 
 from __future__ import annotations
 
-from prosperos_hoard import comfy_driver, engine
+import hashlib
+import io
+import json
+
+import pytest
+from PIL import Image
+
+from prosperos_hoard import character_keys, comfy_driver, engine
 from prosperos_hoard.jobs import JobQueue
 
 
@@ -284,3 +291,66 @@ def test_a_cast_reference_edit_needs_the_edit_model_of_the_engine(client, monkey
     assert r.status_code == 200, r.text
     job = app.state.store.get_job(r.json()["job"]["id"])
     assert job["params"]["template"] == "sdxl_img2img", job["params"]
+
+
+def test_character_key_edits_the_sheet_crop_with_a_separate_pose_and_depth(store, project, monkeypatch, tmp_path):
+    def media(name, image):
+        path = tmp_path / f"{name}.png"
+        image.save(path)
+        return engine.import_asset(store, project["id"], path)
+
+    source = Image.new("RGB", (512, 256), "red")
+    source.paste("green", (256, 0, 512, 256))
+    sheet = media("sheet", source)
+    pose = media("pose", Image.new("RGB", (256, 256), "blue"))
+    depth = media("depth", Image.new("L", (256, 256), 128))
+    refs = [sheet["id"], pose["id"]]
+    params = {"template": "qwen21_character_key", "positive_prompt": "Edit the character from <image1>",
+              "reference_asset_ids": refs, "sheet_asset_id": sheet["id"], "anchor_box": [256, 0, 512, 256],
+              "depth_asset_id": depth["id"], "width": 256, "height": 256, "seed": 51}
+    calls = []
+    monkeypatch.setattr(engine, "check_vram_or_wait", lambda *_: None)
+    monkeypatch.setattr(engine, "_object_info", lambda _: {})
+    monkeypatch.setattr(engine, "_run_comfy_workflow",
+                        lambda _backend, graph, uploads, _progress, **_: calls.append((graph, uploads)) or [{}])
+    monkeypatch.setattr(engine, "_download_output", lambda *_: (store.data_dir / pose["file_path"]).read_bytes())
+    model_report = {"face": {"status": "pass", "observation": "Same eyes and nose."},
+                    "silhouette": {"status": "fail", "observation": "The hem moved."}}
+    vision = lambda: (lambda *_: json.dumps(model_report), "test-vision")
+    job = {"project_id": project["id"], "params": params}
+    outputs = engine.generate_image(store, object(), job, lambda *_: None, vision_provider=vision)
+    asset = store.get_asset(outputs["asset_ids"][0])
+    receipt = engine.asset_view(asset)["recipe"]["character_key"]
+    assert asset["recipe"]["input_asset_ids"] == refs + [depth["id"]]
+    assert receipt["sheet_sha256"] == hashlib.sha256((store.data_dir / sheet["file_path"]).read_bytes()).hexdigest()
+    assert receipt["comparison"]["status"] == "fail"
+    assert receipt["comparison"]["details"]["face"]["status"] == "pass"
+    assert receipt["comparison"]["details"]["props"]["status"] == "unclear"
+    replay_review = character_keys.review_asset(store, asset["id"], vision)
+    assert replay_review["comparison"] == receipt["comparison"]
+    assert replay_review["asset_sha256"] == hashlib.sha256((store.data_dir / asset["file_path"]).read_bytes()).hexdigest()
+
+    engine.rerun_recipe(store, object(), job, lambda *_: None, asset, vary=False)
+    assert len(calls) == 2
+    for graph, uploads in calls:
+        assert graph["encode"]["inputs"]["images.image_1"] == ["identity", 0]
+        assert graph["encode"]["inputs"]["images.image_2"] == ["pose", 0]
+        assert graph["canvas"]["inputs"]["image"] == ["identity", 0]
+        assert graph["sample"]["inputs"]["latent_image"] == ["latent", 0]
+        assert graph["control"]["inputs"]["image"] == ["depth", 0]
+        assert graph["identity"]["inputs"]["image"] == uploads[0][1]
+        assert Image.open(io.BytesIO(uploads[0][0])).getpixel((0, 0)) == (0, 128, 0)
+        assert hashlib.sha256(uploads[0][0]).hexdigest() == receipt["anchor_sha256"]
+        assert graph["pose"]["inputs"]["image"] == uploads[1][1]
+        assert graph["depth"]["inputs"]["image"] == uploads[2][1]
+
+    for patch, code in [
+        ({"sheet_asset_id": None}, "character_sheet_required"),
+        ({"reference_asset_ids": list(reversed(refs))}, "character_key_references"),
+        ({"depth_asset_id": pose["id"]}, "character_key_depth"),
+        ({"anchor_box": [0, 0, 600, 256]}, "character_sheet_crop"),
+    ]:
+        with pytest.raises(engine.EngineError) as error:
+            engine.generate_image(store, object(), {**job, "params": {**params, **patch}}, lambda *_: None)
+        assert error.value.code == code
+    assert len(calls) == 2

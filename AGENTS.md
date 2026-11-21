@@ -95,6 +95,14 @@ Reglas para agentes de código que trabajen en este repositorio.
 
 Qué hacer cuando el usuario pide, con sus palabras:
 
+- **«Haz las claves con la hoja conservada»**: importa esa hoja con
+  `studio_import(piece_id=...)` y el color y profundidad del mismo fotograma
+  del bloqueo. Pasa a `studio_generate_image(template="qwen21_character_key")`
+  las referencias `[hoja, color]` y `template_params` con `sheet_asset_id`,
+  `anchor_box` en píxeles de la hoja y `depth_asset_id`. Abre la clave con
+  `studio_show` y coteja cara, silueta y accesorios con el recibo y la hoja.
+  Si algo falla o no se distingue, conserva la clave como provisional.
+
 - **«ComfyUI no está» / «no encuentra el backend» / "start ComfyUI"**:
   `studio_services`; si el servidor que falta está `down` y `startable`,
   `studio_service_start(id)` (espera a que responda) y repite lo que fallaba.
