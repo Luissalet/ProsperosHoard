@@ -8,7 +8,7 @@ import sys
 import httpx
 import pytest
 
-from prosperos_hoard.studio import Module, Studio, create_app
+from prosperos_hoard.studio import Module, Studio, catalog, create_app
 from prosperos_hoard.studio_projects import Projects
 from prosperos_hoard.studio_response import HTML, NativeResponse, scoped
 
@@ -17,9 +17,9 @@ def test_cold_import_has_no_native_engines_or_store(tmp_path):
     code = '''
 from pathlib import Path
 import sys
-from prosperos_hoard.studio import Studio
+from prosperos_hoard.studio import Studio, catalog
 s = Studio(Path(sys.argv[1]))
-assert len(s.tools) == 249
+assert s.tools == {t["name"]: group for group, entries in catalog().items() for t in entries}
 assert {'production_receive_dossier', 'production_discard_dossier'} <= s.tools.keys()
 assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report', 'website_walkthrough'} <= s.tools.keys()
 assert all(m.phase == 'off' for m in s.modules.values())
@@ -92,7 +92,8 @@ async def test_http_discovery_and_projects_do_not_enable_modules(tmp_path):
     app = create_app(tmp_path, port=64239)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:64239') as client:
         tools = (await client.get('/api/agent/tools')).json()['tools']
-        assert len(tools) == 249
+        expected = [tool for entries in catalog().values() for tool in entries]
+        assert sorted(tools, key=lambda t: t["name"]) == sorted(expected, key=lambda t: t["name"])
         names = {tool['name'] for tool in tools}
         assert 'website_walkthrough' in names
         assert {'studio_qr_video', 'studio_qr_verify', 'studio_qr_report'} <= names
