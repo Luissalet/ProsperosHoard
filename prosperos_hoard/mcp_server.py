@@ -630,6 +630,30 @@ def studio_edit_image(
 
 
 @tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def studio_regional_edit(
+    asset_id: str, mode: Literal["qwen", "paste"],
+    box: Optional[tuple[float, float, float, float]] = None,
+    quad: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]] = None,
+    clip_polygon: Optional[list[tuple[float, float]]] = None, feather_px: float = 2,
+    prompt: Optional[str] = None, reference_asset_ids: Optional[list[str]] = None,
+    drawing_asset_id: Optional[str] = None, rotation: Literal[0, 90, 180, 270] = 0, contrast: float = 1,
+    seed: Optional[int] = None, steps: int = 25, wait_s: float = 0,
+) -> dict[str, Any]:
+    """Edit only a region of an image. Pass box [left, top, right, bottom] or quad [top-left,
+    top-right, bottom-right, bottom-left] in source pixels. clip_polygon can cut the mask around
+    occlusions. feather_px fades inward. Mode qwen takes prompt and optional reference_asset_ids
+    (<image1> is the source); mode paste projects drawing_asset_id into the quad, with clockwise
+    rotation and contrast (1 = original pigment strength), transferring the destination paper and light.
+    Poll with studio_job. The result has a mask URL, SHA-256 hashes and exterior pixel checks.
+    Undo through the agent session or put the derived image in studio_trash. The source is retained.
+
+    Keywords: regional edit, Qwen, mask, perspective, project drawing, paste ink, edición regional, máscara, perspectiva, pegar dibujo, tinta
+    """
+    body = locals().copy()
+    return _call("POST", "/api/agent/studio_regional_edit", json=body)
+
+
+@tool(ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 def studio_outpaint(asset_id: str, width: int, height: int, prompt: str, anchor_x: float = 0.5,
                     anchor_y: float = 0.5, seed: Optional[int] = None, wait_s: float = 0):
     """Expand an image canvas and generate the new border through the existing inpaint queue.

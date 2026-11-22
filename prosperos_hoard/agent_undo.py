@@ -40,7 +40,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import graphic_shots, hub_piece
+from . import graphic_shots, hub_piece, regional_edit
 from . import production_dossier
 from . import productions as prod
 from .hoard_link.agentkit import AppError
@@ -252,6 +252,35 @@ def undo_asset_create(ctx: Any, record: dict, dry_run: bool = False) -> dict:
     except AssetInUse as exc:
         raise _conflict(str(exc)) from None
     return {"trashed_asset": aid, "restore": "studio_trash action=restore ids=[id]"}
+
+
+def track_regional_edit(args: dict, result: dict, ctx: Any = None) -> dict:
+    job = result["job"]
+    return {"objects": [f"project:{job['project_id']}/job:{job['id']}"], "ids": [f"job_id={job['id']}"]}
+
+
+def undo_regional_edit(ctx: Any, record: dict, dry_run: bool = False) -> dict:
+    store = ctx.store
+    job = store.get_job(_id(record, "job_id"))
+    if job["state"] in ("queued", "waiting_gpu", "running"):
+        raise _conflict("Cancel the regional edit and wait for it to finish / Cancela la edición regional y espera a que termine.")
+    outputs = job.get("outputs") or {}
+    ids = [aid for aid in outputs.get("asset_ids", []) if _asset_exists(store, aid)]
+    if not ids:
+        return {"already_gone": True}
+    for aid in ids:
+        asset = store.get_asset(aid)
+        if regional_edit.asset_fingerprint(asset) != outputs.get("asset_fingerprints", {}).get(aid):
+            raise _conflict("The regional result changed after creation / El resultado regional cambió tras crearse.")
+        if store.conn.execute("SELECT 1 FROM assets WHERE id<>? AND instr(recipe_json, ?) LIMIT 1",
+                              (aid, json.dumps(aid))).fetchone():
+            raise _conflict("Another asset uses the regional result / Otro recurso usa el resultado regional.")
+        undo_asset_create(ctx, {"ids": [f"asset_id={aid}"]}, dry_run=True)
+    if dry_run:
+        return {"would_trash_assets": ids}
+    for aid in ids:
+        undo_asset_create(ctx, {"ids": [f"asset_id={aid}"]})
+    return {"trashed_assets": ids, "restore": "studio_trash action=restore ids=[id]"}
 
 
 def capture_trash(ctx: Any, args: dict) -> Optional[dict]:
@@ -654,6 +683,7 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
     "studio_delete_project": {"capture": capture_project_delete, "track": track_project_delete, "undo": undo_project_delete},
     "studio_delete_assets": {"capture": capture_asset_delete, "track": track_asset_delete, "undo": undo_asset_delete},
     "studio_import": {"track": track_asset_create, "undo": undo_asset_create},
+    "studio_regional_edit": {"track": track_regional_edit, "undo": undo_regional_edit},
     "studio_register_piece": {"track": track_piece_register, "undo": undo_piece_register},
     "studio_time_lyrics": {"capture": capture_lyric_timing, "track": track_lyric_timing, "undo": undo_lyric_timing},
     "studio_trash": {"capture": capture_trash, "track": track_trash, "undo": undo_trash},
@@ -685,7 +715,7 @@ HOOKS: dict[str, dict[str, Callable[..., Any]]] = {
 #: the ones that redo work already made (regenerate, promote, continue, QA).
 DRAFT_SAFE = frozenset({
     "studio_qr_video", "studio_qr_verify",
-    "studio_spatial",
+    "studio_spatial", "studio_regional_edit",
     "studio_explainer",
     "studio_create_project", "studio_import", "studio_register_piece", "studio_generate_image", "studio_edit_image", "studio_outpaint", "studio_animate",
     "studio_compose", "studio_voice", "studio_time_lyrics", "studio_design", "studio_photocard_set", "studio_render",

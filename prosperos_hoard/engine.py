@@ -32,7 +32,7 @@ from . import design
 from . import draft_art
 from . import draft_grip as grip_mod
 from . import identity as identity_mod
-from . import procutil
+from . import procutil, regional_edit
 from . import style_cards
 from . import templates as design_templates
 from . import timeline as timeline_mod
@@ -2798,6 +2798,8 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress, *,
     params = job["params"]
     operation = params["operation"]
     src = store.get_asset(params["asset_id"])
+    if operation == "regional":
+        return _edit_region(store, backend, job, progress, src)
     if operation in ("reuse", "vary"):
         return rerun_recipe(store, backend, job, progress, src, vary=operation == "vary", seed=params.get("seed"),
                             count=params.get("count", 1), vision_provider=vision_provider)
@@ -2852,6 +2854,83 @@ def edit_image(store: Store, backend: Backend, job: dict[str, Any], progress, *,
                         operation=f"edit_image:{operation}", count=params.get("count", 1),
                         reference_asset_id=src["id"], mask_asset_id=params.get("mask_asset_id"),
                         name=f"{operation}: {src.get('name') or src['id']}")
+
+
+def _regional_source(store: Store, asset: dict) -> tuple[bytes, Image.Image]:
+    if asset["kind"] != "image":
+        raise EngineError("not_an_image", "Regional edit inputs must be images / Las entradas deben ser imágenes")
+    try:
+        data = (store.data_dir / asset["file_path"]).read_bytes()
+        return data, regional_edit.open_image(data)
+    except (OSError, ValueError) as exc:
+        raise EngineError("bad_image", f"{asset['id']}: {exc}") from exc
+
+
+def validate_regional_edit(store: Store, src: dict, params: dict) -> None:
+    _, base = _regional_source(store, src)
+    try:
+        regional_edit.Region.create(base.size, params["box"], params["quad"], params["clip_polygon"], params["feather_px"])
+    except ValueError as exc:
+        raise EngineError("bad_region", str(exc)) from exc
+    if params["mode"] == "qwen":
+        if not (params.get("prompt") or "").strip():
+            raise EngineError("empty_prompt", "Write an edit instruction / Escribe una instrucción de edición")
+        if params.get("drawing_asset_id") or params["rotation"] or params["contrast"] != 1:
+            raise EngineError("bad_parameter", "Drawing, rotation and contrast are for paste / El dibujo, el giro y el contraste son para pegar")
+        for ref_id in params.get("reference_asset_ids") or []:
+            if store.get_asset(ref_id)["kind"] != "image":
+                raise EngineError("not_an_image", "Qwen references must be images / Las referencias de Qwen deben ser imágenes")
+    else:
+        if not params.get("drawing_asset_id"):
+            raise EngineError("drawing_required", "Pass drawing_asset_id / Indica drawing_asset_id")
+        if params.get("prompt") or params.get("reference_asset_ids") or params.get("seed") is not None:
+            raise EngineError("bad_parameter", "Prompt, references and seed are for Qwen / La instrucción, las referencias y la semilla son para Qwen")
+        _regional_source(store, store.get_asset(params["drawing_asset_id"]))
+
+
+def _edit_region(store: Store, backend: Backend, job: dict, progress, src: dict) -> dict:
+    params = job["params"]
+    source_bytes, base = _regional_source(store, src)
+    region = regional_edit.Region.create(base.size, params["box"], params["quad"], params["clip_polygon"],
+                                         params["feather_px"])
+    mode = params["mode"]
+    references = (params.get("reference_asset_ids") or []) if mode == "qwen" else [params["drawing_asset_id"]]
+    input_ids = [src["id"], *references]
+    inputs = [{"asset_id": src["id"], "sha256": regional_edit.sha256(source_bytes)}]
+    for ref_id in references:
+        ref = store.get_asset(ref_id)
+        inputs.append({"asset_id": ref_id, "sha256": regional_edit.sha256((store.data_dir / ref["file_path"]).read_bytes())})
+    receipt = {"mode": mode, "inputs": inputs}
+    operation = "edit_image:regional"
+    if mode == "qwen":
+        scale = min(1, 1024 / max(base.size))
+        width, height = (max(16, round(axis * scale / 16) * 16) for axis in base.size)
+
+        def composite(data):
+            candidate = regional_edit.open_image(data).resize(base.size, Image.Resampling.LANCZOS)
+            return regional_edit.finish(base, candidate.crop(region.bounds), region, receipt)
+
+        result = run_template(
+            store, backend, job, progress, template_name=regional_edit.TEMPLATE, operation=operation,
+            values={"positive_prompt": params["prompt"].strip(), "steps": params["steps"], "seed": params.get("seed"),
+                    "custom_size": True, "width": width, "height": height},
+            reference_asset_ids=input_ids, extra_recipe={"regional_edit": receipt}, postprocess=composite,
+        )
+    else:
+        progress(.2, "Projecting the drawing / Proyectando el dibujo")
+        drawing = _regional_source(store, store.get_asset(references[0]))[1]
+        receipt.update(rotation=params["rotation"], contrast=params["contrast"])
+        candidate = regional_edit.transfer_drawing(base, drawing, region, params["rotation"], params["contrast"])
+        data = regional_edit.finish(base, candidate, region, receipt)
+        progress.check_cancel()
+        asset = _import_comfy_output(store, src["project_id"], data, "image",
+                                     {"operation": operation, "backend": "local", "regional_edit": receipt,
+                                      "input_asset_ids": input_ids, "job_id": job["id"]}, {}, src.get("name"))
+        result = {"asset_ids": [asset["id"]]}
+    made = [store.get_asset(aid) for aid in result["asset_ids"]]
+    result["asset_fingerprints"] = {asset["id"]: regional_edit.asset_fingerprint(asset) for asset in made}
+    result["regional_receipt"] = made[0]["recipe"]["regional_edit"]
+    return result
 
 
 def rerun_recipe(store: Store, backend: Backend, job: dict[str, Any], progress, src: dict[str, Any], vary: bool,
@@ -3947,7 +4026,16 @@ def get_lineage(store: Store, asset_id: str, depth: int = 3) -> dict[str, Any]:
     asset = store.get_asset(asset_id)
     recipe = asset.get("recipe")
     out: dict[str, Any] = {"asset_id": asset_id, "kind": asset["kind"], "source": asset["source"], "recipe": recipe}
-    if recipe and recipe.get("backend") == "comfyui":
+    if receipt := (recipe or {}).get("regional_edit"):
+        refs = recipe["input_asset_ids"]
+        args = {"asset_id": refs[0], **{key: receipt[key] for key in ("mode", "quad", "clip_polygon", "feather_px")}}
+        if receipt["mode"] == "qwen":
+            params = recipe["params"]
+            args.update(prompt=params["positive_prompt"], steps=params["steps"], seed=params["seed"], reference_asset_ids=refs[1:])
+        else:
+            args.update(drawing_asset_id=refs[1], rotation=receipt["rotation"], contrast=receipt["contrast"])
+        out["reproduce"] = {"tool": "studio_regional_edit", "args": args}
+    elif recipe and recipe.get("backend") == "comfyui":
         out["reproduce"] = {"tool": "studio_edit_image", "args": {"asset_id": asset_id, "operation": "reuse"},
                             "vary": {"asset_id": asset_id, "operation": "vary"}}
     if depth > 0 and recipe:

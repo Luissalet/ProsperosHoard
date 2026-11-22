@@ -38,7 +38,7 @@ from . import charpack
 from . import clip_edit as clip_edit_mod
 from . import interpolate as interpolate_mod
 from . import character_keys, comfy_driver, engine, hub_piece, procutil, template_engines
-from . import qr_video
+from . import qr_video, regional_edit
 from . import dubbing as dubbing_mod
 from . import exporters, family_api, gpu_lease, graphic_shots, jobevents
 from . import motion_graphics as mg
@@ -538,6 +538,23 @@ class EditImageBody(BaseModel):
     scale: Optional[int] = None
     model: Optional[str] = None
     wait_s: float = 0
+
+
+class RegionalEditBody(BaseModel):
+    asset_id: str
+    mode: Literal["qwen", "paste"]
+    box: Optional[tuple[float, float, float, float]] = None
+    quad: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]] = None
+    clip_polygon: Optional[list[tuple[float, float]]] = Field(default=None, min_length=3, max_length=32)
+    feather_px: float = Field(default=2, ge=0, le=128)
+    prompt: Optional[str] = Field(default=None, max_length=4000)
+    reference_asset_ids: Optional[list[str]] = Field(default=None, max_length=9)
+    drawing_asset_id: Optional[str] = None
+    rotation: Literal[0, 90, 180, 270] = 0
+    contrast: float = Field(default=1, gt=0, le=2)
+    seed: Optional[int] = Field(default=None, ge=0, lt=2**64)
+    steps: int = Field(default=25, ge=1, le=100)
+    wait_s: float = Field(default=0, ge=0)
 
 
 class AnimateBody(BaseModel):
@@ -1597,7 +1614,19 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def job_result(job: dict[str, Any]) -> dict[str, Any]:
         view = engine.job_view(job)
         if job["state"] == "done" and view.get("asset_ids"):
-            view["assets"] = [engine.asset_view(store.get_asset(a)) for a in view["asset_ids"][:8]]
+            receipt = (job.get("outputs") or {}).get("regional_receipt")
+            if receipt:
+                asset_id = view["asset_ids"][0]
+                view["receipt"] = dict(receipt)
+                try:
+                    asset = store.get_asset(asset_id)
+                except NotFound:
+                    view["assets"] = []
+                else:
+                    view["assets"] = [engine.asset_view(asset)]
+                    view["receipt"]["mask_url"] = f"{url_prefix}/api/assets/{asset_id}/regional-mask"
+            else:
+                view["assets"] = [engine.asset_view(store.get_asset(a)) for a in view["asset_ids"][:8]]
         if job["state"] == "done" and job["type"] == "dub" and (job.get("outputs") or {}).get("segments"):
             view["result"] = dubbing_mod.agent_result(job["outputs"])  # the line table with plan and QC
         return view
@@ -1832,6 +1861,8 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         if body.operation == "hires" and (asset.get("recipe") or {}).get("template") != "sdxl_txt2img":
             raise engine.EngineError("hires_needs_recipe", "upscale re-runs an SDXL txt2img recipe at a higher resolution; "
                                                            f"asset {asset['id']} was not made that way (use img2img instead)")
+        if body.operation in ("vary", "reuse") and (asset.get("recipe") or {}).get("regional_edit"):
+            raise engine.EngineError("regional_recipe", "Replay with studio_regional_edit / Repite con studio_regional_edit")
         if body.operation in ("vary", "reuse") and (asset.get("recipe") or {}).get("backend") != "comfyui":
             raise engine.EngineError("not_reproducible", f"asset {asset['id']} was not generated on ComfyUI, so it has no recipe to re-run; use img2img")
         if body.operation == "upscale":
@@ -2731,6 +2762,20 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
     def agent_edit_image(body: EditImageBody):
         return agent("studio_edit_image", f"{body.asset_id}:{body.operation}",
                      lambda: {"job": job_result(op_edit(body)["job"])})
+
+    @app.post("/api/agent/studio_regional_edit")
+    def agent_regional_edit(body: RegionalEditBody):
+        def run():
+            asset = store.get_asset(body.asset_id)
+            params = body.model_dump(exclude={"wait_s"})
+            engine.validate_regional_edit(store, asset, params)
+            params["operation"] = "regional"
+            if body.mode == "qwen":
+                params["template"] = regional_edit.TEMPLATE
+            job = queue.enqueue("edit_image", "gpu" if body.mode == "qwen" else "cpu", params,
+                                project_id=asset["project_id"])
+            return {"job": job_result(wait(job, body.wait_s))}
+        return agent("studio_regional_edit", f"{body.asset_id}:{body.mode}", run)
 
     @app.post("/api/assets/{asset_id}/edit")
     def ui_edit(asset_id: str, body: EditImageBody):
@@ -3724,6 +3769,15 @@ def create_app(data_dir: Path, static_dir: Optional[Path] = None, port: int = 88
         path = _asset_path(store, asset["file_path"])
         filename = _download_name(asset, path) if download else None
         return FileResponse(path, media_type=asset.get("mime") or mimetypes.guess_type(path.name)[0], filename=filename)
+
+    @app.get("/api/assets/{asset_id}/regional-mask")
+    def asset_regional_mask(asset_id: str):
+        asset = store.get_asset(asset_id)
+        receipt = (asset.get("recipe") or {}).get("regional_edit")
+        if not receipt:
+            raise NotFound("regional mask", asset_id)
+        path = _asset_path(store, asset["file_path"])
+        return Response(regional_edit.extract_mask(path, receipt["mask_sha256"]), media_type="image/png")
 
     def op_delete_assets(ids: list[str], force: bool) -> dict[str, Any]:
         if not ids or len(ids) > 200:

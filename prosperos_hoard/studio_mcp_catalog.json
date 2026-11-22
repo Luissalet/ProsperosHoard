@@ -1859,6 +1859,254 @@
       }
     },
     {
+      "name": "studio_regional_edit",
+      "description": "Edit only a region of an image. Pass box [left, top, right, bottom] or quad [top-left,\ntop-right, bottom-right, bottom-left] in source pixels. clip_polygon can cut the mask around\nocclusions. feather_px fades inward. Mode qwen takes prompt and optional reference_asset_ids\n(<image1> is the source); mode paste projects drawing_asset_id into the quad, with clockwise\nrotation and contrast (1 = original pigment strength), transferring the destination paper and light.\nPoll with studio_job. The result has a mask URL, SHA-256 hashes and exterior pixel checks.\nUndo through the agent session or put the derived image in studio_trash. The source is retained.\n\nKeywords: regional edit, Qwen, mask, perspective, project drawing, paste ink, edición regional, máscara, perspectiva, pegar dibujo, tinta\n",
+      "inputSchema": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "qwen",
+              "paste"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "box": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Box"
+          },
+          "quad": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quad"
+          },
+          "clip_polygon": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Clip Polygon"
+          },
+          "feather_px": {
+            "default": 2,
+            "title": "Feather Px",
+            "type": "number"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prompt"
+          },
+          "reference_asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Asset Ids"
+          },
+          "drawing_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Drawing Asset Id"
+          },
+          "rotation": {
+            "default": 0,
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "contrast": {
+            "default": 1,
+            "title": "Contrast",
+            "type": "number"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seed"
+          },
+          "steps": {
+            "default": 25,
+            "title": "Steps",
+            "type": "integer"
+          },
+          "wait_s": {
+            "default": 0,
+            "title": "Wait S",
+            "type": "number"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why you are making this change, in one sentence (3-300 characters). The app requires it for every change an agent makes: it is kept in the history so the person can review and undo what you did.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "asset_id",
+          "mode"
+        ],
+        "title": "studio_regional_editArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "studio_register_piece",
       "description": "Register this asset as a piece of an existing Hub order. Returns the piece ID, hash and undo.\nUse your Agora agent ID. Optional task and source piece IDs link the work to its origin.\nRegistra un recurso en una orden del Hub y devuelve el identificador, la huella y cómo deshacer.\nKeywords: register output, order piece, handoff, registrar pieza, orden de producción, relevo\n",
       "inputSchema": {
