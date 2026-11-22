@@ -7107,7 +7107,7 @@
     },
     {
       "name": "studio_regional_edit",
-      "description": "Edit only a region of an image. Pass box [left, top, right, bottom] or quad [top-left,\ntop-right, bottom-right, bottom-left] in source pixels. clip_polygon can cut the mask around\nocclusions. feather_px fades inward. Mode qwen takes prompt and optional reference_asset_ids\n(<image1> is the source); mode paste projects drawing_asset_id into the quad, with clockwise\nrotation and contrast (1 = original pigment strength), transferring the destination paper and light.\nPoll with studio_job. The result has a mask URL, SHA-256 hashes and exterior pixel checks.\nUndo through the agent session or put the derived image in studio_trash. The source is retained.\n\nKeywords: regional edit, Qwen, mask, perspective, project drawing, paste ink, edición regional, máscara, perspectiva, pegar dibujo, tinta",
+      "description": "Edit only a region of an image. Pass box [left, top, right, bottom] or quad [top-left,\ntop-right, bottom-right, bottom-left] in source pixels. clip_polygon can cut the mask around\nocclusions. feather_px fades inward. Mode qwen takes prompt and optional reference_asset_ids\n(<image1> is the source); mode paste projects drawing_asset_id into the quad, with clockwise\nrotation. contrast controls pigment luminance and saturation controls its colour relative to the\ndestination paper. Both default to 1, retaining the drawing's tonal strength and colour.\nPoll with studio_job. The result has a mask URL, SHA-256 hashes and exterior pixel checks.\nUndo through the agent session or put the derived image in studio_trash. The source is retained.\n\nKeywords: regional edit, Qwen, mask, perspective, project drawing, paste ink, edición regional, máscara, perspectiva, pegar dibujo, tinta",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -7310,6 +7310,13 @@
             "exclusiveMinimum": 0.0,
             "maximum": 2.0,
             "title": "Contrast",
+            "type": "number"
+          },
+          "saturation": {
+            "default": 1,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Saturation",
             "type": "number"
           },
           "seed": {

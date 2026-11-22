@@ -35,7 +35,7 @@ def test_regional_edit_preserves_exterior_and_has_verified_receipt(client, fake_
     args = {"asset_id": source, "mode": mode, "wait_s": 12, "feather_px": 3}
     if mode == "paste":
         args.update(quad=[[8, 6], [84, 10], [88, 58], [11, 52]], rotation=180, drawing_asset_id=reference,
-                    clip_polygon=[[20, 6], [90, 6], [90, 60], [10, 60], [22, 35]])
+                    saturation=0, clip_polygon=[[20, 6], [90, 6], [90, 60], [10, 60], [22, 35]])
     else:
         args.update(box=[8, 6, 84, 52], prompt="Use the blue of <image2> in <image1>",
                     reference_asset_ids=[reference], seed=24, steps=3)
@@ -69,6 +69,9 @@ def test_regional_edit_preserves_exterior_and_has_verified_receipt(client, fake_
     if mode == "paste":
         assert output[41, 68, 0] < 100   # the ink moves from upper left to lower right
         assert output[19, 32, 0] > 180
+        assert receipt["saturation"] == lineage["reproduce"]["args"]["saturation"] == 0
+        assert np.array_equal(output[41, 68, :3].astype(int) - original[41, 68, :3],
+                              np.repeat(int(output[41, 68, 0]) - int(original[41, 68, 0]), 3))
     else:
         assert lineage["recipe"]["template"] == "qwen21_edit"
         server, _ = fake_comfy

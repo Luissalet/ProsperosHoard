@@ -129,7 +129,7 @@ def _paper(pixels):
     return np.median(pixels[lightness >= np.quantile(lightness, .55)], axis=0)
 
 
-def transfer_drawing(base, drawing, region, rotation, contrast):
+def transfer_drawing(base, drawing, region, rotation, contrast, saturation):
     if rotation:
         drawing = drawing.rotate(-rotation, expand=True)
     drawing_rgb = np.asarray(drawing.convert("RGB"), dtype=np.float32)
@@ -149,7 +149,9 @@ def transfer_drawing(base, drawing, region, rotation, contrast):
     weight = gaussian_filter(clean.astype(np.float32), 8)
     light = gaussian_filter(error * clean[..., None], (8, 8, 0)) / np.maximum(weight[..., None], .1)
     grain = np.clip(error - light, -5, 5) * clean[..., None]
-    colored = paper + light + grain + pigment * contrast
+    luma = pigment @ np.array([.2126, .7152, .0722], dtype=np.float32)
+    chroma = pigment - luma[..., None]
+    colored = paper + light + grain + luma[..., None] * contrast + chroma * saturation
     return Image.fromarray(np.rint(np.clip(colored, 0, 255)).astype(np.uint8))
 
 

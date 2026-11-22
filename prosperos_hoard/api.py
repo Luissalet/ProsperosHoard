@@ -552,6 +552,7 @@ class RegionalEditBody(BaseModel):
     drawing_asset_id: Optional[str] = None
     rotation: Literal[0, 90, 180, 270] = 0
     contrast: float = Field(default=1, gt=0, le=2)
+    saturation: float = Field(default=1, ge=0, le=2)
     seed: Optional[int] = Field(default=None, ge=0, lt=2**64)
     steps: int = Field(default=25, ge=1, le=100)
     wait_s: float = Field(default=0, ge=0)

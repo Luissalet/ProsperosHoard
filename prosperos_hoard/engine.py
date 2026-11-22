@@ -2875,8 +2875,8 @@ def validate_regional_edit(store: Store, src: dict, params: dict) -> None:
     if params["mode"] == "qwen":
         if not (params.get("prompt") or "").strip():
             raise EngineError("empty_prompt", "Write an edit instruction / Escribe una instrucción de edición")
-        if params.get("drawing_asset_id") or params["rotation"] or params["contrast"] != 1:
-            raise EngineError("bad_parameter", "Drawing, rotation and contrast are for paste / El dibujo, el giro y el contraste son para pegar")
+        if params.get("drawing_asset_id") or params["rotation"] or params["contrast"] != 1 or params["saturation"] != 1:
+            raise EngineError("bad_parameter", "Drawing, rotation, contrast and saturation are for paste / El dibujo, el giro, el contraste y la saturación son para pegar")
         for ref_id in params.get("reference_asset_ids") or []:
             if store.get_asset(ref_id)["kind"] != "image":
                 raise EngineError("not_an_image", "Qwen references must be images / Las referencias de Qwen deben ser imágenes")
@@ -2919,8 +2919,9 @@ def _edit_region(store: Store, backend: Backend, job: dict, progress, src: dict)
     else:
         progress(.2, "Projecting the drawing / Proyectando el dibujo")
         drawing = _regional_source(store, store.get_asset(references[0]))[1]
-        receipt.update(rotation=params["rotation"], contrast=params["contrast"])
-        candidate = regional_edit.transfer_drawing(base, drawing, region, params["rotation"], params["contrast"])
+        tone = {key: params[key] for key in ("rotation", "contrast", "saturation")}
+        receipt.update(tone)
+        candidate = regional_edit.transfer_drawing(base, drawing, region, **tone)
         data = regional_edit.finish(base, candidate, region, receipt)
         progress.check_cancel()
         asset = _import_comfy_output(store, src["project_id"], data, "image",
@@ -4033,7 +4034,8 @@ def get_lineage(store: Store, asset_id: str, depth: int = 3) -> dict[str, Any]:
             params = recipe["params"]
             args.update(prompt=params["positive_prompt"], steps=params["steps"], seed=params["seed"], reference_asset_ids=refs[1:])
         else:
-            args.update(drawing_asset_id=refs[1], rotation=receipt["rotation"], contrast=receipt["contrast"])
+            args.update(drawing_asset_id=refs[1], rotation=receipt["rotation"], contrast=receipt["contrast"],
+                        saturation=receipt["saturation"])
         out["reproduce"] = {"tool": "studio_regional_edit", "args": args}
     elif recipe and recipe.get("backend") == "comfyui":
         out["reproduce"] = {"tool": "studio_edit_image", "args": {"asset_id": asset_id, "operation": "reuse"},
