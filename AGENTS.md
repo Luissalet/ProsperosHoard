@@ -67,6 +67,8 @@ Reglas para agentes de código que trabajen en este repositorio.
 
 ## Para el asistente que dirige el estudio (MCP)
 
+Para editar una zona con Qwen o proyectar un dibujo conocido, usa `studio_regional_edit`. Coteja el PNG y la máscara del recibo antes de utilizar el derivado. Consulta [el contrato de edición regional](docs/regional-edit.md).
+
 - **Motivo y sesión**: toda herramienta que cambia algo lleva `reason` (una
   frase, 3-300 caracteres: por qué lo haces). Sin él la app contesta
   `reason_required` y la llamada no hace nada. El adaptador MCP usa la ruta

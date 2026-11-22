@@ -124,6 +124,27 @@ def test_every_undo_hook_and_draft_safe_name_is_a_real_write_tool(agent):
         assert "undo" in hooks, name                                       # a hook set always says how to take the write back
 
 
+
+def test_regional_edit_undo_trashes_only_the_result_and_keeps_its_receipt(agent):
+    pid = agent.store.create_project("Regional edit")["id"]
+    source = _image(agent.store, pid)["id"]
+    args = {"asset_id": source, "mode": "paste", "drawing_asset_id": source,
+            "box": [0, 0, 5, 5], "wait_s": 10}
+    job = agent.ok("studio_regional_edit", args, session="regional")["job"]
+    assert job["state"] == "done", job
+    [output] = job["asset_ids"]
+
+    plan = agent.undone("regional", dry_run=True)
+    assert len(plan["would_undo"]) == 1 and plan["complete"]
+    assert agent.store.get_asset(output)["id"] == output
+    done = agent.undone("regional", confirm=True)
+    assert len(done["undone"]) == 1 and done["complete"]
+    assert agent.store.get_asset(source)["id"] == source
+    assert output in {item["id"] for item in agent.store.list_trash()}
+    receipt = agent.ok("studio_job", {"job_id": job["id"]})["receipt"]
+    assert receipt == {key: val for key, val in job["receipt"].items() if key != "mask_url"}
+
+
 def test_an_unknown_tool_and_bad_arguments_keep_their_answers(agent):
     unknown = agent.call("nope")
     assert unknown.status_code == 404 and "studio_status" in unknown.json()["tools"]

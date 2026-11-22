@@ -1,5 +1,11 @@
 # Prospero video workspace
 
+## Regional image edits / Edición regional
+
+Use `studio_regional_edit` to change a box or a perspective quadrilateral. Choose `mode="qwen"` for an instruction and image references, or `mode="paste"` to project a known drawing and transfer the destination's paper and light. Check the mask, the result and the exterior pixel count before passing on the derivative. The agent session can be undone through the common tool route.
+
+Usa `studio_regional_edit` para retocar una caja o un cuadrilátero en perspectiva con Qwen, o pegar un dibujo existente conservando el papel y la luz del destino. Comprueba el PNG, la máscara y la diferencia de píxeles fuera de ella antes de pasar el derivado. [Contrato de edición regional](docs/regional-edit.md).
+
 ## Character keys from a kept sheet
 
 Import the kept character sheet into the project with `studio_import(piece_id=...)`.
