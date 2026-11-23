@@ -23,3 +23,12 @@ prosperos_hoard/studio_ui/fonts/
 tasks/qa-data/
 build/
 dist/
+# Local agent and tool state (created per user at runtime)
+.faustus/
+.odysseus/
+.claude/
+.agents/
+.codex/
+.playwright-mcp/
+.hoard-integration.json
+.impeccable/
